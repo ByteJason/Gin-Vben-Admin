@@ -16,9 +16,17 @@ test('installation shell is independent and exposes an accessible status region'
   assert.match(html, /href="#install-main"/);
   assert.match(html, /aria-live="polite"/);
   assert.match(html, /id="capability-list"/);
+  assert.match(html, /id="plan-form"/);
+  assert.match(html, /id="ui-choice"/);
+  assert.match(html, /id="mode-choice"/);
+  assert.match(html, /id="plan-panel"/);
   assert.match(html, /aria-current="step"/);
   assert.match(script, /\/api\/system\/install\/v1\/status/);
   assert.match(script, /\/api\/system\/install\/v1\/capabilities/);
+  assert.match(script, /\/api\/system\/install\/v1\/plan/);
+  assert.match(script, /method:\s*'POST'/);
+  assert.match(script, /selectedUi/);
+  assert.match(script, /canCleanup/);
   assert.match(script, /credentials:\s*'same-origin'/);
   assert.match(script, /textContent/);
   assert.doesNotMatch(script, /innerHTML/);

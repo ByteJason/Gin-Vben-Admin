@@ -76,6 +76,46 @@
             </ul>
           </section>
 
+          <section id="selection-panel" class="selection-panel" aria-labelledby="selection-title">
+            <div class="capability-panel__heading">
+              <h3 id="selection-title">选择界面与运行方式</h3>
+              <span>先检查，再继续</span>
+            </div>
+            <form id="plan-form" class="plan-form">
+              <div class="form-field">
+                <label for="ui-choice">管理界面</label>
+                <select id="ui-choice" name="selectedUi" required>
+                  <option value="antd">Ant Design Vue</option>
+                  <option value="ele">Element Plus</option>
+                  <option value="naive">Naive UI</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label for="mode-choice">运行方式</label>
+                <select id="mode-choice" name="mode" required>
+                  <option value="embedded">嵌入式单包（推荐）</option>
+                  <option value="standalone">静态资源独立部署</option>
+                  <option value="api_only">仅 API</option>
+                  <option value="dev">开发调试</option>
+                </select>
+              </div>
+              <button id="plan-button" class="primary-button" type="submit">
+                检查目录权限
+              </button>
+            </form>
+            <div id="plan-message" class="plan-message" role="status" aria-live="polite"></div>
+            <div id="plan-panel" class="plan-result" hidden aria-labelledby="plan-result-title">
+              <h4 id="plan-result-title">预检结果</h4>
+              <dl class="plan-summary">
+                <div><dt>可裁剪模板</dt><dd id="plan-cleanup">—</dd></div>
+                <div><dt>可构建</dt><dd id="plan-build">—</dd></div>
+                <div><dt>可写配置</dt><dd id="plan-env">—</dd></div>
+                <div><dt>需要重启</dt><dd id="plan-restart">—</dd></div>
+              </dl>
+              <ul id="plan-entries" class="plan-entries" aria-live="polite"></ul>
+            </div>
+          </section>
+
           <button id="retry-button" class="secondary-button" type="button" hidden>
             重新检查
           </button>
