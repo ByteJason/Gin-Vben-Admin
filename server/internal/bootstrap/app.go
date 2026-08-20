@@ -103,6 +103,7 @@ func New(cfg config.Config) (*App, error) {
 		durableSessions := authplatform.NewGORMSessionStore(app.database)
 		authService.SetSessionJournal(durableSessions)
 		authService.SetSessionQuery(durableSessions)
+		authService.SetAuditSink(authplatform.NewGORMAuditSink(app.database))
 		app.auth = authService
 		persistentIAM := iamplatform.NewGORMStore(app.database)
 		app.iam = iamapp.NewServiceWithRepositories(persistentIAM, persistentIAM, persistentIAM, persistentIAM, persistentIAM, persistentIAM)
