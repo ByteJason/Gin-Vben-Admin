@@ -53,6 +53,71 @@ test('OpenAPI scopes stay separate and expose the HTTP seams', () => {
   assert.doesNotMatch(client, /\/api\/admin\/v1/);
 });
 
+test('authentication contract declares login, refresh, and logout endpoints', () => {
+  const admin = readFileSync(join(root, 'contracts/openapi/admin-v1.yaml'), 'utf8');
+  const errors = readFileSync(join(root, 'contracts/errors/error-codes.yaml'), 'utf8');
+
+  for (const path of [
+    '/api/admin/v1/auth/login:',
+    '/api/admin/v1/auth/refresh:',
+    '/api/admin/v1/auth/logout:',
+  ]) {
+    assert.match(admin, new RegExp(`\\n  ${path.replaceAll('/', '\\/')}`), path);
+    const sectionStart = admin.indexOf(`  ${path}`);
+    const nextSection = admin.indexOf('\n  /', sectionStart + 4);
+    const section = admin.slice(sectionStart, nextSection === -1 ? undefined : nextSection);
+    assert.match(section, /post:/, path);
+    assert.match(section, /'200':/, `${path} success`);
+    assert.match(section, /'400':/, `${path} bad request`);
+    assert.match(section, /'401':/, `${path} unauthorized`);
+    assert.match(section, /'503':/, `${path} dependency failure`);
+    assert.match(section, /Set-Cookie:/, `${path} cookie response`);
+    if (path.endsWith('/login:')) {
+      assert.match(section, /'429':/, `${path} rate limit`);
+      assert.match(section, /requestBody:/, `${path} request body`);
+      assert.match(section, /LoginRequest/, `${path} request schema`);
+    } else {
+      assert.match(section, /security:/, `${path} cookie security`);
+      assert.match(section, /RefreshCookie/, `${path} refresh security`);
+      assert.match(section, /RefreshTokenCookie/, `${path} cookie parameter`);
+    }
+  }
+
+  assert.match(admin, /securitySchemes:/);
+  assert.match(admin, /BearerAuth:/);
+  assert.match(admin, /type: http/);
+  assert.match(admin, /scheme: bearer/);
+  assert.match(admin, /RefreshCookie:/);
+  assert.match(admin, /in: cookie/);
+  assert.match(admin, /HttpOnly/);
+  assert.match(admin, /accessToken/);
+  assert.match(admin, /tokenType/);
+  assert.match(admin, /expiresIn/);
+  assert.match(errors, /key: invalid_credentials/);
+  assert.match(errors, /key: invalid_token/);
+  assert.match(errors, /key: auth_rate_limited/);
+  assert.match(errors, /code: 10000[\s\S]*?http_status: 400/);
+  assert.match(errors, /http_status: 401/);
+  assert.match(admin, /RateLimited:/);
+  assert.match(admin, /AuthServiceUnavailable:/);
+});
+
+test('web-antd auth seam uses the versioned API and sends the refresh cookie', () => {
+  const auth = readFileSync(join(root, 'admin/apps/web-antd/src/api/core/auth.ts'), 'utf8');
+  const login = readFileSync(
+    join(root, 'admin/apps/web-antd/src/views/_core/authentication/login.vue'),
+    'utf8',
+  );
+
+  assert.match(auth, /\/admin\/v1\/auth\/login/);
+  assert.match(auth, /\/admin\/v1\/auth\/refresh/);
+  assert.match(auth, /\/admin\/v1\/auth\/logout/);
+  assert.match(auth, /withCredentials:\s*true/);
+  assert.match(auth, /undefined\s*,\s*\{\s*withCredentials:/s);
+  assert.match(login, /authStore\.loginLoading/);
+  assert.match(login, /login-error|login-success|role=["']alert["']/);
+});
+
 test('bootstrap check is cross-platform and verification succeeds', () => {
   const bootstrap = runNode('scripts/bootstrap.mjs', '--check');
   assert.equal(bootstrap.status, 0, bootstrap.stdout + bootstrap.stderr);

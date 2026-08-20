@@ -41,7 +41,108 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SuccessEnvelope'
+  /api/admin/v1/auth/login:
+    post:
+      tags: [Admin]
+      operationId: adminAuthLogin
+      summary: 管理端登录
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            examples:
+              credentials:
+                value:
+                  username: USERNAME
+                  password: PASSWORD
+      responses:
+        '200':
+          description: 登录成功；refresh token 只通过 HttpOnly cookie 返回
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestId'
+            Set-Cookie:
+              $ref: '#/components/headers/RefreshCookie'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSuccessEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/AuthServiceUnavailable'
+  /api/admin/v1/auth/refresh:
+    post:
+      tags: [Admin]
+      operationId: adminAuthRefresh
+      summary: 使用 refresh cookie 轮换 access token
+      security:
+        - RefreshCookie: []
+      parameters:
+        - $ref: '#/components/parameters/RefreshTokenCookie'
+      responses:
+        '200':
+          description: access token 轮换成功；旧 refresh token 立即失效
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestId'
+            Set-Cookie:
+              $ref: '#/components/headers/RefreshCookie'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSuccessEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/AuthServiceUnavailable'
+  /api/admin/v1/auth/logout:
+    post:
+      tags: [Admin]
+      operationId: adminAuthLogout
+      summary: 吊销当前 refresh session
+      security:
+        - RefreshCookie: []
+      parameters:
+        - $ref: '#/components/parameters/RefreshTokenCookie'
+      responses:
+        '200':
+          description: 登出成功；refresh cookie 被清除
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestId'
+            Set-Cookie:
+              $ref: '#/components/headers/ClearedRefreshCookie'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptySuccessEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/AuthServiceUnavailable'
 components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: '受保护管理端请求使用 Authorization: Bearer TOKEN'
+    RefreshCookie:
+      type: apiKey
+      in: cookie
+      name: refresh_token
+      description: HttpOnly、SameSite=Lax 的 refresh token cookie（生产环境启用 Secure）；不会出现在 JSON 响应中
   parameters:
     RequestId:
       name: X-Request-ID
@@ -50,6 +151,14 @@ components:
       schema:
         type: string
         maxLength: 128
+    RefreshTokenCookie:
+      name: refresh_token
+      in: cookie
+      required: true
+      description: 浏览器自动附带的 HttpOnly refresh token cookie
+      schema:
+        type: string
+        minLength: 1
   schemas:
     HealthData:
       type: object
@@ -80,14 +189,61 @@ components:
           type: string
         meta:
           $ref: '#/components/schemas/ResponseMeta'
+    EmptySuccessEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              type: 'null'
+    AuthSuccessEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/AuthTokenData'
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          minLength: 1
+          maxLength: 128
+        password:
+          type: string
+          minLength: 1
+          maxLength: 256
+        captcha:
+          type: string
+          maxLength: 256
+    AuthTokenData:
+      type: object
+      additionalProperties: false
+      required: [accessToken, tokenType, expiresIn]
+      properties:
+        accessToken:
+          type: string
+          minLength: 1
+          description: 短时效 access token；客户端通过 Bearer header 发送
+        tokenType:
+          type: string
+          const: Bearer
+        expiresIn:
+          type: integer
+          minimum: 1
+          description: access token 有效期（秒）
     ErrorEnvelope:
       type: object
-      required: [code, message, traceId, meta]
+      required: [code, message, data, traceId, meta]
       properties:
         code:
           type: integer
         message:
           type: string
+        data: {}
         traceId:
           type: string
         meta:
@@ -130,16 +286,32 @@ components:
                     $ref: '#/components/schemas/HealthData'
     BadRequest:
       description: 请求参数错误
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/RequestId'
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ErrorEnvelope'
+            allOf:
+              - $ref: '#/components/schemas/ErrorEnvelope'
+              - type: object
+                properties:
+                  code:
+                    const: 10000
     Unauthorized:
       description: 未认证或凭据错误
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/RequestId'
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ErrorEnvelope'
+            allOf:
+              - $ref: '#/components/schemas/ErrorEnvelope'
+              - type: object
+                properties:
+                  code:
+                    enum: [10002, 10003, 20000]
     ServiceUnavailable:
       description: 服务未就绪
       content:
@@ -153,8 +325,50 @@ components:
                     const: 40001
                   data:
                     $ref: '#/components/schemas/HealthData'
+    RateLimited:
+      description: 登录尝试超过账号或来源限制
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/RequestId'
+        Retry-After:
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ErrorEnvelope'
+              - type: object
+                properties:
+                  code:
+                    const: 10004
+    AuthServiceUnavailable:
+      description: 认证依赖不可用或认证未启用
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ErrorEnvelope'
+              - type: object
+                properties:
+                  code:
+                    const: 40001
   headers:
     RequestId:
       description: 用于跨服务追踪的请求 ID
       schema:
         type: string
+    RefreshCookie:
+      description: refresh token；服务端必须设置 HttpOnly、SameSite=Lax 和 Path 属性，生产环境启用 Secure
+      schema:
+        type: string
+        example: refresh_token=TOKEN; Path=/api/admin/v1/auth; HttpOnly; SameSite=Lax
+    ClearedRefreshCookie:
+      description: 过期的 refresh token cookie，用于登出清理
+      schema:
+        type: string
+        example: refresh_token=; Max-Age=0; Path=/api/admin/v1/auth; HttpOnly; SameSite=Lax

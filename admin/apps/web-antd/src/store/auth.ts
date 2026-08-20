@@ -19,6 +19,8 @@ export const useAuthStore = defineStore('auth', () => {
   const router = useRouter();
 
   const loginLoading = ref(false);
+  const loginError = ref<null | string>(null);
+  const loginSuccess = ref(false);
 
   /**
    * 异步处理登录操作
@@ -33,7 +35,13 @@ export const useAuthStore = defineStore('auth', () => {
     let userInfo: null | UserInfo = null;
     try {
       loginLoading.value = true;
-      const { accessToken } = await loginApi(params);
+      loginError.value = null;
+      loginSuccess.value = false;
+      const { accessToken } = await loginApi({
+        captcha: typeof params.captcha === 'string' ? params.captcha : undefined,
+        password: params.password,
+        username: params.username,
+      });
 
       // 如果成功获取到 accessToken
       if (accessToken) {
@@ -49,6 +57,7 @@ export const useAuthStore = defineStore('auth', () => {
 
         userStore.setUserInfo(userInfo);
         accessStore.setAccessCodes(accessCodes);
+        loginSuccess.value = true;
 
         if (accessStore.loginExpired) {
           accessStore.setLoginExpired(false);
@@ -68,6 +77,17 @@ export const useAuthStore = defineStore('auth', () => {
           });
         }
       }
+      if (!accessToken) {
+        loginError.value = 'Login response did not include an access token';
+      }
+    } catch (error: any) {
+      loginSuccess.value = false;
+      const responseData = error?.response?.data ?? error?.data ?? error;
+      loginError.value =
+        responseData?.message ??
+        responseData?.error ??
+        'Login failed. Check your credentials and try again.';
+      throw error;
     } finally {
       loginLoading.value = false;
     }
@@ -105,13 +125,17 @@ export const useAuthStore = defineStore('auth', () => {
 
   function $reset() {
     loginLoading.value = false;
+    loginError.value = null;
+    loginSuccess.value = false;
   }
 
   return {
     $reset,
     authLogin,
     fetchUserInfo,
+    loginError,
     loginLoading,
+    loginSuccess,
     logout,
   };
 });

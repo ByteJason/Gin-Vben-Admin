@@ -13,6 +13,18 @@ codes:
     key: validation_failed
     http_status: 422
     retryable: false
+  - code: 10002
+    key: invalid_credentials
+    http_status: 401
+    retryable: false
+  - code: 10003
+    key: invalid_token
+    http_status: 401
+    retryable: false
+  - code: 10004
+    key: auth_rate_limited
+    http_status: 429
+    retryable: true
   - code: 40001
     key: dependency_unavailable
     http_status: 503

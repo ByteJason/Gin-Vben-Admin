@@ -19,6 +19,7 @@
 
 - 管理端布局、路由、主题和国际化基础能力
 - 管理端接口契约与统一响应模型
+- 管理端登录、refresh 轮换、登出、账号/IP 限流和失败锁定（启用认证配置后）
 - Gin 健康检查、统一响应和 request ID
 - OpenAPI、错误码和响应 schema
 - MySQL、PostgreSQL、Redis 开发环境编排与显式数据库迁移
@@ -136,6 +137,8 @@ go -C server run ./cmd/migrate down --steps 1
 
 配置支持 MySQL/PostgreSQL 的 `single`、`read_write`、`cluster_endpoint` 模式，以及 Redis 的 `single`、`sentinel`、`cluster` 模式。默认示例关闭外部依赖；启用时请通过本地配置或环境变量填写连接信息。
 
+启用管理端认证时，在本地配置中填写至少 32 字节的 `auth.jwt_secret`（或设置 `AUTH_JWT_SECRET`），并同时启用数据库与 Redis。登录、刷新和登出接口见 `contracts/openapi/admin-v1.yaml`；refresh token 只保存在 HttpOnly Cookie。
+
 选择其他 UI 模板时，将 `antd` 替换为 `ele` 或 `naive`。
 
 ### 源码部署
@@ -150,8 +153,8 @@ pnpm --dir admin run build:antd
 构建结果位于 `admin/apps/web-antd/dist/`，可交给 Nginx 或其他静态文件服务。服务端构建：
 
 ```text
-go -C server build ./cmd/api
-go -C server run ./cmd/api
+go -C server build -o ./bin/server-api ./cmd/api
+./server/bin/server-api
 ```
 
 运行时配置使用 `server/configs/server.example.yaml` 复制出的本地配置或环境变量；实际密钥和连接串不提交到 Git。
