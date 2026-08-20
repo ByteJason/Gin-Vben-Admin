@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 
 func TestNewBuildsConfiguredHTTPServerAndKeepsDependenciesOptional(t *testing.T) {
 	cfg := config.Default()
+	cfg.Install.StateDir = t.TempDir()
 	cfg.Server.Addr = "127.0.0.1:0"
 	cfg.Server.ReadTimeout = 123 * time.Millisecond
 	cfg.Server.WriteTimeout = 234 * time.Millisecond
@@ -43,6 +45,26 @@ func TestNewBuildsConfiguredHTTPServerAndKeepsDependenciesOptional(t *testing.T)
 	}
 	if app.Readiness() == nil {
 		t.Fatal("readiness checker must always be constructed")
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/system/install/v1/status", nil)
+	response := httptest.NewRecorder()
+	app.HTTPServer().Handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("installation status = %d, want 200; body=%s", response.Code, response.Body.String())
+	}
+	var body struct {
+		Code int `json:"code"`
+		Data struct {
+			Installed bool   `json:"installed"`
+			State     string `json:"state"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode installation status: %v", err)
+	}
+	if body.Code != 0 || body.Data.Installed || body.Data.State != "uninstalled" {
+		t.Fatalf("installation status body = %#v", body)
 	}
 }
 

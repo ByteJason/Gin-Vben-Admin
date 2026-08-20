@@ -8,6 +8,7 @@ import (
 	"example.com/gin-vben-admin/server/internal/transport/http/client"
 	"example.com/gin-vben-admin/server/internal/transport/http/health"
 	iamhttp "example.com/gin-vben-admin/server/internal/transport/http/iam"
+	installhttp "example.com/gin-vben-admin/server/internal/transport/http/install"
 	"example.com/gin-vben-admin/server/internal/transport/http/middleware"
 )
 
@@ -24,13 +25,21 @@ func NewRouter(readiness ...health.ReadinessChecker) *gin.Engine {
 // NewRouter remains a dependency-free compatibility constructor for tests and
 // local probes.
 func NewRouterWithAuth(readinessChecker health.ReadinessChecker, authHandler *authhttp.Handler, iamHandlers ...*iamhttp.Handler) *gin.Engine {
-	r := gin.New()
-	r.Use(gin.Recovery(), middleware.RequestID(), middleware.SecurityHeaders())
-	health.RegisterRoutes(r, readinessChecker)
 	var iamHandler *iamhttp.Handler
 	if len(iamHandlers) > 0 {
 		iamHandler = iamHandlers[0]
 	}
+	return NewRouterWithComponents(readinessChecker, authHandler, iamHandler, nil)
+}
+
+// NewRouterWithComponents is the explicit composition seam for runtime HTTP
+// capabilities. Compatibility constructors delegate here without inventing
+// infrastructure dependencies.
+func NewRouterWithComponents(readinessChecker health.ReadinessChecker, authHandler *authhttp.Handler, iamHandler *iamhttp.Handler, installHandler *installhttp.Handler) *gin.Engine {
+	r := gin.New()
+	r.Use(gin.Recovery(), middleware.RequestID(), middleware.SecurityHeaders())
+	health.RegisterRoutes(r, readinessChecker)
+	installhttp.RegisterRoutes(r, installHandler)
 	admin.RegisterRoutesWithIAM(r, authHandler, iamHandler)
 	client.RegisterRoutes(r)
 	return r

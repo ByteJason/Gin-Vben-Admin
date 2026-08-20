@@ -12,11 +12,13 @@ import (
 
 	appauth "example.com/gin-vben-admin/server/internal/application/auth"
 	iamapp "example.com/gin-vben-admin/server/internal/application/iam"
+	installer "example.com/gin-vben-admin/server/internal/application/installer"
 	"example.com/gin-vben-admin/server/internal/config"
 	"example.com/gin-vben-admin/server/internal/platform/authplatform"
 	rediscache "example.com/gin-vben-admin/server/internal/platform/cache/redis"
 	platformhealth "example.com/gin-vben-admin/server/internal/platform/health"
 	"example.com/gin-vben-admin/server/internal/platform/iamplatform"
+	"example.com/gin-vben-admin/server/internal/platform/installplatform"
 	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
 )
 
@@ -30,6 +32,7 @@ type App struct {
 	redis     *rediscache.Client
 	auth      appauth.AuthService
 	iam       *iamapp.Service
+	install   *installer.StatusService
 	readiness *platformhealth.Checker
 	closers   []io.Closer
 
@@ -46,6 +49,7 @@ func New(cfg config.Config) (*App, error) {
 	}
 
 	app := &App{config: cfg}
+	app.install = installer.NewStatusService(installplatform.NewFileMarkerStore(cfg.Install.MarkerPath()))
 	cleanupOnError := func(cause error) (*App, error) {
 		_ = closeResources(app.closers)
 		return nil, cause
@@ -119,7 +123,7 @@ func New(cfg config.Config) (*App, error) {
 	if candidate, ok := app.auth.(appauth.AccountRecoveryService); ok {
 		recovery = candidate
 	}
-	app.http = newHTTPServer(cfg, app.readiness, app.auth, limiter, app.iam, recovery)
+	app.http = newHTTPServer(cfg, app.readiness, app.auth, limiter, app.iam, recovery, app.install)
 	return app, nil
 }
 
@@ -174,6 +178,14 @@ func (a *App) IAM() *iamapp.Service {
 		return nil
 	}
 	return a.iam
+}
+
+// Installation returns the credential-free installation status service.
+func (a *App) Installation() *installer.StatusService {
+	if a == nil {
+		return nil
+	}
+	return a.install
 }
 
 // Readiness returns the checker injected into the HTTP health routes.
