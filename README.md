@@ -149,9 +149,12 @@ docker compose version
 安装固定 pnpm：
 
 ```text
+corepack enable
 corepack prepare pnpm@11.16.0 --activate
 pnpm --version
 ```
+
+若 Node.js 发行版未附带 Corepack，可改用同等跨平台命令：`npm install --global pnpm@11.16.0`。
 
 ### 2. 获取项目
 
