@@ -161,3 +161,11 @@ test('bootstrap renders the selected database driver into a new local config', a
   assert.doesNotMatch(postgres, /driver: mysql/);
   assert.throws(() => renderServerConfig(template, 'sqlite'));
 });
+
+test('server image packages the explicit migration command', () => {
+  const dockerfile = readFileSync(join(root, 'server/Dockerfile'), 'utf8');
+  const readme = readFileSync(join(root, 'README.md'), 'utf8');
+  assert.match(dockerfile, /-o \/out\/migrate \.\/cmd\/migrate/);
+  assert.match(dockerfile, /COPY --from=build \/out\/migrate \/migrate/);
+  assert.match(readme, /--entrypoint \/migrate server up/);
+});

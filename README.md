@@ -162,6 +162,7 @@ go -C server run ./cmd/api
 
 ```text
 docker compose -f deploy/compose.dev.yaml up -d --build
+docker compose -f deploy/compose.dev.yaml run --rm --entrypoint /migrate server up
 docker compose -f deploy/compose.dev.yaml ps
 ```
 
