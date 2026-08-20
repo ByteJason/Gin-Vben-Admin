@@ -23,6 +23,9 @@ func newHTTPServer(cfg config.Config, readiness health.ReadinessChecker, authSer
 	if authService != nil {
 		authHandler = authhttp.NewHandler(authService, cfg.Auth, limiter)
 		authHandler.SetAccountRecovery(recovery)
+		if sessionManager, ok := authService.(appauth.SessionManagementService); ok {
+			authHandler.SetSessionManager(sessionManager)
+		}
 	}
 	var iamHandler *iamhttp.Handler
 	if iamService != nil {

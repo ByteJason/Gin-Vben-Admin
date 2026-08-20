@@ -5,10 +5,13 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
+	appauth "example.com/gin-vben-admin/server/internal/application/auth"
 	"example.com/gin-vben-admin/server/internal/config"
+	"example.com/gin-vben-admin/server/internal/domain/authdomain"
 )
 
 func TestNewBuildsConfiguredHTTPServerAndKeepsDependenciesOptional(t *testing.T) {
@@ -140,6 +143,41 @@ func TestNewWiresAuthOnlyWhenDatabaseAndRedisAreEnabled(t *testing.T) {
 		t.Fatal("auth service should be wired when auth and dependencies are enabled")
 	}
 }
+
+func TestHTTPCompositionWiresDeviceSessionRoutes(t *testing.T) {
+	cfg := config.Default()
+	cfg.Auth.Enabled = true
+	service := &bootstrapAuthSessionFake{}
+	server := newHTTPServer(cfg, nil, service, nil, nil, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/v1/auth/sessions", nil)
+	req.Header.Set("Authorization", "Bearer access")
+	res := httptest.NewRecorder()
+	server.Handler.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("device session route status = %d, want 200; body=%s", res.Code, res.Body.String())
+	}
+}
+
+type bootstrapAuthSessionFake struct{}
+
+func (*bootstrapAuthSessionFake) Login(context.Context, string, string) (authdomain.TokenPair, error) {
+	return authdomain.TokenPair{}, nil
+}
+func (*bootstrapAuthSessionFake) Refresh(context.Context, string) (authdomain.TokenPair, error) {
+	return authdomain.TokenPair{}, nil
+}
+func (*bootstrapAuthSessionFake) Logout(context.Context, string) error { return nil }
+func (*bootstrapAuthSessionFake) VerifyAccess(string) (authdomain.Claims, error) {
+	return authdomain.Claims{Subject: "1", Type: authdomain.AccessToken}, nil
+}
+func (*bootstrapAuthSessionFake) ListSessions(context.Context, string) ([]authdomain.Session, error) {
+	return []authdomain.Session{}, nil
+}
+func (*bootstrapAuthSessionFake) RevokeSession(context.Context, string, string) error  { return nil }
+func (*bootstrapAuthSessionFake) LogoutWithRefreshToken(context.Context, string) error { return nil }
+
+var _ appauth.AuthService = (*bootstrapAuthSessionFake)(nil)
+var _ appauth.SessionManagementService = (*bootstrapAuthSessionFake)(nil)
 
 func TestNewRejectsAuthWithoutDurableDependencies(t *testing.T) {
 	cfg := config.Default()
