@@ -40,6 +40,8 @@ jobs:
         run: node scripts/bootstrap.mjs --check
       - name: Run skeleton verification
         run: node scripts/verify.mjs --scope skeleton
+      - name: Check dev orchestrator
+        run: node scripts/dev.mjs --check --ui antd
 
   contract:
     name: Contract tests

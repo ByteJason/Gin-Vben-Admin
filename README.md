@@ -189,6 +189,12 @@ go run ./cmd/api
 node ./scripts/verify.mjs
 ```
 
+也可用 Node 编排器同时启动两端：
+
+```text
+node ./scripts/dev.mjs --ui antd
+```
+
 `bootstrap.mjs` 检查目标树并从 `server/configs/server.example.yaml` 生成本地 `server/configs/server.yaml`；默认不覆盖已有本地配置。安装依赖与下载 Go module 作为显式步骤执行，便于 Windows PowerShell、macOS zsh、Linux bash 看到失败位置。密钥、连接串、日志、数据库卷、会话和初始化备份均进入 `.gitignore`。
 
 ### 5. 常见问题
