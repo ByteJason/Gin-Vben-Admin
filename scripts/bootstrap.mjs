@@ -22,6 +22,7 @@ const required = [
   'contracts/openapi/admin-v1.yaml',
   'contracts/openapi/client-v1.yaml',
   'server/configs/server.example.yaml',
+  'server/cmd/migrate',
   'deploy/compose.dev.yaml',
   'deploy/compose.dependencies.yaml',
 ];

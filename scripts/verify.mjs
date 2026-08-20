@@ -50,6 +50,7 @@ const required = [
   'admin/apps/web-ele',
   'admin/apps/web-naive',
   'server/cmd/api',
+  'server/cmd/migrate',
   'server/internal/bootstrap',
   'server/internal/transport/http/admin',
   'server/internal/transport/http/client',
@@ -63,7 +64,8 @@ const required = [
   'LICENSES/Vue-Vben-Admin-MIT.txt',
   'NOTICE',
 ];
-const missing = required.filter((item) => !exists(item));
+const existence = await Promise.all(required.map(async (item) => [item, await exists(item)]));
+const missing = existence.filter(([, present]) => !present).map(([item]) => item);
 const allowedRootDirectories = new Set([
   '.dev-docs',
   '.git',
