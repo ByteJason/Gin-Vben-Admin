@@ -16,6 +16,15 @@ type AccountProvisioner interface {
 	UpdatePassword(context.Context, string, string) error
 }
 
+// AccountRecoveryService is the transport-facing seam for account creation
+// and password recovery. It is separate from AuthService so existing login
+// consumers do not need to implement write operations.
+type AccountRecoveryService interface {
+	Register(context.Context, string, string) error
+	RequestPasswordReset(context.Context, string) error
+	ResetPassword(context.Context, string, string) error
+}
+
 // PasswordResetProvider owns one-time token delivery and consumption. A
 // transport must never return the issued token; delivery is provider-owned.
 type PasswordResetProvider interface {
@@ -36,6 +45,8 @@ func (s *Service) SetPasswordResetProvider(provider PasswordResetProvider) {
 		s.reset = provider
 	}
 }
+
+var _ AccountRecoveryService = (*Service)(nil)
 
 // Register creates an active account after hashing its password. The
 // plaintext password never crosses the AccountProvisioner boundary.

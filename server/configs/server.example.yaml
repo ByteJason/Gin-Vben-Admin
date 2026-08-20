@@ -60,3 +60,4 @@ auth:
   rate_limit_max_attempts: 10
   lockout_threshold: 5
   lockout_duration: 15m
+  registration_enabled: false

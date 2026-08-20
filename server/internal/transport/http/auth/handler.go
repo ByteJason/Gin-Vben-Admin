@@ -28,10 +28,11 @@ const (
 )
 
 type Handler struct {
-	service appauth.AuthService
-	config  config.AuthConfig
-	limiter appauth.RateLimiter
-	captcha appauth.CaptchaProvider
+	service  appauth.AuthService
+	recovery appauth.AccountRecoveryService
+	config   config.AuthConfig
+	limiter  appauth.RateLimiter
+	captcha  appauth.CaptchaProvider
 }
 
 func NewHandler(service appauth.AuthService, cfg config.AuthConfig, limiters ...appauth.RateLimiter) *Handler {
@@ -48,6 +49,13 @@ func (h *Handler) SetCaptchaProvider(provider appauth.CaptchaProvider) {
 	}
 }
 
+// SetAccountRecovery wires the optional registration/password recovery seam.
+func (h *Handler) SetAccountRecovery(recovery appauth.AccountRecoveryService) {
+	if h != nil {
+		h.recovery = recovery
+	}
+}
+
 // RegisterRoutes installs login, refresh, and logout. A nil handler is a
 // deliberate disabled seam that returns a safe dependency error rather than
 // accidentally accepting credentials.
@@ -58,12 +66,27 @@ func RegisterRoutes(r gin.IRouter, handler *Handler) {
 		group.POST("/login", disabled)
 		group.POST("/refresh", disabled)
 		group.POST("/logout", disabled)
+		group.POST("/register", disabled)
+		group.POST("/password/reset/request", disabled)
+		group.POST("/password/reset", disabled)
 		return
 	}
 	group.GET("/captcha", handler.issueCaptcha)
 	group.POST("/login", handler.login)
 	group.POST("/refresh", handler.refresh)
 	group.POST("/logout", handler.logout)
+	if handler.config.RegistrationEnabled && handler.recovery != nil {
+		group.POST("/register", handler.register)
+	} else {
+		group.POST("/register", disabled)
+	}
+	if handler.recovery != nil {
+		group.POST("/password/reset/request", handler.requestPasswordReset)
+		group.POST("/password/reset", handler.resetPassword)
+	} else {
+		group.POST("/password/reset/request", disabled)
+		group.POST("/password/reset", disabled)
+	}
 }
 
 type loginRequest struct {
@@ -71,6 +94,17 @@ type loginRequest struct {
 	Password  string `json:"password"`
 	CaptchaID string `json:"captchaId,omitempty"`
 	Captcha   string `json:"captcha,omitempty"`
+}
+
+type registerRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+type passwordResetRequest struct {
+	Username string `json:"username,omitempty"`
+	Token    string `json:"token,omitempty"`
+	Password string `json:"password,omitempty"`
 }
 
 type tokenData struct {
@@ -110,6 +144,46 @@ func (h *Handler) login(c *gin.Context) {
 	}
 	h.setRefreshCookie(c, pair.RefreshToken, false)
 	response.OK(c, tokenData{AccessToken: pair.AccessToken, TokenType: "Bearer", ExpiresIn: pair.ExpiresIn})
+}
+
+func (h *Handler) register(c *gin.Context) {
+	var request registerRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid request")
+		return
+	}
+	if err := h.recovery.Register(c.Request.Context(), strings.TrimSpace(request.Username), request.Password); err != nil {
+		handleRecoveryError(c, err)
+		return
+	}
+	response.OK(c, nil)
+}
+
+func (h *Handler) requestPasswordReset(c *gin.Context) {
+	var request passwordResetRequest
+	if err := c.ShouldBindJSON(&request); err != nil || strings.TrimSpace(request.Username) == "" {
+		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid request")
+		return
+	}
+	if err := h.recovery.RequestPasswordReset(c.Request.Context(), strings.TrimSpace(request.Username)); err != nil {
+		handleRecoveryError(c, err)
+		return
+	}
+	// Existing and missing accounts deliberately receive the same success body.
+	response.OK(c, nil)
+}
+
+func (h *Handler) resetPassword(c *gin.Context) {
+	var request passwordResetRequest
+	if err := c.ShouldBindJSON(&request); err != nil || strings.TrimSpace(request.Token) == "" || request.Password == "" {
+		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid request")
+		return
+	}
+	if err := h.recovery.ResetPassword(c.Request.Context(), strings.TrimSpace(request.Token), request.Password); err != nil {
+		handleRecoveryError(c, err)
+		return
+	}
+	response.OK(c, nil)
 }
 
 func (h *Handler) issueCaptcha(c *gin.Context) {
@@ -244,6 +318,21 @@ func handleAuthError(c *gin.Context, err error, login bool) {
 			return
 		}
 		response.Error(c, http.StatusInternalServerError, 50000, "internal error")
+	}
+}
+
+func handleRecoveryError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, authdomain.ErrInvalidAccount):
+		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid request")
+	case errors.Is(err, authdomain.ErrUserAlreadyExists):
+		response.Error(c, http.StatusUnprocessableEntity, 10001, "validation failed")
+	case errors.Is(err, authdomain.ErrPasswordResetInvalid):
+		response.Error(c, http.StatusUnauthorized, codeCredentials, "invalid credentials")
+	case errors.Is(err, authdomain.ErrDependencyUnavailable):
+		response.Error(c, http.StatusServiceUnavailable, 40001, "dependency unavailable")
+	default:
+		response.Error(c, http.StatusServiceUnavailable, 40001, "dependency unavailable")
 	}
 }
 

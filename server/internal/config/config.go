@@ -83,6 +83,7 @@ type AuthConfig struct {
 	RateLimitMaxAttempts int           `mapstructure:"rate_limit_max_attempts" yaml:"rate_limit_max_attempts"`
 	LockoutThreshold     int           `mapstructure:"lockout_threshold" yaml:"lockout_threshold"`
 	LockoutDuration      time.Duration `mapstructure:"lockout_duration" yaml:"lockout_duration"`
+	RegistrationEnabled  bool          `mapstructure:"registration_enabled" yaml:"registration_enabled"`
 }
 
 // Summary is a redacted, log-safe view of a Config. It deliberately excludes
@@ -137,6 +138,7 @@ type AuthSummary struct {
 	RateLimitMaxAttempts int           `json:"rate_limit_max_attempts"`
 	LockoutThreshold     int           `json:"lockout_threshold"`
 	LockoutDuration      time.Duration `json:"lockout_duration"`
+	RegistrationEnabled  bool          `json:"registration_enabled"`
 }
 
 // Default returns a complete configuration that starts the HTTP server without
@@ -180,6 +182,7 @@ func Default() Config {
 			RateLimitMaxAttempts: 10,
 			LockoutThreshold:     5,
 			LockoutDuration:      15 * time.Minute,
+			RegistrationEnabled:  false,
 		},
 	}
 }
@@ -396,6 +399,7 @@ func (cfg Config) SafeSummary() Summary {
 			RateLimitMaxAttempts: cfg.Auth.RateLimitMaxAttempts,
 			LockoutThreshold:     cfg.Auth.LockoutThreshold,
 			LockoutDuration:      cfg.Auth.LockoutDuration,
+			RegistrationEnabled:  cfg.Auth.RegistrationEnabled,
 		},
 	}
 }
@@ -451,6 +455,7 @@ func newViper() *viper.Viper {
 	v.SetDefault("auth.rate_limit_max_attempts", cfg.Auth.RateLimitMaxAttempts)
 	v.SetDefault("auth.lockout_threshold", cfg.Auth.LockoutThreshold)
 	v.SetDefault("auth.lockout_duration", cfg.Auth.LockoutDuration)
+	v.SetDefault("auth.registration_enabled", cfg.Auth.RegistrationEnabled)
 
 	for key, environment := range environmentBindings {
 		_ = v.BindEnv(key, environment)
@@ -503,6 +508,7 @@ var environmentBindings = map[string]string{
 	"auth.rate_limit_max_attempts": "AUTH_RATE_LIMIT_MAX_ATTEMPTS",
 	"auth.lockout_threshold":       "AUTH_LOCKOUT_THRESHOLD",
 	"auth.lockout_duration":        "AUTH_LOCKOUT_DURATION",
+	"auth.registration_enabled":    "AUTH_REGISTRATION_ENABLED",
 }
 
 func resolvePath(path string) (string, bool) {
