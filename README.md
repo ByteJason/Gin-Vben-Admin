@@ -10,7 +10,7 @@
 
 ## 当前状态
 
-本仓库已完成 B1 的最小可运行骨架：三款管理端模板已裁剪导入，Gin health/request-id/admin/client scope 已实现，根契约与跨平台 Node 编排脚本已加入。完整业务登录、RBAC、数据库迁移和公开法律包仍按后续批次推进；下面的命令区分“当前已验证”与“后续批次接口”。
+本仓库已完成 B1 的最小可运行骨架：三款管理端模板已裁剪导入，Gin health/request-id/admin/client scope 已实现，根契约、跨平台 Node 编排脚本和三平台 CI 门禁已加入。完整业务登录、RBAC、数据库迁移和公开法律包仍按后续批次推进；下面的命令区分“当前已验证”与“后续批次接口”。
 
 | 项目 | 当前结论 |
 |---|---|
@@ -18,6 +18,7 @@
 | 产品版本 | `0.1.0-dev`，不随文档版本联动 |
 | 管理端 UI | `admin/`，保留三款初始化模板；B1 smoke 已通过 |
 | Gin 服务端 | `server/`，Go 1.24 module、模块化单体；B1 `go test`/`go vet` 已通过 |
+| CI 门禁 | `.github/workflows/ci.yml`，Ubuntu/macOS/Windows smoke + admin/server/Compose |
 | API 契约 | `/api/admin/v1`、`/api/client/v1`，分别维护 OpenAPI |
 | 公开文档 | 根 `docs/` 仅保留入口；专门开发资料位于不提交的 `.dev-docs/` |
 
@@ -264,7 +265,7 @@ GET /health/ready
 - 三款管理 UI：build、typecheck、OpenAPI 类型一致性和 API smoke；
 - `admin/apps/web`：Playwright E2E、axe、键盘和 375/768/1024/1440 视觉回归；
 - 核心单元测试覆盖率目标 `>= 80%`；WCAG 2.2 AA；
-- CI 至少包含 `windows-latest`、`macos-latest`、`ubuntu-latest` 安装 smoke。
+- `.github/workflows/ci.yml` 包含 `windows-latest`、`macos-latest`、`ubuntu-latest` smoke，并在 Ubuntu 执行 admin/server/Compose 门禁。
 
 ## 开发批次
 
