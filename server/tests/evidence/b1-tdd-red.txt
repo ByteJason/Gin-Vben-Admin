@@ -1,0 +1,11 @@
+B1 TDD RED
+COMMAND: GOCACHE=/tmp/gva-go-cache GOTMPDIR=/tmp go test ./...
+WORKDIR: server/
+EXIT_STATUS: 1
+OUTPUT:
+# example.com/gin-vben-admin/server/internal/transport/http/router [build failed]
+internal/transport/http/router/router_test.go:10:7: undefined: NewRouter
+internal/transport/http/router/router_test.go:35:7: undefined: NewRouter
+FAIL	example.com/gin-vben-admin/server/internal/transport/http/router [build failed]
+FAIL
+RESULT: router tests failed to compile with undefined: NewRouter

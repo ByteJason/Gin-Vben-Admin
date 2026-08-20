@@ -1,0 +1,12 @@
+server:
+  addr: ":8080"
+  read_timeout: 10s
+  write_timeout: 10s
+  shutdown_timeout: 10s
+
+logging:
+  level: info
+
+database:
+  driver: mysql
+  dsn: "user:password@tcp(127.0.0.1:3306)/gin_vben_admin?parseTime=true"

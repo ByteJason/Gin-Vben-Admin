@@ -1,0 +1,17 @@
+B1 TDD GREEN
+COMMAND: cd server && GOCACHE=/tmp/gva-go-cache GOTMPDIR=/tmp GOSUMDB=off GOPROXY=off go test ./...
+WORKDIR: server/
+?   	example.com/gin-vben-admin/server/cmd/api	[no test files]
+?   	example.com/gin-vben-admin/server/internal/bootstrap	[no test files]
+?   	example.com/gin-vben-admin/server/internal/config	[no test files]
+?   	example.com/gin-vben-admin/server/internal/transport/http/admin	[no test files]
+?   	example.com/gin-vben-admin/server/internal/transport/http/client	[no test files]
+?   	example.com/gin-vben-admin/server/internal/transport/http/health	[no test files]
+?   	example.com/gin-vben-admin/server/internal/transport/http/middleware	[no test files]
+?   	example.com/gin-vben-admin/server/internal/transport/http/response	[no test files]
+ok  	example.com/gin-vben-admin/server/internal/transport/http/router	(cached)
+EXIT_STATUS: 0
+COMMAND: GOCACHE=/tmp/gva-go-cache GOTMPDIR=/tmp GOSUMDB=off GOPROXY=off go vet ./...
+VET_EXIT_STATUS: 0
+COMMAND: GOCACHE=/tmp/gva-go-cache GOTMPDIR=/tmp GOSUMDB=off GOPROXY=off go test -race ./...
+RACE_EXIT_STATUS: 0
