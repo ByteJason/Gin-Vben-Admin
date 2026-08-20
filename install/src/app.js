@@ -1,4 +1,5 @@
 const endpoint = '/api/system/install/v1/status';
+const capabilitiesEndpoint = '/api/system/install/v1/capabilities';
 
 const title = document.querySelector('#status-title');
 const badge = document.querySelector('#status-badge');
@@ -8,6 +9,8 @@ const installerVersion = document.querySelector('#installer-version');
 const selectedUi = document.querySelector('#selected-ui');
 const selectedMode = document.querySelector('#selected-mode');
 const retryButton = document.querySelector('#retry-button');
+const platformSummary = document.querySelector('#platform-summary');
+const capabilityList = document.querySelector('#capability-list');
 
 const uiLabels = { antd: 'Ant Design Vue', ele: 'Element Plus', naive: 'Naive UI' };
 const modeLabels = {
@@ -31,6 +34,25 @@ async function loadStatus() {
     renderStatus(envelope.data);
   } catch {
     renderError();
+  }
+}
+
+async function loadCapabilities() {
+  platformSummary.textContent = '检测中';
+  capabilityList.replaceChildren(createCapabilityMessage('正在识别可用工具'));
+  try {
+    const response = await fetch(capabilitiesEndpoint, {
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json' },
+    });
+    const envelope = await response.json();
+    if (!response.ok || envelope.code !== 0 || !envelope.data) {
+      throw new Error('capabilities request failed');
+    }
+    renderCapabilities(envelope.data);
+  } catch {
+    platformSummary.textContent = '未识别';
+    capabilityList.replaceChildren(createCapabilityMessage('暂未读取到运行工具信息'));
   }
 }
 
@@ -78,5 +100,33 @@ function renderError() {
   retryButton.hidden = false;
 }
 
-retryButton.addEventListener('click', loadStatus);
-loadStatus();
+function renderCapabilities(capabilities) {
+  const platform = capabilities.platform || {};
+  platformSummary.textContent = [platform.os, platform.arch].filter(Boolean).join(' / ') || '未识别';
+  const items = Array.isArray(capabilities.tools) ? capabilities.tools : [];
+  const nodes = items.map((tool) => {
+    const item = document.createElement('li');
+    const name = document.createElement('strong');
+    const state = document.createElement('span');
+    name.textContent = String(tool.id || 'tool').toUpperCase();
+    state.textContent = tool.available ? tool.version || '可用' : '未检测到';
+    state.dataset.available = tool.available ? 'true' : 'false';
+    item.append(name, state);
+    return item;
+  });
+  capabilityList.replaceChildren(...(nodes.length ? nodes : [createCapabilityMessage('未返回工具信息')]));
+}
+
+function createCapabilityMessage(value) {
+  const item = document.createElement('li');
+  item.className = 'capability-placeholder';
+  item.textContent = value;
+  return item;
+}
+
+async function loadAll() {
+  await Promise.allSettled([loadStatus(), loadCapabilities()]);
+}
+
+retryButton.addEventListener('click', loadAll);
+loadAll();

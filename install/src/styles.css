@@ -279,6 +279,75 @@ h1 {
   font-weight: 700;
 }
 
+.capability-panel {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+
+.capability-panel__heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: baseline;
+  margin-bottom: 14px;
+}
+
+.capability-panel h3 {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+.capability-panel__heading span {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+#capability-list {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  list-style: none;
+}
+
+#capability-list li {
+  min-width: 0;
+  padding: 11px 12px;
+  display: grid;
+  gap: 5px;
+  background: var(--canvas);
+  border-radius: 9px;
+}
+
+#capability-list strong,
+#capability-list span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#capability-list strong {
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+}
+
+#capability-list span {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+#capability-list span[data-available="true"] {
+  color: var(--accent);
+}
+
+#capability-list .capability-placeholder {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
 .secondary-button {
   min-height: 44px;
   margin-top: 24px;
@@ -357,6 +426,10 @@ footer {
 
   .status-details {
     grid-template-columns: 1fr;
+  }
+
+  #capability-list {
+    grid-template-columns: 1fr 1fr;
   }
 }
 
