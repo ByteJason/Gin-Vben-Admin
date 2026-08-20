@@ -1,0 +1,94 @@
+#!/usr/bin/env node
+import { access, mkdir, readFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const scopeIndex = process.argv.indexOf('--scope');
+const scope = scopeIndex >= 0 ? process.argv[scopeIndex + 1] : 'skeleton';
+
+async function exists(relative) {
+  try {
+    await access(path.join(root, relative), constants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function text(relative) {
+  return readFile(path.join(root, relative), 'utf8');
+}
+
+async function run(command, commandArgs, cwd = root) {
+  const runtimeDir = path.join(root, '.runtime');
+  await mkdir(path.join(runtimeDir, 'go-cache'), { recursive: true });
+  await mkdir(path.join(runtimeDir, 'go-tmp'), { recursive: true });
+  await new Promise((resolve, reject) => {
+    const child = spawn(command, commandArgs, {
+      cwd,
+      stdio: 'inherit',
+      shell: false,
+      env: {
+        ...process.env,
+        GOCACHE: process.env.GOCACHE ?? path.join(runtimeDir, 'go-cache'),
+        GOTMPDIR: process.env.GOTMPDIR ?? path.join(runtimeDir, 'go-tmp'),
+      },
+    });
+    child.on('error', reject);
+    child.on('exit', (code, signal) => {
+      if (code === 0) resolve();
+      else reject(new Error(`${command} exited ${code ?? signal}`));
+    });
+  });
+}
+
+const required = [
+  'admin/apps/web-antd',
+  'admin/apps/web-ele',
+  'admin/apps/web-naive',
+  'server/cmd/api',
+  'server/internal/bootstrap',
+  'server/internal/transport/http/admin',
+  'server/internal/transport/http/client',
+  'contracts/openapi/admin-v1.yaml',
+  'contracts/openapi/client-v1.yaml',
+  'deploy/compose.dev.yaml',
+  'deploy/compose.dependencies.yaml',
+  'admin/Dockerfile',
+  'docs/README.md',
+];
+const forbidden = ['apps', 'packages', 'internal', 'frontend', 'backend', 'admin/apps/web-antdv-next', 'admin/apps/web-tdesign', 'admin/apps/backend-mock'];
+const missing = required.filter((item) => !exists(item));
+const presentForbidden = [];
+for (const item of forbidden) {
+  if (await exists(item)) presentForbidden.push(item);
+}
+if (missing.length || presentForbidden.length) {
+  console.error(`VERIFY_FAILED missing=${missing.join(',')} forbidden=${presentForbidden.join(',')}`);
+  process.exit(1);
+}
+
+const adminContract = await text('contracts/openapi/admin-v1.yaml');
+const clientContract = await text('contracts/openapi/client-v1.yaml');
+for (const token of ['/health/live', '/health/ready', '/api/admin/v1/auth/login', 'X-Request-ID']) {
+  if (!adminContract.includes(token)) {
+    console.error(`VERIFY_FAILED contract_token=${token}`);
+    process.exit(1);
+  }
+}
+if (clientContract.includes('/api/admin/v1')) {
+  console.error('VERIFY_FAILED client_contract_cross_scope');
+  process.exit(1);
+}
+
+if (scope !== 'skeleton' && scope !== 'template') {
+  console.error(`unsupported --scope: ${scope}`);
+  process.exit(2);
+}
+
+if (await exists('server/go.mod')) await run('go', ['test', './...'], path.join(root, 'server'));
+console.log(`VERIFY_SCOPE=${scope}`);
+console.log('VERIFY_OK');
