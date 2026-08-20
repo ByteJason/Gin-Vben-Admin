@@ -74,5 +74,5 @@ test('B1 CI covers the three host platforms and core gates', () => {
   assert.match(workflow, /pnpm\/action-setup/);
   assert.match(workflow, /node --test tests\/contract\/b1_contract\.test\.mjs/);
   assert.match(workflow, /pnpm --dir admin run test:b1/);
-  assert.match(workflow, /go -C server test \.\.\./);
+  assert.match(workflow, /go -C server test \.\/\.\.\./);
 });

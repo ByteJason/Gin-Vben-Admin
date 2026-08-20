@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PNPM_VERSION: 11.16.0
+  NODE_VERSION: 24.16.0
+
+jobs:
+  platform-smoke:
+    name: Platform smoke (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      - name: Run cross-platform bootstrap check
+        run: node scripts/bootstrap.mjs --check
+      - name: Run skeleton verification
+        run: node scripts/verify.mjs --scope skeleton
+
+  contract:
+    name: Contract tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Run root contract tests
+        run: node --test tests/contract/b1_contract.test.mjs
+
+  admin:
+    name: Admin UI gates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: admin/pnpm-lock.yaml
+      - name: Install workspace
+        run: pnpm --dir admin install --frozen-lockfile
+      - name: Build generated workspace stubs
+        run: pnpm --dir admin -r run --if-present stub
+      - name: Run admin smoke tests
+        run: pnpm --dir admin run test:b1
+      - name: Build retained UI templates
+        run: |
+          pnpm --dir admin run build:antd
+          pnpm --dir admin run build:ele
+          pnpm --dir admin run build:naive
+      - name: Typecheck retained UI templates
+        run: |
+          pnpm --dir admin --filter @vben/web-antd exec vue-tsc --noEmit --skipLibCheck
+          pnpm --dir admin --filter @vben/web-ele exec vue-tsc --noEmit --skipLibCheck
+          pnpm --dir admin --filter @vben/web-naive exec vue-tsc --noEmit --skipLibCheck
+
+  server:
+    name: Gin server gates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache-dependency-path: server/go.sum
+      - name: Test
+        run: go -C server test ./...
+      - name: Vet
+        run: go -C server vet ./...
+      - name: Race test
+        run: go -C server test -race ./...
+
+  compose:
+    name: Compose configuration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Validate development topology
+        run: docker compose -f deploy/compose.dev.yaml config --quiet
+      - name: Validate dependency topology
+        run: docker compose -f deploy/compose.dependencies.yaml config --quiet
