@@ -1,22 +1,428 @@
+// Package config loads and validates the runtime configuration for the server.
 package config
 
-// Config contains the dependency-free runtime settings used by the HTTP service.
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/spf13/viper"
+)
+
+const defaultConfigPath = "configs/server.yaml"
+
+// Config contains the runtime settings used by the HTTP service and its optional
+// infrastructure dependencies.
 type Config struct {
-	Server ServerConfig `yaml:"server"`
+	Server   ServerConfig   `mapstructure:"server" yaml:"server"`
+	Logging  LoggingConfig  `mapstructure:"logging" yaml:"logging"`
+	Database DatabaseConfig `mapstructure:"database" yaml:"database"`
+	Redis    RedisConfig    `mapstructure:"redis" yaml:"redis"`
 }
 
 type ServerConfig struct {
-	Addr            string `yaml:"addr"`
-	ReadTimeout     string `yaml:"read_timeout"`
-	WriteTimeout    string `yaml:"write_timeout"`
-	ShutdownTimeout string `yaml:"shutdown_timeout"`
+	Addr            string        `mapstructure:"addr" yaml:"addr"`
+	ReadTimeout     time.Duration `mapstructure:"read_timeout" yaml:"read_timeout"`
+	WriteTimeout    time.Duration `mapstructure:"write_timeout" yaml:"write_timeout"`
+	IdleTimeout     time.Duration `mapstructure:"idle_timeout" yaml:"idle_timeout"`
+	ShutdownTimeout time.Duration `mapstructure:"shutdown_timeout" yaml:"shutdown_timeout"`
 }
 
+type LoggingConfig struct {
+	Level string `mapstructure:"level" yaml:"level"`
+}
+
+type DatabaseConfig struct {
+	Enabled         bool          `mapstructure:"enabled" yaml:"enabled"`
+	Driver          string        `mapstructure:"driver" yaml:"driver"`
+	DSN             string        `mapstructure:"dsn" yaml:"dsn"`
+	Mode            string        `mapstructure:"mode" yaml:"mode"`
+	PrimaryDSN      string        `mapstructure:"primary_dsn" yaml:"primary_dsn"`
+	ReplicaDSNs     []string      `mapstructure:"replica_dsns" yaml:"replica_dsns"`
+	ReadPolicy      string        `mapstructure:"read_policy" yaml:"read_policy"`
+	MaxOpenConns    int           `mapstructure:"max_open_conns" yaml:"max_open_conns"`
+	MaxIdleConns    int           `mapstructure:"max_idle_conns" yaml:"max_idle_conns"`
+	ConnMaxLifetime time.Duration `mapstructure:"conn_max_lifetime" yaml:"conn_max_lifetime"`
+	ConnMaxIdleTime time.Duration `mapstructure:"conn_max_idle_time" yaml:"conn_max_idle_time"`
+	PingTimeout     time.Duration `mapstructure:"ping_timeout" yaml:"ping_timeout"`
+}
+
+type RedisConfig struct {
+	Enabled      bool          `mapstructure:"enabled" yaml:"enabled"`
+	Addr         string        `mapstructure:"addr" yaml:"addr"`
+	Username     string        `mapstructure:"username" yaml:"username"`
+	Password     string        `mapstructure:"password" yaml:"password"`
+	DB           int           `mapstructure:"db" yaml:"db"`
+	Namespace    string        `mapstructure:"namespace" yaml:"namespace"`
+	Mode         string        `mapstructure:"mode" yaml:"mode"`
+	Addrs        []string      `mapstructure:"addrs" yaml:"addrs"`
+	MasterName   string        `mapstructure:"master_name" yaml:"master_name"`
+	DialTimeout  time.Duration `mapstructure:"dial_timeout" yaml:"dial_timeout"`
+	ReadTimeout  time.Duration `mapstructure:"read_timeout" yaml:"read_timeout"`
+	WriteTimeout time.Duration `mapstructure:"write_timeout" yaml:"write_timeout"`
+	PingTimeout  time.Duration `mapstructure:"ping_timeout" yaml:"ping_timeout"`
+}
+
+// Summary is a redacted, log-safe view of a Config. It deliberately excludes
+// database DSNs and all usernames and passwords.
+type Summary struct {
+	Server   ServerSummary   `json:"server"`
+	Logging  LoggingSummary  `json:"logging"`
+	Database DatabaseSummary `json:"database"`
+	Redis    RedisSummary    `json:"redis"`
+}
+
+type ServerSummary struct {
+	Addr            string        `json:"addr"`
+	ReadTimeout     time.Duration `json:"read_timeout"`
+	WriteTimeout    time.Duration `json:"write_timeout"`
+	IdleTimeout     time.Duration `json:"idle_timeout"`
+	ShutdownTimeout time.Duration `json:"shutdown_timeout"`
+}
+
+type LoggingSummary struct {
+	Level string `json:"level"`
+}
+
+type DatabaseSummary struct {
+	Enabled      bool   `json:"enabled"`
+	Driver       string `json:"driver"`
+	Mode         string `json:"mode"`
+	ReadPolicy   string `json:"read_policy"`
+	ReplicaCount int    `json:"replica_count"`
+}
+
+type RedisSummary struct {
+	Enabled      bool   `json:"enabled"`
+	Mode         string `json:"mode"`
+	AddressCount int    `json:"address_count"`
+	MasterName   string `json:"master_name"`
+	Namespace    string `json:"namespace"`
+	DB           int    `json:"db"`
+}
+
+// Default returns a complete configuration that starts the HTTP server without
+// external infrastructure services.
 func Default() Config {
-	return Config{Server: ServerConfig{
-		Addr:            ":8080",
-		ReadTimeout:     "10s",
-		WriteTimeout:    "10s",
-		ShutdownTimeout: "10s",
-	}}
+	return Config{
+		Server: ServerConfig{
+			Addr:            ":8080",
+			ReadTimeout:     10 * time.Second,
+			WriteTimeout:    10 * time.Second,
+			IdleTimeout:     60 * time.Second,
+			ShutdownTimeout: 10 * time.Second,
+		},
+		Logging: LoggingConfig{Level: "info"},
+		Database: DatabaseConfig{
+			Driver:          "mysql",
+			Mode:            "single",
+			ReadPolicy:      "random",
+			MaxOpenConns:    10,
+			MaxIdleConns:    5,
+			ConnMaxLifetime: time.Hour,
+			ConnMaxIdleTime: 15 * time.Minute,
+			PingTimeout:     5 * time.Second,
+		},
+		Redis: RedisConfig{
+			Mode:         "single",
+			Namespace:    "app:v1",
+			DialTimeout:  5 * time.Second,
+			ReadTimeout:  3 * time.Second,
+			WriteTimeout: 3 * time.Second,
+			PingTimeout:  3 * time.Second,
+		},
+	}
+}
+
+// Load reads YAML settings and then applies environment variable overrides.
+// When path is empty it uses SERVER_CONFIG, then configs/server.yaml. A missing
+// implicit default file is allowed; a named file must exist.
+func Load(path string) (Config, error) {
+	configPath, explicit := resolvePath(path)
+	v := newViper()
+
+	if _, err := os.Stat(configPath); err != nil {
+		if !errors.Is(err, os.ErrNotExist) || explicit {
+			return Config{}, fmt.Errorf("read configuration %q: %w", configPath, err)
+		}
+	} else {
+		v.SetConfigFile(configPath)
+		if err := v.ReadInConfig(); err != nil {
+			return Config{}, fmt.Errorf("read configuration %q: %w", configPath, err)
+		}
+	}
+
+	applyListEnvironmentOverrides(v)
+
+	cfg := Default()
+	if err := v.Unmarshal(&cfg); err != nil {
+		return Config{}, fmt.Errorf("decode configuration: %w", err)
+	}
+	if err := cfg.Validate(); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
+}
+
+// Validate checks the configuration before external clients are constructed.
+func (cfg Config) Validate() error {
+	if strings.TrimSpace(cfg.Server.Addr) == "" {
+		return errors.New("server.addr is required")
+	}
+	if cfg.Server.ReadTimeout <= 0 || cfg.Server.WriteTimeout <= 0 || cfg.Server.IdleTimeout <= 0 || cfg.Server.ShutdownTimeout <= 0 {
+		return errors.New("server timeouts must be positive")
+	}
+	if strings.TrimSpace(cfg.Logging.Level) == "" {
+		return errors.New("logging.level is required")
+	}
+	if err := cfg.Database.validate(); err != nil {
+		return fmt.Errorf("database: %w", err)
+	}
+	if err := cfg.Redis.validate(); err != nil {
+		return fmt.Errorf("redis: %w", err)
+	}
+	return nil
+}
+
+func (cfg DatabaseConfig) validate() error {
+	if cfg.MaxOpenConns < 0 || cfg.MaxIdleConns < 0 {
+		return errors.New("connection pool sizes must not be negative")
+	}
+	if cfg.MaxOpenConns > 0 && cfg.MaxIdleConns > cfg.MaxOpenConns {
+		return errors.New("max_idle_conns must not exceed max_open_conns")
+	}
+	if cfg.ConnMaxLifetime < 0 || cfg.ConnMaxIdleTime < 0 || cfg.PingTimeout < 0 {
+		return errors.New("connection durations must not be negative")
+	}
+	if !cfg.Enabled {
+		return nil
+	}
+	if cfg.Driver != "mysql" && cfg.Driver != "postgres" {
+		return fmt.Errorf("driver must be mysql or postgres, got %q", cfg.Driver)
+	}
+	switch cfg.Mode {
+	case "single", "cluster_endpoint":
+		if strings.TrimSpace(cfg.DSN) == "" {
+			return fmt.Errorf("dsn is required for mode %q", cfg.Mode)
+		}
+	case "read_write":
+		if strings.TrimSpace(cfg.PrimaryDSN) == "" || len(nonEmpty(cfg.ReplicaDSNs)) == 0 {
+			return errors.New("primary_dsn and at least one replica_dsns entry are required for read_write mode")
+		}
+	default:
+		return fmt.Errorf("mode must be single, read_write, or cluster_endpoint, got %q", cfg.Mode)
+	}
+	if cfg.ReadPolicy != "random" && cfg.ReadPolicy != "round_robin" {
+		return fmt.Errorf("read_policy must be random or round_robin, got %q", cfg.ReadPolicy)
+	}
+	return nil
+}
+
+// MigrationDSN returns the write endpoint used by the explicit migration CLI.
+// Read replicas are never eligible migration targets.
+func (cfg DatabaseConfig) MigrationDSN() (string, error) {
+	if !cfg.Enabled {
+		return "", errors.New("database is disabled")
+	}
+
+	var dsn string
+	switch cfg.Mode {
+	case "single", "cluster_endpoint":
+		dsn = cfg.DSN
+	case "read_write":
+		dsn = cfg.PrimaryDSN
+	default:
+		return "", errors.New("database mode has no migration endpoint")
+	}
+	if strings.TrimSpace(dsn) == "" {
+		return "", errors.New("database migration endpoint is empty")
+	}
+	return dsn, nil
+}
+
+func (cfg RedisConfig) validate() error {
+	if cfg.DB < 0 {
+		return errors.New("db must not be negative")
+	}
+	if cfg.DialTimeout < 0 || cfg.ReadTimeout < 0 || cfg.WriteTimeout < 0 || cfg.PingTimeout < 0 {
+		return errors.New("timeouts must not be negative")
+	}
+	if len(cfg.Namespace) > 128 || strings.TrimSpace(cfg.Namespace) != cfg.Namespace || strings.ContainsAny(cfg.Namespace, "\r\n\t") {
+		return errors.New("namespace must be a trimmed string of at most 128 characters")
+	}
+	if !cfg.Enabled {
+		return nil
+	}
+	switch cfg.Mode {
+	case "single":
+		if strings.TrimSpace(cfg.Addr) == "" {
+			return errors.New("addr is required for single mode")
+		}
+	case "sentinel":
+		if len(nonEmpty(cfg.Addrs)) == 0 || strings.TrimSpace(cfg.MasterName) == "" {
+			return errors.New("addrs and master_name are required for sentinel mode")
+		}
+	case "cluster":
+		if len(nonEmpty(cfg.Addrs)) < 2 {
+			return errors.New("at least two addrs entries are required for cluster mode")
+		}
+	default:
+		return fmt.Errorf("mode must be single, sentinel, or cluster, got %q", cfg.Mode)
+	}
+	return nil
+}
+
+// SafeSummary returns configuration details suitable for structured logs. It
+// never returns a DSN, username, or password.
+func (cfg Config) SafeSummary() Summary {
+	return Summary{
+		Server: ServerSummary{
+			Addr:            cfg.Server.Addr,
+			ReadTimeout:     cfg.Server.ReadTimeout,
+			WriteTimeout:    cfg.Server.WriteTimeout,
+			IdleTimeout:     cfg.Server.IdleTimeout,
+			ShutdownTimeout: cfg.Server.ShutdownTimeout,
+		},
+		Logging: LoggingSummary{Level: cfg.Logging.Level},
+		Database: DatabaseSummary{
+			Enabled:      cfg.Database.Enabled,
+			Driver:       cfg.Database.Driver,
+			Mode:         cfg.Database.Mode,
+			ReadPolicy:   cfg.Database.ReadPolicy,
+			ReplicaCount: len(nonEmpty(cfg.Database.ReplicaDSNs)),
+		},
+		Redis: RedisSummary{
+			Enabled:      cfg.Redis.Enabled,
+			Mode:         cfg.Redis.Mode,
+			AddressCount: redisAddressCount(cfg.Redis),
+			MasterName:   cfg.Redis.MasterName,
+			Namespace:    cfg.Redis.Namespace,
+			DB:           cfg.Redis.DB,
+		},
+	}
+}
+
+func newViper() *viper.Viper {
+	cfg := Default()
+	v := viper.New()
+	v.SetConfigType("yaml")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	v.AutomaticEnv()
+
+	v.SetDefault("server.addr", cfg.Server.Addr)
+	v.SetDefault("server.read_timeout", cfg.Server.ReadTimeout)
+	v.SetDefault("server.write_timeout", cfg.Server.WriteTimeout)
+	v.SetDefault("server.idle_timeout", cfg.Server.IdleTimeout)
+	v.SetDefault("server.shutdown_timeout", cfg.Server.ShutdownTimeout)
+	v.SetDefault("logging.level", cfg.Logging.Level)
+	v.SetDefault("database.enabled", cfg.Database.Enabled)
+	v.SetDefault("database.driver", cfg.Database.Driver)
+	v.SetDefault("database.dsn", cfg.Database.DSN)
+	v.SetDefault("database.mode", cfg.Database.Mode)
+	v.SetDefault("database.primary_dsn", cfg.Database.PrimaryDSN)
+	v.SetDefault("database.replica_dsns", cfg.Database.ReplicaDSNs)
+	v.SetDefault("database.read_policy", cfg.Database.ReadPolicy)
+	v.SetDefault("database.max_open_conns", cfg.Database.MaxOpenConns)
+	v.SetDefault("database.max_idle_conns", cfg.Database.MaxIdleConns)
+	v.SetDefault("database.conn_max_lifetime", cfg.Database.ConnMaxLifetime)
+	v.SetDefault("database.conn_max_idle_time", cfg.Database.ConnMaxIdleTime)
+	v.SetDefault("database.ping_timeout", cfg.Database.PingTimeout)
+	v.SetDefault("redis.enabled", cfg.Redis.Enabled)
+	v.SetDefault("redis.addr", cfg.Redis.Addr)
+	v.SetDefault("redis.username", cfg.Redis.Username)
+	v.SetDefault("redis.password", cfg.Redis.Password)
+	v.SetDefault("redis.db", cfg.Redis.DB)
+	v.SetDefault("redis.namespace", cfg.Redis.Namespace)
+	v.SetDefault("redis.mode", cfg.Redis.Mode)
+	v.SetDefault("redis.addrs", cfg.Redis.Addrs)
+	v.SetDefault("redis.master_name", cfg.Redis.MasterName)
+	v.SetDefault("redis.dial_timeout", cfg.Redis.DialTimeout)
+	v.SetDefault("redis.read_timeout", cfg.Redis.ReadTimeout)
+	v.SetDefault("redis.write_timeout", cfg.Redis.WriteTimeout)
+	v.SetDefault("redis.ping_timeout", cfg.Redis.PingTimeout)
+
+	for key, environment := range environmentBindings {
+		_ = v.BindEnv(key, environment)
+	}
+	return v
+}
+
+var environmentBindings = map[string]string{
+	"server.addr":                 "SERVER_ADDR",
+	"server.read_timeout":         "SERVER_READ_TIMEOUT",
+	"server.write_timeout":        "SERVER_WRITE_TIMEOUT",
+	"server.idle_timeout":         "SERVER_IDLE_TIMEOUT",
+	"server.shutdown_timeout":     "SERVER_SHUTDOWN_TIMEOUT",
+	"logging.level":               "LOGGING_LEVEL",
+	"database.enabled":            "DATABASE_ENABLED",
+	"database.driver":             "DATABASE_DRIVER",
+	"database.dsn":                "DATABASE_DSN",
+	"database.mode":               "DATABASE_MODE",
+	"database.primary_dsn":        "DATABASE_PRIMARY_DSN",
+	"database.replica_dsns":       "DATABASE_REPLICA_DSNS",
+	"database.read_policy":        "DATABASE_READ_POLICY",
+	"database.max_open_conns":     "DATABASE_MAX_OPEN_CONNS",
+	"database.max_idle_conns":     "DATABASE_MAX_IDLE_CONNS",
+	"database.conn_max_lifetime":  "DATABASE_CONN_MAX_LIFETIME",
+	"database.conn_max_idle_time": "DATABASE_CONN_MAX_IDLE_TIME",
+	"database.ping_timeout":       "DATABASE_PING_TIMEOUT",
+	"redis.enabled":               "REDIS_ENABLED",
+	"redis.addr":                  "REDIS_ADDR",
+	"redis.username":              "REDIS_USERNAME",
+	"redis.password":              "REDIS_PASSWORD",
+	"redis.db":                    "REDIS_DB",
+	"redis.namespace":             "REDIS_NAMESPACE",
+	"redis.mode":                  "REDIS_MODE",
+	"redis.addrs":                 "REDIS_ADDRS",
+	"redis.master_name":           "REDIS_MASTER_NAME",
+	"redis.dial_timeout":          "REDIS_DIAL_TIMEOUT",
+	"redis.read_timeout":          "REDIS_READ_TIMEOUT",
+	"redis.write_timeout":         "REDIS_WRITE_TIMEOUT",
+	"redis.ping_timeout":          "REDIS_PING_TIMEOUT",
+}
+
+func resolvePath(path string) (string, bool) {
+	if strings.TrimSpace(path) != "" {
+		return path, true
+	}
+	if envPath := strings.TrimSpace(os.Getenv("SERVER_CONFIG")); envPath != "" {
+		return envPath, true
+	}
+	return filepath.FromSlash(defaultConfigPath), false
+}
+
+func applyListEnvironmentOverrides(v *viper.Viper) {
+	if value, ok := os.LookupEnv("DATABASE_REPLICA_DSNS"); ok {
+		v.Set("database.replica_dsns", splitCommaSeparated(value))
+	}
+	if value, ok := os.LookupEnv("REDIS_ADDRS"); ok {
+		v.Set("redis.addrs", splitCommaSeparated(value))
+	}
+}
+
+func splitCommaSeparated(value string) []string {
+	return nonEmpty(strings.Split(value, ","))
+}
+
+func nonEmpty(values []string) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+func redisAddressCount(cfg RedisConfig) int {
+	if cfg.Mode == "single" {
+		if strings.TrimSpace(cfg.Addr) == "" {
+			return 0
+		}
+		return 1
+	}
+	return len(nonEmpty(cfg.Addrs))
 }
