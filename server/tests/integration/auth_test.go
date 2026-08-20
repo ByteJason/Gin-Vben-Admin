@@ -82,6 +82,7 @@ func testAuthRefreshRotation(t *testing.T, driver, dsn, redisAddr string) {
 	cfg.Auth.RefreshTTL = 30 * time.Minute
 	cfg.Auth.BcryptCost = 10
 	cfg.Auth.SecureCookie = false
+	cfg.Auth.RegistrationEnabled = true
 
 	app, err := bootstrap.New(cfg)
 	if err != nil {
@@ -91,6 +92,8 @@ func testAuthRefreshRotation(t *testing.T, driver, dsn, redisAddr string) {
 
 	username := fmt.Sprintf("it_auth_%s_%d", driver, time.Now().UnixNano())
 	password := "integration-password-012345"
+	registeredUsername := fmt.Sprintf("it_register_%s_%d", driver, time.Now().UnixNano())
+	registeredPassword := "registered-password-012345"
 	hasher := authplatform.BcryptHasher{Cost: cfg.Auth.BcryptCost}
 	passwordHash, err := hasher.Hash(password)
 	if err != nil {
@@ -106,14 +109,32 @@ func testAuthRefreshRotation(t *testing.T, driver, dsn, redisAddr string) {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()
 		_ = app.Database().Write(cleanupCtx).Exec("DELETE FROM users WHERE username = ?", username).Error
+		_ = app.Database().Write(cleanupCtx).Exec("DELETE FROM users WHERE username = ?", registeredUsername).Error
 	})
 
 	ts := httptest.NewServer(app.HTTPServer().Handler)
 	t.Cleanup(ts.Close)
 	client := ts.Client()
 	loginURL := ts.URL + "/api/admin/v1/auth/login"
+	registerURL := ts.URL + "/api/admin/v1/auth/register"
 	refreshURL := ts.URL + "/api/admin/v1/auth/refresh"
 	logoutURL := ts.URL + "/api/admin/v1/auth/logout"
+
+	registerResponse := doAuthRequest(t, client, http.MethodPost, registerURL, `{"username":"`+registeredUsername+`","password":"`+registeredPassword+`"}`, nil)
+	if registerResponse.status != http.StatusOK || registerResponse.envelope.Code != 0 {
+		t.Fatalf("register status/code = %d/%d, body=%s", registerResponse.status, registerResponse.envelope.Code, registerResponse.body)
+	}
+	var registeredHash string
+	if err := app.Database().Read(ctx).Table("users").Select("password_hash").Where("username = ?", registeredUsername).Scan(&registeredHash).Error; err != nil {
+		t.Fatalf("registered user lookup error = %v", err)
+	}
+	if registeredHash == "" || registeredHash == registeredPassword {
+		t.Fatal("registration did not persist a password hash")
+	}
+	duplicateResponse := doAuthRequest(t, client, http.MethodPost, registerURL, `{"username":"`+registeredUsername+`","password":"`+registeredPassword+`"}`, nil)
+	if duplicateResponse.status != http.StatusUnprocessableEntity || duplicateResponse.envelope.Code != 10001 {
+		t.Fatalf("duplicate register status/code = %d/%d, body=%s", duplicateResponse.status, duplicateResponse.envelope.Code, duplicateResponse.body)
+	}
 
 	requestHeaders := map[string]string{
 		"X-Request-ID":  "it-req-" + driver,
