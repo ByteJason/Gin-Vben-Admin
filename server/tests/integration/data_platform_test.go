@@ -91,10 +91,11 @@ func testDatabaseLifecycle(t *testing.T, driver, dsn string) {
 	if err := runner.Up(); err != nil {
 		t.Fatalf("migration.Up() error = %v", err)
 	}
-	assertMigrationStatus(t, runner, 2, true)
+	assertMigrationStatus(t, runner, 3, true)
 	assertMetadataTable(t, store, ctx, true)
 	assertMetadataRow(t, store, ctx, "product", true)
 	assertAuthTables(t, store, ctx, true)
+	assertRBACTables(t, store, ctx, true)
 
 	commitKey := "integration-" + driver + "-commit"
 	rollbackKey := "integration-" + driver + "-rollback"
@@ -127,8 +128,8 @@ func testDatabaseLifecycle(t *testing.T, driver, dsn string) {
 	assertMetadataRow(t, store, ctx, rollbackKey, false)
 
 	cleanupKeys()
-	if err := runner.Down(2); err != nil {
-		t.Fatalf("migration.Down(2) error = %v", err)
+	if err := runner.Down(3); err != nil {
+		t.Fatalf("migration.Down(3) error = %v", err)
 	}
 	assertMigrationStatus(t, runner, 0, false)
 	assertMetadataTable(t, store, ctx, false)
@@ -136,10 +137,11 @@ func testDatabaseLifecycle(t *testing.T, driver, dsn string) {
 	if err := runner.Up(); err != nil {
 		t.Fatalf("migration.Up() restore error = %v", err)
 	}
-	assertMigrationStatus(t, runner, 2, true)
+	assertMigrationStatus(t, runner, 3, true)
 	assertMetadataTable(t, store, ctx, true)
 	assertMetadataRow(t, store, ctx, "product", true)
 	assertAuthTables(t, store, ctx, true)
+	assertRBACTables(t, store, ctx, true)
 }
 
 func insertMetadata(tx *gorm.DB, key string, payload any) error {
@@ -188,6 +190,16 @@ func assertMetadataRow(t *testing.T, store *gormdb.Store, ctx context.Context, k
 func assertAuthTables(t *testing.T, store *gormdb.Store, ctx context.Context, want bool) {
 	t.Helper()
 	for _, table := range []string{"users", "auth_sessions"} {
+		got := store.Write(ctx).Migrator().HasTable(table)
+		if got != want {
+			t.Fatalf("%s table present = %t, want %t", table, got, want)
+		}
+	}
+}
+
+func assertRBACTables(t *testing.T, store *gormdb.Store, ctx context.Context, want bool) {
+	t.Helper()
+	for _, table := range []string{"roles", "user_roles", "menus", "permissions", "iam_policies", "iam_data_scopes"} {
 		got := store.Write(ctx).Migrator().HasTable(table)
 		if got != want {
 			t.Fatalf("%s table present = %t, want %t", table, got, want)
