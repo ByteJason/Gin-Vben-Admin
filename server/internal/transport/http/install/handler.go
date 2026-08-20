@@ -18,17 +18,26 @@ type CapabilityProvider interface {
 	Probe(context.Context) (installer.Capabilities, error)
 }
 
+type PlanProvider interface {
+	Plan(context.Context, installer.PlanRequest) (installer.Plan, error)
+}
+
 type Handler struct {
 	status       StatusProvider
 	capabilities CapabilityProvider
+	plan         PlanProvider
 }
 
 func NewHandler(status StatusProvider, capabilities ...CapabilityProvider) *Handler {
-	handler := &Handler{status: status}
+	var capability CapabilityProvider
 	if len(capabilities) > 0 {
-		handler.capabilities = capabilities[0]
+		capability = capabilities[0]
 	}
-	return handler
+	return NewHandlerWithComponents(status, capability, nil)
+}
+
+func NewHandlerWithComponents(status StatusProvider, capabilities CapabilityProvider, plan PlanProvider) *Handler {
+	return &Handler{status: status, capabilities: capabilities, plan: plan}
 }
 
 func RegisterRoutes(router gin.IRouter, handler *Handler) {
@@ -56,5 +65,26 @@ func RegisterRoutes(router gin.IRouter, handler *Handler) {
 			return
 		}
 		response.OK(c, capabilities)
+	})
+	group.POST("/plan", func(c *gin.Context) {
+		if handler == nil || handler.plan == nil {
+			response.Error(c, http.StatusServiceUnavailable, 40001, "installation service unavailable")
+			return
+		}
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 8<<10)
+		var request installer.PlanRequest
+		if err := c.ShouldBindJSON(&request); err != nil {
+			response.Error(c, http.StatusBadRequest, 10000, "invalid installation plan")
+			return
+		}
+		plan, err := handler.plan.Plan(c.Request.Context(), request)
+		if err != nil {
+			// Validation and filesystem details remain server-side. The public
+			// response is intentionally stable and never carries absolute paths,
+			// credentials, or OS error text.
+			response.Error(c, http.StatusBadRequest, 10000, "invalid installation plan")
+			return
+		}
+		response.OK(c, plan)
 	})
 }

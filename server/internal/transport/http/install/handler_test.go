@@ -1,6 +1,7 @@
 package install
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -126,6 +127,83 @@ func TestCapabilitiesEndpointHidesProbeFailure(t *testing.T) {
 	}
 }
 
+func TestPlanEndpointReturnsAllowlistedPermissionSummary(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	want := installer.Plan{
+		SelectedUI:      "antd",
+		Mode:            "embedded",
+		CanCleanup:      true,
+		CanBuild:        true,
+		CanWriteEnv:     true,
+		RequiresRestart: true,
+		Entries: []installer.PlanEntry{{
+			Path:   "admin/apps/web-ele",
+			Action: installer.ActionRemove,
+			Permission: installer.PathPermission{
+				CanRead: true, CanWrite: true, CanCreate: true, CanRename: true, CanDelete: true,
+			},
+		}},
+	}
+	provider := &planProviderStub{plan: want}
+	RegisterRoutes(router, NewHandlerWithComponents(statusProviderStub{}, capabilityProviderStub{}, provider))
+
+	request := httptest.NewRequest(http.MethodPost, "/api/system/install/v1/plan", bytes.NewBufferString(`{"selectedUi":"antd","mode":"embedded"}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want 200; body=%s", response.Code, response.Body.String())
+	}
+	var body struct {
+		Code int            `json:"code"`
+		Data installer.Plan `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Code != 0 || body.Data.SelectedUI != want.SelectedUI || len(body.Data.Entries) != 1 {
+		t.Fatalf("unexpected plan response: %#v", body)
+	}
+	if provider.request.SelectedUI != "antd" || provider.request.Mode != "embedded" {
+		t.Fatalf("provider request = %#v", provider.request)
+	}
+	for _, forbidden := range []string{"/private/", "c:\\users", "password", "secret", "dsn"} {
+		if strings.Contains(strings.ToLower(response.Body.String()), forbidden) {
+			t.Fatalf("plan response leaked %q: %s", forbidden, response.Body.String())
+		}
+	}
+}
+
+func TestPlanEndpointRejectsMalformedRequestAndHidesProviderFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, testCase := range []struct {
+		name     string
+		body     string
+		provider *planProviderStub
+		status   int
+	}{
+		{name: "malformed", body: `{"selectedUi":`, provider: &planProviderStub{}, status: http.StatusBadRequest},
+		{name: "provider", body: `{"selectedUi":"antd","mode":"embedded"}`, provider: &planProviderStub{err: errors.New("/private/root password=fixture")}, status: http.StatusBadRequest},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			router := gin.New()
+			RegisterRoutes(router, NewHandlerWithComponents(statusProviderStub{}, capabilityProviderStub{}, testCase.provider))
+			request := httptest.NewRequest(http.MethodPost, "/api/system/install/v1/plan", bytes.NewBufferString(testCase.body))
+			request.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+			if response.Code != testCase.status {
+				t.Fatalf("status code = %d, want %d; body=%s", response.Code, testCase.status, response.Body.String())
+			}
+			if strings.Contains(strings.ToLower(response.Body.String()), "private") || strings.Contains(strings.ToLower(response.Body.String()), "password") {
+				t.Fatalf("plan error leaked internal cause: %s", response.Body.String())
+			}
+		})
+	}
+}
+
 type statusProviderStub struct {
 	status installer.Status
 	err    error
@@ -142,4 +220,15 @@ type capabilityProviderStub struct {
 
 func (s capabilityProviderStub) Probe(context.Context) (installer.Capabilities, error) {
 	return s.capabilities, s.err
+}
+
+type planProviderStub struct {
+	plan    installer.Plan
+	err     error
+	request installer.PlanRequest
+}
+
+func (s *planProviderStub) Plan(_ context.Context, request installer.PlanRequest) (installer.Plan, error) {
+	s.request = request
+	return s.plan, s.err
 }
