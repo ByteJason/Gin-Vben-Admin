@@ -75,8 +75,9 @@ func TestGORMUserRepositoryFindByIdentifierMySQLDialect(t *testing.T) {
 var _ authdomain.UserRepository = (*GORMUserRepository)(nil)
 
 type queryResult struct {
-	rows [][]driver.Value
-	err  error
+	rows    [][]driver.Value
+	err     error
+	execErr error
 }
 
 type testDriver struct{ result queryResult }
@@ -89,16 +90,49 @@ type testRows struct {
 
 func (d testDriver) Open(string) (driver.Conn, error) { return testConn{result: d.result}, nil }
 func (c testConn) Prepare(string) (driver.Stmt, error) {
-	return nil, errors.New("prepare not supported")
+	return testStmt{result: c.result}, nil
 }
 func (c testConn) Close() error              { return nil }
-func (c testConn) Begin() (driver.Tx, error) { return nil, errors.New("transaction not supported") }
+func (c testConn) Begin() (driver.Tx, error) { return testTx{}, nil }
 func (c testConn) QueryContext(_ context.Context, _ string, _ []driver.NamedValue) (driver.Rows, error) {
 	if c.result.err != nil {
 		return nil, c.result.err
 	}
 	return &testRows{columns: []string{"id", "username", "password_hash", "status"}, rows: c.result.rows}, nil
 }
+func (c testConn) ExecContext(_ context.Context, _ string, _ []driver.NamedValue) (driver.Result, error) {
+	if c.result.execErr != nil {
+		return nil, c.result.execErr
+	}
+	return testResult{}, nil
+}
+
+type testStmt struct{ result queryResult }
+
+type testTx struct{}
+
+func (testTx) Commit() error   { return nil }
+func (testTx) Rollback() error { return nil }
+
+func (s testStmt) Close() error  { return nil }
+func (s testStmt) NumInput() int { return -1 }
+func (s testStmt) Exec([]driver.Value) (driver.Result, error) {
+	if s.result.execErr != nil {
+		return nil, s.result.execErr
+	}
+	return testResult{}, nil
+}
+func (s testStmt) Query([]driver.Value) (driver.Rows, error) {
+	if s.result.err != nil {
+		return nil, s.result.err
+	}
+	return &testRows{columns: []string{"id", "username", "password_hash", "status"}, rows: s.result.rows}, nil
+}
+
+type testResult struct{}
+
+func (testResult) LastInsertId() (int64, error)             { return 1, nil }
+func (testResult) RowsAffected() (int64, error)             { return 1, nil }
 func (c testConn) CheckNamedValue(*driver.NamedValue) error { return nil }
 func (r *testRows) Columns() []string                       { return r.columns }
 func (r *testRows) Close() error                            { return nil }
