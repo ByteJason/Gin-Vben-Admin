@@ -11,7 +11,10 @@ import (
 	domain "example.com/gin-vben-admin/server/internal/domain/iam"
 )
 
-var ErrInvalidID = errors.New("id is required")
+var (
+	ErrInvalidID         = errors.New("id is required")
+	ErrRepositoryMissing = errors.New("iam repository capability is unavailable")
+)
 
 // MemoryStore is a local adapter used by unit tests and the initial bootstrap.
 // Its methods intentionally implement the same repository seams used by the
@@ -235,21 +238,56 @@ type Service struct {
 	Roles       domain.RoleRepository
 	Menus       domain.MenuRepository
 	Permissions domain.PermissionRepository
+	Policies    domain.PolicyStore
+	DataScopes  domain.DataScopeStore
 	Authorizer  domain.Authorizer
 	Scopes      domain.DataScopeResolver
+}
+
+type userLister interface {
+	ListUsers(context.Context) ([]domain.User, error)
+}
+type roleLister interface {
+	ListRoles(context.Context) ([]domain.Role, error)
+}
+type menuLister interface {
+	ListMenus(context.Context) ([]domain.Menu, error)
+}
+type permissionLister interface {
+	ListPermissions(context.Context) ([]domain.Permission, error)
+}
+type userSaver interface {
+	SaveUser(context.Context, domain.User) error
+}
+type roleSaver interface {
+	SaveRole(context.Context, domain.Role) error
+}
+type menuSaver interface {
+	SaveMenu(context.Context, domain.Menu) error
+}
+type permissionSaver interface {
+	SavePermission(context.Context, domain.Permission) error
 }
 
 func NewService(store *MemoryStore) *Service {
 	if store == nil {
 		store = NewMemoryStore()
 	}
+	return NewServiceWithRepositories(store, store, store, store, store, store)
+}
+
+// NewServiceWithRepositories composes the authorization service from ports so
+// the HTTP layer can use either the in-memory test adapter or the GORM adapter.
+func NewServiceWithRepositories(users domain.UserRepository, roles domain.RoleRepository, menus domain.MenuRepository, permissions domain.PermissionRepository, policies domain.PolicyStore, scopes domain.DataScopeStore) *Service {
 	return &Service{
-		Users:       store,
-		Roles:       store,
-		Menus:       store,
-		Permissions: store,
-		Authorizer:  domain.NewAuthorizer(store),
-		Scopes:      domain.NewMemoryDataScopeResolver(store),
+		Users:       users,
+		Roles:       roles,
+		Menus:       menus,
+		Permissions: permissions,
+		Policies:    policies,
+		DataScopes:  scopes,
+		Authorizer:  domain.NewAuthorizer(policies),
+		Scopes:      domain.NewMemoryDataScopeResolver(scopes),
 	}
 }
 
@@ -265,4 +303,132 @@ func (s *Service) ResolveDataScope(ctx context.Context, subject domain.Subject, 
 		return domain.DataScope{}, domain.ErrDataScopeNotFound
 	}
 	return s.Scopes.Resolve(ctx, subject, resource)
+}
+
+func (s *Service) ListUsers(ctx context.Context) ([]domain.User, error) {
+	if s == nil {
+		return nil, ErrRepositoryMissing
+	}
+	repo, ok := s.Users.(userLister)
+	if !ok {
+		return nil, ErrRepositoryMissing
+	}
+	return repo.ListUsers(ctx)
+}
+
+func (s *Service) SaveUser(ctx context.Context, user domain.User) error {
+	if s == nil {
+		return ErrRepositoryMissing
+	}
+	repo, ok := s.Users.(userSaver)
+	if !ok {
+		return ErrRepositoryMissing
+	}
+	return repo.SaveUser(ctx, user)
+}
+
+func (s *Service) ListRoles(ctx context.Context) ([]domain.Role, error) {
+	if s == nil {
+		return nil, ErrRepositoryMissing
+	}
+	repo, ok := s.Roles.(roleLister)
+	if !ok {
+		return nil, ErrRepositoryMissing
+	}
+	return repo.ListRoles(ctx)
+}
+
+func (s *Service) SaveRole(ctx context.Context, role domain.Role) error {
+	if s == nil {
+		return ErrRepositoryMissing
+	}
+	repo, ok := s.Roles.(roleSaver)
+	if !ok {
+		return ErrRepositoryMissing
+	}
+	return repo.SaveRole(ctx, role)
+}
+
+func (s *Service) ListMenus(ctx context.Context) ([]domain.Menu, error) {
+	if s == nil {
+		return nil, ErrRepositoryMissing
+	}
+	repo, ok := s.Menus.(menuLister)
+	if !ok {
+		return nil, ErrRepositoryMissing
+	}
+	return repo.ListMenus(ctx)
+}
+
+func (s *Service) SaveMenu(ctx context.Context, menu domain.Menu) error {
+	if s == nil {
+		return ErrRepositoryMissing
+	}
+	repo, ok := s.Menus.(menuSaver)
+	if !ok {
+		return ErrRepositoryMissing
+	}
+	return repo.SaveMenu(ctx, menu)
+}
+
+func (s *Service) ListPermissions(ctx context.Context) ([]domain.Permission, error) {
+	if s == nil {
+		return nil, ErrRepositoryMissing
+	}
+	repo, ok := s.Permissions.(permissionLister)
+	if !ok {
+		return nil, ErrRepositoryMissing
+	}
+	return repo.ListPermissions(ctx)
+}
+
+func (s *Service) SavePermission(ctx context.Context, permission domain.Permission) error {
+	if s == nil {
+		return ErrRepositoryMissing
+	}
+	repo, ok := s.Permissions.(permissionSaver)
+	if !ok {
+		return ErrRepositoryMissing
+	}
+	return repo.SavePermission(ctx, permission)
+}
+
+func (s *Service) ListPolicies(ctx context.Context) ([]domain.Policy, error) {
+	if s == nil || s.Policies == nil {
+		return nil, ErrRepositoryMissing
+	}
+	return s.Policies.ListPolicies(ctx)
+}
+
+func (s *Service) SavePolicy(ctx context.Context, policy domain.Policy) error {
+	if s == nil {
+		return ErrRepositoryMissing
+	}
+	repo, ok := s.Policies.(interface {
+		SavePolicy(context.Context, domain.Policy) error
+	})
+	if !ok {
+		return ErrRepositoryMissing
+	}
+	return repo.SavePolicy(ctx, policy)
+}
+
+func (s *Service) ListDataScopes(ctx context.Context) ([]domain.DataScope, error) {
+	if s == nil || s.DataScopes == nil {
+		return nil, ErrRepositoryMissing
+	}
+	return s.DataScopes.ListDataScopes(ctx)
+}
+
+func (s *Service) SaveDataScope(ctx context.Context, scope domain.DataScope) error {
+	if s == nil {
+		return ErrRepositoryMissing
+	}
+	repo, ok := s.DataScopes.(interface {
+		SaveDataScope(context.Context, domain.DataScope) error
+	})
+	if !ok {
+		return ErrRepositoryMissing
+	}
+	return repo.SaveDataScope(ctx, scope)
 }

@@ -57,3 +57,22 @@ func TestServiceRejectsCancelledContext(t *testing.T) {
 		t.Fatalf("authorize cancelled error=%v", err)
 	}
 }
+
+func TestServiceExposesManagementCollections(t *testing.T) {
+	store := NewMemoryStore()
+	service := NewService(store)
+	if err := service.SaveMenu(context.Background(), domain.Menu{ID: "menu-home", Name: "Home", Path: "/home", Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.SavePermission(context.Background(), domain.Permission{ID: "perm-home", Name: "Home", Method: "GET", Path: "/home", Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	menus, err := service.ListMenus(context.Background())
+	if err != nil || len(menus) != 1 || menus[0].ID != "menu-home" {
+		t.Fatalf("menus=%+v err=%v", menus, err)
+	}
+	permissions, err := service.ListPermissions(context.Background())
+	if err != nil || len(permissions) != 1 || permissions[0].ID != "perm-home" {
+		t.Fatalf("permissions=%+v err=%v", permissions, err)
+	}
+}
