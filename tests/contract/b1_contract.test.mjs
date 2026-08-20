@@ -77,3 +77,13 @@ test('B1 CI covers the three host platforms and core gates', () => {
   assert.match(workflow, /pnpm --dir admin run test:b1/);
   assert.match(workflow, /go -C server test \.\/\.\.\./);
 });
+
+test('B1 dev orchestrator exposes a cross-platform check mode', () => {
+  const source = readFileSync(join(root, 'scripts/dev.mjs'), 'utf8');
+  assert.match(source, /shell:\s*false/);
+  const check = runNode('scripts/dev.mjs', '--check', '--ui', 'antd');
+  assert.equal(check.status, 0, check.stdout + check.stderr);
+  assert.match(check.stdout, /DEV_CHECK_OK/);
+  assert.match(check.stdout, /go -C server run \.\/cmd\/api/);
+  assert.match(check.stdout, /pnpm --dir admin run dev:antd/);
+});
