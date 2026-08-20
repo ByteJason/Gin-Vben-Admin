@@ -1,0 +1,8 @@
+B1 CONTRACT TDD RED
+COMMAND: node --test tests/contract/b1_contract.test.mjs
+WORKDIR: repository root
+EXIT_STATUS: 1
+OBSERVED:
+- boundary assertion failed because server/cmd/api was not present;
+- bootstrap assertion failed because scripts/bootstrap.mjs was not present;
+- the OpenAPI scope test already passed.

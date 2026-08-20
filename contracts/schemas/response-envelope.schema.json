@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/contracts/response-envelope.schema.json",
+  "title": "ResponseEnvelope",
+  "type": "object",
+  "required": ["code", "message", "traceId", "meta"],
+  "properties": {
+    "code": { "type": "integer" },
+    "message": { "type": "string" },
+    "data": {},
+    "traceId": { "type": "string" },
+    "meta": {
+      "type": "object",
+      "required": ["requestId"],
+      "properties": { "requestId": { "type": "string" } }
+    },
+    "errors": { "type": "array" }
+  },
+  "additionalProperties": true
+}

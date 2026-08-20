@@ -1,0 +1,169 @@
+openapi: 3.1.0
+info:
+  title: APP Admin API
+  version: 0.1.0-dev
+  description: |
+    首个工程切片的管理端契约骨架。业务接口按 B3/B4 批次逐步扩展。
+servers:
+  - url: /
+    description: Local development
+tags:
+  - name: Health
+  - name: Auth
+paths:
+  /health/live:
+    get:
+      tags: [Health]
+      operationId: getLiveHealth
+      summary: Liveness probe
+      responses:
+        '200':
+          $ref: '#/components/responses/HealthResponse'
+  /health/ready:
+    get:
+      tags: [Health]
+      operationId: getReadyHealth
+      summary: Readiness probe
+      responses:
+        '200':
+          $ref: '#/components/responses/HealthResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/admin/v1/auth/login:
+    post:
+      tags: [Auth]
+      operationId: adminLogin
+      summary: 首版登录契约占位
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+components:
+  parameters:
+    RequestId:
+      name: X-Request-ID
+      in: header
+      required: false
+      schema:
+        type: string
+        maxLength: 128
+  schemas:
+    LoginRequest:
+      type: object
+      required: [username, password]
+      additionalProperties: false
+      properties:
+        username:
+          type: string
+          minLength: 1
+          maxLength: 128
+        password:
+          type: string
+          format: password
+          minLength: 1
+          maxLength: 256
+    HealthData:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok, ready]
+    SuccessEnvelope:
+      type: object
+      required: [code, message, data, traceId, meta]
+      properties:
+        code:
+          type: integer
+          const: 0
+        message:
+          type: string
+        data: {}
+        traceId:
+          type: string
+        meta:
+          $ref: '#/components/schemas/ResponseMeta'
+    ErrorEnvelope:
+      type: object
+      required: [code, message, traceId, meta]
+      properties:
+        code:
+          type: integer
+        message:
+          type: string
+        traceId:
+          type: string
+        meta:
+          $ref: '#/components/schemas/ResponseMeta'
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/FieldError'
+    ResponseMeta:
+      type: object
+      required: [requestId]
+      properties:
+        requestId:
+          type: string
+    FieldError:
+      type: object
+      required: [messageKey]
+      properties:
+        field:
+          type: string
+        messageKey:
+          type: string
+        params:
+          type: object
+          additionalProperties: true
+  responses:
+    HealthResponse:
+      description: 服务存活或就绪
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/SuccessEnvelope'
+              - type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/HealthData'
+    BadRequest:
+      description: 请求参数错误
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Unauthorized:
+      description: 未认证或凭据错误
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    ServiceUnavailable:
+      description: 服务未就绪
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+  headers:
+    RequestId:
+      description: 用于跨服务追踪的请求 ID
+      schema:
+        type: string

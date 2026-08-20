@@ -1,0 +1,27 @@
+version: 1
+owner: api-platform
+codes:
+  - code: 0
+    key: success
+    http_status: 200
+    retryable: false
+  - code: 10000
+    key: invalid_request
+    http_status: 400
+    retryable: false
+  - code: 10001
+    key: validation_failed
+    http_status: 422
+    retryable: false
+  - code: 20000
+    key: unauthenticated
+    http_status: 401
+    retryable: false
+  - code: 30000
+    key: forbidden
+    http_status: 403
+    retryable: false
+  - code: 50000
+    key: internal_error
+    http_status: 500
+    retryable: true
