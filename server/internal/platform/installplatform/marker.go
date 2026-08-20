@@ -1,0 +1,189 @@
+package installplatform
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+
+	installstate "example.com/gin-vben-admin/server/internal/domain/installstate"
+)
+
+var (
+	ErrAlreadyInstalled = errors.New("application is already installed")
+	ErrInstallationBusy = errors.New("installation marker is being written")
+)
+
+const maxMarkerBytes = 16 << 10
+
+type FileMarkerStore struct {
+	path string
+}
+
+func NewFileMarkerStore(path string) *FileMarkerStore {
+	return &FileMarkerStore{path: filepath.Clean(path)}
+}
+
+func (s *FileMarkerStore) Load(ctx context.Context) (installstate.Marker, bool, error) {
+	if err := contextError(ctx); err != nil {
+		return installstate.Marker{}, false, err
+	}
+	if s == nil || s.path == "." || s.path == "" {
+		return installstate.Marker{}, false, errors.New("installation marker path is required")
+	}
+
+	info, err := os.Lstat(s.path)
+	if errors.Is(err, os.ErrNotExist) {
+		return installstate.Marker{}, false, nil
+	}
+	if err != nil {
+		return installstate.Marker{}, false, fmt.Errorf("inspect installation marker: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return installstate.Marker{}, false, errors.New("installation marker must be a regular file")
+	}
+
+	file, err := os.Open(s.path)
+	if err != nil {
+		return installstate.Marker{}, false, fmt.Errorf("open installation marker: %w", err)
+	}
+	defer file.Close()
+
+	decoder := json.NewDecoder(io.LimitReader(file, maxMarkerBytes))
+	decoder.DisallowUnknownFields()
+	var marker installstate.Marker
+	if err := decoder.Decode(&marker); err != nil {
+		return installstate.Marker{}, false, errors.New("decode installation marker")
+	}
+	if err := ensureJSONEnd(decoder); err != nil {
+		return installstate.Marker{}, false, err
+	}
+	if err := marker.Validate(); err != nil {
+		return installstate.Marker{}, false, fmt.Errorf("validate installation marker: %w", err)
+	}
+	return marker, true, nil
+}
+
+func (s *FileMarkerStore) Create(ctx context.Context, marker installstate.Marker) error {
+	if err := contextError(ctx); err != nil {
+		return err
+	}
+	if s == nil || s.path == "." || s.path == "" {
+		return errors.New("installation marker path is required")
+	}
+	if err := marker.Validate(); err != nil {
+		return fmt.Errorf("validate installation marker: %w", err)
+	}
+	if _, err := os.Lstat(s.path); err == nil {
+		return ErrAlreadyInstalled
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect installation marker: %w", err)
+	}
+
+	dir := filepath.Dir(s.path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("create installation state directory: %w", err)
+	}
+	lockPath := s.path + ".lock"
+	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		return ErrInstallationBusy
+	}
+	if err != nil {
+		return fmt.Errorf("acquire installation marker lock: %w", err)
+	}
+	if err := lock.Close(); err != nil {
+		_ = os.Remove(lockPath)
+		return fmt.Errorf("close installation marker lock: %w", err)
+	}
+	defer os.Remove(lockPath)
+
+	if _, err := os.Lstat(s.path); err == nil {
+		return ErrAlreadyInstalled
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("recheck installation marker: %w", err)
+	}
+
+	encoded, err := json.MarshalIndent(marker, "", "  ")
+	if err != nil {
+		return errors.New("encode installation marker")
+	}
+	encoded = append(encoded, '\n')
+
+	temp, err := os.CreateTemp(dir, ".installed.tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temporary installation marker: %w", err)
+	}
+	tempPath := temp.Name()
+	removeTemp := true
+	defer func() {
+		if removeTemp {
+			_ = os.Remove(tempPath)
+		}
+	}()
+
+	if err := temp.Chmod(0o600); err != nil {
+		_ = temp.Close()
+		return fmt.Errorf("set installation marker permissions: %w", err)
+	}
+	writer := bufio.NewWriter(temp)
+	if _, err := writer.Write(encoded); err != nil {
+		_ = temp.Close()
+		return fmt.Errorf("write installation marker: %w", err)
+	}
+	if err := writer.Flush(); err != nil {
+		_ = temp.Close()
+		return fmt.Errorf("flush installation marker: %w", err)
+	}
+	if err := temp.Sync(); err != nil {
+		_ = temp.Close()
+		return fmt.Errorf("sync installation marker: %w", err)
+	}
+	if err := temp.Close(); err != nil {
+		return fmt.Errorf("close installation marker: %w", err)
+	}
+	if err := contextError(ctx); err != nil {
+		return err
+	}
+	if err := os.Rename(tempPath, s.path); err != nil {
+		return fmt.Errorf("publish installation marker: %w", err)
+	}
+	removeTemp = false
+	if err := syncDirectory(dir); err != nil {
+		return fmt.Errorf("sync installation state directory: %w", err)
+	}
+	return nil
+}
+
+func ensureJSONEnd(decoder *json.Decoder) error {
+	var extra any
+	if err := decoder.Decode(&extra); errors.Is(err, io.EOF) {
+		return nil
+	}
+	return errors.New("installation marker contains trailing data")
+}
+
+func contextError(ctx context.Context) error {
+	if ctx == nil {
+		return nil
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return nil
+	}
+}
+
+func syncDirectory(path string) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
+}
