@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	appauth "example.com/gin-vben-admin/server/internal/application/auth"
 	"example.com/gin-vben-admin/server/internal/config"
@@ -242,5 +243,66 @@ func TestAuthDisabledReturnsServiceUnavailable(t *testing.T) {
 	r.ServeHTTP(res, req)
 	if res.Code != http.StatusServiceUnavailable {
 		t.Fatalf("disabled auth status = %d, want 503", res.Code)
+	}
+}
+
+func TestLoginUsesConfiguredCaptchaProvider(t *testing.T) {
+	cfg := testAuthConfig()
+	service := &fakeAuthService{loginPair: authdomain.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 60}}
+	provider := appauth.NewMemoryCaptchaProvider(time.Minute)
+	challenge, err := provider.Issue(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := provider.PutAnswer(challenge.ID, "4821"); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewHandler(service, cfg)
+	handler.SetCaptchaProvider(provider)
+	r := gin.New()
+	RegisterRoutes(r, handler)
+
+	missing := httptest.NewRecorder()
+	missingReq := httptest.NewRequest(http.MethodPost, "/api/admin/v1/auth/login", strings.NewReader(`{"username":"alice","password":"secret"}`))
+	missingReq.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(missing, missingReq)
+	if missing.Code != http.StatusBadRequest {
+		t.Fatalf("missing captcha status = %d, want 400", missing.Code)
+	}
+	invalid := httptest.NewRecorder()
+	invalidReq := httptest.NewRequest(http.MethodPost, "/api/admin/v1/auth/login", strings.NewReader(`{"username":"alice","password":"secret","captchaId":"`+challenge.ID+`","captcha":"0000"}`))
+	invalidReq.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(invalid, invalidReq)
+	if invalid.Code != http.StatusBadRequest || !strings.Contains(invalid.Body.String(), `"code":10005`) {
+		t.Fatalf("invalid captcha status=%d body=%s", invalid.Code, invalid.Body.String())
+	}
+
+	validChallenge, err := provider.Issue(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := provider.PutAnswer(validChallenge.ID, "4821"); err != nil {
+		t.Fatal(err)
+	}
+	valid := httptest.NewRecorder()
+	validReq := httptest.NewRequest(http.MethodPost, "/api/admin/v1/auth/login", strings.NewReader(`{"username":"alice","password":"secret","captchaId":"`+validChallenge.ID+`","captcha":"4821"}`))
+	validReq.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(valid, validReq)
+	if valid.Code != http.StatusOK {
+		t.Fatalf("valid captcha status = %d, body=%s", valid.Code, valid.Body.String())
+	}
+}
+
+func TestCaptchaChallengeEndpointDoesNotExposeAnswer(t *testing.T) {
+	cfg := testAuthConfig()
+	handler := NewHandler(&fakeAuthService{}, cfg)
+	provider := appauth.NewMemoryCaptchaProvider(time.Minute)
+	handler.SetCaptchaProvider(provider)
+	r := gin.New()
+	RegisterRoutes(r, handler)
+	res := httptest.NewRecorder()
+	r.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/api/admin/v1/auth/captcha", nil))
+	if res.Code != http.StatusOK || strings.Contains(res.Body.String(), "answer") {
+		t.Fatalf("captcha challenge response status=%d body=%s", res.Code, res.Body.String())
 	}
 }

@@ -41,6 +41,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SuccessEnvelope'
+  /api/admin/v1/auth/captcha:
+    get:
+      tags: [Admin]
+      operationId: issueAdminAuthCaptcha
+      summary: 获取当前验证码 provider 的一次性挑战
+      responses:
+        '200':
+          description: 验证码挑战已签发；响应不包含答案
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaptchaSuccessEnvelope'
+        '503':
+          $ref: '#/components/responses/AuthServiceUnavailable'
   /api/admin/v1/auth/login:
     post:
       tags: [Admin]
@@ -70,7 +84,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/AuthSuccessEnvelope'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/LoginBadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '429':
@@ -335,6 +349,30 @@ components:
           properties:
             data:
               $ref: '#/components/schemas/AuthTokenData'
+    CaptchaSuccessEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/CaptchaChallenge'
+    CaptchaChallenge:
+      type: object
+      additionalProperties: false
+      required: [id, kind, expiresIn]
+      properties:
+        id:
+          type: string
+          minLength: 1
+        kind:
+          type: string
+          description: image、slider、turnstile 或 provider 自定义类型
+        payload:
+          type: string
+          description: 可公开渲染数据；禁止包含答案或凭据
+        expiresIn:
+          type: integer
+          minimum: 1
     LoginRequest:
       type: object
       additionalProperties: false
@@ -349,6 +387,9 @@ components:
           minLength: 1
           maxLength: 256
         captcha:
+          type: string
+          maxLength: 256
+        captchaId:
           type: string
           maxLength: 256
     AuthTokenData:
@@ -531,6 +572,20 @@ components:
                 properties:
                   code:
                     const: 10000
+    LoginBadRequest:
+      description: 登录请求字段或验证码无效
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ErrorEnvelope'
+              - type: object
+                properties:
+                  code:
+                    enum: [10000, 10005]
     Unauthorized:
       description: 未认证或凭据错误
       headers:

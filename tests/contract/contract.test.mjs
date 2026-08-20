@@ -100,6 +100,10 @@ test('authentication contract declares login, refresh, and logout endpoints', ()
   assert.match(errors, /http_status: 401/);
   assert.match(admin, /RateLimited:/);
   assert.match(admin, /AuthServiceUnavailable:/);
+  assert.match(admin, /\/api\/admin\/v1\/auth\/captcha:/);
+  assert.match(admin, /CaptchaChallenge/);
+  assert.match(errors, /key: invalid_captcha/);
+  assert.match(errors, /code: 10005[\s\S]*?http_status: 400/);
 });
 
 test('RBAC management contract exposes guarded collections and denial code', () => {
@@ -146,6 +150,8 @@ test('management UI clients use versioned authentication and menu endpoints', ()
       assert.match(auth, new RegExp(endpoint.replaceAll('/', '\\/')), `${ui} ${endpoint}`);
     }
     assert.match(auth, /withCredentials:\s*true/, `${ui} refresh credentials`);
+    assert.match(auth, /getCaptchaApi/, `${ui} captcha client`);
+    assert.match(auth, /captchaId/, `${ui} captcha challenge id`);
     assert.match(menu, /\/admin\/v1\/menu\/all/, `${ui} menu endpoint`);
   }
 });

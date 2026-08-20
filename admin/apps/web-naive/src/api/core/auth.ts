@@ -12,6 +12,7 @@ export namespace AuthApi {
   /** 登录接口参数 */
   export interface LoginParams {
     captcha?: string;
+    captchaId?: string;
     password: string;
     username: string;
   }
@@ -59,6 +60,16 @@ function normalizeTokenData(
   };
 }
 
+/** 获取一次性验证码挑战；答案由 provider 私下校验。 */
+export async function getCaptchaApi() {
+  return requestClient.get<{
+    expiresIn: number;
+    id: string;
+    kind: string;
+    payload?: string;
+  }>(`${AUTH_API_PREFIX}/captcha`);
+}
+
 /** 登录；服务端在响应头设置 HttpOnly refresh cookie。 */
 export async function loginApi(data: AuthApi.LoginParams) {
   const payload: AuthApi.LoginParams = {
@@ -67,6 +78,9 @@ export async function loginApi(data: AuthApi.LoginParams) {
   };
   if (typeof data.captcha === 'string' && data.captcha.length > 0) {
     payload.captcha = data.captcha;
+  }
+  if (typeof data.captchaId === 'string' && data.captchaId.length > 0) {
+    payload.captchaId = data.captchaId;
   }
   const result = await requestClient.post<
     AuthApi.LoginResult | AuthApi.WireTokenData

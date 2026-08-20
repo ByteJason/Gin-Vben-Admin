@@ -23,6 +23,7 @@ const (
 	codeCredentials     = 10002
 	codeToken           = 10003
 	codeRateLimited     = 10004
+	codeCaptcha         = 10005
 	codeUnauthenticated = 20000
 )
 
@@ -30,6 +31,7 @@ type Handler struct {
 	service appauth.AuthService
 	config  config.AuthConfig
 	limiter appauth.RateLimiter
+	captcha appauth.CaptchaProvider
 }
 
 func NewHandler(service appauth.AuthService, cfg config.AuthConfig, limiters ...appauth.RateLimiter) *Handler {
@@ -40,26 +42,35 @@ func NewHandler(service appauth.AuthService, cfg config.AuthConfig, limiters ...
 	return &Handler{service: service, config: cfg, limiter: limiter}
 }
 
+func (h *Handler) SetCaptchaProvider(provider appauth.CaptchaProvider) {
+	if h != nil {
+		h.captcha = provider
+	}
+}
+
 // RegisterRoutes installs login, refresh, and logout. A nil handler is a
 // deliberate disabled seam that returns a safe dependency error rather than
 // accidentally accepting credentials.
 func RegisterRoutes(r gin.IRouter, handler *Handler) {
 	group := r.Group(authPath)
 	if handler == nil || !handler.config.Enabled || handler.service == nil {
+		group.GET("/captcha", disabled)
 		group.POST("/login", disabled)
 		group.POST("/refresh", disabled)
 		group.POST("/logout", disabled)
 		return
 	}
+	group.GET("/captcha", handler.issueCaptcha)
 	group.POST("/login", handler.login)
 	group.POST("/refresh", handler.refresh)
 	group.POST("/logout", handler.logout)
 }
 
 type loginRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Captcha  string `json:"captcha,omitempty"`
+	Username  string `json:"username"`
+	Password  string `json:"password"`
+	CaptchaID string `json:"captchaId,omitempty"`
+	Captcha   string `json:"captcha,omitempty"`
 }
 
 type tokenData struct {
@@ -77,6 +88,21 @@ func (h *Handler) login(c *gin.Context) {
 	if !h.checkRateLimit(c, request.Username) {
 		return
 	}
+	if h.captcha != nil {
+		if strings.TrimSpace(request.CaptchaID) == "" || strings.TrimSpace(request.Captcha) == "" {
+			response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid request")
+			return
+		}
+		if err := h.captcha.Verify(c.Request.Context(), request.CaptchaID, request.Captcha); err != nil {
+			switch {
+			case errors.Is(err, appauth.ErrCaptchaInvalid), errors.Is(err, appauth.ErrCaptchaExpired):
+				response.Error(c, http.StatusBadRequest, codeCaptcha, "invalid captcha")
+			default:
+				response.Error(c, http.StatusServiceUnavailable, 40001, "dependency unavailable")
+			}
+			return
+		}
+	}
 	pair, err := h.service.Login(c.Request.Context(), strings.TrimSpace(request.Username), request.Password)
 	if err != nil {
 		handleAuthError(c, err, true)
@@ -84,6 +110,19 @@ func (h *Handler) login(c *gin.Context) {
 	}
 	h.setRefreshCookie(c, pair.RefreshToken, false)
 	response.OK(c, tokenData{AccessToken: pair.AccessToken, TokenType: "Bearer", ExpiresIn: pair.ExpiresIn})
+}
+
+func (h *Handler) issueCaptcha(c *gin.Context) {
+	if h == nil || h.captcha == nil {
+		response.Error(c, http.StatusServiceUnavailable, 40001, "dependency unavailable")
+		return
+	}
+	challenge, err := h.captcha.Issue(c.Request.Context())
+	if err != nil {
+		response.Error(c, http.StatusServiceUnavailable, 40001, "dependency unavailable")
+		return
+	}
+	response.OK(c, challenge)
 }
 
 func (h *Handler) checkRateLimit(c *gin.Context, username string) bool {
