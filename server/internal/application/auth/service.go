@@ -132,7 +132,12 @@ func (s *Service) Login(ctx context.Context, identifier, password string) (authd
 	if claims.Type != authdomain.RefreshToken {
 		return authdomain.TokenPair{}, authdomain.ErrInvalidToken
 	}
-	session := authdomain.Session{ID: sessionID, UserID: user.ID, RefreshJTI: claims.TokenID, ExpiresAt: claims.ExpiresAt}
+	metadata := RequestMetadataFromContext(ctx)
+	session := authdomain.Session{
+		ID: sessionID, UserID: user.ID, RefreshJTI: claims.TokenID, ExpiresAt: claims.ExpiresAt,
+		DeviceID: metadata.DeviceID, DeviceName: metadata.DeviceName, IPAddress: metadata.IPAddress,
+		UserAgent: metadata.UserAgent, CreatedAt: time.Now().UTC(), LastSeenAt: time.Now().UTC(),
+	}
 	if err := s.sess.Create(ctx, session); err != nil {
 		return authdomain.TokenPair{}, authdomain.ErrDependencyUnavailable
 	}
@@ -144,7 +149,8 @@ func (s *Service) Login(ctx context.Context, identifier, password string) (authd
 	}
 	if err := s.recordAudit(ctx, authdomain.AuditEvent{
 		UserID: user.ID, SessionID: session.ID, EventType: authdomain.AuditLogin,
-		Outcome: authdomain.AuditOutcomeSuccess,
+		Outcome: authdomain.AuditOutcomeSuccess, RequestID: metadata.RequestID,
+		IPAddress: metadata.IPAddress, UserAgent: metadata.UserAgent,
 	}); err != nil {
 		_ = s.sess.Revoke(ctx, session.ID)
 		return authdomain.TokenPair{}, authdomain.ErrDependencyUnavailable
@@ -207,9 +213,11 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (authdomain.
 			return authdomain.TokenPair{}, authdomain.ErrDependencyUnavailable
 		}
 	}
+	metadata := RequestMetadataFromContext(ctx)
 	if err := s.recordAudit(ctx, authdomain.AuditEvent{
 		UserID: claims.Subject, SessionID: claims.SessionID, EventType: authdomain.AuditRefresh,
-		Outcome: authdomain.AuditOutcomeSuccess,
+		Outcome: authdomain.AuditOutcomeSuccess, RequestID: metadata.RequestID,
+		IPAddress: metadata.IPAddress, UserAgent: metadata.UserAgent,
 	}); err != nil {
 		_ = s.sess.Revoke(ctx, claims.SessionID)
 		return authdomain.TokenPair{}, authdomain.ErrDependencyUnavailable
@@ -232,9 +240,11 @@ func (s *Service) Logout(ctx context.Context, sessionID string) error {
 			return authdomain.ErrDependencyUnavailable
 		}
 	}
+	metadata := RequestMetadataFromContext(ctx)
 	if err := s.recordAudit(ctx, authdomain.AuditEvent{
 		SessionID: sessionID, EventType: authdomain.AuditLogout,
-		Outcome: authdomain.AuditOutcomeSuccess,
+		Outcome: authdomain.AuditOutcomeSuccess, RequestID: metadata.RequestID,
+		IPAddress: metadata.IPAddress, UserAgent: metadata.UserAgent,
 	}); err != nil {
 		return authdomain.ErrDependencyUnavailable
 	}
