@@ -115,7 +115,13 @@ func testAuthRefreshRotation(t *testing.T, driver, dsn, redisAddr string) {
 	refreshURL := ts.URL + "/api/admin/v1/auth/refresh"
 	logoutURL := ts.URL + "/api/admin/v1/auth/logout"
 
-	loginResponse := doAuthRequest(t, client, http.MethodPost, loginURL, `{"username":"`+username+`","password":"`+password+`"}`, nil)
+	requestHeaders := map[string]string{
+		"X-Request-ID":  "it-req-" + driver,
+		"X-Device-ID":   "device-" + driver,
+		"X-Device-Name": "integration-browser",
+		"User-Agent":    "gin-vben-integration/0.3",
+	}
+	loginResponse := doAuthRequest(t, client, http.MethodPost, loginURL, `{"username":"`+username+`","password":"`+password+`"}`, nil, requestHeaders)
 	if loginResponse.status != http.StatusOK || loginResponse.envelope.Code != 0 {
 		t.Fatalf("login status/code = %d/%d, body=%s", loginResponse.status, loginResponse.envelope.Code, loginResponse.body)
 	}
@@ -146,10 +152,28 @@ func testAuthRefreshRotation(t *testing.T, driver, dsn, redisAddr string) {
 	if err != nil || !storedSession.MatchesRefreshJTI(claims.TokenID) {
 		t.Fatalf("durable session lookup = %+v err=%v", storedSession, err)
 	}
+	if storedSession.DeviceID != requestHeaders["X-Device-ID"] || storedSession.DeviceName != requestHeaders["X-Device-Name"] || storedSession.IPAddress == "" || storedSession.UserAgent != requestHeaders["User-Agent"] {
+		t.Fatalf("durable request metadata = %+v", storedSession)
+	}
+	var loginAudit struct {
+		EventType string
+		Outcome   string
+		RequestID string
+		IPAddress string
+		UserAgent string
+		SessionID string
+	}
+	if err := app.Database().Read(ctx).Table("auth_audit_events").Where("session_id = ? AND event_type = ?", claims.SessionID, "auth.login").Order("id DESC").Take(&loginAudit).Error; err != nil {
+		t.Fatalf("login audit lookup error = %v", err)
+	}
+	if loginAudit.Outcome != "success" || loginAudit.RequestID != requestHeaders["X-Request-ID"] || loginAudit.UserAgent != requestHeaders["User-Agent"] || loginAudit.SessionID != claims.SessionID {
+		t.Fatalf("login audit = %+v", loginAudit)
+	}
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()
 		_ = app.Database().Write(cleanupCtx).Exec("DELETE FROM auth_sessions WHERE id = ?", claims.SessionID).Error
+		_ = app.Database().Write(cleanupCtx).Exec("DELETE FROM auth_audit_events WHERE session_id = ?", claims.SessionID).Error
 	})
 	sessionKey, err := app.Redis().Key("auth-session", claims.SessionID)
 	if err != nil {
@@ -165,7 +189,7 @@ func testAuthRefreshRotation(t *testing.T, driver, dsn, redisAddr string) {
 		t.Cleanup(func() { _ = app.Redis().Delete(context.Background(), rateKey) })
 	}
 
-	refreshResponse := doAuthRequest(t, client, http.MethodPost, refreshURL, "", loginCookie)
+	refreshResponse := doAuthRequest(t, client, http.MethodPost, refreshURL, "", loginCookie, requestHeaders)
 	if refreshResponse.status != http.StatusOK || refreshResponse.envelope.Code != 0 {
 		t.Fatalf("refresh status/code = %d/%d, body=%s", refreshResponse.status, refreshResponse.envelope.Code, refreshResponse.body)
 	}
@@ -185,12 +209,12 @@ func testAuthRefreshRotation(t *testing.T, driver, dsn, redisAddr string) {
 		t.Fatalf("rotated durable session lookup = %+v err=%v", storedSession, err)
 	}
 
-	replayResponse := doAuthRequest(t, client, http.MethodPost, refreshURL, "", oldRefresh)
+	replayResponse := doAuthRequest(t, client, http.MethodPost, refreshURL, "", oldRefresh, requestHeaders)
 	if replayResponse.status != http.StatusUnauthorized || replayResponse.envelope.Code != 20000 {
 		t.Fatalf("old refresh replay status/code = %d/%d, body=%s", replayResponse.status, replayResponse.envelope.Code, replayResponse.body)
 	}
 
-	logoutResponse := doAuthRequest(t, client, http.MethodPost, logoutURL, "", rotatedCookie)
+	logoutResponse := doAuthRequest(t, client, http.MethodPost, logoutURL, "", rotatedCookie, requestHeaders)
 	if logoutResponse.status != http.StatusOK || logoutResponse.envelope.Code != 0 {
 		t.Fatalf("logout status/code = %d/%d, body=%s", logoutResponse.status, logoutResponse.envelope.Code, logoutResponse.body)
 	}
@@ -202,7 +226,7 @@ func testAuthRefreshRotation(t *testing.T, driver, dsn, redisAddr string) {
 		t.Fatalf("logout did not clear refresh cookie: %+v", cleared)
 	}
 
-	revokedResponse := doAuthRequest(t, client, http.MethodPost, refreshURL, "", rotatedCookie)
+	revokedResponse := doAuthRequest(t, client, http.MethodPost, refreshURL, "", rotatedCookie, requestHeaders)
 	if revokedResponse.status != http.StatusUnauthorized || revokedResponse.envelope.Code != 20000 {
 		t.Fatalf("revoked refresh status/code = %d/%d, body=%s", revokedResponse.status, revokedResponse.envelope.Code, revokedResponse.body)
 	}
@@ -220,7 +244,7 @@ type authResponse struct {
 	}
 }
 
-func doAuthRequest(t *testing.T, client *http.Client, method, endpoint, payload string, cookie *http.Cookie) authResponse {
+func doAuthRequest(t *testing.T, client *http.Client, method, endpoint, payload string, cookie *http.Cookie, headerSets ...map[string]string) authResponse {
 	t.Helper()
 	var body io.Reader
 	if payload != "" {
@@ -232,6 +256,11 @@ func doAuthRequest(t *testing.T, client *http.Client, method, endpoint, payload 
 	}
 	if payload != "" {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if len(headerSets) > 0 {
+		for key, value := range headerSets[0] {
+			req.Header.Set(key, value)
+		}
 	}
 	if cookie != nil {
 		req.AddCookie(&http.Cookie{Name: cookie.Name, Value: cookie.Value})
