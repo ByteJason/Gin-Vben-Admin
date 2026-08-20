@@ -1,6 +1,6 @@
 # 管理端前端（admin）
 
-本目录是独立的 pnpm workspace，保留三套 UI 模板：
+本目录是独立的 pnpm workspace，提供三套 UI 模板：
 
 - `apps/web-antd`：Ant Design Vue
 - `apps/web-ele`：Element Plus

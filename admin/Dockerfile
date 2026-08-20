@@ -1,4 +1,4 @@
-# Build one of the three retained management UI templates.
+# Build one of the management UI templates.
 FROM node:22-alpine AS build
 
 WORKDIR /workspace

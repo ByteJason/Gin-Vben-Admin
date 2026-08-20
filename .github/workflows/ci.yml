@@ -78,12 +78,12 @@ jobs:
         run: pnpm --dir admin -r run --if-present stub
       - name: Run admin smoke tests
         run: pnpm --dir admin run test:smoke
-      - name: Build retained UI templates
+      - name: Build management UI templates
         run: |
           pnpm --dir admin run build:antd
           pnpm --dir admin run build:ele
           pnpm --dir admin run build:naive
-      - name: Typecheck retained UI templates
+      - name: Typecheck management UI templates
         run: |
           pnpm --dir admin --filter @vben/web-antd exec vue-tsc --noEmit --skipLibCheck
           pnpm --dir admin --filter @vben/web-ele exec vue-tsc --noEmit --skipLibCheck
