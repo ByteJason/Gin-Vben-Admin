@@ -2,7 +2,7 @@ name: gin-vben-admin
 
 services:
   mysql:
-    image: mysql:8.4
+    image: mysql:9.7
     environment:
       MYSQL_DATABASE: ${MYSQL_DATABASE:-gin_vben_admin}
       MYSQL_USER: ${MYSQL_USER:-app}
@@ -18,8 +18,24 @@ services:
       timeout: 5s
       retries: 20
 
+  postgres:
+    image: postgres:18.4
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-gin_vben_admin}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
   redis:
-    image: redis:7-alpine
+    image: redis:8.10
     ports:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
@@ -32,4 +48,5 @@ services:
 
 volumes:
   mysql-data:
+  postgres-data:
   redis-data:

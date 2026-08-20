@@ -117,3 +117,50 @@ jobs:
         run: docker compose -f deploy/compose.dev.yaml config --quiet
       - name: Validate dependency topology
         run: docker compose -f deploy/compose.dependencies.yaml config --quiet
+
+  integration:
+    name: Single-node integration services
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:9.7
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: gin_vben_admin
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+      postgres:
+        image: postgres:18.4
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: gin_vben_admin
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d gin_vben_admin"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+      redis:
+        image: redis:8.10
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      - name: Run server integration gates
+        env:
+          DATA_PLATFORM_INTEGRATION: '1'
+          TEST_MYSQL_DSN: root:root@tcp(127.0.0.1:3306)/gin_vben_admin?parseTime=true&charset=utf8mb4
+          TEST_POSTGRES_DSN: postgres://postgres:postgres@127.0.0.1:5432/gin_vben_admin?sslmode=disable
+          TEST_REDIS_ADDR: 127.0.0.1:6379
+        run: go -C server test ./tests/integration -count=1 -v

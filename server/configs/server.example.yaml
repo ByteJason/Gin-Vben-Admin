@@ -1,12 +1,45 @@
+version: 0.2.0-dev
+
 server:
   addr: ":8080"
   read_timeout: 10s
   write_timeout: 10s
+  idle_timeout: 60s
   shutdown_timeout: 10s
 
 logging:
   level: info
 
 database:
+  enabled: false
   driver: mysql
-  dsn: "user:password@tcp(127.0.0.1:3306)/gin_vben_admin?parseTime=true"
+  # mode options: single, read_write, cluster_endpoint
+  # single/cluster_endpoint use dsn; read_write uses primary_dsn + replica_dsns.
+  mode: single
+  dsn: ""
+  primary_dsn: ""
+  replica_dsns: []
+  read_policy: random
+  max_open_conns: 10
+  max_idle_conns: 5
+  conn_max_lifetime: 1h
+  conn_max_idle_time: 15m
+  ping_timeout: 5s
+
+redis:
+  enabled: false
+  # mode options: single, sentinel, cluster
+  # single uses addr; sentinel uses addrs + master_name; cluster uses at least
+  # two addrs and requires db: 0.
+  mode: single
+  addr: "127.0.0.1:6379"
+  username: ""
+  password: ""
+  db: 0
+  namespace: gin-vben-admin:v1
+  addrs: []
+  master_name: ""
+  dial_timeout: 5s
+  read_timeout: 3s
+  write_timeout: 3s
+  ping_timeout: 3s
