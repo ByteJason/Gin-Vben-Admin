@@ -20,6 +20,7 @@ type Service struct {
 	attempts LoginAttemptStore
 	accounts AccountProvisioner
 	reset    PasswordResetProvider
+	query    SessionQuery
 }
 
 // SessionJournal records durable session lifecycle changes independently from
