@@ -5,22 +5,20 @@ import { resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
 const requiredApps = ['web-antd', 'web-ele', 'web-naive'];
-const removedApps = ['web-antdv-next', 'web-tdesign', 'backend-mock'];
 
-test('B1 keeps the three selected UI templates', () => {
-  for (const app of requiredApps) assert.ok(existsSync(resolve(root, 'apps', app)), app);
+test('B1 workspace exposes exactly the supported UI templates', () => {
+  const apps = readdirSync(resolve(root, 'apps'), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  assert.deepEqual(apps, [...requiredApps].sort());
 });
 
-test('B1 removes unsupported UI and mock runtimes', () => {
-  for (const app of removedApps) assert.equal(existsSync(resolve(root, 'apps', app)), false, app);
-});
-
-test('B1 workspace is rooted at admin and has no Nitro mock chain', () => {
+test('B1 workspace is rooted at admin and has no runtime simulators', () => {
   const workspace = readFileSync(resolve(root, 'pnpm-workspace.yaml'), 'utf8');
   const pkg = readFileSync(resolve(root, 'package.json'), 'utf8');
   assert.match(workspace, /apps\/\*/);
-  assert.doesNotMatch(pkg, /backend-mock|nitropack|h3\b/);
-  assert.doesNotMatch(workspace, /backend-mock/);
+  assert.doesNotMatch(pkg, /mock|nitro|h3\b/i);
 });
 
 test('B1 contains frontend build closure', () => {

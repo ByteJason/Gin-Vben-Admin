@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { access, mkdir, readFile } from 'node:fs/promises';
+import { access, mkdir, readFile, readdir } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -60,11 +60,21 @@ const required = [
   'admin/Dockerfile',
   'docs/README.md',
 ];
-const forbidden = ['apps', 'packages', 'internal', 'frontend', 'backend', 'admin/apps/web-antdv-next', 'admin/apps/web-tdesign', 'admin/apps/backend-mock'];
+const forbidden = ['apps', 'packages', 'internal', 'frontend', 'backend'];
 const missing = required.filter((item) => !exists(item));
 const presentForbidden = [];
 for (const item of forbidden) {
   if (await exists(item)) presentForbidden.push(item);
+}
+
+const supportedApps = new Set(['web-antd', 'web-ele', 'web-naive']);
+const appEntries = await readdir(path.join(root, 'admin/apps'), { withFileTypes: true });
+const unexpectedApps = appEntries
+  .filter((entry) => entry.isDirectory() && !supportedApps.has(entry.name))
+  .map((entry) => entry.name);
+if (unexpectedApps.length) {
+  console.error(`VERIFY_FAILED unexpected_apps=${unexpectedApps.join(',')}`);
+  process.exit(1);
 }
 if (missing.length || presentForbidden.length) {
   console.error(`VERIFY_FAILED missing=${missing.join(',')} forbidden=${presentForbidden.join(',')}`);
