@@ -230,6 +230,38 @@ func testAuthRefreshRotation(t *testing.T, driver, dsn, redisAddr string) {
 	if revokedResponse.status != http.StatusUnauthorized || revokedResponse.envelope.Code != 20000 {
 		t.Fatalf("revoked refresh status/code = %d/%d, body=%s", revokedResponse.status, revokedResponse.envelope.Code, revokedResponse.body)
 	}
+
+	// A second session verifies the user-scoped device-session endpoint without
+	// conflating its runtime revocation path with the logout-cookie assertion.
+	secondLogin := doAuthRequest(t, client, http.MethodPost, loginURL, `{"username":"`+username+`","password":"`+password+`"}`, nil, requestHeaders)
+	if secondLogin.status != http.StatusOK {
+		t.Fatalf("second login status = %d, body=%s", secondLogin.status, secondLogin.body)
+	}
+	secondCookie := requireRefreshCookie(t, secondLogin.cookies)
+	secondClaims, err := tokens.Parse(secondCookie.Value)
+	if err != nil {
+		t.Fatalf("parse second refresh token error = %v", err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_ = app.Database().Write(cleanupCtx).Exec("DELETE FROM auth_sessions WHERE id = ?", secondClaims.SessionID).Error
+		_ = app.Database().Write(cleanupCtx).Exec("DELETE FROM auth_audit_events WHERE session_id = ?", secondClaims.SessionID).Error
+	})
+	secondHeaders := cloneHeaders(requestHeaders)
+	secondHeaders["Authorization"] = "Bearer " + secondLogin.envelope.Data.AccessToken
+	sessionsResponse := doAuthRequest(t, client, http.MethodGet, ts.URL+"/api/admin/v1/auth/sessions", "", nil, secondHeaders)
+	if sessionsResponse.status != http.StatusOK || !strings.Contains(sessionsResponse.body, secondClaims.SessionID) {
+		t.Fatalf("device sessions status/body = %d/%s", sessionsResponse.status, sessionsResponse.body)
+	}
+	revokeResponse := doAuthRequest(t, client, http.MethodDelete, ts.URL+"/api/admin/v1/auth/sessions/"+secondClaims.SessionID, "", nil, secondHeaders)
+	if revokeResponse.status != http.StatusOK || revokeResponse.envelope.Code != 0 {
+		t.Fatalf("device revoke status/code = %d/%d, body=%s", revokeResponse.status, revokeResponse.envelope.Code, revokeResponse.body)
+	}
+	secondRevoked := doAuthRequest(t, client, http.MethodPost, refreshURL, "", secondCookie, requestHeaders)
+	if secondRevoked.status != http.StatusUnauthorized || secondRevoked.envelope.Code != 20000 {
+		t.Fatalf("device-revoked refresh status/code = %d/%d, body=%s", secondRevoked.status, secondRevoked.envelope.Code, secondRevoked.body)
+	}
 }
 
 type authResponse struct {
@@ -237,11 +269,27 @@ type authResponse struct {
 	body     string
 	cookies  []*http.Cookie
 	envelope struct {
-		Code int `json:"code"`
-		Data struct {
-			AccessToken string `json:"accessToken"`
-		} `json:"data"`
+		Code int              `json:"code"`
+		Data authResponseData `json:"data"`
 	}
+}
+
+type authResponseData struct {
+	AccessToken string
+}
+
+func (d *authResponseData) UnmarshalJSON(raw []byte) error {
+	if len(raw) == 0 || raw[0] != '{' {
+		return nil
+	}
+	var payload struct {
+		AccessToken string `json:"accessToken"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return err
+	}
+	d.AccessToken = payload.AccessToken
+	return nil
 }
 
 func doAuthRequest(t *testing.T, client *http.Client, method, endpoint, payload string, cookie *http.Cookie, headerSets ...map[string]string) authResponse {
@@ -305,4 +353,12 @@ func cloneCookie(cookie *http.Cookie) *http.Cookie {
 	}
 	copy := *cookie
 	return &copy
+}
+
+func cloneHeaders(headers map[string]string) map[string]string {
+	clone := make(map[string]string, len(headers))
+	for key, value := range headers {
+		clone[key] = value
+	}
+	return clone
 }
