@@ -166,7 +166,7 @@ docker compose -f deploy/compose.dev.yaml run --rm --entrypoint /migrate server 
 docker compose -f deploy/compose.dev.yaml ps
 ```
 
-需要同时启动 PostgreSQL 时增加 `--profile postgres`。
+需要同时启动 PostgreSQL 服务时增加 `--profile postgres`。服务端使用本地配置或环境变量中的 `database.driver` 与 DSN；启用 Compose profile 不会自动切换数据库驱动。
 
 只启动数据库依赖：
 
