@@ -269,6 +269,9 @@ func (cfg RedisConfig) validate() error {
 		if len(nonEmpty(cfg.Addrs)) < 2 {
 			return errors.New("at least two addrs entries are required for cluster mode")
 		}
+		if cfg.DB != 0 {
+			return errors.New("db must be zero for cluster mode")
+		}
 	default:
 		return fmt.Errorf("mode must be single, sentinel, or cluster, got %q", cfg.Mode)
 	}

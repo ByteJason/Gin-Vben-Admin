@@ -121,7 +121,7 @@ func TestLoadPathSelectionAndMissingFilePolicy(t *testing.T) {
 
 func TestValidateRejectsInvalidTopologyAndRanges(t *testing.T) {
 	valid := Default()
-	valid.Database = DatabaseConfig{Enabled: true, Driver: "mysql", Mode: "single", DSN: "user:secret@tcp(db:3306)/app"}
+	valid.Database = DatabaseConfig{Enabled: true, Driver: "mysql", Mode: "single", DSN: "user:secret@tcp(db:3306)/app", ReadPolicy: "random"}
 	valid.Redis = RedisConfig{Enabled: true, Mode: "single", Addr: "redis:6379"}
 
 	tests := []struct {
@@ -141,6 +141,9 @@ func TestValidateRejectsInvalidTopologyAndRanges(t *testing.T) {
 			c.Redis.Mode, c.Redis.Addr, c.Redis.Addrs, c.Redis.MasterName = "sentinel", "", []string{"redis-a:26379"}, ""
 		}},
 		{"cluster redis requires two addresses", func(c *Config) { c.Redis.Mode, c.Redis.Addr, c.Redis.Addrs = "cluster", "", []string{"redis-a:6379"} }},
+		{"cluster redis requires database zero", func(c *Config) {
+			c.Redis.Mode, c.Redis.Addr, c.Redis.Addrs, c.Redis.DB = "cluster", "", []string{"redis-a:6379", "redis-b:6379"}, 1
+		}},
 		{"redis database range", func(c *Config) { c.Redis.DB = -1 }},
 		{"redis duration range", func(c *Config) { c.Redis.DialTimeout = -time.Second }},
 	}
