@@ -16,7 +16,17 @@ type Service struct {
 	hasher   authdomain.PasswordHasher
 	tokens   authdomain.TokenService
 	sess     authdomain.SessionStore
+	journal  SessionJournal
 	attempts LoginAttemptStore
+}
+
+// SessionJournal records durable session lifecycle changes independently from
+// the runtime session store. This lets Redis remain the fast revocation store
+// while SQL retains an auditable auth_sessions history.
+type SessionJournal interface {
+	Create(context.Context, authdomain.Session) error
+	Rotate(context.Context, string, string, string, time.Time) error
+	Revoke(context.Context, string) error
 }
 
 // AuthService is the transport-facing seam. HTTP handlers should depend on
@@ -44,6 +54,14 @@ func NewService(users authdomain.UserRepository, hasher authdomain.PasswordHashe
 		attempts = attemptStores[0]
 	}
 	return &Service{users: users, hasher: hasher, tokens: tokens, sess: sessions, attempts: attempts}
+}
+
+// SetSessionJournal enables durable lifecycle recording without changing the
+// runtime session store used for token validation and rotation.
+func (s *Service) SetSessionJournal(journal SessionJournal) {
+	if s != nil {
+		s.journal = journal
+	}
 }
 
 func (s *Service) Login(ctx context.Context, identifier, password string) (authdomain.TokenPair, error) {
@@ -88,8 +106,15 @@ func (s *Service) Login(ctx context.Context, identifier, password string) (authd
 	if claims.Type != authdomain.RefreshToken {
 		return authdomain.TokenPair{}, authdomain.ErrInvalidToken
 	}
-	if err := s.sess.Create(ctx, authdomain.Session{ID: sessionID, UserID: user.ID, RefreshJTI: claims.TokenID, ExpiresAt: claims.ExpiresAt}); err != nil {
+	session := authdomain.Session{ID: sessionID, UserID: user.ID, RefreshJTI: claims.TokenID, ExpiresAt: claims.ExpiresAt}
+	if err := s.sess.Create(ctx, session); err != nil {
 		return authdomain.TokenPair{}, authdomain.ErrDependencyUnavailable
+	}
+	if s.journal != nil {
+		if err := s.journal.Create(ctx, session); err != nil {
+			_ = s.sess.Revoke(ctx, sessionID)
+			return authdomain.TokenPair{}, authdomain.ErrDependencyUnavailable
+		}
 	}
 	return pair, nil
 }
@@ -123,6 +148,9 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (authdomain.
 	if session.UserID != claims.Subject {
 		return authdomain.TokenPair{}, authdomain.ErrInvalidToken
 	}
+	if !session.MatchesRefreshJTI(claims.TokenID) {
+		return authdomain.TokenPair{}, authdomain.ErrRefreshReplay
+	}
 	if session.Revoked || !session.ExpiresAt.After(time.Now()) {
 		return authdomain.TokenPair{}, authdomain.ErrSessionRevoked
 	}
@@ -140,6 +168,12 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (authdomain.
 		}
 		return authdomain.TokenPair{}, authdomain.ErrDependencyUnavailable
 	}
+	if s.journal != nil {
+		if err := s.journal.Rotate(ctx, claims.SessionID, claims.TokenID, next.TokenID, next.ExpiresAt); err != nil {
+			_ = s.sess.Revoke(ctx, claims.SessionID)
+			return authdomain.TokenPair{}, authdomain.ErrDependencyUnavailable
+		}
+	}
 	return pair, nil
 }
 
@@ -152,6 +186,11 @@ func (s *Service) Logout(ctx context.Context, sessionID string) error {
 			return err
 		}
 		return authdomain.ErrDependencyUnavailable
+	}
+	if s.journal != nil {
+		if err := s.journal.Revoke(ctx, sessionID); err != nil {
+			return authdomain.ErrDependencyUnavailable
+		}
 	}
 	return nil
 }

@@ -134,6 +134,23 @@ func testAuthRefreshRotation(t *testing.T, driver, dsn, redisAddr string) {
 	if err != nil {
 		t.Fatalf("parse login refresh token error = %v", err)
 	}
+	var sessionCount int64
+	if err := app.Database().Read(ctx).Table("auth_sessions").Where("id = ?", claims.SessionID).Count(&sessionCount).Error; err != nil {
+		t.Fatalf("count durable auth session error = %v", err)
+	}
+	if sessionCount != 1 {
+		t.Fatalf("durable auth session count = %d, want 1", sessionCount)
+	}
+	durableSessions := authplatform.NewGORMSessionStore(app.Database())
+	storedSession, err := durableSessions.Get(ctx, claims.SessionID)
+	if err != nil || !storedSession.MatchesRefreshJTI(claims.TokenID) {
+		t.Fatalf("durable session lookup = %+v err=%v", storedSession, err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_ = app.Database().Write(cleanupCtx).Exec("DELETE FROM auth_sessions WHERE id = ?", claims.SessionID).Error
+	})
 	sessionKey, err := app.Redis().Key("auth-session", claims.SessionID)
 	if err != nil {
 		t.Fatalf("build session cleanup key error = %v", err)
@@ -159,6 +176,14 @@ func testAuthRefreshRotation(t *testing.T, driver, dsn, redisAddr string) {
 	if rotatedCookie.Value == oldRefresh.Value {
 		t.Fatal("refresh did not rotate the refresh cookie")
 	}
+	rotatedClaims, err := tokens.Parse(rotatedCookie.Value)
+	if err != nil {
+		t.Fatalf("parse rotated refresh token error = %v", err)
+	}
+	storedSession, err = durableSessions.Get(ctx, claims.SessionID)
+	if err != nil || !storedSession.MatchesRefreshJTI(rotatedClaims.TokenID) {
+		t.Fatalf("rotated durable session lookup = %+v err=%v", storedSession, err)
+	}
 
 	replayResponse := doAuthRequest(t, client, http.MethodPost, refreshURL, "", oldRefresh)
 	if replayResponse.status != http.StatusUnauthorized || replayResponse.envelope.Code != 20000 {
@@ -168,6 +193,10 @@ func testAuthRefreshRotation(t *testing.T, driver, dsn, redisAddr string) {
 	logoutResponse := doAuthRequest(t, client, http.MethodPost, logoutURL, "", rotatedCookie)
 	if logoutResponse.status != http.StatusOK || logoutResponse.envelope.Code != 0 {
 		t.Fatalf("logout status/code = %d/%d, body=%s", logoutResponse.status, logoutResponse.envelope.Code, logoutResponse.body)
+	}
+	storedSession, err = durableSessions.Get(ctx, claims.SessionID)
+	if err != nil || !storedSession.Revoked {
+		t.Fatalf("revoked durable session lookup = %+v err=%v", storedSession, err)
 	}
 	if cleared := findCookie(logoutResponse.cookies, cfg.Auth.RefreshCookieName); cleared == nil || cleared.MaxAge >= 0 || cleared.Value != "" {
 		t.Fatalf("logout did not clear refresh cookie: %+v", cleared)

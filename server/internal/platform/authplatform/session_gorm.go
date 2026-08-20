@@ -2,8 +2,6 @@ package authplatform
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"strconv"
 	"strings"
@@ -60,7 +58,7 @@ func (s *GORMSessionStore) Create(ctx context.Context, session authdomain.Sessio
 	record := authSessionRecord{
 		ID:               session.ID,
 		UserID:           userID,
-		RefreshTokenHash: hashSessionToken(session.RefreshJTI),
+		RefreshTokenHash: authdomain.HashRefreshJTI(session.RefreshJTI),
 		FamilyID:         session.ID,
 		Status:           sessionStatus(session.Revoked),
 		ExpiresAt:        session.ExpiresAt,
@@ -119,11 +117,11 @@ func (s *GORMSessionStore) Rotate(ctx context.Context, id, expectedJTI, nextJTI 
 		if record.Status != "active" || record.RevokedAt != nil || !record.ExpiresAt.After(time.Now()) {
 			return authdomain.ErrSessionRevoked
 		}
-		if record.RefreshTokenHash != hashSessionToken(expectedJTI) {
+		if record.RefreshTokenHash != authdomain.HashRefreshJTI(expectedJTI) {
 			return authdomain.ErrRefreshReplay
 		}
 		updates := map[string]any{
-			"refresh_token_hash": hashSessionToken(nextJTI),
+			"refresh_token_hash": authdomain.HashRefreshJTI(nextJTI),
 			"expires_at":         expiresAt,
 			"last_seen_at":       time.Now().UTC(),
 		}
@@ -174,11 +172,11 @@ func (r authSessionRecord) toDomain() (authdomain.Session, error) {
 		return authdomain.Session{}, authdomain.ErrDependencyUnavailable
 	}
 	return authdomain.Session{
-		ID:         r.ID,
-		UserID:     strconv.FormatUint(r.UserID, 10),
-		RefreshJTI: r.RefreshTokenHash,
-		ExpiresAt:  r.ExpiresAt,
-		Revoked:    r.Status != "active" || r.RevokedAt != nil,
+		ID:             r.ID,
+		UserID:         strconv.FormatUint(r.UserID, 10),
+		RefreshJTIHash: r.RefreshTokenHash,
+		ExpiresAt:      r.ExpiresAt,
+		Revoked:        r.Status != "active" || r.RevokedAt != nil,
 	}, nil
 }
 
@@ -200,11 +198,6 @@ func parseNumericUserID(value string) (uint64, error) {
 		return 0, errors.New("user id must be numeric")
 	}
 	return id, nil
-}
-
-func hashSessionToken(value string) string {
-	sum := sha256.Sum256([]byte(value))
-	return hex.EncodeToString(sum[:])
 }
 
 func sessionStatus(revoked bool) string {

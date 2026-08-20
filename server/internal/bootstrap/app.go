@@ -98,7 +98,9 @@ func New(cfg config.Config) (*App, error) {
 		)
 		sessions := authplatform.NewRedisSessionStore(app.redis)
 		attempts := authplatform.NewRedisLoginAttemptStore(app.redis, cfg.Auth.LockoutThreshold, cfg.Auth.LockoutDuration)
-		app.auth = appauth.NewService(users, hasher, tokens, sessions, attempts)
+		authService := appauth.NewService(users, hasher, tokens, sessions, attempts)
+		authService.SetSessionJournal(authplatform.NewGORMSessionStore(app.database))
+		app.auth = authService
 		persistentIAM := iamplatform.NewGORMStore(app.database)
 		app.iam = iamapp.NewServiceWithRepositories(persistentIAM, persistentIAM, persistentIAM, persistentIAM, persistentIAM, persistentIAM)
 		app.iam.SetPermissionCache(iamplatform.NewRedisPermissionCache(app.redis), 30*time.Second)

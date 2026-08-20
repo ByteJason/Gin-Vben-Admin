@@ -3,6 +3,8 @@ package authdomain
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"time"
 )
@@ -30,11 +32,26 @@ type User struct {
 }
 
 type Session struct {
-	ID         string
-	UserID     string
-	RefreshJTI string
-	ExpiresAt  time.Time
-	Revoked    bool
+	ID             string
+	UserID         string
+	RefreshJTI     string
+	RefreshJTIHash string
+	ExpiresAt      time.Time
+	Revoked        bool
+}
+
+// HashRefreshJTI returns the storage-safe digest used by durable session
+// journals. Runtime session stores may retain RefreshJTI directly; durable
+// adapters should populate RefreshJTIHash instead.
+func HashRefreshJTI(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
+}
+
+// MatchesRefreshJTI accepts either the in-memory token identifier or its
+// durable digest without exposing the raw refresh token in a database record.
+func (s Session) MatchesRefreshJTI(value string) bool {
+	return s.RefreshJTI == value || (s.RefreshJTIHash != "" && s.RefreshJTIHash == HashRefreshJTI(value))
 }
 
 type TokenPair struct {

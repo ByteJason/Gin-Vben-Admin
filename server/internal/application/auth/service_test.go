@@ -23,6 +23,56 @@ func (failingUserRepo) FindByIdentifier(context.Context, string) (authdomain.Use
 	return authdomain.User{}, errors.New("database socket closed")
 }
 
+type recordingSessionJournal struct {
+	created int
+	rotated int
+	revoked int
+}
+
+func (j *recordingSessionJournal) Create(context.Context, authdomain.Session) error {
+	j.created++
+	return nil
+}
+
+func (j *recordingSessionJournal) Rotate(context.Context, string, string, string, time.Time) error {
+	j.rotated++
+	return nil
+}
+
+func (j *recordingSessionJournal) Revoke(context.Context, string) error {
+	j.revoked++
+	return nil
+}
+
+func TestSessionJournalTracksLifecycle(t *testing.T) {
+	hasher := authplatform.BcryptHasher{Cost: 4}
+	hash, err := hasher.Hash("correct-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokens := authplatform.NewJWTService([]byte("test-secret"), time.Minute, time.Hour)
+	journal := &recordingSessionJournal{}
+	svc := auth.NewService(userRepo{user: authdomain.User{ID: "1", Identifier: "alice", PasswordHash: hash, Active: true}}, hasher, tokens, authplatform.NewMemorySessionStore())
+	svc.SetSessionJournal(journal)
+	pair, err := svc.Login(context.Background(), "alice", "correct-password")
+	if err != nil {
+		t.Fatalf("Login() error = %v", err)
+	}
+	claims, err := tokens.Parse(pair.RefreshToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Refresh(context.Background(), pair.RefreshToken); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+	if err := svc.Logout(context.Background(), claims.SessionID); err != nil {
+		t.Fatalf("Logout() error = %v", err)
+	}
+	if journal.created != 1 || journal.rotated != 1 || journal.revoked != 1 {
+		t.Fatalf("journal calls = create:%d rotate:%d revoke:%d", journal.created, journal.rotated, journal.revoked)
+	}
+}
+
 func TestLoginRefreshRotationAndReplayRejection(t *testing.T) {
 	ctx := context.Background()
 	hasher := authplatform.BcryptHasher{Cost: 4}
