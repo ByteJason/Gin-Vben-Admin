@@ -39,7 +39,13 @@ type Session struct {
 	UserID         string
 	RefreshJTI     string
 	RefreshJTIHash string
+	DeviceID       string
+	DeviceName     string
+	IPAddress      string
+	UserAgent      string
 	ExpiresAt      time.Time
+	CreatedAt      time.Time
+	LastSeenAt     time.Time
 	Revoked        bool
 }
 

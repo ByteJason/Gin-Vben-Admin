@@ -33,6 +33,10 @@ type authSessionRecord struct {
 	RefreshTokenHash string     `gorm:"column:refresh_token_hash"`
 	FamilyID         string     `gorm:"column:family_id"`
 	Status           string     `gorm:"column:status"`
+	DeviceID         string     `gorm:"column:device_id"`
+	DeviceName       string     `gorm:"column:device_name"`
+	IPAddress        string     `gorm:"column:ip_address"`
+	UserAgent        string     `gorm:"column:user_agent"`
 	ExpiresAt        time.Time  `gorm:"column:expires_at"`
 	LastSeenAt       time.Time  `gorm:"column:last_seen_at"`
 	RevokedAt        *time.Time `gorm:"column:revoked_at"`
@@ -61,6 +65,10 @@ func (s *GORMSessionStore) Create(ctx context.Context, session authdomain.Sessio
 		RefreshTokenHash: authdomain.HashRefreshJTI(session.RefreshJTI),
 		FamilyID:         session.ID,
 		Status:           sessionStatus(session.Revoked),
+		DeviceID:         session.DeviceID,
+		DeviceName:       session.DeviceName,
+		IPAddress:        session.IPAddress,
+		UserAgent:        session.UserAgent,
 		ExpiresAt:        session.ExpiresAt,
 		LastSeenAt:       time.Now().UTC(),
 	}
@@ -72,6 +80,70 @@ func (s *GORMSessionStore) Create(ctx context.Context, session authdomain.Sessio
 		return authdomain.ErrDependencyUnavailable
 	}
 	return nil
+}
+
+// ListByUser returns durable device sessions newest first. The user predicate
+// is part of the SQL query, not only an application-side filter.
+func (s *GORMSessionStore) ListByUser(ctx context.Context, userID string) ([]authdomain.Session, error) {
+	if err := sessionContext(ctx); err != nil {
+		return nil, err
+	}
+	if s == nil || s.db == nil {
+		return nil, authdomain.ErrDependencyUnavailable
+	}
+	parsedID, err := parseNumericUserID(userID)
+	if err != nil {
+		return nil, authdomain.ErrDependencyUnavailable
+	}
+	var records []authSessionRecord
+	if err := s.db.Write(ctx).Where("user_id = ?", parsedID).Order("created_at DESC").Find(&records).Error; err != nil {
+		return nil, authdomain.ErrDependencyUnavailable
+	}
+	result := make([]authdomain.Session, 0, len(records))
+	for _, record := range records {
+		session, err := record.toDomain()
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, session)
+	}
+	return result, nil
+}
+
+// RevokeOwned revokes one session only when it belongs to userID.
+func (s *GORMSessionStore) RevokeOwned(ctx context.Context, userID, sessionID string) error {
+	if err := sessionContext(ctx); err != nil {
+		return err
+	}
+	if s == nil || s.db == nil {
+		return authdomain.ErrDependencyUnavailable
+	}
+	parsedID, err := parseNumericUserID(userID)
+	if err != nil || strings.TrimSpace(sessionID) == "" {
+		return authdomain.ErrSessionNotFound
+	}
+	return s.db.WithinTransaction(ctx, func(tx *gorm.DB) error {
+		var record authSessionRecord
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND user_id = ?", sessionID, parsedID).Take(&record).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return authdomain.ErrSessionNotFound
+		}
+		if err != nil {
+			return authdomain.ErrDependencyUnavailable
+		}
+		if record.Status != "active" || record.RevokedAt != nil {
+			return authdomain.ErrSessionRevoked
+		}
+		now := time.Now().UTC()
+		if err := tx.Model(&authSessionRecord{}).Where("id = ? AND user_id = ?", sessionID, parsedID).Updates(map[string]any{
+			"status":       "revoked",
+			"revoked_at":   now,
+			"last_seen_at": now,
+		}).Error; err != nil {
+			return authdomain.ErrDependencyUnavailable
+		}
+		return nil
+	})
 }
 
 func (s *GORMSessionStore) Get(ctx context.Context, id string) (authdomain.Session, error) {
@@ -175,7 +247,13 @@ func (r authSessionRecord) toDomain() (authdomain.Session, error) {
 		ID:             r.ID,
 		UserID:         strconv.FormatUint(r.UserID, 10),
 		RefreshJTIHash: r.RefreshTokenHash,
+		DeviceID:       r.DeviceID,
+		DeviceName:     r.DeviceName,
+		IPAddress:      r.IPAddress,
+		UserAgent:      r.UserAgent,
 		ExpiresAt:      r.ExpiresAt,
+		CreatedAt:      r.CreatedAt,
+		LastSeenAt:     r.LastSeenAt,
 		Revoked:        r.Status != "active" || r.RevokedAt != nil,
 	}, nil
 }
