@@ -14,12 +14,21 @@ type StatusProvider interface {
 	Status(context.Context) (installer.Status, error)
 }
 
-type Handler struct {
-	status StatusProvider
+type CapabilityProvider interface {
+	Probe(context.Context) (installer.Capabilities, error)
 }
 
-func NewHandler(status StatusProvider) *Handler {
-	return &Handler{status: status}
+type Handler struct {
+	status       StatusProvider
+	capabilities CapabilityProvider
+}
+
+func NewHandler(status StatusProvider, capabilities ...CapabilityProvider) *Handler {
+	handler := &Handler{status: status}
+	if len(capabilities) > 0 {
+		handler.capabilities = capabilities[0]
+	}
+	return handler
 }
 
 func RegisterRoutes(router gin.IRouter, handler *Handler) {
@@ -35,5 +44,17 @@ func RegisterRoutes(router gin.IRouter, handler *Handler) {
 			return
 		}
 		response.OK(c, status)
+	})
+	group.GET("/capabilities", func(c *gin.Context) {
+		if handler == nil || handler.capabilities == nil {
+			response.Error(c, http.StatusServiceUnavailable, 40001, "installation service unavailable")
+			return
+		}
+		capabilities, err := handler.capabilities.Probe(c.Request.Context())
+		if err != nil {
+			response.Error(c, http.StatusInternalServerError, 50000, "installation capabilities unavailable")
+			return
+		}
+		response.OK(c, capabilities)
 	})
 }
