@@ -99,6 +99,7 @@ func New(cfg config.Config) (*App, error) {
 		sessions := authplatform.NewRedisSessionStore(app.redis)
 		attempts := authplatform.NewRedisLoginAttemptStore(app.redis, cfg.Auth.LockoutThreshold, cfg.Auth.LockoutDuration)
 		authService := appauth.NewService(users, hasher, tokens, sessions, attempts)
+		authService.SetAccountProvisioner(users)
 		authService.SetSessionJournal(authplatform.NewGORMSessionStore(app.database))
 		app.auth = authService
 		persistentIAM := iamplatform.NewGORMStore(app.database)
@@ -111,7 +112,11 @@ func New(cfg config.Config) (*App, error) {
 	if cfg.Auth.Enabled {
 		limiter = authplatform.NewRedisRateLimiter(app.redis)
 	}
-	app.http = newHTTPServer(cfg, app.readiness, app.auth, limiter, app.iam)
+	var recovery appauth.AccountRecoveryService
+	if candidate, ok := app.auth.(appauth.AccountRecoveryService); ok {
+		recovery = candidate
+	}
+	app.http = newHTTPServer(cfg, app.readiness, app.auth, limiter, app.iam, recovery)
 	return app, nil
 }
 

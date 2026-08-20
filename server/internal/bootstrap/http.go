@@ -15,17 +15,18 @@ import (
 func NewHTTPServer(addr string) *http.Server {
 	cfg := config.Default()
 	cfg.Server.Addr = addr
-	return newHTTPServer(cfg, nil, nil, nil)
+	return newHTTPServer(cfg, nil, nil, nil, nil, nil)
 }
 
-func newHTTPServer(cfg config.Config, readiness health.ReadinessChecker, authService appauth.AuthService, limiter appauth.RateLimiter, iamServices ...*iamapp.Service) *http.Server {
+func newHTTPServer(cfg config.Config, readiness health.ReadinessChecker, authService appauth.AuthService, limiter appauth.RateLimiter, iamService *iamapp.Service, recovery appauth.AccountRecoveryService) *http.Server {
 	var authHandler *authhttp.Handler
 	if authService != nil {
 		authHandler = authhttp.NewHandler(authService, cfg.Auth, limiter)
+		authHandler.SetAccountRecovery(recovery)
 	}
 	var iamHandler *iamhttp.Handler
-	if len(iamServices) > 0 && iamServices[0] != nil {
-		iamHandler = iamhttp.NewHandler(iamServices[0], authService)
+	if iamService != nil {
+		iamHandler = iamhttp.NewHandler(iamService, authService)
 	}
 	return &http.Server{
 		Addr:              cfg.Server.Addr,
