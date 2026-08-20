@@ -102,6 +102,26 @@ test('authentication contract declares login, refresh, and logout endpoints', ()
   assert.match(admin, /AuthServiceUnavailable:/);
 });
 
+test('RBAC management contract exposes guarded collections and denial code', () => {
+  const admin = readFileSync(join(root, 'contracts/openapi/admin-v1.yaml'), 'utf8');
+  for (const path of [
+    '/api/admin/v1/iam/users:',
+    '/api/admin/v1/iam/roles:',
+    '/api/admin/v1/iam/menus:',
+    '/api/admin/v1/iam/permissions:',
+    '/api/admin/v1/iam/policies:',
+    '/api/admin/v1/iam/data-scopes:',
+    '/api/admin/v1/menu/all:',
+  ]) {
+    assert.match(admin, new RegExp(`\\n  ${path.replaceAll('/', '\\/')}`), path);
+  }
+  assert.match(admin, /BearerAuth/);
+  assert.match(admin, /code: 30000|const: 30000/);
+  for (const schema of ['IAMUser', 'IAMRole', 'IAMMenu', 'IAMPermission', 'IAMPolicy', 'IAMDataScope']) {
+    assert.match(admin, new RegExp(`^    ${schema}:`, 'm'), schema);
+  }
+});
+
 test('web-antd auth seam uses the versioned API and sends the refresh cookie', () => {
   const auth = readFileSync(join(root, 'admin/apps/web-antd/src/api/core/auth.ts'), 'utf8');
   const login = readFileSync(

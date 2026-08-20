@@ -11,10 +11,12 @@ import (
 	"time"
 
 	appauth "example.com/gin-vben-admin/server/internal/application/auth"
+	iamapp "example.com/gin-vben-admin/server/internal/application/iam"
 	"example.com/gin-vben-admin/server/internal/config"
 	"example.com/gin-vben-admin/server/internal/platform/authplatform"
 	rediscache "example.com/gin-vben-admin/server/internal/platform/cache/redis"
 	platformhealth "example.com/gin-vben-admin/server/internal/platform/health"
+	"example.com/gin-vben-admin/server/internal/platform/iamplatform"
 	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
 )
 
@@ -27,6 +29,7 @@ type App struct {
 	database  *gormdb.Store
 	redis     *rediscache.Client
 	auth      appauth.AuthService
+	iam       *iamapp.Service
 	readiness *platformhealth.Checker
 	closers   []io.Closer
 
@@ -96,6 +99,8 @@ func New(cfg config.Config) (*App, error) {
 		sessions := authplatform.NewRedisSessionStore(app.redis)
 		attempts := authplatform.NewRedisLoginAttemptStore(app.redis, cfg.Auth.LockoutThreshold, cfg.Auth.LockoutDuration)
 		app.auth = appauth.NewService(users, hasher, tokens, sessions, attempts)
+		persistentIAM := iamplatform.NewGORMStore(app.database)
+		app.iam = iamapp.NewServiceWithRepositories(persistentIAM, persistentIAM, persistentIAM, persistentIAM, persistentIAM, persistentIAM)
 	}
 
 	app.readiness = platformhealth.NewChecker(readinessTimeout(cfg), dependencies...)
@@ -103,7 +108,7 @@ func New(cfg config.Config) (*App, error) {
 	if cfg.Auth.Enabled {
 		limiter = authplatform.NewRedisRateLimiter(app.redis)
 	}
-	app.http = newHTTPServer(cfg, app.readiness, app.auth, limiter)
+	app.http = newHTTPServer(cfg, app.readiness, app.auth, limiter, app.iam)
 	return app, nil
 }
 
@@ -149,6 +154,15 @@ func (a *App) Auth() appauth.AuthService {
 		return nil
 	}
 	return a.auth
+}
+
+// IAM returns the database-backed management authorization service, or nil
+// when authentication and its persistence dependencies are disabled.
+func (a *App) IAM() *iamapp.Service {
+	if a == nil {
+		return nil
+	}
+	return a.iam
 }
 
 // Readiness returns the checker injected into the HTTP health routes.

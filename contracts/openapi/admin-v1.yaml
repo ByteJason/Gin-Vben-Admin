@@ -131,6 +131,138 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '503':
           $ref: '#/components/responses/AuthServiceUnavailable'
+  /api/admin/v1/iam/users:
+    get:
+      tags: [IAM]
+      operationId: listIAMUsers
+      summary: 查询管理用户
+      security: [{BearerAuth: []}]
+      responses:
+        '200':
+          $ref: '#/components/responses/CollectionResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
+    post:
+      tags: [IAM]
+      operationId: createIAMUser
+      summary: 保存管理用户
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IAMUserRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/SuccessResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/admin/v1/iam/roles:
+    get:
+      tags: [IAM]
+      operationId: listIAMRoles
+      summary: 查询角色
+      security: [{BearerAuth: []}]
+      responses:
+        '200': { $ref: '#/components/responses/CollectionResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [IAM]
+      operationId: createIAMRole
+      summary: 保存角色
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IAMRoleRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/SuccessResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/admin/v1/iam/menus:
+    get:
+      tags: [IAM]
+      operationId: listIAMMenus
+      summary: 查询菜单
+      security: [{BearerAuth: []}]
+      responses:
+        '200': { $ref: '#/components/responses/CollectionResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/admin/v1/menu/all:
+    get:
+      tags: [IAM]
+      operationId: listVisibleMenus
+      summary: 查询当前用户菜单
+      security: [{BearerAuth: []}]
+      responses:
+        '200': { $ref: '#/components/responses/CollectionResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/admin/v1/iam/permissions:
+    get:
+      tags: [IAM]
+      operationId: listIAMPermissions
+      summary: 查询 API 权限
+      security: [{BearerAuth: []}]
+      responses:
+        '200': { $ref: '#/components/responses/CollectionResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/admin/v1/iam/policies:
+    get:
+      tags: [IAM]
+      operationId: listIAMPolicies
+      summary: 查询授权策略
+      security: [{BearerAuth: []}]
+      responses:
+        '200': { $ref: '#/components/responses/CollectionResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [IAM]
+      operationId: createIAMPolicy
+      summary: 保存授权策略
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IAMPolicyRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/SuccessResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/admin/v1/iam/data-scopes:
+    get:
+      tags: [IAM]
+      operationId: listIAMDataScopes
+      summary: 查询数据范围
+      security: [{BearerAuth: []}]
+      responses:
+        '200': { $ref: '#/components/responses/CollectionResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [IAM]
+      operationId: createIAMDataScope
+      summary: 保存数据范围
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IAMDataScopeRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/SuccessResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 components:
   securitySchemes:
     BearerAuth:
@@ -235,6 +367,81 @@ components:
           type: integer
           minimum: 1
           description: access token 有效期（秒）
+    IAMUser:
+      type: object
+      required: [id, username, active, roleIds]
+      properties:
+        id: { type: string, minLength: 1 }
+        username: { type: string, minLength: 1 }
+        displayName: { type: string }
+        active: { type: boolean }
+        roleIds:
+          type: array
+          items: { type: string }
+    IAMUserRequest:
+      allOf:
+        - $ref: '#/components/schemas/IAMUser'
+    IAMRole:
+      type: object
+      required: [id, name, active, dataScope]
+      properties:
+        id: { type: string, minLength: 1 }
+        name: { type: string, minLength: 1 }
+        active: { type: boolean }
+        dataScope: { type: string, enum: [all, own, org, custom] }
+        userIds:
+          type: array
+          items: { type: string }
+    IAMRoleRequest:
+      allOf:
+        - $ref: '#/components/schemas/IAMRole'
+    IAMMenu:
+      type: object
+      required: [id, name, path, visible, active]
+      properties:
+        id: { type: string }
+        parentId: { type: string }
+        name: { type: string }
+        path: { type: string }
+        visible: { type: boolean }
+        active: { type: boolean }
+    IAMPermission:
+      type: object
+      required: [id, name, method, path, active]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        method: { type: string }
+        path: { type: string }
+        active: { type: boolean }
+    IAMPolicy:
+      type: object
+      required: [method, path, effect]
+      properties:
+        subject: { type: string }
+        roleId: { type: string }
+        domain: { type: string }
+        method: { type: string }
+        path: { type: string }
+        effect: { type: string, enum: [allow, deny] }
+    IAMPolicyRequest:
+      allOf:
+        - $ref: '#/components/schemas/IAMPolicy'
+    IAMDataScope:
+      type: object
+      required: [resource, scope, ids]
+      properties:
+        subject: { type: string }
+        roleId: { type: string }
+        domain: { type: string }
+        resource: { type: string }
+        scope: { type: string, enum: [all, own, org, custom] }
+        ids:
+          type: array
+          items: { type: string }
+    IAMDataScopeRequest:
+      allOf:
+        - $ref: '#/components/schemas/IAMDataScope'
     ErrorEnvelope:
       type: object
       required: [code, message, data, traceId, meta]
@@ -270,6 +477,32 @@ components:
           type: object
           additionalProperties: true
   responses:
+    SuccessResponse:
+      description: 请求成功
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SuccessEnvelope'
+    CollectionResponse:
+      description: 集合查询成功
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SuccessEnvelope'
+    Forbidden:
+      description: 当前主体没有资源权限；服务端默认拒绝
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ErrorEnvelope'
+              - type: object
+                properties:
+                  code:
+                    const: 30000
     HealthResponse:
       description: 服务存活或就绪
       headers:
