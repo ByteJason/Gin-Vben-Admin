@@ -5,7 +5,11 @@ export const AUTH_API_PREFIX = '/admin/v1/auth';
 export const AUTH_ENDPOINTS = {
   login: '/admin/v1/auth/login',
   logout: '/admin/v1/auth/logout',
+  passwordReset: '/admin/v1/auth/password/reset',
+  passwordResetRequest: '/admin/v1/auth/password/reset/request',
+  register: '/admin/v1/auth/register',
   refresh: '/admin/v1/auth/refresh',
+  sessions: '/admin/v1/auth/sessions',
 } as const;
 
 export namespace AuthApi {
@@ -15,6 +19,29 @@ export namespace AuthApi {
     captchaId?: string;
     password: string;
     username: string;
+  }
+
+  export interface RegisterParams {
+    password: string;
+    username: string;
+  }
+
+  export interface PasswordResetRequestParams {
+    password?: string;
+    token?: string;
+    username?: string;
+  }
+
+  export interface SessionInfo {
+    createdAt: string;
+    deviceId: string;
+    deviceName: string;
+    expiresAt: string;
+    id: string;
+    ipAddress: string;
+    lastSeenAt: string;
+    revoked: boolean;
+    userAgent: string;
   }
 
   /** 登录、刷新接口返回值；refresh token 永不进入此对象 */
@@ -112,6 +139,41 @@ export async function logoutApi() {
       withCredentials: true,
     },
   );
+}
+
+/** 创建管理端账号；服务端只返回统一成功包，不返回凭据。 */
+export async function registerApi(data: AuthApi.RegisterParams) {
+  return requestClient.post<void>(AUTH_ENDPOINTS.register, data, {
+    withCredentials: true,
+  });
+}
+
+/** 请求密码重置；未知账号也返回相同结果以避免账号枚举。 */
+export async function requestPasswordResetApi(username: string) {
+  return requestClient.post<void>(AUTH_ENDPOINTS.passwordResetRequest, { username }, {
+    withCredentials: true,
+  });
+}
+
+/** 使用一次性令牌提交新密码。 */
+export async function resetPasswordApi(data: Required<Pick<AuthApi.PasswordResetRequestParams, 'token' | 'password'>>) {
+  return requestClient.post<void>(AUTH_ENDPOINTS.passwordReset, data, {
+    withCredentials: true,
+  });
+}
+
+/** 获取当前账号的设备会话列表。 */
+export async function listSessionsApi() {
+  return requestClient.get<AuthApi.SessionInfo[]>(AUTH_ENDPOINTS.sessions, {
+    withCredentials: true,
+  });
+}
+
+/** 撤销当前账号名下的指定设备会话。 */
+export async function revokeSessionApi(sessionId: string) {
+  return requestClient.delete<void>(`${AUTH_ENDPOINTS.sessions}/${encodeURIComponent(sessionId)}`, {
+    withCredentials: true,
+  });
 }
 
 /** 获取当前账号的权限码。 */

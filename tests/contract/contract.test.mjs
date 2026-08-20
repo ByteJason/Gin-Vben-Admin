@@ -198,6 +198,24 @@ test('management UI clients use versioned authentication and menu endpoints', ()
   }
 });
 
+test('management UI clients expose account recovery and device-session endpoints', () => {
+  for (const ui of ['web-antd', 'web-ele', 'web-naive']) {
+    const auth = readFileSync(join(root, `admin/apps/${ui}/src/api/core/auth.ts`), 'utf8');
+    for (const endpoint of [
+      '/admin/v1/auth/register',
+      '/admin/v1/auth/password/reset/request',
+      '/admin/v1/auth/password/reset',
+      '/admin/v1/auth/sessions',
+    ]) {
+      assert.match(auth, new RegExp(endpoint.replaceAll('/', '\\/')), `${ui} ${endpoint}`);
+    }
+    for (const fn of ['registerApi', 'requestPasswordResetApi', 'resetPasswordApi', 'listSessionsApi', 'revokeSessionApi']) {
+      assert.match(auth, new RegExp(`export async function ${fn}`), `${ui} ${fn}`);
+    }
+    assert.match(auth, /withCredentials:\s*true/);
+  }
+});
+
 test('bootstrap check is cross-platform and verification succeeds', () => {
   const bootstrap = runNode('scripts/bootstrap.mjs', '--check');
   assert.equal(bootstrap.status, 0, bootstrap.stdout + bootstrap.stderr);
