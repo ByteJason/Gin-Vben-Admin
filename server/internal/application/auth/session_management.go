@@ -54,7 +54,38 @@ func (s *Service) RevokeSession(ctx context.Context, userID, sessionID string) e
 	if s == nil || s.query == nil || strings.TrimSpace(userID) == "" || strings.TrimSpace(sessionID) == "" {
 		return authdomain.ErrDependencyUnavailable
 	}
-	err := s.query.RevokeOwned(ctx, strings.TrimSpace(userID), strings.TrimSpace(sessionID))
+	userID = strings.TrimSpace(userID)
+	sessionID = strings.TrimSpace(sessionID)
+	owned, err := s.query.ListByUser(ctx, userID)
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
+		return authdomain.ErrDependencyUnavailable
+	}
+	found := false
+	for _, session := range owned {
+		if session.ID == sessionID && session.UserID == userID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return authdomain.ErrSessionNotFound
+	}
+	// Validate ownership before touching the runtime store. A missing Redis
+	// key is tolerated because the durable row still needs to be revoked.
+	if s.sess != nil {
+		if runtimeErr := s.sess.Revoke(ctx, sessionID); runtimeErr != nil &&
+			!errors.Is(runtimeErr, authdomain.ErrSessionNotFound) &&
+			!errors.Is(runtimeErr, authdomain.ErrSessionRevoked) {
+			if errors.Is(runtimeErr, context.Canceled) || errors.Is(runtimeErr, context.DeadlineExceeded) {
+				return runtimeErr
+			}
+			return authdomain.ErrDependencyUnavailable
+		}
+	}
+	err = s.query.RevokeOwned(ctx, userID, sessionID)
 	if err == nil {
 		return nil
 	}

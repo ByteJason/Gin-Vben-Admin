@@ -28,7 +28,11 @@ func (q *sessionQuery) RevokeOwned(_ context.Context, userID, sessionID string) 
 
 func TestSessionManagementDelegatesWithUserBoundary(t *testing.T) {
 	query := &sessionQuery{sessions: []authdomain.Session{{ID: "s1", UserID: "u1", ExpiresAt: time.Now().Add(time.Hour)}}}
-	svc := auth.NewService(userRepo{}, authplatform.BcryptHasher{Cost: 4}, authplatform.NewJWTService([]byte("test-secret"), time.Minute, time.Hour), authplatform.NewMemorySessionStore())
+	runtime := authplatform.NewMemorySessionStore()
+	if err := runtime.Create(context.Background(), authdomain.Session{ID: "s1", UserID: "u1", RefreshJTI: "jti", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	svc := auth.NewService(userRepo{}, authplatform.BcryptHasher{Cost: 4}, authplatform.NewJWTService([]byte("test-secret"), time.Minute, time.Hour), runtime)
 	svc.SetSessionQuery(query)
 
 	sessions, err := svc.ListSessions(context.Background(), "u1")
@@ -40,5 +44,25 @@ func TestSessionManagementDelegatesWithUserBoundary(t *testing.T) {
 	}
 	if query.userID != "u1" || query.session != "s1" {
 		t.Fatalf("RevokeSession() boundary = user:%q session:%q", query.userID, query.session)
+	}
+	if session, err := runtime.Get(context.Background(), "s1"); err != nil || !session.Revoked {
+		t.Fatalf("RevokeSession() runtime state = %+v, %v", session, err)
+	}
+}
+
+func TestRevokeSessionDoesNotTouchAnotherUsersRuntimeSession(t *testing.T) {
+	runtime := authplatform.NewMemorySessionStore()
+	if err := runtime.Create(context.Background(), authdomain.Session{ID: "s-other", UserID: "u2", RefreshJTI: "jti", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	query := &sessionQuery{sessions: []authdomain.Session{{ID: "s-other", UserID: "u2", ExpiresAt: time.Now().Add(time.Hour)}}}
+	svc := auth.NewService(userRepo{}, authplatform.BcryptHasher{Cost: 4}, authplatform.NewJWTService([]byte("test-secret"), time.Minute, time.Hour), runtime)
+	svc.SetSessionQuery(query)
+
+	if err := svc.RevokeSession(context.Background(), "u1", "s-other"); err != authdomain.ErrSessionNotFound {
+		t.Fatalf("RevokeSession() error = %v, want session not found", err)
+	}
+	if session, err := runtime.Get(context.Background(), "s-other"); err != nil || session.Revoked {
+		t.Fatalf("another user's runtime session = %+v, %v", session, err)
 	}
 }
