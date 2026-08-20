@@ -52,3 +52,14 @@ test('bootstrap check is cross-platform and verify reports a green skeleton', ()
   assert.equal(verify.status, 0, verify.stdout + verify.stderr);
   assert.match(verify.stdout, /VERIFY_OK/);
 });
+
+test('B1 container build prepares the upstream workspace stubs', () => {
+  const dockerfile = readFileSync(join(root, 'admin/Dockerfile'), 'utf8');
+  assert.match(dockerfile, /pnpm -r run --if-present stub/);
+});
+
+test('B1 install flow does not advertise an unimplemented migration command', () => {
+  const readme = readFileSync(join(root, 'README.md'), 'utf8');
+  assert.doesNotMatch(readme, /go -C server run \.\/cmd\/migrate up/);
+  assert.doesNotMatch(readme, /go run \.\/cmd\/migrate up/);
+});
