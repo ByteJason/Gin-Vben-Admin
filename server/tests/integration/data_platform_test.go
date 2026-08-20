@@ -192,7 +192,9 @@ func testRedisLifecycle(t *testing.T, addr string) {
 	if err != nil {
 		t.Fatalf("redis.New() error = %v", err)
 	}
-	defer func() { _ = client.Close() }()
+	// Register Close first so later key/lock cleanup runs while the client is
+	// still usable (testing cleanups execute in LIFO order).
+	t.Cleanup(func() { _ = client.Close() })
 	if err := client.Ping(ctx); err != nil {
 		t.Fatalf("redis.Ping() error = %v", err)
 	}
