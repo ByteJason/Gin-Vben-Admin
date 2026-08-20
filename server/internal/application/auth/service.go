@@ -21,6 +21,7 @@ type Service struct {
 	accounts AccountProvisioner
 	reset    PasswordResetProvider
 	query    SessionQuery
+	audit    AuditSink
 }
 
 // SessionJournal records durable session lifecycle changes independently from
@@ -30,6 +31,12 @@ type SessionJournal interface {
 	Create(context.Context, authdomain.Session) error
 	Rotate(context.Context, string, string, string, time.Time) error
 	Revoke(context.Context, string) error
+}
+
+// AuditSink persists authentication outcomes without coupling the application
+// service to SQL, Redis, or a particular logging backend.
+type AuditSink interface {
+	Record(context.Context, authdomain.AuditEvent) error
 }
 
 // AuthService is the transport-facing seam. HTTP handlers should depend on
@@ -65,6 +72,22 @@ func (s *Service) SetSessionJournal(journal SessionJournal) {
 	if s != nil {
 		s.journal = journal
 	}
+}
+
+func (s *Service) SetAuditSink(sink AuditSink) {
+	if s != nil {
+		s.audit = sink
+	}
+}
+
+func (s *Service) recordAudit(ctx context.Context, event authdomain.AuditEvent) error {
+	if s == nil || s.audit == nil {
+		return nil
+	}
+	if event.CreatedAt.IsZero() {
+		event.CreatedAt = time.Now().UTC()
+	}
+	return s.audit.Record(ctx, event)
 }
 
 func (s *Service) Login(ctx context.Context, identifier, password string) (authdomain.TokenPair, error) {
@@ -118,6 +141,13 @@ func (s *Service) Login(ctx context.Context, identifier, password string) (authd
 			_ = s.sess.Revoke(ctx, sessionID)
 			return authdomain.TokenPair{}, authdomain.ErrDependencyUnavailable
 		}
+	}
+	if err := s.recordAudit(ctx, authdomain.AuditEvent{
+		UserID: user.ID, SessionID: session.ID, EventType: authdomain.AuditLogin,
+		Outcome: authdomain.AuditOutcomeSuccess,
+	}); err != nil {
+		_ = s.sess.Revoke(ctx, session.ID)
+		return authdomain.TokenPair{}, authdomain.ErrDependencyUnavailable
 	}
 	return pair, nil
 }

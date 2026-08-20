@@ -25,7 +25,30 @@ var (
 const (
 	AccessToken  = "access"
 	RefreshToken = "refresh"
+
+	AuditLogin         = "auth.login"
+	AuditRefresh       = "auth.refresh"
+	AuditLogout        = "auth.logout"
+	AuditRegister      = "auth.register"
+	AuditPasswordReset = "auth.password_reset"
+
+	AuditOutcomeSuccess = "success"
+	AuditOutcomeFailure = "failure"
 )
+
+// AuditEvent is the storage-neutral record emitted by authentication flows.
+// Metadata must contain only non-secret, bounded values.
+type AuditEvent struct {
+	UserID    string
+	SessionID string
+	EventType string
+	Outcome   string
+	RequestID string
+	IPAddress string
+	UserAgent string
+	Metadata  map[string]string
+	CreatedAt time.Time
+}
 
 type User struct {
 	ID           string
