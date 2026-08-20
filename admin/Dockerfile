@@ -10,7 +10,8 @@ COPY packages ./packages
 COPY internal ./internal
 COPY scripts ./scripts
 
-RUN pnpm install --frozen-lockfile --ignore-scripts
+RUN pnpm install --frozen-lockfile --ignore-scripts \
+    && pnpm -r run --if-present stub
 
 ARG UI_APP=web-antd
 RUN case "$UI_APP" in \

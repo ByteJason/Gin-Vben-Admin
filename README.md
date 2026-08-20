@@ -193,7 +193,6 @@ pnpm --dir admin run dev:antd
 
 ```text
 go -C server mod download
-go -C server run ./cmd/migrate up
 go -C server run ./cmd/api
 ```
 
@@ -202,9 +201,10 @@ go -C server run ./cmd/api
 ```text
 cd server
 go mod download
-go run ./cmd/migrate up
 go run ./cmd/api
 ```
+
+B1 尚未加入迁移命令；数据库迁移与回滚入口随 B2 数据基础设施批次落地。当前服务端可直接启动健康检查与 scope ping seam。
 
 终端 C——全量验证：
 
@@ -214,14 +214,9 @@ node ./scripts/verify.mjs
 
 `bootstrap.mjs` 检查目标树并从 `server/configs/server.example.yaml` 生成本地 `server/configs/server.yaml`；默认不覆盖已有本地配置。安装依赖与下载 Go module 作为显式步骤执行，便于 Windows PowerShell、macOS zsh、Linux bash 看到失败位置。密钥、连接串、日志、数据库卷、会话和初始化备份均进入 `.gitignore`。
 
-### 5. 初始化器
+### 5. 模板初始化（B5，当前未执行）
 
-```text
-pnpm --dir admin run init:project -- --ui antd --name APP --dry-run
-pnpm --dir admin run init:project -- --ui antd --name APP
-```
-
-成功后保留 `admin/apps/web`，删除未选 UI 和一次性初始化器；`.init-backup/TIMESTAMP/rollback.mjs` 与 manifest 保留为不入 Git 的回滚包。
+B1 保留 `admin/apps/web-antd`、`admin/apps/web-ele`、`admin/apps/web-naive` 三个模板，尚未提供会删除模板的初始化器。模板选择、原地生成 `admin/apps/web`、manifest 与 rollback 会在 B5 以独立小步提交实现并验证；当前使用其中任一模板进行开发，不运行不存在的 `init:project` 命令。
 
 ### 6. 常见问题
 
