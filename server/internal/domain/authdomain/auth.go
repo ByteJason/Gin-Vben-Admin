@@ -20,6 +20,7 @@ var (
 	ErrUserAlreadyExists     = errors.New("authentication user already exists")
 	ErrInvalidAccount        = errors.New("invalid authentication account input")
 	ErrPasswordResetInvalid  = errors.New("invalid password reset token")
+	ErrInvalidAuditEvent     = errors.New("invalid authentication audit event")
 )
 
 const (
