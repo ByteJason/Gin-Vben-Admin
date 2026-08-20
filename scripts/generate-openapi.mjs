@@ -5,7 +5,11 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const files = ['contracts/openapi/admin-v1.yaml', 'contracts/openapi/client-v1.yaml'];
+const files = [
+  'contracts/openapi/admin-v1.yaml',
+  'contracts/openapi/client-v1.yaml',
+  'contracts/openapi/install-v1.yaml',
+];
 for (const file of files) {
   try {
     await access(path.join(root, file), constants.F_OK);
@@ -14,6 +18,6 @@ for (const file of files) {
     process.exit(1);
   }
 }
-console.log('OPENAPI_SOURCES_OK=2');
+console.log(`OPENAPI_SOURCES_OK=${files.length}`);
 console.log('OPENAPI_GENERATION_MODE=standard');
 console.log('OPENAPI_GENERATE_OK');

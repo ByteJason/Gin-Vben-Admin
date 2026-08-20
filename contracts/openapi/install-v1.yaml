@@ -1,0 +1,101 @@
+openapi: 3.1.0
+info:
+  title: APP Installation API
+  version: 0.4.0-dev
+  description: |
+    首次安装状态 API。该 scope 与管理端、客户端 API 隔离。
+servers:
+  - url: /
+    description: Local runtime
+tags:
+  - name: Installation
+paths:
+  /api/system/install/v1/status:
+    get:
+      tags: [Installation]
+      operationId: getInstallationStatus
+      summary: 获取无敏感字段的安装状态
+      responses:
+        '200':
+          description: 安装状态读取成功
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstallationStatusEnvelope'
+        '500':
+          description: 安装状态不可读
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+components:
+  headers:
+    RequestId:
+      description: 请求关联标识
+      schema:
+        type: string
+  schemas:
+    InstallationStatusEnvelope:
+      type: object
+      required: [code, message, data, traceId, meta]
+      properties:
+        code:
+          type: integer
+          const: 0
+        message:
+          type: string
+          const: success
+        data:
+          $ref: '#/components/schemas/InstallationStatus'
+        traceId:
+          type: string
+        meta:
+          $ref: '#/components/schemas/ResponseMeta'
+    InstallationStatus:
+      type: object
+      required: [state, installed, schemaVersion, installerVersion]
+      properties:
+        state:
+          type: string
+          enum: [uninstalled, installed]
+        installed:
+          type: boolean
+        schemaVersion:
+          type: integer
+          minimum: 1
+        installerVersion:
+          type: string
+        selectedUi:
+          type: string
+          enum: [antd, ele, naive]
+        mode:
+          type: string
+          enum: [embedded, standalone, api_only, dev]
+        installedAt:
+          type: string
+          format: date-time
+    ErrorEnvelope:
+      type: object
+      required: [code, message, data, traceId, meta]
+      properties:
+        code:
+          type: integer
+          const: 50000
+        message:
+          type: string
+          const: installation state unavailable
+        data:
+          type: 'null'
+        traceId:
+          type: string
+        meta:
+          $ref: '#/components/schemas/ResponseMeta'
+    ResponseMeta:
+      type: object
+      required: [requestId]
+      properties:
+        requestId:
+          type: string

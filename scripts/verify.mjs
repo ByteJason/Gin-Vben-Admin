@@ -56,6 +56,7 @@ const required = [
   'server/internal/transport/http/client',
   'contracts/openapi/admin-v1.yaml',
   'contracts/openapi/client-v1.yaml',
+  'contracts/openapi/install-v1.yaml',
   'deploy/compose.dev.yaml',
   'deploy/compose.dependencies.yaml',
   'admin/Dockerfile',
@@ -103,6 +104,7 @@ if (missing.length || unexpectedRootDirectories.length) {
 
 const adminContract = await text('contracts/openapi/admin-v1.yaml');
 const clientContract = await text('contracts/openapi/client-v1.yaml');
+const installContract = await text('contracts/openapi/install-v1.yaml');
 for (const token of ['/health/live', '/health/ready', '/api/admin/v1/ping', 'X-Request-ID']) {
   if (!adminContract.includes(token)) {
     console.error(`VERIFY_FAILED contract_token=${token}`);
@@ -111,6 +113,10 @@ for (const token of ['/health/live', '/health/ready', '/api/admin/v1/ping', 'X-R
 }
 if (clientContract.includes('/api/admin/v1')) {
   console.error('VERIFY_FAILED client_contract_cross_scope');
+  process.exit(1);
+}
+if (!installContract.includes('/api/system/install/v1/status') || installContract.includes('/api/admin/v1')) {
+  console.error('VERIFY_FAILED install_contract_scope');
   process.exit(1);
 }
 

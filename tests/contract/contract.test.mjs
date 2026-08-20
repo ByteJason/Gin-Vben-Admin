@@ -27,6 +27,7 @@ test('repository exposes the required code boundaries', () => {
     'docs/README.md',
     'contracts/openapi/admin-v1.yaml',
     'contracts/openapi/client-v1.yaml',
+    'contracts/openapi/install-v1.yaml',
     'LICENSE',
     'LICENSES/Vue-Vben-Admin-MIT.txt',
     'NOTICE',
@@ -51,6 +52,20 @@ test('OpenAPI scopes stay separate and expose the HTTP seams', () => {
   assert.match(admin, /\/api\/admin\/v1\/ping/);
   assert.match(admin, /X-Request-ID/);
   assert.doesNotMatch(client, /\/api\/admin\/v1/);
+});
+
+test('installation contract exposes credential-free status on its own scope', () => {
+  const install = readFileSync(join(root, 'contracts/openapi/install-v1.yaml'), 'utf8');
+  assert.match(install, /\/api\/system\/install\/v1\/status:/);
+  assert.match(install, /get:/);
+  assert.match(install, /InstallationStatus/);
+  assert.match(install, /schemaVersion/);
+  assert.match(install, /installerVersion/);
+  assert.match(install, /selectedUi/);
+  assert.match(install, /enum: \[antd, ele, naive\]/);
+  assert.match(install, /enum: \[embedded, standalone, api_only, dev\]/);
+  assert.doesNotMatch(install, /password|dsn|jwtSecret|redisPassword/i);
+  assert.doesNotMatch(install, /\/api\/admin\/v1|\/api\/client\/v1/);
 });
 
 test('authentication contract declares login, refresh, and logout endpoints', () => {
