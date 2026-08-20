@@ -33,6 +33,7 @@ test('B1 skeleton exposes the separated admin/client/server boundaries', () => {
   for (const forbidden of ['apps', 'packages', 'internal', 'frontend', 'backend']) {
     assert.equal(existsSync(join(root, forbidden)), false, `root/${forbidden}`);
   }
+  assert.equal(existsSync(join(root, 'client')), false, 'client is deferred until its first vertical slice');
 });
 
 test('OpenAPI scopes stay separate and expose the B1 seams', () => {
