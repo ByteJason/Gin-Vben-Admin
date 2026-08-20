@@ -18,6 +18,7 @@ func TestPublicHTTPSeam(t *testing.T) {
 		{name: "live", path: "/health/live", wantStatus: http.StatusOK},
 		{name: "ready", path: "/health/ready", wantStatus: http.StatusOK},
 		{name: "admin route", path: "/api/admin/v1/ping", wantStatus: http.StatusOK},
+		{name: "client route", path: "/api/client/v1/ping", wantStatus: http.StatusOK},
 	}
 
 	for _, tt := range tests {
