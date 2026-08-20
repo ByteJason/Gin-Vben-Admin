@@ -22,6 +22,14 @@ func NewHTTPServer(addr string) *http.Server {
 }
 
 func newHTTPServer(cfg config.Config, readiness health.ReadinessChecker, authService appauth.AuthService, limiter appauth.RateLimiter, iamService *iamapp.Service, recovery appauth.AccountRecoveryService, installStatuses ...*installer.StatusService) *http.Server {
+	var installStatus *installer.StatusService
+	if len(installStatuses) > 0 {
+		installStatus = installStatuses[0]
+	}
+	return newHTTPServerWithPlan(cfg, readiness, authService, limiter, iamService, recovery, installStatus, nil)
+}
+
+func newHTTPServerWithPlan(cfg config.Config, readiness health.ReadinessChecker, authService appauth.AuthService, limiter appauth.RateLimiter, iamService *iamapp.Service, recovery appauth.AccountRecoveryService, installStatus *installer.StatusService, installPlan installer.PlanProvider) *http.Server {
 	var authHandler *authhttp.Handler
 	if authService != nil {
 		authHandler = authhttp.NewHandler(authService, cfg.Auth, limiter)
@@ -35,8 +43,8 @@ func newHTTPServer(cfg config.Config, readiness health.ReadinessChecker, authSer
 		iamHandler = iamhttp.NewHandler(iamService, authService)
 	}
 	var installHandler *installhttp.Handler
-	if len(installStatuses) > 0 && installStatuses[0] != nil {
-		installHandler = installhttp.NewHandler(installStatuses[0], installplatform.NewSystemCapabilityProbe())
+	if installStatus != nil {
+		installHandler = installhttp.NewHandlerWithComponents(installStatus, installplatform.NewSystemCapabilityProbe(), installPlan)
 	}
 	return &http.Server{
 		Addr:              cfg.Server.Addr,

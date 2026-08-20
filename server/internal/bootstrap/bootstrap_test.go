@@ -1,12 +1,15 @@
 package bootstrap
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -90,6 +93,48 @@ func TestNewBuildsConfiguredHTTPServerAndKeepsDependenciesOptional(t *testing.T)
 	}
 	if capabilitiesBody.Code != 0 || capabilitiesBody.Data.Platform.OS == "" || capabilitiesBody.Data.Platform.Arch == "" || len(capabilitiesBody.Data.Tools) != 4 {
 		t.Fatalf("installation capabilities body = %#v", capabilitiesBody)
+	}
+}
+
+func TestNewWiresInstallerPlanAgainstStateDirectoryParent(t *testing.T) {
+	root := t.TempDir()
+	for _, relative := range []string{"install", "admin/apps/web-antd", "admin/apps/web-ele", "admin/apps/web-naive"} {
+		if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(relative)), 0o755); err != nil {
+			t.Fatalf("MkdirAll(%q) error = %v", relative, err)
+		}
+	}
+	cfg := config.Default()
+	cfg.Install.StateDir = filepath.Join(root, "install")
+	cfg.Server.Addr = "127.0.0.1:0"
+
+	app, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer app.Close()
+
+	request := httptest.NewRequest(http.MethodPost, "/api/system/install/v1/plan", bytes.NewBufferString(`{"selectedUi":"naive","mode":"standalone"}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	app.HTTPServer().Handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("installation plan = %d, want 200; body=%s", response.Code, response.Body.String())
+	}
+	var body struct {
+		Code int `json:"code"`
+		Data struct {
+			SelectedUI  string `json:"selectedUi"`
+			Mode        string `json:"mode"`
+			CanCleanup  bool   `json:"canCleanup"`
+			CanBuild    bool   `json:"canBuild"`
+			CanWriteEnv bool   `json:"canWriteEnv"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode installation plan: %v", err)
+	}
+	if body.Code != 0 || body.Data.SelectedUI != "naive" || body.Data.Mode != "standalone" || !body.Data.CanCleanup || !body.Data.CanBuild || !body.Data.CanWriteEnv {
+		t.Fatalf("installation plan body = %#v", body)
 	}
 }
 

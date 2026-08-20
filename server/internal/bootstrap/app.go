@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -123,8 +124,22 @@ func New(cfg config.Config) (*App, error) {
 	if candidate, ok := app.auth.(appauth.AccountRecoveryService); ok {
 		recovery = candidate
 	}
-	app.http = newHTTPServer(cfg, app.readiness, app.auth, limiter, app.iam, recovery, app.install)
+	var installPlan installer.PlanProvider
+	if workspaceRoot, err := installWorkspaceRoot(cfg.Install.StateDir); err == nil {
+		if inspector, inspectorErr := installplatform.NewFileSystemInspector(workspaceRoot); inspectorErr == nil {
+			installPlan = installer.NewPlanService(inspector)
+		}
+	}
+	app.http = newHTTPServerWithPlan(cfg, app.readiness, app.auth, limiter, app.iam, recovery, app.install, installPlan)
 	return app, nil
+}
+
+func installWorkspaceRoot(stateDir string) (string, error) {
+	abs, err := filepath.Abs(stateDir)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Dir(abs), nil
 }
 
 // Config returns a copy of the validated runtime configuration.

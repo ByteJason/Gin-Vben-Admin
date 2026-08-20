@@ -52,6 +52,13 @@ type PathInspector interface {
 	Inspect(context.Context, string) (PathPermission, error)
 }
 
+// PlanProvider is the application boundary consumed by the HTTP installer
+// transport. Keeping the interface here prevents transport and bootstrap from
+// depending on a concrete filesystem implementation.
+type PlanProvider interface {
+	Plan(context.Context, PlanRequest) (Plan, error)
+}
+
 type PlanService struct {
 	inspector PathInspector
 }
