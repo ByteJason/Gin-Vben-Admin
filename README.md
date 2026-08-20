@@ -67,7 +67,10 @@
 ├── scripts/                            # 跨平台 Node.js 脚本
 ├── tests/contract/                     # 根级契约测试
 ├── docs/                               # 公开文档
+├── LICENSES/                           # 第三方许可证
 ├── .github/
+├── LICENSE
+├── NOTICE
 ├── README.md
 └── .gitignore
 ```
@@ -195,4 +198,4 @@ node ./scripts/verify.mjs --scope basic
 
 ## 许可证
 
-本项目采用 MIT License。前端基于 [Vue Vben Admin](https://github.com/vbenjs/vue-vben-admin)；发布包按许可证要求携带项目与上游归属文件。
+本项目采用 [MIT License](LICENSE)。前端基于 [Vue Vben Admin](https://github.com/vbenjs/vue-vben-admin)；上游许可证文本见 [`LICENSES/Vue-Vben-Admin-MIT.txt`](LICENSES/Vue-Vben-Admin-MIT.txt)，归属信息见 [`NOTICE`](NOTICE)。

@@ -27,11 +27,14 @@ test('repository exposes the required code boundaries', () => {
     'docs/README.md',
     'contracts/openapi/admin-v1.yaml',
     'contracts/openapi/client-v1.yaml',
+    'LICENSE',
+    'LICENSES/Vue-Vben-Admin-MIT.txt',
+    'NOTICE',
   ]) {
     assert.equal(existsSync(join(root, path)), true, path);
   }
   const allowed = new Set([
-    '.dev-docs', '.git', '.github', '.idea', '.pnpm-store', '.runtime', 'admin', 'contracts', 'deploy', 'docs',
+    '.dev-docs', '.git', '.github', '.idea', '.pnpm-store', '.runtime', 'LICENSES', 'admin', 'contracts', 'deploy', 'docs',
     'scripts', 'server', 'tests',
   ]);
   const unexpected = readdirSync(root, { withFileTypes: true })

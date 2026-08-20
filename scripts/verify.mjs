@@ -59,6 +59,9 @@ const required = [
   'deploy/compose.dependencies.yaml',
   'admin/Dockerfile',
   'docs/README.md',
+  'LICENSE',
+  'LICENSES/Vue-Vben-Admin-MIT.txt',
+  'NOTICE',
 ];
 const missing = required.filter((item) => !exists(item));
 const allowedRootDirectories = new Set([
@@ -68,6 +71,7 @@ const allowedRootDirectories = new Set([
   '.idea',
   '.pnpm-store',
   '.runtime',
+  'LICENSES',
   'admin',
   'contracts',
   'deploy',
