@@ -28,6 +28,11 @@ test('repository exposes the required code boundaries', () => {
     'contracts/openapi/admin-v1.yaml',
     'contracts/openapi/client-v1.yaml',
     'contracts/openapi/install-v1.yaml',
+    'install/src/index.html',
+    'install/src/app.js',
+    'install/src/styles.css',
+    'install/package.json',
+    'install/pnpm-lock.yaml',
     'LICENSE',
     'LICENSES/Vue-Vben-Admin-MIT.txt',
     'NOTICE',
@@ -36,7 +41,7 @@ test('repository exposes the required code boundaries', () => {
   }
   const allowed = new Set([
     '.dev-docs', '.git', '.github', '.idea', '.pnpm-store', '.runtime', 'LICENSES', 'admin', 'contracts', 'deploy', 'docs',
-    'scripts', 'server', 'tests',
+    'install', 'scripts', 'server', 'tests',
   ]);
   const unexpected = readdirSync(root, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && !allowed.has(entry.name))
@@ -66,6 +71,14 @@ test('installation contract exposes credential-free status on its own scope', ()
   assert.match(install, /enum: \[embedded, standalone, api_only, dev\]/);
   assert.doesNotMatch(install, /password|dsn|jwtSecret|redisPassword/i);
   assert.doesNotMatch(install, /\/api\/admin\/v1|\/api\/client\/v1/);
+});
+
+test('installation workspace smoke and runtime artifacts stay cross-platform', () => {
+  const smoke = runNode('install/tests/smoke.test.mjs');
+  assert.equal(smoke.status, 0, smoke.stdout + smoke.stderr);
+  const ignore = readFileSync(join(root, '.gitignore'), 'utf8');
+  assert.match(ignore, /\/install\/\.installed/);
+  assert.match(ignore, /\/install\/dist\//);
 });
 
 test('authentication contract declares login, refresh, and logout endpoints', () => {

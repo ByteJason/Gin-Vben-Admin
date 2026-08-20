@@ -145,6 +145,14 @@ __debug_bin*
 /server/configs/server.json
 /server/configs/*.local.*
 
+# Installation workspace runtime state and generated assets
+/install/.installed
+/install/.installed.lock
+/install/.install-state/
+/install/.install-backup/
+/install/.dist-staging-*/
+/install/dist/
+
 # Local Docker overrides and volumes
 compose.override.yaml
 compose.override.yml
