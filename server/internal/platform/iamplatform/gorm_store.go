@@ -89,7 +89,7 @@ func (s *GORMStore) ListUsers(ctx context.Context) ([]domain.User, error) {
 		return nil, ErrStoreUnavailable
 	}
 	var rows []userRow
-	if err := s.read(ctx).Order("id ASC").Find(&rows).Error; err != nil {
+	if err := s.read(ctx).Table("users").Order("id ASC").Find(&rows).Error; err != nil {
 		return nil, ErrStoreUnavailable
 	}
 	out := make([]domain.User, 0, len(rows))
