@@ -17,6 +17,9 @@ var (
 	ErrSessionRevoked        = errors.New("session revoked")
 	ErrDependencyUnavailable = errors.New("authentication dependency unavailable")
 	ErrAccountLocked         = errors.New("authentication account locked")
+	ErrUserAlreadyExists     = errors.New("authentication user already exists")
+	ErrInvalidAccount        = errors.New("invalid authentication account input")
+	ErrPasswordResetInvalid  = errors.New("invalid password reset token")
 )
 
 const (

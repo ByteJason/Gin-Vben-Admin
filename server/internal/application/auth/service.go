@@ -18,6 +18,8 @@ type Service struct {
 	sess     authdomain.SessionStore
 	journal  SessionJournal
 	attempts LoginAttemptStore
+	accounts AccountProvisioner
+	reset    PasswordResetProvider
 }
 
 // SessionJournal records durable session lifecycle changes independently from
