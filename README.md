@@ -2,7 +2,7 @@
 
 基于 Go、Gin、Vue 3 与 Vue Vben Admin 的企业级后台管理基础平台。
 
-当前版本：`0.1.0-dev`
+当前版本：`0.2.0-dev`
 
 ## 项目链接
 
@@ -21,7 +21,7 @@
 - 管理端接口契约与统一响应模型
 - Gin 健康检查、统一响应和 request ID
 - OpenAPI、错误码和响应 schema
-- MySQL、Redis 开发环境编排
+- MySQL、PostgreSQL、Redis 开发环境编排与显式数据库迁移
 - Windows、macOS、Linux 通用的 Node.js 开发命令
 - 源码运行与 Docker Compose 部署
 
@@ -33,7 +33,7 @@
 | UI 模板 | Ant Design Vue、Element Plus、Naive UI |
 | 服务端 | Go 1.24、Gin |
 | API 契约 | OpenAPI |
-| 数据服务 | MySQL 8、Redis 6+ |
+| 数据服务 | MySQL 9.7、PostgreSQL 18.4、Redis 8.10 |
 | 工程化 | pnpm、Turborepo、Node.js、GitHub Actions |
 | 部署 | Docker、Docker Compose |
 
@@ -55,6 +55,7 @@
 │   └── Dockerfile
 ├── server/                             # Gin HTTP 服务
 │   ├── cmd/api/
+│   ├── cmd/migrate/
 │   ├── configs/server.example.yaml
 │   ├── internal/bootstrap/
 │   ├── internal/config/
@@ -125,6 +126,16 @@ pnpm --dir admin run dev:antd
 go -C server run ./cmd/api
 ```
 
+编辑本地 `server/configs/server.yaml` 或设置环境变量后，使用显式命令管理数据库迁移：
+
+```text
+go -C server run ./cmd/migrate status
+go -C server run ./cmd/migrate up
+go -C server run ./cmd/migrate down --steps 1
+```
+
+配置支持 MySQL/PostgreSQL 的 `single`、`read_write`、`cluster_endpoint` 模式，以及 Redis 的 `single`、`sentinel`、`cluster` 模式。默认示例关闭外部依赖；启用时请通过本地配置或环境变量填写连接信息。
+
 选择其他 UI 模板时，将 `antd` 替换为 `ele` 或 `naive`。
 
 ### 源码部署
@@ -153,6 +164,8 @@ go -C server run ./cmd/api
 docker compose -f deploy/compose.dev.yaml up -d --build
 docker compose -f deploy/compose.dev.yaml ps
 ```
+
+需要同时启动 PostgreSQL 时增加 `--profile postgres`。
 
 只启动数据库依赖：
 

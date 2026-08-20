@@ -1,5 +1,7 @@
 # 管理端前端（admin）
 
+当前接口版本：`0.2.0-dev`
+
 本目录是独立的 pnpm workspace，提供三套 UI 模板：
 
 - `apps/web-antd`：Ant Design Vue
