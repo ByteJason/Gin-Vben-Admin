@@ -22,6 +22,7 @@ type Config struct {
 	Database DatabaseConfig `mapstructure:"database" yaml:"database"`
 	Redis    RedisConfig    `mapstructure:"redis" yaml:"redis"`
 	Auth     AuthConfig     `mapstructure:"auth" yaml:"auth"`
+	Install  InstallConfig  `mapstructure:"install" yaml:"install"`
 }
 
 type ServerConfig struct {
@@ -86,6 +87,14 @@ type AuthConfig struct {
 	RegistrationEnabled  bool          `mapstructure:"registration_enabled" yaml:"registration_enabled"`
 }
 
+type InstallConfig struct {
+	StateDir string `mapstructure:"state_dir" yaml:"state_dir"`
+}
+
+func (cfg InstallConfig) MarkerPath() string {
+	return filepath.Join(cfg.StateDir, ".installed")
+}
+
 // Summary is a redacted, log-safe view of a Config. It deliberately excludes
 // database DSNs and all usernames and passwords.
 type Summary struct {
@@ -94,6 +103,7 @@ type Summary struct {
 	Database DatabaseSummary `json:"database"`
 	Redis    RedisSummary    `json:"redis"`
 	Auth     AuthSummary     `json:"auth"`
+	Install  InstallSummary  `json:"install"`
 }
 
 type ServerSummary struct {
@@ -141,6 +151,10 @@ type AuthSummary struct {
 	RegistrationEnabled  bool          `json:"registration_enabled"`
 }
 
+type InstallSummary struct {
+	StateDirectoryAbsolute bool `json:"state_directory_absolute"`
+}
+
 // Default returns a complete configuration that starts the HTTP server without
 // external infrastructure services.
 func Default() Config {
@@ -184,6 +198,7 @@ func Default() Config {
 			LockoutDuration:      15 * time.Minute,
 			RegistrationEnabled:  false,
 		},
+		Install: InstallConfig{StateDir: filepath.FromSlash("../install")},
 	}
 }
 
@@ -236,6 +251,24 @@ func (cfg Config) Validate() error {
 	}
 	if err := cfg.Auth.validate(); err != nil {
 		return fmt.Errorf("auth: %w", err)
+	}
+	if err := cfg.Install.validate(); err != nil {
+		return fmt.Errorf("install: %w", err)
+	}
+	return nil
+}
+
+func (cfg InstallConfig) validate() error {
+	if strings.TrimSpace(cfg.StateDir) == "" {
+		return errors.New("state_dir is required")
+	}
+	clean := filepath.Clean(cfg.StateDir)
+	root := string(filepath.Separator)
+	if volume := filepath.VolumeName(clean); volume != "" {
+		root = volume + string(filepath.Separator)
+	}
+	if clean == root {
+		return errors.New("state_dir must not be a filesystem root")
 	}
 	return nil
 }
@@ -401,6 +434,7 @@ func (cfg Config) SafeSummary() Summary {
 			LockoutDuration:      cfg.Auth.LockoutDuration,
 			RegistrationEnabled:  cfg.Auth.RegistrationEnabled,
 		},
+		Install: InstallSummary{StateDirectoryAbsolute: filepath.IsAbs(cfg.Install.StateDir)},
 	}
 }
 
@@ -456,6 +490,7 @@ func newViper() *viper.Viper {
 	v.SetDefault("auth.lockout_threshold", cfg.Auth.LockoutThreshold)
 	v.SetDefault("auth.lockout_duration", cfg.Auth.LockoutDuration)
 	v.SetDefault("auth.registration_enabled", cfg.Auth.RegistrationEnabled)
+	v.SetDefault("install.state_dir", cfg.Install.StateDir)
 
 	for key, environment := range environmentBindings {
 		_ = v.BindEnv(key, environment)
@@ -509,6 +544,7 @@ var environmentBindings = map[string]string{
 	"auth.lockout_threshold":       "AUTH_LOCKOUT_THRESHOLD",
 	"auth.lockout_duration":        "AUTH_LOCKOUT_DURATION",
 	"auth.registration_enabled":    "AUTH_REGISTRATION_ENABLED",
+	"install.state_dir":            "INSTALL_STATE_DIR",
 }
 
 func resolvePath(path string) (string, bool) {

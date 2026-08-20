@@ -56,11 +56,14 @@ redis:
   read_timeout: 2s
   write_timeout: 3s
   ping_timeout: 4s
+install:
+  state_dir: ./yaml-install-state
 `)
 	t.Setenv("SERVER_ADDR", "127.0.0.1:9090")
 	t.Setenv("LOGGING_LEVEL", "debug")
 	t.Setenv("DATABASE_REPLICA_DSNS", "postgres://one@db/one, postgres://two@db/two")
 	t.Setenv("REDIS_ADDRS", "redis-c:26379, redis-d:26379")
+	t.Setenv("INSTALL_STATE_DIR", filepath.Join(t.TempDir(), "runtime-install-state"))
 
 	cfg, err := Load(path)
 	if err != nil {
@@ -81,6 +84,43 @@ redis:
 	}
 	if got, want := cfg.Redis.Addrs, []string{"redis-c:26379", "redis-d:26379"}; !sameStrings(got, want) {
 		t.Fatalf("REDIS_ADDRS = %#v, want %#v", got, want)
+	}
+	if got := cfg.Install.StateDir; got == "./yaml-install-state" || !filepath.IsAbs(got) {
+		t.Fatalf("INSTALL_STATE_DIR did not override YAML: %q", got)
+	}
+}
+
+func TestInstallConfigUsesRootInstallDirectoryAndSafeSummaryHidesPath(t *testing.T) {
+	cfg := Default()
+	if got, want := filepath.Clean(cfg.Install.StateDir), filepath.Clean("../install"); got != want {
+		t.Fatalf("default install.state_dir = %q, want %q", got, want)
+	}
+	if got, want := cfg.Install.MarkerPath(), filepath.Join(cfg.Install.StateDir, ".installed"); got != want {
+		t.Fatalf("MarkerPath() = %q, want %q", got, want)
+	}
+
+	privatePath := filepath.Join(t.TempDir(), "private-state")
+	cfg.Install.StateDir = privatePath
+	encoded, err := json.Marshal(cfg.SafeSummary())
+	if err != nil {
+		t.Fatalf("marshal SafeSummary() = %v", err)
+	}
+	if strings.Contains(string(encoded), privatePath) {
+		t.Fatalf("SafeSummary leaked install state path: %s", encoded)
+	}
+}
+
+func TestInstallConfigRejectsEmptyAndFilesystemRoot(t *testing.T) {
+	cases := []string{"", string(filepath.Separator)}
+	if volume := filepath.VolumeName(os.TempDir()); volume != "" {
+		cases = append(cases, volume+string(filepath.Separator))
+	}
+	for _, stateDir := range cases {
+		cfg := Default()
+		cfg.Install.StateDir = stateDir
+		if err := cfg.Validate(); err == nil {
+			t.Fatalf("Validate() with install.state_dir %q error = nil", stateDir)
+		}
 	}
 }
 
