@@ -41,7 +41,10 @@ func Open(options Options) (*Store, error) {
 		return nil, errors.Join(cause, store.Close())
 	}
 
-	database, err := gorm.Open(primaryDialector, &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	database, err := gorm.Open(primaryDialector, &gorm.Config{
+		Logger:               logger.Default.LogMode(logger.Silent),
+		DisableAutomaticPing: true,
+	})
 	if err != nil {
 		return closeOnError(fmt.Errorf("initialize %s database: %w", options.Driver, err))
 	}

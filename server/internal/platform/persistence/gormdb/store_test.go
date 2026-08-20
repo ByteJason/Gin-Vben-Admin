@@ -1,6 +1,7 @@
 package gormdb
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -71,5 +72,23 @@ func TestOptionsDefaultsBoundTheConnectionPool(t *testing.T) {
 		if duration <= 0 {
 			t.Fatalf("%s = %s, want positive", name, duration)
 		}
+	}
+}
+
+func TestOpenDoesNotProbeNetworkUntilPing(t *testing.T) {
+	store, err := Open(Options{
+		Driver: "mysql",
+		Mode:   ModeSingle,
+		DSN:    "user:secret@tcp(127.0.0.1:1)/test?parseTime=true",
+	})
+	if err != nil {
+		t.Fatalf("Open() error = %v; constructor must not probe the endpoint", err)
+	}
+	defer store.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if err := store.Ping(ctx); err == nil {
+		t.Fatal("Ping() error = nil, want unavailable endpoint error")
 	}
 }
