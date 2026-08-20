@@ -156,7 +156,7 @@ func (h *Handler) login(c *gin.Context) {
 			response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid request")
 			return
 		}
-		if err := h.captcha.Verify(c.Request.Context(), request.CaptchaID, request.Captcha); err != nil {
+		if err := h.captcha.Verify(requestContext(c), request.CaptchaID, request.Captcha); err != nil {
 			switch {
 			case errors.Is(err, appauth.ErrCaptchaInvalid), errors.Is(err, appauth.ErrCaptchaExpired):
 				response.Error(c, http.StatusBadRequest, codeCaptcha, "invalid captcha")
@@ -166,7 +166,7 @@ func (h *Handler) login(c *gin.Context) {
 			return
 		}
 	}
-	pair, err := h.service.Login(c.Request.Context(), strings.TrimSpace(request.Username), request.Password)
+	pair, err := h.service.Login(requestContext(c), strings.TrimSpace(request.Username), request.Password)
 	if err != nil {
 		handleAuthError(c, err, true)
 		return
@@ -181,7 +181,7 @@ func (h *Handler) register(c *gin.Context) {
 		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid request")
 		return
 	}
-	if err := h.recovery.Register(c.Request.Context(), strings.TrimSpace(request.Username), request.Password); err != nil {
+	if err := h.recovery.Register(requestContext(c), strings.TrimSpace(request.Username), request.Password); err != nil {
 		handleRecoveryError(c, err)
 		return
 	}
@@ -194,7 +194,7 @@ func (h *Handler) requestPasswordReset(c *gin.Context) {
 		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid request")
 		return
 	}
-	if err := h.recovery.RequestPasswordReset(c.Request.Context(), strings.TrimSpace(request.Username)); err != nil {
+	if err := h.recovery.RequestPasswordReset(requestContext(c), strings.TrimSpace(request.Username)); err != nil {
 		handleRecoveryError(c, err)
 		return
 	}
@@ -208,7 +208,7 @@ func (h *Handler) resetPassword(c *gin.Context) {
 		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid request")
 		return
 	}
-	if err := h.recovery.ResetPassword(c.Request.Context(), strings.TrimSpace(request.Token), request.Password); err != nil {
+	if err := h.recovery.ResetPassword(requestContext(c), strings.TrimSpace(request.Token), request.Password); err != nil {
 		handleRecoveryError(c, err)
 		return
 	}
@@ -221,7 +221,7 @@ func (h *Handler) listSessions(c *gin.Context) {
 		response.Error(c, http.StatusUnauthorized, codeUnauthenticated, "unauthenticated")
 		return
 	}
-	sessions, err := h.sessions.ListSessions(c.Request.Context(), claims.Subject)
+	sessions, err := h.sessions.ListSessions(requestContext(c), claims.Subject)
 	if err != nil {
 		handleSessionError(c, err)
 		return
@@ -248,7 +248,7 @@ func (h *Handler) revokeSession(c *gin.Context) {
 		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid request")
 		return
 	}
-	if err := h.sessions.RevokeSession(c.Request.Context(), claims.Subject, sessionID); err != nil {
+	if err := h.sessions.RevokeSession(requestContext(c), claims.Subject, sessionID); err != nil {
 		handleSessionError(c, err)
 		return
 	}
@@ -269,7 +269,7 @@ func (h *Handler) issueCaptcha(c *gin.Context) {
 		response.Error(c, http.StatusServiceUnavailable, 40001, "dependency unavailable")
 		return
 	}
-	challenge, err := h.captcha.Issue(c.Request.Context())
+	challenge, err := h.captcha.Issue(requestContext(c))
 	if err != nil {
 		response.Error(c, http.StatusServiceUnavailable, 40001, "dependency unavailable")
 		return
@@ -311,13 +311,40 @@ func contextOrBackground(c *gin.Context) context.Context {
 	return context.Background()
 }
 
+// requestContext carries correlation and device attributes from the HTTP
+// boundary into application ports. Values are bounded by the application
+// metadata helper before they can reach durable session/audit storage.
+func requestContext(c *gin.Context) context.Context {
+	ctx := contextOrBackground(c)
+	metadata := appauth.RequestMetadata{}
+	if c == nil {
+		return appauth.WithRequestMetadata(ctx, metadata)
+	}
+	if value, ok := c.Get("request_id"); ok {
+		metadata.RequestID, _ = value.(string)
+	}
+	if metadata.RequestID == "" {
+		metadata.RequestID = c.GetHeader("X-Request-ID")
+	}
+	metadata.DeviceID = c.GetHeader("X-Device-ID")
+	metadata.DeviceName = c.GetHeader("X-Device-Name")
+	metadata.UserAgent = c.GetHeader("User-Agent")
+	if c.Request != nil {
+		metadata.IPAddress = c.Request.RemoteAddr
+		if host, _, err := net.SplitHostPort(metadata.IPAddress); err == nil {
+			metadata.IPAddress = host
+		}
+	}
+	return appauth.WithRequestMetadata(ctx, metadata)
+}
+
 func (h *Handler) refresh(c *gin.Context) {
 	refreshToken, err := c.Cookie(h.cookieName())
 	if err != nil || strings.TrimSpace(refreshToken) == "" {
 		response.Error(c, http.StatusUnauthorized, codeUnauthenticated, "unauthenticated")
 		return
 	}
-	pair, err := h.service.Refresh(c.Request.Context(), refreshToken)
+	pair, err := h.service.Refresh(requestContext(c), refreshToken)
 	if err != nil {
 		handleAuthError(c, err, false)
 		return
@@ -333,7 +360,7 @@ func (h *Handler) logout(c *gin.Context) {
 		return
 	}
 	if logoutService, ok := h.service.(appauth.RefreshLogoutService); ok {
-		err = logoutService.LogoutWithRefreshToken(c.Request.Context(), refreshToken)
+		err = logoutService.LogoutWithRefreshToken(requestContext(c), refreshToken)
 	} else {
 		// Implementations that expose only AuthService cannot safely derive a
 		// session ID from an opaque refresh token, so reject rather than guess.

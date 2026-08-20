@@ -25,18 +25,26 @@ type fakeAuthService struct {
 	logoutToken string
 	refreshGot  string
 	claims      authdomain.Claims
+	loginMeta   appauth.RequestMetadata
+	refreshMeta appauth.RequestMetadata
+	logoutMeta  appauth.RequestMetadata
 }
 
-func (f *fakeAuthService) Login(context.Context, string, string) (authdomain.TokenPair, error) {
+func (f *fakeAuthService) Login(ctx context.Context, _ string, _ string) (authdomain.TokenPair, error) {
+	f.loginMeta = appauth.RequestMetadataFromContext(ctx)
 	return f.loginPair, f.loginErr
 }
 
-func (f *fakeAuthService) Refresh(_ context.Context, token string) (authdomain.TokenPair, error) {
+func (f *fakeAuthService) Refresh(ctx context.Context, token string) (authdomain.TokenPair, error) {
+	f.refreshMeta = appauth.RequestMetadataFromContext(ctx)
 	f.refreshGot = token
 	return f.refreshPair, f.refreshErr
 }
 
-func (f *fakeAuthService) Logout(context.Context, string) error { return f.logoutErr }
+func (f *fakeAuthService) Logout(ctx context.Context, _ string) error {
+	f.logoutMeta = appauth.RequestMetadataFromContext(ctx)
+	return f.logoutErr
+}
 
 func (f *fakeAuthService) VerifyAccess(string) (authdomain.Claims, error) {
 	return f.claims, nil
@@ -101,6 +109,27 @@ func TestLoginReturnsCamelCaseAccessTokenAndHttpOnlyRefreshCookie(t *testing.T) 
 	cookie := res.Result().Cookies()
 	if len(cookie) != 1 || cookie[0].Name != "refresh_token" || cookie[0].Value != "refresh-1" || !cookie[0].HttpOnly || cookie[0].SameSite != http.SameSiteLaxMode || cookie[0].Path != "/api/admin/v1/auth" {
 		t.Fatalf("unexpected refresh cookie: %+v", cookie)
+	}
+}
+
+func TestAuthHandlersPropagateRequestMetadata(t *testing.T) {
+	service := &fakeAuthService{loginPair: authdomain.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 60}}
+	r := newAuthRouter(service, testAuthConfig())
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/v1/auth/login", strings.NewReader(`{"username":"alice","password":"secret"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Request-ID", "req-http")
+	req.Header.Set("X-Device-ID", "device-http")
+	req.Header.Set("X-Device-Name", "Browser")
+	req.Header.Set("User-Agent", "test-agent")
+	req.RemoteAddr = "192.0.2.10:4567"
+	res := httptest.NewRecorder()
+	r.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("login status = %d; body=%s", res.Code, res.Body.String())
+	}
+	want := appauth.RequestMetadata{RequestID: "req-http", DeviceID: "device-http", DeviceName: "Browser", IPAddress: "192.0.2.10", UserAgent: "test-agent"}
+	if service.loginMeta != want {
+		t.Fatalf("login metadata = %+v, want %+v", service.loginMeta, want)
 	}
 }
 
