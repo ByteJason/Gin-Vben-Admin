@@ -106,6 +106,28 @@ test('authentication contract declares login, refresh, and logout endpoints', ()
   assert.match(errors, /code: 10005[\s\S]*?http_status: 400/);
 });
 
+test('authentication recovery contract declares registration and reset endpoints', () => {
+  const admin = readFileSync(join(root, 'contracts/openapi/admin-v1.yaml'), 'utf8');
+  for (const path of [
+    '/api/admin/v1/auth/register:',
+    '/api/admin/v1/auth/password/reset/request:',
+    '/api/admin/v1/auth/password/reset:',
+  ]) {
+    assert.match(admin, new RegExp(`\\n  ${path.replaceAll('/', '\\/')}`), path);
+    const sectionStart = admin.indexOf(`  ${path}`);
+    const nextSection = admin.indexOf('\n  /', sectionStart + 4);
+    const section = admin.slice(sectionStart, nextSection === -1 ? undefined : nextSection);
+    assert.match(section, /post:/, `${path} method`);
+    assert.match(section, /requestBody:/, `${path} request body`);
+    assert.match(section, /'200':/, `${path} success`);
+    assert.match(section, /'400':/, `${path} validation`);
+    assert.match(section, /'503':/, `${path} dependency failure`);
+  }
+  assert.match(admin, /RegisterRequest/);
+  assert.match(admin, /PasswordResetRequest/);
+  assert.match(admin, /PasswordResetTokenRequest/);
+});
+
 test('RBAC management contract exposes guarded collections and denial code', () => {
   const admin = readFileSync(join(root, 'contracts/openapi/admin-v1.yaml'), 'utf8');
   for (const path of [

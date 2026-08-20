@@ -145,6 +145,64 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '503':
           $ref: '#/components/responses/AuthServiceUnavailable'
+  /api/admin/v1/auth/register:
+    post:
+      tags: [Admin]
+      operationId: adminAuthRegister
+      summary: 创建管理端账号（按配置开关开放）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/AuthServiceUnavailable'
+  /api/admin/v1/auth/password/reset/request:
+    post:
+      tags: [Admin]
+      operationId: requestAdminPasswordReset
+      summary: 请求一次性密码重置（不暴露账号是否存在）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '503':
+          $ref: '#/components/responses/AuthServiceUnavailable'
+  /api/admin/v1/auth/password/reset:
+    post:
+      tags: [Admin]
+      operationId: resetAdminPassword
+      summary: 使用一次性 token 设置新密码
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetTokenRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/AuthServiceUnavailable'
   /api/admin/v1/iam/users:
     get:
       tags: [IAM]
@@ -392,6 +450,41 @@ components:
         captchaId:
           type: string
           maxLength: 256
+    RegisterRequest:
+      type: object
+      additionalProperties: false
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          minLength: 1
+          maxLength: 128
+        password:
+          type: string
+          minLength: 8
+          maxLength: 128
+    PasswordResetRequest:
+      type: object
+      additionalProperties: false
+      required: [username]
+      properties:
+        username:
+          type: string
+          minLength: 1
+          maxLength: 128
+    PasswordResetTokenRequest:
+      type: object
+      additionalProperties: false
+      required: [token, password]
+      properties:
+        token:
+          type: string
+          minLength: 1
+          maxLength: 512
+        password:
+          type: string
+          minLength: 8
+          maxLength: 128
     AuthTokenData:
       type: object
       additionalProperties: false
@@ -572,6 +665,20 @@ components:
                 properties:
                   code:
                     const: 10000
+    ValidationFailed:
+      description: 请求字段通过语法解析但未通过业务校验
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ErrorEnvelope'
+              - type: object
+                properties:
+                  code:
+                    const: 10001
     LoginBadRequest:
       description: 登录请求字段或验证码无效
       headers:
