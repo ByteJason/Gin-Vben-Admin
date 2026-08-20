@@ -7,6 +7,7 @@ import (
 	iamapp "example.com/gin-vben-admin/server/internal/application/iam"
 	installer "example.com/gin-vben-admin/server/internal/application/installer"
 	"example.com/gin-vben-admin/server/internal/config"
+	"example.com/gin-vben-admin/server/internal/platform/installplatform"
 	authhttp "example.com/gin-vben-admin/server/internal/transport/http/auth"
 	"example.com/gin-vben-admin/server/internal/transport/http/health"
 	iamhttp "example.com/gin-vben-admin/server/internal/transport/http/iam"
@@ -35,7 +36,7 @@ func newHTTPServer(cfg config.Config, readiness health.ReadinessChecker, authSer
 	}
 	var installHandler *installhttp.Handler
 	if len(installStatuses) > 0 && installStatuses[0] != nil {
-		installHandler = installhttp.NewHandler(installStatuses[0])
+		installHandler = installhttp.NewHandler(installStatuses[0], installplatform.NewSystemCapabilityProbe())
 	}
 	return &http.Server{
 		Addr:              cfg.Server.Addr,

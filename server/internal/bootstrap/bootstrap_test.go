@@ -66,6 +66,31 @@ func TestNewBuildsConfiguredHTTPServerAndKeepsDependenciesOptional(t *testing.T)
 	if body.Code != 0 || body.Data.Installed || body.Data.State != "uninstalled" {
 		t.Fatalf("installation status body = %#v", body)
 	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/system/install/v1/capabilities", nil)
+	response = httptest.NewRecorder()
+	app.HTTPServer().Handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("installation capabilities = %d, want 200; body=%s", response.Code, response.Body.String())
+	}
+	var capabilitiesBody struct {
+		Code int `json:"code"`
+		Data struct {
+			Platform struct {
+				OS   string `json:"os"`
+				Arch string `json:"arch"`
+			} `json:"platform"`
+			Tools []struct {
+				ID string `json:"id"`
+			} `json:"tools"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&capabilitiesBody); err != nil {
+		t.Fatalf("decode installation capabilities: %v", err)
+	}
+	if capabilitiesBody.Code != 0 || capabilitiesBody.Data.Platform.OS == "" || capabilitiesBody.Data.Platform.Arch == "" || len(capabilitiesBody.Data.Tools) != 4 {
+		t.Fatalf("installation capabilities body = %#v", capabilitiesBody)
+	}
 }
 
 func TestDependencyOptionsMapEverySupportedTopology(t *testing.T) {
