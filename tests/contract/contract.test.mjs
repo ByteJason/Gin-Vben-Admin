@@ -128,6 +128,26 @@ test('authentication recovery contract declares registration and reset endpoints
   assert.match(admin, /PasswordResetTokenRequest/);
 });
 
+test('authentication session contract is bearer-protected and hides token material', () => {
+  const admin = readFileSync(join(root, 'contracts/openapi/admin-v1.yaml'), 'utf8');
+  for (const path of [
+    '/api/admin/v1/auth/sessions:',
+    '/api/admin/v1/auth/sessions/{id}:',
+  ]) {
+    assert.match(admin, new RegExp(`\\n  ${path.replaceAll('/', '\\/')}`), path);
+    const sectionStart = admin.indexOf(`  ${path}`);
+    const nextSection = admin.indexOf('\n  /', sectionStart + 4);
+    const section = admin.slice(sectionStart, nextSection === -1 ? undefined : nextSection);
+    assert.match(section, /BearerAuth/, `${path} bearer security`);
+    assert.match(section, /'401':/, `${path} unauthorized`);
+  }
+  assert.match(admin, /SessionData/);
+  assert.match(admin, /deviceId/);
+  assert.match(admin, /deviceName/);
+  assert.match(admin, /ipAddress/);
+  assert.doesNotMatch(admin, /refreshTokenHash/);
+});
+
 test('RBAC management contract exposes guarded collections and denial code', () => {
   const admin = readFileSync(join(root, 'contracts/openapi/admin-v1.yaml'), 'utf8');
   for (const path of [

@@ -24,6 +24,7 @@ type fakeAuthService struct {
 	logoutErr   error
 	logoutToken string
 	refreshGot  string
+	claims      authdomain.Claims
 }
 
 func (f *fakeAuthService) Login(context.Context, string, string) (authdomain.TokenPair, error) {
@@ -38,7 +39,7 @@ func (f *fakeAuthService) Refresh(_ context.Context, token string) (authdomain.T
 func (f *fakeAuthService) Logout(context.Context, string) error { return f.logoutErr }
 
 func (f *fakeAuthService) VerifyAccess(string) (authdomain.Claims, error) {
-	return authdomain.Claims{}, nil
+	return f.claims, nil
 }
 
 func (f *fakeAuthService) LogoutWithRefreshToken(_ context.Context, token string) error {

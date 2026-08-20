@@ -203,6 +203,43 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '503':
           $ref: '#/components/responses/AuthServiceUnavailable'
+  /api/admin/v1/auth/sessions:
+    get:
+      tags: [Admin]
+      operationId: listAdminAuthSessions
+      summary: 查询当前账号的设备会话
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/AuthServiceUnavailable'
+  /api/admin/v1/auth/sessions/{id}:
+    delete:
+      tags: [Admin]
+      operationId: revokeAdminAuthSession
+      summary: 吊销当前账号的指定设备会话
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/AuthServiceUnavailable'
   /api/admin/v1/iam/users:
     get:
       tags: [IAM]
@@ -485,6 +522,20 @@ components:
           type: string
           minLength: 8
           maxLength: 128
+    SessionData:
+      type: object
+      additionalProperties: false
+      required: [id, deviceId, deviceName, ipAddress, userAgent, expiresAt, revoked]
+      properties:
+        id: { type: string, minLength: 1 }
+        deviceId: { type: string }
+        deviceName: { type: string }
+        ipAddress: { type: string }
+        userAgent: { type: string }
+        expiresAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        lastSeenAt: { type: string, format: date-time }
+        revoked: { type: boolean }
     AuthTokenData:
       type: object
       additionalProperties: false

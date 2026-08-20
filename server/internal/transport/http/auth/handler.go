@@ -30,6 +30,7 @@ const (
 type Handler struct {
 	service  appauth.AuthService
 	recovery appauth.AccountRecoveryService
+	sessions appauth.SessionManagementService
 	config   config.AuthConfig
 	limiter  appauth.RateLimiter
 	captcha  appauth.CaptchaProvider
@@ -56,6 +57,13 @@ func (h *Handler) SetAccountRecovery(recovery appauth.AccountRecoveryService) {
 	}
 }
 
+// SetSessionManager wires user-scoped device-session listing and revocation.
+func (h *Handler) SetSessionManager(manager appauth.SessionManagementService) {
+	if h != nil {
+		h.sessions = manager
+	}
+}
+
 // RegisterRoutes installs login, refresh, and logout. A nil handler is a
 // deliberate disabled seam that returns a safe dependency error rather than
 // accidentally accepting credentials.
@@ -69,6 +77,8 @@ func RegisterRoutes(r gin.IRouter, handler *Handler) {
 		group.POST("/register", disabled)
 		group.POST("/password/reset/request", disabled)
 		group.POST("/password/reset", disabled)
+		group.GET("/sessions", disabled)
+		group.DELETE("/sessions/:id", disabled)
 		return
 	}
 	group.GET("/captcha", handler.issueCaptcha)
@@ -86,6 +96,13 @@ func RegisterRoutes(r gin.IRouter, handler *Handler) {
 	} else {
 		group.POST("/password/reset/request", disabled)
 		group.POST("/password/reset", disabled)
+	}
+	if handler.sessions != nil {
+		group.GET("/sessions", Middleware(handler.service), handler.listSessions)
+		group.DELETE("/sessions/:id", Middleware(handler.service), handler.revokeSession)
+	} else {
+		group.GET("/sessions", disabled)
+		group.DELETE("/sessions/:id", disabled)
 	}
 }
 
@@ -105,6 +122,18 @@ type passwordResetRequest struct {
 	Username string `json:"username,omitempty"`
 	Token    string `json:"token,omitempty"`
 	Password string `json:"password,omitempty"`
+}
+
+type sessionData struct {
+	ID         string    `json:"id"`
+	DeviceID   string    `json:"deviceId"`
+	DeviceName string    `json:"deviceName"`
+	IPAddress  string    `json:"ipAddress"`
+	UserAgent  string    `json:"userAgent"`
+	ExpiresAt  time.Time `json:"expiresAt"`
+	CreatedAt  time.Time `json:"createdAt"`
+	LastSeenAt time.Time `json:"lastSeenAt"`
+	Revoked    bool      `json:"revoked"`
 }
 
 type tokenData struct {
@@ -184,6 +213,55 @@ func (h *Handler) resetPassword(c *gin.Context) {
 		return
 	}
 	response.OK(c, nil)
+}
+
+func (h *Handler) listSessions(c *gin.Context) {
+	claims, ok := verifiedClaims(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, codeUnauthenticated, "unauthenticated")
+		return
+	}
+	sessions, err := h.sessions.ListSessions(c.Request.Context(), claims.Subject)
+	if err != nil {
+		handleSessionError(c, err)
+		return
+	}
+	items := make([]sessionData, 0, len(sessions))
+	for _, session := range sessions {
+		items = append(items, sessionData{
+			ID: session.ID, DeviceID: session.DeviceID, DeviceName: session.DeviceName,
+			IPAddress: session.IPAddress, UserAgent: session.UserAgent, ExpiresAt: session.ExpiresAt,
+			CreatedAt: session.CreatedAt, LastSeenAt: session.LastSeenAt, Revoked: session.Revoked,
+		})
+	}
+	response.OK(c, items)
+}
+
+func (h *Handler) revokeSession(c *gin.Context) {
+	claims, ok := verifiedClaims(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, codeUnauthenticated, "unauthenticated")
+		return
+	}
+	sessionID := strings.TrimSpace(c.Param("id"))
+	if sessionID == "" {
+		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid request")
+		return
+	}
+	if err := h.sessions.RevokeSession(c.Request.Context(), claims.Subject, sessionID); err != nil {
+		handleSessionError(c, err)
+		return
+	}
+	response.OK(c, nil)
+}
+
+func verifiedClaims(c *gin.Context) (authdomain.Claims, bool) {
+	claims, ok := c.Get("auth_claims")
+	if !ok {
+		return authdomain.Claims{}, false
+	}
+	value, ok := claims.(authdomain.Claims)
+	return value, ok && strings.TrimSpace(value.Subject) != ""
 }
 
 func (h *Handler) issueCaptcha(c *gin.Context) {
@@ -329,6 +407,17 @@ func handleRecoveryError(c *gin.Context, err error) {
 		response.Error(c, http.StatusUnprocessableEntity, 10001, "validation failed")
 	case errors.Is(err, authdomain.ErrPasswordResetInvalid):
 		response.Error(c, http.StatusUnauthorized, codeCredentials, "invalid credentials")
+	case errors.Is(err, authdomain.ErrDependencyUnavailable):
+		response.Error(c, http.StatusServiceUnavailable, 40001, "dependency unavailable")
+	default:
+		response.Error(c, http.StatusServiceUnavailable, 40001, "dependency unavailable")
+	}
+}
+
+func handleSessionError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, authdomain.ErrSessionNotFound), errors.Is(err, authdomain.ErrSessionRevoked):
+		response.Error(c, http.StatusUnauthorized, codeUnauthenticated, "unauthenticated")
 	case errors.Is(err, authdomain.ErrDependencyUnavailable):
 		response.Error(c, http.StatusServiceUnavailable, 40001, "dependency unavailable")
 	default:
