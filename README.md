@@ -2,7 +2,7 @@
 
 基于 Go、Gin、Vue 3 与 Vue Vben Admin 的企业级后台管理基础平台。
 
-> **状态：B1 首个可验证工程切片已落地（文档基线 `0.3.0`）**
+> **状态：B1 首个可验证工程切片已落地（规划基线/文档基线 `0.3.0`）**
 >
 > **当前批次：B1 工程骨架与质量门禁；B2 数据基础设施待开始**
 >
@@ -21,7 +21,7 @@
 | API 契约 | `/api/admin/v1`、`/api/client/v1`，分别维护 OpenAPI |
 | 公开文档 | 根 `docs/` 仅保留入口；专门开发资料位于不提交的 `.dev-docs/` |
 
-## 目标目录
+## 目标目录（B1 已落地项 + 后续预留项）
 
 ```text
 .
@@ -31,9 +31,9 @@
 │   │   ├── web-ele/
 │   │   └── web-naive/
 │   ├── packages/
-│   │   └── api-client/                    # admin-v1 OpenAPI 生成客户端
+│   │   └── api-client/                    # B2+ 生成目标；B1 仍以根 contracts 为源
 │   ├── internal/                          # lint/Vite/Tailwind/TS 工具链
-│   ├── scripts/init-project/
+│   ├── scripts/init-project/              # B5 规划；B1 不创建
 │   ├── tests/contract/
 │   ├── package.json
 │   ├── pnpm-workspace.yaml
@@ -41,22 +41,22 @@
 │   ├── turbo.json
 │   └── Dockerfile
 ├── server/                                # Gin 服务端唯一代码边界
-│   ├── cmd/{api,migrate,setup,worker}/
+│   ├── cmd/{api,migrate,setup,worker}/    # B1 仅落地 api，其余按批次加入
 │   ├── configs/server.example.yaml
 │   ├── internal/
 │   │   ├── bootstrap/
 │   │   ├── config/
 │   │   ├── transport/http/{router,middleware,admin,client,open,internal}/
-│   │   ├── platform/{persistence,cache,security,observability}/
-│   │   ├── generated/{adminv1,clientv1}/
-│   │   └── modules/
+│   │   ├── platform/{persistence,cache,security,observability}/ # B2+
+│   │   ├── generated/{adminv1,clientv1}/                        # 契约生成
+│   │   └── modules/                                               # B3+
 │   │       ├── identity/{domain,application/{admin,client},transport/http/{admin,client},adapter}
 │   │       ├── iam/
 │   │       ├── settings/
 │   │       ├── audit/
 │   │       ├── admin/                   # 管理端专属能力
 │   │       └── client/                  # 客户端专属能力
-│   ├── migrations/{mysql,postgres}/
+│   ├── migrations/{mysql,postgres}/       # B2+
 │   ├── tests/{contract,integration}/
 │   ├── go.mod
 │   ├── go.sum
@@ -74,6 +74,16 @@
 ├── README.md
 └── .gitignore
 ```
+
+### B1 当前实际已提交树
+
+```text
+admin/{apps/web-antd,apps/web-ele,apps/web-naive,packages,internal,scripts,tests,package.json,pnpm-lock.yaml}
+server/{cmd/api,configs,internal/{bootstrap,config,transport/http},tests,go.mod,go.sum,Dockerfile}
+contracts/{openapi,errors,schemas}   deploy/   scripts/   tests/   docs/
+```
+
+`admin/apps/web`、`admin/packages/api-client`、迁移/生成/业务模块目录属于后续批次目标，不代表 B1 已生成文件。
 
 根目录不放 `apps/`、`packages/`、`internal/`、`go.mod` 或 pnpm workspace 文件。共享客户端的确定路径为 `admin/packages/api-client`。服务端装配入口为 `server/internal/bootstrap`，HTTP scope 入口为 `server/internal/transport/http/admin` 与 `server/internal/transport/http/client`。人工契约源为 `contracts/openapi/admin-v1.yaml` 与 `contracts/openapi/client-v1.yaml`。`backend/` 不作为管理端目录：在本项目中 `server/` 专指 Gin，`admin/` 专指管理端。
 
