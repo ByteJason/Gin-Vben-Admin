@@ -10,10 +10,14 @@ import (
 )
 
 // NewRouter builds the public HTTP seam without binding to a port or external services.
-func NewRouter() *gin.Engine {
+func NewRouter(readiness ...health.ReadinessChecker) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery(), middleware.RequestID())
-	health.RegisterRoutes(r)
+	var readinessChecker health.ReadinessChecker
+	if len(readiness) > 0 {
+		readinessChecker = readiness[0]
+	}
+	health.RegisterRoutes(r, readinessChecker)
 	admin.RegisterRoutes(r)
 	client.RegisterRoutes(r)
 	return r

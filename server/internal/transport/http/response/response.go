@@ -17,13 +17,21 @@ func OK(c *gin.Context, payload any) {
 }
 
 func Error(c *gin.Context, status int, code int, message string) {
+	ErrorWithData(c, status, code, message, nil)
+}
+
+func ErrorWithData(c *gin.Context, status int, code int, message string, data any) {
 	requestID := requestID(c)
-	c.JSON(status, gin.H{
+	body := gin.H{
 		"code":    code,
 		"message": message,
 		"traceId": requestID,
 		"meta":    gin.H{"requestId": requestID},
-	})
+	}
+	if data != nil {
+		body["data"] = data
+	}
+	c.JSON(status, body)
 }
 
 func requestID(c *gin.Context) string {
