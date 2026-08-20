@@ -118,6 +118,38 @@ func TestNewConstructsEnabledDependenciesWithoutProbingNetwork(t *testing.T) {
 	}
 }
 
+func TestNewWiresAuthOnlyWhenDatabaseAndRedisAreEnabled(t *testing.T) {
+	cfg := config.Default()
+	cfg.Server.Addr = "127.0.0.1:0"
+	cfg.Auth.Enabled = true
+	cfg.Auth.JWTSecret = "01234567890123456789012345678901"
+	cfg.Database.Enabled = true
+	cfg.Database.Driver = "mysql"
+	cfg.Database.Mode = "single"
+	cfg.Database.DSN = "root:root@tcp(127.0.0.1:1)/auth_test?parseTime=true"
+	cfg.Redis.Enabled = true
+	cfg.Redis.Mode = "single"
+	cfg.Redis.Addr = "127.0.0.1:1"
+
+	app, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer app.Close()
+	if app.Auth() == nil {
+		t.Fatal("auth service should be wired when auth and dependencies are enabled")
+	}
+}
+
+func TestNewRejectsAuthWithoutDurableDependencies(t *testing.T) {
+	cfg := config.Default()
+	cfg.Auth.Enabled = true
+	cfg.Auth.JWTSecret = "01234567890123456789012345678901"
+	if _, err := New(cfg); err == nil {
+		t.Fatal("New() error = nil, want auth dependency requirement")
+	}
+}
+
 func TestCloseResourcesIsReverseOrderAndContinuesAfterErrors(t *testing.T) {
 	var order []string
 	resources := []closer{

@@ -10,7 +10,9 @@ import (
 	"sync"
 	"time"
 
+	appauth "example.com/gin-vben-admin/server/internal/application/auth"
 	"example.com/gin-vben-admin/server/internal/config"
+	"example.com/gin-vben-admin/server/internal/platform/authplatform"
 	rediscache "example.com/gin-vben-admin/server/internal/platform/cache/redis"
 	platformhealth "example.com/gin-vben-admin/server/internal/platform/health"
 	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
@@ -24,6 +26,7 @@ type App struct {
 	http      *http.Server
 	database  *gormdb.Store
 	redis     *rediscache.Client
+	auth      appauth.AuthService
 	readiness *platformhealth.Checker
 	closers   []io.Closer
 
@@ -77,8 +80,30 @@ func New(cfg config.Config) (*App, error) {
 		dependencies = append(dependencies, timedDependency{dependency: client, timeout: cfg.Redis.PingTimeout})
 	}
 
+	if cfg.Auth.Enabled {
+		if app.database == nil || app.redis == nil {
+			return cleanupOnError(errors.New("auth requires enabled database and redis dependencies"))
+		}
+		users := authplatform.NewGORMUserRepository(app.database)
+		hasher := authplatform.BcryptHasher{Cost: cfg.Auth.BcryptCost}
+		tokens := authplatform.NewJWTServiceWithOptions(
+			[]byte(cfg.Auth.JWTSecret),
+			cfg.Auth.AccessTTL,
+			cfg.Auth.RefreshTTL,
+			cfg.Auth.Issuer,
+			cfg.Auth.Audience,
+		)
+		sessions := authplatform.NewRedisSessionStore(app.redis)
+		attempts := authplatform.NewRedisLoginAttemptStore(app.redis, cfg.Auth.LockoutThreshold, cfg.Auth.LockoutDuration)
+		app.auth = appauth.NewService(users, hasher, tokens, sessions, attempts)
+	}
+
 	app.readiness = platformhealth.NewChecker(readinessTimeout(cfg), dependencies...)
-	app.http = newHTTPServer(cfg, app.readiness)
+	var limiter appauth.RateLimiter
+	if cfg.Auth.Enabled {
+		limiter = authplatform.NewRedisRateLimiter(app.redis)
+	}
+	app.http = newHTTPServer(cfg, app.readiness, app.auth, limiter)
 	return app, nil
 }
 
@@ -115,6 +140,15 @@ func (a *App) Redis() *rediscache.Client {
 		return nil
 	}
 	return a.redis
+}
+
+// Auth returns the configured authentication service, or nil when authentication
+// is disabled.
+func (a *App) Auth() appauth.AuthService {
+	if a == nil {
+		return nil
+	}
+	return a.auth
 }
 
 // Readiness returns the checker injected into the HTTP health routes.

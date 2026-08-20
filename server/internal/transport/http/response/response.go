@@ -25,11 +25,9 @@ func ErrorWithData(c *gin.Context, status int, code int, message string, data an
 	body := gin.H{
 		"code":    code,
 		"message": message,
+		"data":    data,
 		"traceId": requestID,
 		"meta":    gin.H{"requestId": requestID},
-	}
-	if data != nil {
-		body["data"] = data
 	}
 	c.JSON(status, body)
 }

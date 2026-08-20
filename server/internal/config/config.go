@@ -21,6 +21,7 @@ type Config struct {
 	Logging  LoggingConfig  `mapstructure:"logging" yaml:"logging"`
 	Database DatabaseConfig `mapstructure:"database" yaml:"database"`
 	Redis    RedisConfig    `mapstructure:"redis" yaml:"redis"`
+	Auth     AuthConfig     `mapstructure:"auth" yaml:"auth"`
 }
 
 type ServerConfig struct {
@@ -66,6 +67,24 @@ type RedisConfig struct {
 	PingTimeout  time.Duration `mapstructure:"ping_timeout" yaml:"ping_timeout"`
 }
 
+// AuthConfig contains the runtime security policy for authentication.
+// Secrets are required only when authentication is enabled.
+type AuthConfig struct {
+	Enabled              bool          `mapstructure:"enabled" yaml:"enabled"`
+	JWTSecret            string        `mapstructure:"jwt_secret" yaml:"jwt_secret"`
+	Issuer               string        `mapstructure:"issuer" yaml:"issuer"`
+	Audience             string        `mapstructure:"audience" yaml:"audience"`
+	AccessTTL            time.Duration `mapstructure:"access_ttl" yaml:"access_ttl"`
+	RefreshTTL           time.Duration `mapstructure:"refresh_ttl" yaml:"refresh_ttl"`
+	RefreshCookieName    string        `mapstructure:"refresh_cookie_name" yaml:"refresh_cookie_name"`
+	SecureCookie         bool          `mapstructure:"secure_cookie" yaml:"secure_cookie"`
+	BcryptCost           int           `mapstructure:"bcrypt_cost" yaml:"bcrypt_cost"`
+	RateLimitWindow      time.Duration `mapstructure:"rate_limit_window" yaml:"rate_limit_window"`
+	RateLimitMaxAttempts int           `mapstructure:"rate_limit_max_attempts" yaml:"rate_limit_max_attempts"`
+	LockoutThreshold     int           `mapstructure:"lockout_threshold" yaml:"lockout_threshold"`
+	LockoutDuration      time.Duration `mapstructure:"lockout_duration" yaml:"lockout_duration"`
+}
+
 // Summary is a redacted, log-safe view of a Config. It deliberately excludes
 // database DSNs and all usernames and passwords.
 type Summary struct {
@@ -73,6 +92,7 @@ type Summary struct {
 	Logging  LoggingSummary  `json:"logging"`
 	Database DatabaseSummary `json:"database"`
 	Redis    RedisSummary    `json:"redis"`
+	Auth     AuthSummary     `json:"auth"`
 }
 
 type ServerSummary struct {
@@ -104,6 +124,21 @@ type RedisSummary struct {
 	DB           int    `json:"db"`
 }
 
+type AuthSummary struct {
+	Enabled              bool          `json:"enabled"`
+	Issuer               string        `json:"issuer"`
+	Audience             string        `json:"audience"`
+	AccessTTL            time.Duration `json:"access_ttl"`
+	RefreshTTL           time.Duration `json:"refresh_ttl"`
+	RefreshCookieName    string        `json:"refresh_cookie_name"`
+	SecureCookie         bool          `json:"secure_cookie"`
+	BcryptCost           int           `json:"bcrypt_cost"`
+	RateLimitWindow      time.Duration `json:"rate_limit_window"`
+	RateLimitMaxAttempts int           `json:"rate_limit_max_attempts"`
+	LockoutThreshold     int           `json:"lockout_threshold"`
+	LockoutDuration      time.Duration `json:"lockout_duration"`
+}
+
 // Default returns a complete configuration that starts the HTTP server without
 // external infrastructure services.
 func Default() Config {
@@ -133,6 +168,18 @@ func Default() Config {
 			ReadTimeout:  3 * time.Second,
 			WriteTimeout: 3 * time.Second,
 			PingTimeout:  3 * time.Second,
+		},
+		Auth: AuthConfig{
+			Issuer:               "gin-vben-admin",
+			Audience:             "admin",
+			AccessTTL:            15 * time.Minute,
+			RefreshTTL:           7 * 24 * time.Hour,
+			RefreshCookieName:    "refresh_token",
+			BcryptCost:           12,
+			RateLimitWindow:      time.Minute,
+			RateLimitMaxAttempts: 10,
+			LockoutThreshold:     5,
+			LockoutDuration:      15 * time.Minute,
 		},
 	}
 }
@@ -183,6 +230,37 @@ func (cfg Config) Validate() error {
 	}
 	if err := cfg.Redis.validate(); err != nil {
 		return fmt.Errorf("redis: %w", err)
+	}
+	if err := cfg.Auth.validate(); err != nil {
+		return fmt.Errorf("auth: %w", err)
+	}
+	return nil
+}
+
+func (cfg AuthConfig) validate() error {
+	if !cfg.Enabled {
+		return nil
+	}
+	if cfg.AccessTTL <= 0 || cfg.RefreshTTL <= 0 || cfg.RefreshTTL <= cfg.AccessTTL {
+		return errors.New("access_ttl and refresh_ttl must be positive, with refresh_ttl greater than access_ttl")
+	}
+	if cfg.BcryptCost < 10 || cfg.BcryptCost > 14 {
+		return errors.New("bcrypt_cost must be between 10 and 14")
+	}
+	if cfg.RateLimitWindow <= 0 || cfg.RateLimitMaxAttempts <= 0 {
+		return errors.New("rate limit window and max attempts must be positive")
+	}
+	if cfg.LockoutThreshold <= 0 || cfg.LockoutDuration <= 0 {
+		return errors.New("lockout threshold and duration must be positive")
+	}
+	if strings.TrimSpace(cfg.RefreshCookieName) == "" || strings.ContainsAny(cfg.RefreshCookieName, "\r\n;= ") {
+		return errors.New("refresh_cookie_name must be a valid cookie name")
+	}
+	if len([]byte(cfg.JWTSecret)) < 32 {
+		return errors.New("jwt_secret must contain at least 32 bytes when auth is enabled")
+	}
+	if strings.TrimSpace(cfg.Issuer) == "" || strings.TrimSpace(cfg.Audience) == "" {
+		return errors.New("issuer and audience are required when auth is enabled")
 	}
 	return nil
 }
@@ -305,6 +383,20 @@ func (cfg Config) SafeSummary() Summary {
 			Namespace:    cfg.Redis.Namespace,
 			DB:           cfg.Redis.DB,
 		},
+		Auth: AuthSummary{
+			Enabled:              cfg.Auth.Enabled,
+			Issuer:               cfg.Auth.Issuer,
+			Audience:             cfg.Auth.Audience,
+			AccessTTL:            cfg.Auth.AccessTTL,
+			RefreshTTL:           cfg.Auth.RefreshTTL,
+			RefreshCookieName:    cfg.Auth.RefreshCookieName,
+			SecureCookie:         cfg.Auth.SecureCookie,
+			BcryptCost:           cfg.Auth.BcryptCost,
+			RateLimitWindow:      cfg.Auth.RateLimitWindow,
+			RateLimitMaxAttempts: cfg.Auth.RateLimitMaxAttempts,
+			LockoutThreshold:     cfg.Auth.LockoutThreshold,
+			LockoutDuration:      cfg.Auth.LockoutDuration,
+		},
 	}
 }
 
@@ -346,6 +438,19 @@ func newViper() *viper.Viper {
 	v.SetDefault("redis.read_timeout", cfg.Redis.ReadTimeout)
 	v.SetDefault("redis.write_timeout", cfg.Redis.WriteTimeout)
 	v.SetDefault("redis.ping_timeout", cfg.Redis.PingTimeout)
+	v.SetDefault("auth.enabled", cfg.Auth.Enabled)
+	v.SetDefault("auth.jwt_secret", cfg.Auth.JWTSecret)
+	v.SetDefault("auth.issuer", cfg.Auth.Issuer)
+	v.SetDefault("auth.audience", cfg.Auth.Audience)
+	v.SetDefault("auth.access_ttl", cfg.Auth.AccessTTL)
+	v.SetDefault("auth.refresh_ttl", cfg.Auth.RefreshTTL)
+	v.SetDefault("auth.refresh_cookie_name", cfg.Auth.RefreshCookieName)
+	v.SetDefault("auth.secure_cookie", cfg.Auth.SecureCookie)
+	v.SetDefault("auth.bcrypt_cost", cfg.Auth.BcryptCost)
+	v.SetDefault("auth.rate_limit_window", cfg.Auth.RateLimitWindow)
+	v.SetDefault("auth.rate_limit_max_attempts", cfg.Auth.RateLimitMaxAttempts)
+	v.SetDefault("auth.lockout_threshold", cfg.Auth.LockoutThreshold)
+	v.SetDefault("auth.lockout_duration", cfg.Auth.LockoutDuration)
 
 	for key, environment := range environmentBindings {
 		_ = v.BindEnv(key, environment)
@@ -354,37 +459,50 @@ func newViper() *viper.Viper {
 }
 
 var environmentBindings = map[string]string{
-	"server.addr":                 "SERVER_ADDR",
-	"server.read_timeout":         "SERVER_READ_TIMEOUT",
-	"server.write_timeout":        "SERVER_WRITE_TIMEOUT",
-	"server.idle_timeout":         "SERVER_IDLE_TIMEOUT",
-	"server.shutdown_timeout":     "SERVER_SHUTDOWN_TIMEOUT",
-	"logging.level":               "LOGGING_LEVEL",
-	"database.enabled":            "DATABASE_ENABLED",
-	"database.driver":             "DATABASE_DRIVER",
-	"database.dsn":                "DATABASE_DSN",
-	"database.mode":               "DATABASE_MODE",
-	"database.primary_dsn":        "DATABASE_PRIMARY_DSN",
-	"database.replica_dsns":       "DATABASE_REPLICA_DSNS",
-	"database.read_policy":        "DATABASE_READ_POLICY",
-	"database.max_open_conns":     "DATABASE_MAX_OPEN_CONNS",
-	"database.max_idle_conns":     "DATABASE_MAX_IDLE_CONNS",
-	"database.conn_max_lifetime":  "DATABASE_CONN_MAX_LIFETIME",
-	"database.conn_max_idle_time": "DATABASE_CONN_MAX_IDLE_TIME",
-	"database.ping_timeout":       "DATABASE_PING_TIMEOUT",
-	"redis.enabled":               "REDIS_ENABLED",
-	"redis.addr":                  "REDIS_ADDR",
-	"redis.username":              "REDIS_USERNAME",
-	"redis.password":              "REDIS_PASSWORD",
-	"redis.db":                    "REDIS_DB",
-	"redis.namespace":             "REDIS_NAMESPACE",
-	"redis.mode":                  "REDIS_MODE",
-	"redis.addrs":                 "REDIS_ADDRS",
-	"redis.master_name":           "REDIS_MASTER_NAME",
-	"redis.dial_timeout":          "REDIS_DIAL_TIMEOUT",
-	"redis.read_timeout":          "REDIS_READ_TIMEOUT",
-	"redis.write_timeout":         "REDIS_WRITE_TIMEOUT",
-	"redis.ping_timeout":          "REDIS_PING_TIMEOUT",
+	"server.addr":                  "SERVER_ADDR",
+	"server.read_timeout":          "SERVER_READ_TIMEOUT",
+	"server.write_timeout":         "SERVER_WRITE_TIMEOUT",
+	"server.idle_timeout":          "SERVER_IDLE_TIMEOUT",
+	"server.shutdown_timeout":      "SERVER_SHUTDOWN_TIMEOUT",
+	"logging.level":                "LOGGING_LEVEL",
+	"database.enabled":             "DATABASE_ENABLED",
+	"database.driver":              "DATABASE_DRIVER",
+	"database.dsn":                 "DATABASE_DSN",
+	"database.mode":                "DATABASE_MODE",
+	"database.primary_dsn":         "DATABASE_PRIMARY_DSN",
+	"database.replica_dsns":        "DATABASE_REPLICA_DSNS",
+	"database.read_policy":         "DATABASE_READ_POLICY",
+	"database.max_open_conns":      "DATABASE_MAX_OPEN_CONNS",
+	"database.max_idle_conns":      "DATABASE_MAX_IDLE_CONNS",
+	"database.conn_max_lifetime":   "DATABASE_CONN_MAX_LIFETIME",
+	"database.conn_max_idle_time":  "DATABASE_CONN_MAX_IDLE_TIME",
+	"database.ping_timeout":        "DATABASE_PING_TIMEOUT",
+	"redis.enabled":                "REDIS_ENABLED",
+	"redis.addr":                   "REDIS_ADDR",
+	"redis.username":               "REDIS_USERNAME",
+	"redis.password":               "REDIS_PASSWORD",
+	"redis.db":                     "REDIS_DB",
+	"redis.namespace":              "REDIS_NAMESPACE",
+	"redis.mode":                   "REDIS_MODE",
+	"redis.addrs":                  "REDIS_ADDRS",
+	"redis.master_name":            "REDIS_MASTER_NAME",
+	"redis.dial_timeout":           "REDIS_DIAL_TIMEOUT",
+	"redis.read_timeout":           "REDIS_READ_TIMEOUT",
+	"redis.write_timeout":          "REDIS_WRITE_TIMEOUT",
+	"redis.ping_timeout":           "REDIS_PING_TIMEOUT",
+	"auth.enabled":                 "AUTH_ENABLED",
+	"auth.jwt_secret":              "AUTH_JWT_SECRET",
+	"auth.issuer":                  "AUTH_ISSUER",
+	"auth.audience":                "AUTH_AUDIENCE",
+	"auth.access_ttl":              "AUTH_ACCESS_TTL",
+	"auth.refresh_ttl":             "AUTH_REFRESH_TTL",
+	"auth.refresh_cookie_name":     "AUTH_REFRESH_COOKIE_NAME",
+	"auth.secure_cookie":           "AUTH_SECURE_COOKIE",
+	"auth.bcrypt_cost":             "AUTH_BCRYPT_COST",
+	"auth.rate_limit_window":       "AUTH_RATE_LIMIT_WINDOW",
+	"auth.rate_limit_max_attempts": "AUTH_RATE_LIMIT_MAX_ATTEMPTS",
+	"auth.lockout_threshold":       "AUTH_LOCKOUT_THRESHOLD",
+	"auth.lockout_duration":        "AUTH_LOCKOUT_DURATION",
 }
 
 func resolvePath(path string) (string, bool) {
