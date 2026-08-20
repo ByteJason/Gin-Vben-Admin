@@ -175,6 +175,28 @@ func (c *Client) Delete(ctx context.Context, key string) error {
 	return c.client.Del(ctx, key).Err()
 }
 
+const incrementWithTTLScript = `
+local count = redis.call("INCR", KEYS[1])
+if count == 1 then
+  redis.call("PEXPIRE", KEYS[1], ARGV[1])
+end
+return count
+`
+
+var incrementWithTTL = redis.NewScript(incrementWithTTLScript)
+
+// Increment atomically increments a namespaced counter and applies the TTL to
+// its first write. It is the primitive used by distributed rate-limiters.
+func (c *Client) Increment(ctx context.Context, key string, ttl time.Duration) (int64, error) {
+	if !c.isPhysicalKey(key) {
+		return 0, ErrInvalidKey
+	}
+	if ttl <= 0 {
+		return 0, ErrInvalidTTL
+	}
+	return incrementWithTTL.Run(ctx, c.client, []string{key}, ttl.Milliseconds()).Int64()
+}
+
 // Lock is an acquired Redis lock. Its owner token is generated locally and is
 // never exposed, logged, or accepted from callers.
 type Lock struct {

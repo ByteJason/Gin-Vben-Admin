@@ -95,6 +95,16 @@ func TestTTLAndLockNameValidationHappenBeforeNetworkIO(t *testing.T) {
 	if _, err := client.AcquireLock(context.Background(), "job", 0); !errors.Is(err, ErrInvalidTTL) {
 		t.Fatalf("AcquireLock() error = %v, want ErrInvalidTTL", err)
 	}
+	if _, err := client.Increment(context.Background(), "foreign:key", time.Minute); !errors.Is(err, ErrInvalidKey) {
+		t.Fatalf("Increment() error = %v, want ErrInvalidKey", err)
+	}
+	validRateKey, err := client.Key("rate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Increment(context.Background(), validRateKey, 0); !errors.Is(err, ErrInvalidTTL) {
+		t.Fatalf("Increment() error = %v, want ErrInvalidTTL", err)
+	}
 }
 
 func TestTopologyValidationDoesNotProbeNetwork(t *testing.T) {
