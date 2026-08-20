@@ -152,3 +152,12 @@ test('readiness contract describes dependency check states', () => {
   assert.match(admin, /enum: \[up, down\]/);
   assert.match(admin, /enum: \[ok, ready, unavailable\]/);
 });
+
+test('bootstrap renders the selected database driver into a new local config', async () => {
+  const { renderServerConfig } = await import('../../scripts/bootstrap-config.mjs');
+  const template = 'database:\n  enabled: false\n  driver: mysql\n';
+  const postgres = renderServerConfig(template, 'postgres');
+  assert.match(postgres, /driver: postgres/);
+  assert.doesNotMatch(postgres, /driver: mysql/);
+  assert.throws(() => renderServerConfig(template, 'sqlite'));
+});

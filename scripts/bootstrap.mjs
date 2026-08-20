@@ -1,9 +1,11 @@
 #!/usr/bin/env node
-import { access, copyFile, mkdir } from 'node:fs/promises';
+import { access, copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+
+import { renderServerConfig } from './bootstrap-config.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = new Set(process.argv.slice(2));
@@ -89,7 +91,8 @@ if (checkOnly) {
 
 const localConfig = path.join(root, 'server/configs/server.yaml');
 if (!(await exists('server/configs/server.yaml'))) {
-  await copyFile(path.join(root, 'server/configs/server.example.yaml'), localConfig);
+  const template = await readFile(path.join(root, 'server/configs/server.example.yaml'), 'utf8');
+  await writeFile(localConfig, renderServerConfig(template, database), { mode: 0o600 });
   console.log('CONFIG_CREATED=server/configs/server.yaml');
 } else {
   console.log('CONFIG_PRESERVED=server/configs/server.yaml');
