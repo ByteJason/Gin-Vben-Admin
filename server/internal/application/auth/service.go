@@ -207,6 +207,13 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (authdomain.
 			return authdomain.TokenPair{}, authdomain.ErrDependencyUnavailable
 		}
 	}
+	if err := s.recordAudit(ctx, authdomain.AuditEvent{
+		UserID: claims.Subject, SessionID: claims.SessionID, EventType: authdomain.AuditRefresh,
+		Outcome: authdomain.AuditOutcomeSuccess,
+	}); err != nil {
+		_ = s.sess.Revoke(ctx, claims.SessionID)
+		return authdomain.TokenPair{}, authdomain.ErrDependencyUnavailable
+	}
 	return pair, nil
 }
 
@@ -224,6 +231,12 @@ func (s *Service) Logout(ctx context.Context, sessionID string) error {
 		if err := s.journal.Revoke(ctx, sessionID); err != nil {
 			return authdomain.ErrDependencyUnavailable
 		}
+	}
+	if err := s.recordAudit(ctx, authdomain.AuditEvent{
+		SessionID: sessionID, EventType: authdomain.AuditLogout,
+		Outcome: authdomain.AuditOutcomeSuccess,
+	}); err != nil {
+		return authdomain.ErrDependencyUnavailable
 	}
 	return nil
 }

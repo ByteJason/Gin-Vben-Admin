@@ -40,3 +40,34 @@ func TestSuccessfulLoginRecordsAuditEvent(t *testing.T) {
 		t.Fatalf("audit event = %+v", event)
 	}
 }
+
+func TestRefreshAndLogoutRecordAuditEvents(t *testing.T) {
+	hasher := authplatform.BcryptHasher{Cost: 4}
+	hash, err := hasher.Hash("correct-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink := &auditSink{}
+	tokens := authplatform.NewJWTService([]byte("test-secret"), time.Minute, time.Hour)
+	svc := auth.NewService(userRepo{user: authdomain.User{ID: "u1", Identifier: "alice", PasswordHash: hash, Active: true}}, hasher, tokens, authplatform.NewMemorySessionStore())
+	svc.SetAuditSink(sink)
+
+	pair, err := svc.Login(context.Background(), "alice", "correct-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rotated, err := svc.Refresh(context.Background(), pair.RefreshToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := tokens.Parse(rotated.RefreshToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Logout(context.Background(), claims.SessionID); err != nil {
+		t.Fatal(err)
+	}
+	if len(sink.events) != 3 || sink.events[1].EventType != authdomain.AuditRefresh || sink.events[2].EventType != authdomain.AuditLogout {
+		t.Fatalf("audit lifecycle events = %+v", sink.events)
+	}
+}

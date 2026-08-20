@@ -65,6 +65,7 @@ func (s *Service) Register(ctx context.Context, identifier, password string) err
 	err = s.accounts.CreateUser(ctx, authdomain.User{Identifier: identifier, PasswordHash: hash, Active: true})
 	switch {
 	case err == nil:
+		_ = s.recordAudit(ctx, authdomain.AuditEvent{EventType: authdomain.AuditRegister, Outcome: authdomain.AuditOutcomeSuccess})
 		return nil
 	case errors.Is(err, authdomain.ErrUserAlreadyExists):
 		return authdomain.ErrUserAlreadyExists
@@ -142,6 +143,7 @@ func (s *Service) ResetPassword(ctx context.Context, token, password string) err
 		}
 		return authdomain.ErrDependencyUnavailable
 	}
+	_ = s.recordAudit(ctx, authdomain.AuditEvent{EventType: authdomain.AuditPasswordReset, Outcome: authdomain.AuditOutcomeSuccess})
 	return nil
 }
 
