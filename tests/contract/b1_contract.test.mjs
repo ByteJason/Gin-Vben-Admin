@@ -63,3 +63,16 @@ test('B1 install flow does not advertise an unimplemented migration command', ()
   assert.doesNotMatch(readme, /go -C server run \.\/cmd\/migrate up/);
   assert.doesNotMatch(readme, /go run \.\/cmd\/migrate up/);
 });
+
+test('B1 CI covers the three host platforms and core gates', () => {
+  const workflowPath = join(root, '.github/workflows/ci.yml');
+  assert.equal(existsSync(workflowPath), true, workflowPath);
+  const workflow = readFileSync(workflowPath, 'utf8');
+  for (const platform of ['ubuntu-latest', 'macos-latest', 'windows-latest']) {
+    assert.match(workflow, new RegExp(platform));
+  }
+  assert.match(workflow, /pnpm\/action-setup/);
+  assert.match(workflow, /node --test tests\/contract\/b1_contract\.test\.mjs/);
+  assert.match(workflow, /pnpm --dir admin run test:b1/);
+  assert.match(workflow, /go -C server test \.\.\./);
+});
