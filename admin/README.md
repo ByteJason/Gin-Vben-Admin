@@ -6,11 +6,11 @@
 - `apps/web-ele`：Element Plus
 - `apps/web-naive`：Naive UI
 
-`web-antdv-next`、`web-tdesign` 和上游 mock 服务已从工作区裁剪。前端通过 `/api` 访问根目录的 Gin 服务 `server/`，不在此目录启动模拟服务。
+前端通过 `/api` 访问根目录的 Gin 服务 `server/`。
 
 ## 初始化与验证
 
-```bash
+```text
 pnpm install --frozen-lockfile
 pnpm run test:b1
 pnpm run dev:antd   # 或 dev:ele / dev:naive
@@ -20,7 +20,7 @@ pnpm run dev:antd   # 或 dev:ele / dev:naive
 
 构建单个模板：
 
-```bash
+```text
 pnpm run build:antd
 pnpm run build:ele
 pnpm run build:naive
