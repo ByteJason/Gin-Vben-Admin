@@ -13,6 +13,10 @@ codes:
     key: validation_failed
     http_status: 422
     retryable: false
+  - code: 40001
+    key: dependency_unavailable
+    http_status: 503
+    retryable: true
   - code: 20000
     key: unauthenticated
     http_status: 401

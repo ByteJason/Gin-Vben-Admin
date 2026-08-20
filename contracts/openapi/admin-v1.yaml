@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: APP Admin API
-  version: 0.1.0-dev
+  version: 0.2.0-dev
   description: |
     管理端 HTTP API。
 servers:
@@ -57,7 +57,15 @@ components:
       properties:
         status:
           type: string
-          enum: [ok, ready]
+          enum: [ok, ready, unavailable]
+        check:
+          type: string
+          enum: [live]
+        checks:
+          type: object
+          additionalProperties:
+            type: string
+            enum: [up, down]
     SuccessEnvelope:
       type: object
       required: [code, message, data, traceId, meta]
@@ -137,7 +145,14 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ErrorEnvelope'
+            allOf:
+              - $ref: '#/components/schemas/ErrorEnvelope'
+              - type: object
+                properties:
+                  code:
+                    const: 40001
+                  data:
+                    $ref: '#/components/schemas/HealthData'
   headers:
     RequestId:
       description: 用于跨服务追踪的请求 ID
