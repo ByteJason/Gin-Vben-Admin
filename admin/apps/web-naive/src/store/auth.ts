@@ -33,7 +33,11 @@ export const useAuthStore = defineStore('auth', () => {
     let userInfo: null | UserInfo = null;
     try {
       loginLoading.value = true;
-      const { accessToken } = await loginApi(params);
+      const { accessToken } = await loginApi({
+        captcha: typeof params.captcha === 'string' ? params.captcha : undefined,
+        password: params.password,
+        username: params.username,
+      });
 
       // 如果成功获取到 accessToken
       if (accessToken) {

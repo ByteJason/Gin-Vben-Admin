@@ -138,6 +138,18 @@ test('web-antd auth seam uses the versioned API and sends the refresh cookie', (
   assert.match(login, /login-error|login-success|role=["']alert["']/);
 });
 
+test('management UI clients use versioned authentication and menu endpoints', () => {
+  for (const ui of ['web-antd', 'web-ele', 'web-naive']) {
+    const auth = readFileSync(join(root, `admin/apps/${ui}/src/api/core/auth.ts`), 'utf8');
+    const menu = readFileSync(join(root, `admin/apps/${ui}/src/api/core/menu.ts`), 'utf8');
+    for (const endpoint of ['/admin/v1/auth/login', '/admin/v1/auth/refresh', '/admin/v1/auth/logout']) {
+      assert.match(auth, new RegExp(endpoint.replaceAll('/', '\\/')), `${ui} ${endpoint}`);
+    }
+    assert.match(auth, /withCredentials:\s*true/, `${ui} refresh credentials`);
+    assert.match(menu, /\/admin\/v1\/menu\/all/, `${ui} menu endpoint`);
+  }
+});
+
 test('bootstrap check is cross-platform and verification succeeds', () => {
   const bootstrap = runNode('scripts/bootstrap.mjs', '--check');
   assert.equal(bootstrap.status, 0, bootstrap.stdout + bootstrap.stderr);

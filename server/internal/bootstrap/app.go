@@ -101,6 +101,7 @@ func New(cfg config.Config) (*App, error) {
 		app.auth = appauth.NewService(users, hasher, tokens, sessions, attempts)
 		persistentIAM := iamplatform.NewGORMStore(app.database)
 		app.iam = iamapp.NewServiceWithRepositories(persistentIAM, persistentIAM, persistentIAM, persistentIAM, persistentIAM, persistentIAM)
+		app.iam.SetPermissionCache(iamplatform.NewRedisPermissionCache(app.redis), 30*time.Second)
 	}
 
 	app.readiness = platformhealth.NewChecker(readinessTimeout(cfg), dependencies...)

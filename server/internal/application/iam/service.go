@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	domain "example.com/gin-vben-admin/server/internal/domain/iam"
 )
@@ -242,6 +243,7 @@ type Service struct {
 	DataScopes  domain.DataScopeStore
 	Authorizer  domain.Authorizer
 	Scopes      domain.DataScopeResolver
+	cache       DecisionCache
 }
 
 type userLister interface {
@@ -291,6 +293,20 @@ func NewServiceWithRepositories(users domain.UserRepository, roles domain.RoleRe
 	}
 }
 
+// SetPermissionCache wraps the current authorizer with a versioned decision
+// cache. It is intentionally explicit so deployments can keep caching off.
+func (s *Service) SetPermissionCache(cache DecisionCache, ttl time.Duration) {
+	if s == nil {
+		return
+	}
+	s.cache = cache
+	s.Authorizer = NewCachedAuthorizer(s.Authorizer, cache, ttl)
+}
+
+func (s *Service) invalidate(ctx context.Context) error {
+	return InvalidatePermissionCache(ctx, s.cache)
+}
+
 func (s *Service) Authorize(ctx context.Context, subject domain.Subject, request domain.Request) (bool, error) {
 	if s == nil || s.Authorizer == nil {
 		return false, domain.ErrAccessDenied
@@ -324,7 +340,10 @@ func (s *Service) SaveUser(ctx context.Context, user domain.User) error {
 	if !ok {
 		return ErrRepositoryMissing
 	}
-	return repo.SaveUser(ctx, user)
+	if err := repo.SaveUser(ctx, user); err != nil {
+		return err
+	}
+	return s.invalidate(ctx)
 }
 
 func (s *Service) ListRoles(ctx context.Context) ([]domain.Role, error) {
@@ -346,7 +365,10 @@ func (s *Service) SaveRole(ctx context.Context, role domain.Role) error {
 	if !ok {
 		return ErrRepositoryMissing
 	}
-	return repo.SaveRole(ctx, role)
+	if err := repo.SaveRole(ctx, role); err != nil {
+		return err
+	}
+	return s.invalidate(ctx)
 }
 
 func (s *Service) ListMenus(ctx context.Context) ([]domain.Menu, error) {
@@ -368,7 +390,10 @@ func (s *Service) SaveMenu(ctx context.Context, menu domain.Menu) error {
 	if !ok {
 		return ErrRepositoryMissing
 	}
-	return repo.SaveMenu(ctx, menu)
+	if err := repo.SaveMenu(ctx, menu); err != nil {
+		return err
+	}
+	return s.invalidate(ctx)
 }
 
 func (s *Service) ListPermissions(ctx context.Context) ([]domain.Permission, error) {
@@ -390,7 +415,10 @@ func (s *Service) SavePermission(ctx context.Context, permission domain.Permissi
 	if !ok {
 		return ErrRepositoryMissing
 	}
-	return repo.SavePermission(ctx, permission)
+	if err := repo.SavePermission(ctx, permission); err != nil {
+		return err
+	}
+	return s.invalidate(ctx)
 }
 
 func (s *Service) ListPolicies(ctx context.Context) ([]domain.Policy, error) {
@@ -410,7 +438,10 @@ func (s *Service) SavePolicy(ctx context.Context, policy domain.Policy) error {
 	if !ok {
 		return ErrRepositoryMissing
 	}
-	return repo.SavePolicy(ctx, policy)
+	if err := repo.SavePolicy(ctx, policy); err != nil {
+		return err
+	}
+	return s.invalidate(ctx)
 }
 
 func (s *Service) ListDataScopes(ctx context.Context) ([]domain.DataScope, error) {
@@ -430,5 +461,8 @@ func (s *Service) SaveDataScope(ctx context.Context, scope domain.DataScope) err
 	if !ok {
 		return ErrRepositoryMissing
 	}
-	return repo.SaveDataScope(ctx, scope)
+	if err := repo.SaveDataScope(ctx, scope); err != nil {
+		return err
+	}
+	return s.invalidate(ctx)
 }
