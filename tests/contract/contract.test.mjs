@@ -73,6 +73,21 @@ test('installation contract exposes credential-free status on its own scope', ()
   assert.doesNotMatch(install, /\/api\/admin\/v1|\/api\/client\/v1/);
 });
 
+test('installation contract exposes a permission plan without filesystem details', () => {
+  const install = readFileSync(join(root, 'contracts/openapi/install-v1.yaml'), 'utf8');
+  assert.match(install, /\/api\/system\/install\/v1\/plan:/);
+  assert.match(install, /post:/);
+  assert.match(install, /PlanRequest/);
+  assert.match(install, /InstallationPlan/);
+  assert.match(install, /canCleanup/);
+  assert.match(install, /canBuild/);
+  assert.match(install, /canWriteEnv/);
+  assert.match(install, /requiresRestart/);
+  assert.match(install, /path:/);
+  assert.match(install, /action:/);
+  assert.doesNotMatch(install, /absolutePath|rootPath|password|dsn|jwtSecret|redisPassword/i);
+});
+
 test('installation workspace smoke and runtime artifacts stay cross-platform', () => {
   const smoke = runNode('install/tests/smoke.test.mjs');
   assert.equal(smoke.status, 0, smoke.stdout + smoke.stderr);

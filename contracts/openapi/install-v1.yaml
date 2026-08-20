@@ -31,6 +31,39 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+  /api/system/install/v1/plan:
+    post:
+      tags: [Installation]
+      operationId: createInstallationPlan
+      summary: 生成 UI 与配置写入的权限预检计划
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlanRequest'
+      responses:
+        '200':
+          description: 预检计划生成成功
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstallationPlanEnvelope'
+        '400':
+          description: 选择或路径预检参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanErrorEnvelope'
+        '503':
+          description: 安装服务未接通
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstallServiceUnavailableEnvelope'
 components:
   headers:
     RequestId:
@@ -99,3 +132,117 @@ components:
       properties:
         requestId:
           type: string
+    PlanRequest:
+      type: object
+      required: [selectedUi, mode]
+      additionalProperties: false
+      properties:
+        selectedUi:
+          type: string
+          enum: [antd, ele, naive]
+        mode:
+          type: string
+          enum: [embedded, standalone, api_only, dev]
+    InstallationPlanEnvelope:
+      type: object
+      required: [code, message, data, traceId, meta]
+      properties:
+        code:
+          type: integer
+          const: 0
+        message:
+          type: string
+          const: success
+        data:
+          $ref: '#/components/schemas/InstallationPlan'
+        traceId:
+          type: string
+        meta:
+          $ref: '#/components/schemas/ResponseMeta'
+    InstallationPlan:
+      type: object
+      required: [selectedUi, mode, canCleanup, canBuild, canWriteEnv, requiresRestart, entries, reasons]
+      properties:
+        selectedUi:
+          type: string
+          enum: [antd, ele, naive]
+        mode:
+          type: string
+          enum: [embedded, standalone, api_only, dev]
+        canCleanup:
+          type: boolean
+        canBuild:
+          type: boolean
+        canWriteEnv:
+          type: boolean
+        requiresRestart:
+          type: boolean
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlanEntry'
+        reasons:
+          type: array
+          items:
+            type: string
+    PlanEntry:
+      type: object
+      required: [path, action, permission]
+      properties:
+        path:
+          type: string
+        action:
+          type: string
+          enum: [keep, remove, create, write]
+        permission:
+          $ref: '#/components/schemas/PathPermission'
+    PathPermission:
+      type: object
+      required: [canRead, canWrite, canCreate, canRename, canDelete, reasons]
+      properties:
+        canRead:
+          type: boolean
+        canWrite:
+          type: boolean
+        canCreate:
+          type: boolean
+        canRename:
+          type: boolean
+        canDelete:
+          type: boolean
+        reasons:
+          type: array
+          items:
+            type: string
+    PlanErrorEnvelope:
+      type: object
+      required: [code, message, data, traceId, meta]
+      properties:
+        code:
+          type: integer
+          const: 10000
+        message:
+          type: string
+          const: invalid installation plan
+        data:
+          type: 'null'
+        traceId:
+          type: string
+        meta:
+          $ref: '#/components/schemas/ResponseMeta'
+    InstallServiceUnavailableEnvelope:
+      type: object
+      required: [code, message, data, traceId, meta]
+      properties:
+        code:
+          type: integer
+          const: 40001
+        message:
+          type: string
+          const: installation service unavailable
+        data:
+          type: 'null'
+        traceId:
+          type: string
+        meta:
+          $ref: '#/components/schemas/ResponseMeta'
