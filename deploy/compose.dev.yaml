@@ -14,7 +14,7 @@ services:
       REDIS_ENABLED: "true"
       REDIS_MODE: single
       REDIS_ADDR: redis:6379
-      REDIS_NAMESPACE: gin-vben-admin:v1
+      REDIS_NAMESPACE: app:v1
     ports:
       - "${SERVER_PORT:-8080}:8080"
     depends_on:

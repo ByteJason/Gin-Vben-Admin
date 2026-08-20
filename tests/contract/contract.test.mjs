@@ -103,6 +103,7 @@ test('v0.2 public surface documents config topologies and explicit migrations', 
   assert.match(readme, /migrate status/);
   for (const mode of ['single', 'read_write', 'cluster_endpoint']) assert.match(example, new RegExp(mode));
   for (const mode of ['single', 'sentinel', 'cluster']) assert.match(example, new RegExp(mode));
+  assert.match(example, /namespace: app:v1/);
   assert.equal(existsSync(join(root, 'server/cmd/migrate')), true);
 });
 
@@ -141,6 +142,7 @@ test('development compose wires the API to the default single-node dependencies'
     assert.match(server, new RegExp(variable));
   }
   assert.doesNotMatch(server, /postgres:\s*\n\s+condition:/);
+  assert.match(server, /REDIS_NAMESPACE: app:v1/);
   assert.match(compose, /postgres:\s*\n\s+profiles: \["postgres"\]/);
 });
 

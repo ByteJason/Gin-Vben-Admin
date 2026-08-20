@@ -36,7 +36,7 @@ redis:
   username: ""
   password: ""
   db: 0
-  namespace: gin-vben-admin:v1
+  namespace: app:v1
   addrs: []
   master_name: ""
   dial_timeout: 5s
