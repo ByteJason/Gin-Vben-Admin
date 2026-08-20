@@ -100,7 +100,9 @@ func New(cfg config.Config) (*App, error) {
 		attempts := authplatform.NewRedisLoginAttemptStore(app.redis, cfg.Auth.LockoutThreshold, cfg.Auth.LockoutDuration)
 		authService := appauth.NewService(users, hasher, tokens, sessions, attempts)
 		authService.SetAccountProvisioner(users)
-		authService.SetSessionJournal(authplatform.NewGORMSessionStore(app.database))
+		durableSessions := authplatform.NewGORMSessionStore(app.database)
+		authService.SetSessionJournal(durableSessions)
+		authService.SetSessionQuery(durableSessions)
 		app.auth = authService
 		persistentIAM := iamplatform.NewGORMStore(app.database)
 		app.iam = iamapp.NewServiceWithRepositories(persistentIAM, persistentIAM, persistentIAM, persistentIAM, persistentIAM, persistentIAM)
