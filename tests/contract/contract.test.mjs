@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
@@ -13,7 +13,7 @@ function runNode(script, ...args) {
   });
 }
 
-test('B1 skeleton exposes the separated admin/client/server boundaries', () => {
+test('repository exposes the required code boundaries', () => {
   for (const path of [
     'admin/apps/web-antd',
     'admin/apps/web-ele',
@@ -30,42 +30,46 @@ test('B1 skeleton exposes the separated admin/client/server boundaries', () => {
   ]) {
     assert.equal(existsSync(join(root, path)), true, path);
   }
-  for (const forbidden of ['apps', 'packages', 'internal', 'frontend', 'backend']) {
-    assert.equal(existsSync(join(root, forbidden)), false, `root/${forbidden}`);
-  }
-  assert.equal(existsSync(join(root, 'client')), false, 'client is deferred until its first vertical slice');
+  const allowed = new Set([
+    '.dev-docs', '.git', '.github', '.idea', '.pnpm-store', '.runtime', 'admin', 'contracts', 'deploy', 'docs',
+    'scripts', 'server', 'tests',
+  ]);
+  const unexpected = readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !allowed.has(entry.name))
+    .map((entry) => entry.name);
+  assert.deepEqual(unexpected, []);
 });
 
-test('OpenAPI scopes stay separate and expose the B1 seams', () => {
+test('OpenAPI scopes stay separate and expose the HTTP seams', () => {
   const admin = readFileSync(join(root, 'contracts/openapi/admin-v1.yaml'), 'utf8');
   const client = readFileSync(join(root, 'contracts/openapi/client-v1.yaml'), 'utf8');
   assert.match(admin, /\/health\/live/);
   assert.match(admin, /\/health\/ready/);
-  assert.match(admin, /\/api\/admin\/v1\/auth\/login/);
+  assert.match(admin, /\/api\/admin\/v1\/ping/);
   assert.match(admin, /X-Request-ID/);
   assert.doesNotMatch(client, /\/api\/admin\/v1/);
 });
 
-test('bootstrap check is cross-platform and verify reports a green skeleton', () => {
+test('bootstrap check is cross-platform and verification succeeds', () => {
   const bootstrap = runNode('scripts/bootstrap.mjs', '--check');
   assert.equal(bootstrap.status, 0, bootstrap.stdout + bootstrap.stderr);
-  const verify = runNode('scripts/verify.mjs', '--scope', 'skeleton');
+  const verify = runNode('scripts/verify.mjs', '--scope', 'basic');
   assert.equal(verify.status, 0, verify.stdout + verify.stderr);
   assert.match(verify.stdout, /VERIFY_OK/);
 });
 
-test('B1 container build prepares the upstream workspace stubs', () => {
+test('container build prepares the workspace stubs', () => {
   const dockerfile = readFileSync(join(root, 'admin/Dockerfile'), 'utf8');
   assert.match(dockerfile, /pnpm -r run --if-present stub/);
 });
 
-test('B1 install flow does not advertise an unimplemented migration command', () => {
+test('install flow does not advertise an unavailable migration command', () => {
   const readme = readFileSync(join(root, 'README.md'), 'utf8');
   assert.doesNotMatch(readme, /go -C server run \.\/cmd\/migrate up/);
   assert.doesNotMatch(readme, /go run \.\/cmd\/migrate up/);
 });
 
-test('B1 CI covers the three host platforms and core gates', () => {
+test('CI covers the three host platforms and core gates', () => {
   const workflowPath = join(root, '.github/workflows/ci.yml');
   assert.equal(existsSync(workflowPath), true, workflowPath);
   const workflow = readFileSync(workflowPath, 'utf8');
@@ -73,12 +77,12 @@ test('B1 CI covers the three host platforms and core gates', () => {
     assert.match(workflow, new RegExp(platform));
   }
   assert.match(workflow, /pnpm\/action-setup/);
-  assert.match(workflow, /node --test tests\/contract\/b1_contract\.test\.mjs/);
-  assert.match(workflow, /pnpm --dir admin run test:b1/);
+  assert.match(workflow, /node --test tests\/contract\/contract\.test\.mjs/);
+  assert.match(workflow, /pnpm --dir admin run test:smoke/);
   assert.match(workflow, /go -C server test \.\/\.\.\./);
 });
 
-test('B1 dev orchestrator exposes a cross-platform check mode', () => {
+test('dev orchestrator exposes a cross-platform check mode', () => {
   const source = readFileSync(join(root, 'scripts/dev.mjs'), 'utf8');
   assert.match(source, /shell:\s*false/);
   const check = runNode('scripts/dev.mjs', '--check', '--ui', 'antd');

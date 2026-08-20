@@ -2,207 +2,196 @@
 
 基于 Go、Gin、Vue 3 与 Vue Vben Admin 的企业级后台管理基础平台。
 
-当前版本：`0.1.0-dev`。项目提供管理端 UI 模板、Gin HTTP 服务、OpenAPI 契约和跨平台开发脚本。
+当前版本：`0.1.0-dev`
 
-## 目录
+## 项目链接
+
+- 项目文档：
+- 在线演示：
+- 贡献指南：
+- 交流群：
+
+## 基本介绍
+
+项目提供管理端 UI 模板、Gin HTTP 服务、OpenAPI 契约、开发脚本和 Docker Compose 配置，适合企业后台、SaaS 管理台、ERP、CRM、CMS、OA 等项目的基础建设。
+
+## 主要功能
+
+- 管理端布局、路由、主题和国际化基础能力
+- 管理端接口契约与统一响应模型
+- Gin 健康检查、统一响应和 request ID
+- OpenAPI、错误码和响应 schema
+- MySQL、Redis 开发环境编排
+- Windows、macOS、Linux 通用的 Node.js 开发命令
+- 源码运行与 Docker Compose 部署
+
+## 技术选型
+
+| 层级 | 技术 |
+|---|---|
+| 管理端 | Vue 3、TypeScript、Vue Vben Admin |
+| UI 模板 | Ant Design Vue、Element Plus、Naive UI |
+| 服务端 | Go 1.24、Gin |
+| API 契约 | OpenAPI |
+| 数据服务 | MySQL 8、Redis 6+ |
+| 工程化 | pnpm、Turborepo、Node.js、GitHub Actions |
+| 部署 | Docker、Docker Compose |
+
+## 目录树
 
 ```text
 .
 ├── admin/                              # 管理端 pnpm workspace
-│   ├── apps/
-│   │   ├── web-antd/
-│   │   ├── web-ele/
-│   │   └── web-naive/
-│   ├── packages/                       # 共享前端包
-│   ├── internal/                       # 前端构建与质量工具
+│   ├── apps/web-antd/
+│   ├── apps/web-ele/
+│   ├── apps/web-naive/
+│   ├── packages/
+│   ├── internal/
 │   ├── scripts/
 │   ├── tests/contract/
 │   ├── package.json
 │   ├── pnpm-workspace.yaml
 │   ├── pnpm-lock.yaml
-│   ├── turbo.json
 │   └── Dockerfile
 ├── server/                             # Gin HTTP 服务
 │   ├── cmd/api/
 │   ├── configs/server.example.yaml
-│   ├── internal/
-│   │   ├── bootstrap/
-│   │   ├── config/
-│   │   └── transport/http/
-│   │       ├── admin/
-│   │       ├── client/
-│   │       ├── health/
-│   │       ├── middleware/
-│   │       ├── response/
-│   │       └── router/
-│   ├── tests/evidence/
+│   ├── internal/bootstrap/
+│   ├── internal/config/
+│   ├── internal/transport/http/
 │   ├── go.mod
 │   ├── go.sum
 │   └── Dockerfile
-├── contracts/                          # OpenAPI、错误码与响应 schema
-├── deploy/                              # Compose 配置
-├── scripts/                             # 跨平台 Node 脚本
-├── tests/contract/                      # 根级契约测试
-├── docs/                                # 公开文档
+├── contracts/                          # OpenAPI、错误码、响应 schema
+├── deploy/                             # Docker Compose 配置
+├── scripts/                            # 跨平台 Node.js 脚本
+├── tests/contract/                     # 根级契约测试
+├── docs/                               # 公开文档
 ├── .github/
 ├── README.md
 └── .gitignore
 ```
 
-## 管理端模板
+## 快速开始
 
-可用模板：
+### 环境要求
 
-- `admin/apps/web-antd`：Ant Design Vue
-- `admin/apps/web-ele`：Element Plus
-- `admin/apps/web-naive`：Naive UI
+- Git
+- Go `>= 1.24`
+- Node.js `^22.18.0 || ^24.12.0`
+- pnpm `11.16.0`
+- Docker Engine + Compose v2（使用 Docker 部署时）
 
-进入 `admin/` 后，可使用对应的 `dev:*`、`build:*` 和 `typecheck:*` 命令。
-
-## 环境要求
-
-| 组件 | 版本 |
-|---|---|
-| Git | 稳定版 |
-| Go | `>= 1.24` |
-| Node.js | `^22.18.0 || ^24.12.0` |
-| pnpm | `11.16.0` |
-| MySQL | `>= 8` |
-| PostgreSQL | 受支持版本 |
-| Redis | `>= 6` |
-| Docker | Docker Engine + Compose v2 |
-
-## 安装与启动（Windows / macOS / Linux）
-
-### 平台准备
-
-| 平台 | 推荐终端 | 容器运行时 |
-|---|---|---|
-| Windows 11 | PowerShell 7 | Docker Desktop（WSL 2） |
-| macOS | Terminal / zsh | Docker Desktop |
-| Linux | bash | Docker Engine + Compose plugin |
-
-安装 Git、Go、Node.js、npm 和 Docker 后检查：
-
-```text
-git --version
-go version
-node --version
-npm --version
-docker --version
-docker compose version
-```
-
-启用固定版本的 pnpm：
+Windows 推荐 PowerShell 7，macOS 推荐 zsh，Linux 使用 bash。启用 pnpm：
 
 ```text
 corepack enable
 corepack prepare pnpm@11.16.0 --activate
-pnpm --version
 ```
 
-没有 Corepack 时使用：
+没有 Corepack 时：
 
 ```text
 npm install --global pnpm@11.16.0
 ```
 
-### 获取项目
+### 获取源码
 
 ```text
 git clone REPOSITORY_URL Gin-Vben-Admin
 cd Gin-Vben-Admin
 ```
 
-### Docker 启动
+### 初始化与源码运行
 
 ```text
 node ./scripts/bootstrap.mjs --ui antd --database mysql --skip-install
 pnpm --dir admin install --frozen-lockfile
 go -C server mod download
-docker compose -f deploy/compose.dev.yaml up -d --build
-node ./scripts/verify.mjs
-docker compose -f deploy/compose.dev.yaml ps
 ```
 
-查看日志或停止服务：
+启动管理端：
 
 ```text
-docker compose -f deploy/compose.dev.yaml logs -f
-docker compose -f deploy/compose.dev.yaml down
-```
-
-### 原生启动
-
-先启动数据库与 Redis：
-
-```text
-docker compose -f deploy/compose.dependencies.yaml up -d
-node ./scripts/bootstrap.mjs --ui antd --database mysql
-```
-
-管理端：
-
-```text
-pnpm --dir admin install --frozen-lockfile
 pnpm --dir admin run dev:antd
 ```
 
-Gin 服务：
+启动服务端：
 
 ```text
-go -C server mod download
 go -C server run ./cmd/api
 ```
 
-也可以进入服务目录执行：
+选择其他 UI 模板时，将 `antd` 替换为 `ele` 或 `naive`。
+
+### 源码部署
+
+管理端构建：
 
 ```text
-cd server
-go mod download
-go run ./cmd/api
+pnpm --dir admin install --frozen-lockfile
+pnpm --dir admin run build:antd
 ```
 
-同时启动管理端与 Gin 服务：
+构建结果位于 `admin/apps/web-antd/dist/`，可交给 Nginx 或其他静态文件服务。服务端构建：
 
 ```text
-node ./scripts/dev.mjs --ui antd
+go -C server build ./cmd/api
+go -C server run ./cmd/api
 ```
 
-本地配置样例为 `server/configs/server.example.yaml`；脚本会生成 `server/configs/server.yaml`，不会覆盖已有文件。密钥、连接串、日志和运行数据使用本地配置或环境变量，不提交到 Git。
+运行时配置使用 `server/configs/server.example.yaml` 复制出的本地配置或环境变量；实际密钥和连接串不提交到 Git。
 
-## API 与健康检查
+### Docker 部署
 
-管理端 API：
+开发环境（包含服务端、管理端、MySQL、Redis）：
 
 ```text
-POST /api/admin/v1/auth/login
-POST /api/admin/v1/auth/refresh
-POST /api/admin/v1/auth/logout
-GET  /api/admin/v1/auth/codes
-GET  /api/admin/v1/user/info
-GET  /api/admin/v1/menu/all
+docker compose -f deploy/compose.dev.yaml up -d --build
+docker compose -f deploy/compose.dev.yaml ps
 ```
 
-健康检查：
+只启动数据库依赖：
 
 ```text
-GET /health/live
-GET /health/ready
+docker compose -f deploy/compose.dependencies.yaml up -d
 ```
 
-OpenAPI 文件位于 `contracts/openapi/`；响应包含 request ID/trace ID，写操作可按接口约定使用 `Idempotency-Key`。
+停止服务：
+
+```text
+docker compose -f deploy/compose.dev.yaml down
+```
+
+默认管理端端口为 `5173`，服务端端口为 `8080`；可通过 Compose 环境变量调整。
+
+## 使用说明
+
+- 管理端 API 地址默认使用 `/api`，开发代理指向本地 Gin 服务。
+- 管理端连通性检查：`GET /api/admin/v1/ping`。
+- 健康检查：`GET /health/live`、`GET /health/ready`。
+- 管理端接口契约位于 `contracts/openapi/`。
+- 本地配置、日志、数据库卷和构建产物按 `.gitignore` 规则处理。
 
 ## 验证
 
 ```text
-node --test tests/contract/b1_contract.test.mjs
-pnpm --dir admin run test:b1
+node --test tests/contract/contract.test.mjs
+pnpm --dir admin run test:smoke
+pnpm --dir admin run check:type
 go -C server test ./...
-node ./scripts/verify.mjs --scope skeleton
+node ./scripts/verify.mjs --scope basic
 ```
 
-持续集成配置：`.github/workflows/ci.yml`。
+## 贡献指南
+
+贡献流程文档：
+
+- CONTRIBUTING：
+- 安全报告：
+- 变更记录：
+
+提交代码前请运行相关测试，并保持提交内容聚焦单一改动。
 
 ## 许可证
 

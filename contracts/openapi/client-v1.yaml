@@ -3,7 +3,7 @@ info:
   title: APP Client API
   version: 0.1.0-dev
   description: |
-    客户端 API 契约骨架。真实客户端垂直切片批准后增加资源；管理端契约不得写入此文件。
+    客户端 HTTP API。
 servers:
   - url: /
     description: Local development

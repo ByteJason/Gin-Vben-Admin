@@ -1,6 +1,6 @@
 package config
 
-// Config contains the dependency-free runtime settings used by the B1 HTTP seam.
+// Config contains the dependency-free runtime settings used by the HTTP service.
 type Config struct {
 	Server ServerConfig `yaml:"server"`
 }

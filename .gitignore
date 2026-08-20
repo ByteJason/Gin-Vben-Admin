@@ -75,6 +75,7 @@ dist.war
 /go.work
 /go.work.sum
 /server/bin/
+/server/api
 /server/tmp/
 /server/dist/
 /server/vendor/

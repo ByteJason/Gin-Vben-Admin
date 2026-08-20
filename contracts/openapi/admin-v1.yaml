@@ -3,13 +3,13 @@ info:
   title: APP Admin API
   version: 0.1.0-dev
   description: |
-    首个工程切片的管理端契约骨架。业务接口按 B3/B4 批次逐步扩展。
+    管理端 HTTP API。
 servers:
   - url: /
     description: Local development
 tags:
   - name: Health
-  - name: Auth
+  - name: Admin
 paths:
   /health/live:
     get:
@@ -29,28 +29,18 @@ paths:
           $ref: '#/components/responses/HealthResponse'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
-  /api/admin/v1/auth/login:
-    post:
-      tags: [Auth]
-      operationId: adminLogin
-      summary: 首版登录契约占位
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/LoginRequest'
+  /api/admin/v1/ping:
+    get:
+      tags: [Admin]
+      operationId: adminPing
+      summary: 管理端服务连通性检查
       responses:
         '200':
-          description: 登录成功
+          description: 请求成功
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/SuccessEnvelope'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
 components:
   parameters:
     RequestId:
@@ -61,20 +51,6 @@ components:
         type: string
         maxLength: 128
   schemas:
-    LoginRequest:
-      type: object
-      required: [username, password]
-      additionalProperties: false
-      properties:
-        username:
-          type: string
-          minLength: 1
-          maxLength: 128
-        password:
-          type: string
-          format: password
-          minLength: 1
-          maxLength: 256
     HealthData:
       type: object
       required: [status]

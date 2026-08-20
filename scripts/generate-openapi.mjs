@@ -15,5 +15,5 @@ for (const file of files) {
   }
 }
 console.log('OPENAPI_SOURCES_OK=2');
-console.log('OPENAPI_GENERATION_MODE=skeleton');
+console.log('OPENAPI_GENERATION_MODE=standard');
 console.log('OPENAPI_GENERATE_OK');

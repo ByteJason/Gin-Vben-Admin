@@ -12,7 +12,7 @@
 
 ```text
 pnpm install --frozen-lockfile
-pnpm run test:b1
+pnpm run test:smoke
 pnpm run dev:antd   # 或 dev:ele / dev:naive
 ```
 

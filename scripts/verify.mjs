@@ -7,7 +7,7 @@ import path from 'node:path';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const scopeIndex = process.argv.indexOf('--scope');
-const scope = scopeIndex >= 0 ? process.argv[scopeIndex + 1] : 'skeleton';
+const scope = scopeIndex >= 0 ? process.argv[scopeIndex + 1] : 'basic';
 
 async function exists(relative) {
   try {
@@ -60,12 +60,26 @@ const required = [
   'admin/Dockerfile',
   'docs/README.md',
 ];
-const forbidden = ['apps', 'packages', 'internal', 'frontend', 'backend'];
 const missing = required.filter((item) => !exists(item));
-const presentForbidden = [];
-for (const item of forbidden) {
-  if (await exists(item)) presentForbidden.push(item);
-}
+const allowedRootDirectories = new Set([
+  '.dev-docs',
+  '.git',
+  '.github',
+  '.idea',
+  '.pnpm-store',
+  '.runtime',
+  'admin',
+  'contracts',
+  'deploy',
+  'docs',
+  'scripts',
+  'server',
+  'tests',
+]);
+const rootEntries = await readdir(root, { withFileTypes: true });
+const unexpectedRootDirectories = rootEntries
+  .filter((entry) => entry.isDirectory() && !allowedRootDirectories.has(entry.name))
+  .map((entry) => entry.name);
 
 const supportedApps = new Set(['web-antd', 'web-ele', 'web-naive']);
 const appEntries = await readdir(path.join(root, 'admin/apps'), { withFileTypes: true });
@@ -76,14 +90,14 @@ if (unexpectedApps.length) {
   console.error(`VERIFY_FAILED unexpected_apps=${unexpectedApps.join(',')}`);
   process.exit(1);
 }
-if (missing.length || presentForbidden.length) {
-  console.error(`VERIFY_FAILED missing=${missing.join(',')} forbidden=${presentForbidden.join(',')}`);
+if (missing.length || unexpectedRootDirectories.length) {
+  console.error(`VERIFY_FAILED missing=${missing.join(',')} unexpected_root=${unexpectedRootDirectories.join(',')}`);
   process.exit(1);
 }
 
 const adminContract = await text('contracts/openapi/admin-v1.yaml');
 const clientContract = await text('contracts/openapi/client-v1.yaml');
-for (const token of ['/health/live', '/health/ready', '/api/admin/v1/auth/login', 'X-Request-ID']) {
+for (const token of ['/health/live', '/health/ready', '/api/admin/v1/ping', 'X-Request-ID']) {
   if (!adminContract.includes(token)) {
     console.error(`VERIFY_FAILED contract_token=${token}`);
     process.exit(1);
@@ -94,7 +108,7 @@ if (clientContract.includes('/api/admin/v1')) {
   process.exit(1);
 }
 
-if (scope !== 'skeleton' && scope !== 'template') {
+if (scope !== 'basic' && scope !== 'template') {
   console.error(`unsupported --scope: ${scope}`);
   process.exit(2);
 }
