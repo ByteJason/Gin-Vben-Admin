@@ -55,7 +55,8 @@ function verifyManifest(directory, expectedMode, expectedUi) {
   const manifestPath = join(directory, 'artifact-manifest.json');
   if (!existsSync(manifestPath)) return false;
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-  if (manifest.schema !== 1 || manifest.mode !== expectedMode || manifest.ui !== expectedUi) {
+  const acceptedUis = Array.isArray(expectedUi) ? expectedUi : [expectedUi];
+  if (manifest.schema !== 1 || manifest.mode !== expectedMode || !acceptedUis.includes(manifest.ui)) {
     fail(`invalid artifact manifest: ${relative(root, manifestPath)}`);
   }
   for (const [name, expected] of Object.entries(manifest.files ?? {})) {
@@ -89,7 +90,7 @@ function checkSourceContract(options) {
   const embedded = join(root, '.runtime', 'build', 'embedded');
   const standalone = join(root, '.runtime', 'build', 'standalone');
   if (existsSync(embedded)) verifyManifest(embedded, 'embedded', 'all');
-  if (existsSync(standalone)) verifyManifest(standalone, 'standalone', options.ui[0]);
+  if (existsSync(standalone)) verifyManifest(standalone, 'standalone', options.ui);
   process.stdout.write('MANIFEST_CONTRACT_OK\n');
 }
 
