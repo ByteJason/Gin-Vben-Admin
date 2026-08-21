@@ -56,19 +56,20 @@ type DatabaseConfig struct {
 }
 
 type RedisConfig struct {
-	Enabled      bool          `mapstructure:"enabled" yaml:"enabled"`
-	Addr         string        `mapstructure:"addr" yaml:"addr"`
-	Username     string        `mapstructure:"username" yaml:"username"`
-	Password     string        `mapstructure:"password" yaml:"password"`
-	DB           int           `mapstructure:"db" yaml:"db"`
-	Namespace    string        `mapstructure:"namespace" yaml:"namespace"`
-	Mode         string        `mapstructure:"mode" yaml:"mode"`
-	Addrs        []string      `mapstructure:"addrs" yaml:"addrs"`
-	MasterName   string        `mapstructure:"master_name" yaml:"master_name"`
-	DialTimeout  time.Duration `mapstructure:"dial_timeout" yaml:"dial_timeout"`
-	ReadTimeout  time.Duration `mapstructure:"read_timeout" yaml:"read_timeout"`
-	WriteTimeout time.Duration `mapstructure:"write_timeout" yaml:"write_timeout"`
-	PingTimeout  time.Duration `mapstructure:"ping_timeout" yaml:"ping_timeout"`
+	Enabled      bool              `mapstructure:"enabled" yaml:"enabled"`
+	Addr         string            `mapstructure:"addr" yaml:"addr"`
+	Username     string            `mapstructure:"username" yaml:"username"`
+	Password     string            `mapstructure:"password" yaml:"password"`
+	DB           int               `mapstructure:"db" yaml:"db"`
+	Namespace    string            `mapstructure:"namespace" yaml:"namespace"`
+	Mode         string            `mapstructure:"mode" yaml:"mode"`
+	Addrs        []string          `mapstructure:"addrs" yaml:"addrs"`
+	MasterName   string            `mapstructure:"master_name" yaml:"master_name"`
+	AddressMap   map[string]string `mapstructure:"address_map" yaml:"address_map"`
+	DialTimeout  time.Duration     `mapstructure:"dial_timeout" yaml:"dial_timeout"`
+	ReadTimeout  time.Duration     `mapstructure:"read_timeout" yaml:"read_timeout"`
+	WriteTimeout time.Duration     `mapstructure:"write_timeout" yaml:"write_timeout"`
+	PingTimeout  time.Duration     `mapstructure:"ping_timeout" yaml:"ping_timeout"`
 }
 
 // AuthConfig contains the runtime security policy for authentication.
@@ -445,6 +446,11 @@ func (cfg RedisConfig) validate() error {
 	if len(cfg.Namespace) > 128 || strings.TrimSpace(cfg.Namespace) != cfg.Namespace || strings.ContainsAny(cfg.Namespace, "\r\n\t") {
 		return errors.New("namespace must be a trimmed string of at most 128 characters")
 	}
+	for advertised, reachable := range cfg.AddressMap {
+		if strings.TrimSpace(advertised) == "" || strings.TrimSpace(reachable) == "" || strings.ContainsAny(advertised+reachable, "\r\n") {
+			return errors.New("address_map endpoints must be non-empty and single-line")
+		}
+	}
 	if !cfg.Enabled {
 		return nil
 	}
@@ -562,6 +568,7 @@ func newViper() *viper.Viper {
 	v.SetDefault("redis.mode", cfg.Redis.Mode)
 	v.SetDefault("redis.addrs", cfg.Redis.Addrs)
 	v.SetDefault("redis.master_name", cfg.Redis.MasterName)
+	v.SetDefault("redis.address_map", cfg.Redis.AddressMap)
 	v.SetDefault("redis.dial_timeout", cfg.Redis.DialTimeout)
 	v.SetDefault("redis.read_timeout", cfg.Redis.ReadTimeout)
 	v.SetDefault("redis.write_timeout", cfg.Redis.WriteTimeout)

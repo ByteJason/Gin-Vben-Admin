@@ -136,3 +136,21 @@ func TestTopologyValidationDoesNotProbeNetwork(t *testing.T) {
 		})
 	}
 }
+
+func TestAddressMapRewritesAdvertisedTopologyEndpoints(t *testing.T) {
+	client, err := New(Config{
+		Mode:       ModeCluster,
+		Addrs:      []string{"127.0.0.1:16379", "127.0.0.1:16380"},
+		AddressMap: map[string]string{"172.20.0.7:6379": "127.0.0.1:16379"},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer client.Close()
+	if got := client.mapAddress("172.20.0.7:6379"); got != "127.0.0.1:16379" {
+		t.Fatalf("mapAddress() = %q, want mapped endpoint", got)
+	}
+	if got := client.mapAddress("127.0.0.1:16380"); got != "127.0.0.1:16380" {
+		t.Fatalf("mapAddress() unchanged = %q", got)
+	}
+}

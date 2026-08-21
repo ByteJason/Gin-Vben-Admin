@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -48,6 +49,9 @@ type Config struct {
 	Addr       string
 	Addrs      []string
 	MasterName string
+	// AddressMap rewrites exact addresses advertised by Sentinel/Cluster to
+	// externally reachable host:port values. An empty map keeps native discovery.
+	AddressMap map[string]string
 	Username   string
 	Password   string
 	DB         int
@@ -60,8 +64,9 @@ type Config struct {
 
 // Client is a namespaced Redis cache client.
 type Client struct {
-	client    redis.UniversalClient
-	namespace string
+	client     redis.UniversalClient
+	namespace  string
+	addressMap map[string]string
 }
 
 // New creates a Redis client for a standalone, Sentinel, or Cluster topology.
@@ -83,6 +88,7 @@ func New(config Config) (*Client, error) {
 			DialTimeout:  normalized.DialTimeout,
 			ReadTimeout:  normalized.ReadTimeout,
 			WriteTimeout: normalized.WriteTimeout,
+			Dialer:       normalized.dialer(),
 		})
 	case ModeSentinel:
 		client = redis.NewFailoverClient(&redis.FailoverOptions{
@@ -94,6 +100,7 @@ func New(config Config) (*Client, error) {
 			DialTimeout:   normalized.DialTimeout,
 			ReadTimeout:   normalized.ReadTimeout,
 			WriteTimeout:  normalized.WriteTimeout,
+			Dialer:        normalized.dialer(),
 		})
 	case ModeCluster:
 		client = redis.NewClusterClient(&redis.ClusterOptions{
@@ -103,12 +110,13 @@ func New(config Config) (*Client, error) {
 			DialTimeout:  normalized.DialTimeout,
 			ReadTimeout:  normalized.ReadTimeout,
 			WriteTimeout: normalized.WriteTimeout,
+			Dialer:       normalized.dialer(),
 		})
 	default:
 		return nil, fmt.Errorf("%w: unsupported mode", ErrInvalidConfig)
 	}
 
-	return &Client{client: client, namespace: normalized.Namespace}, nil
+	return &Client{client: client, namespace: normalized.Namespace, addressMap: cloneAddressMap(normalized.AddressMap)}, nil
 }
 
 // Name implements the health dependency contract.
@@ -285,6 +293,18 @@ func (c *Client) Close() error {
 	return c.client.Close()
 }
 
+// mapAddress is deterministic and side-effect free, allowing topology
+// discovery to be tested without opening a network connection.
+func (c *Client) mapAddress(address string) string {
+	if c == nil || c.addressMap == nil {
+		return address
+	}
+	if mapped, ok := c.addressMap[address]; ok && strings.TrimSpace(mapped) != "" {
+		return mapped
+	}
+	return address
+}
+
 func normalizeConfig(config Config) (Config, error) {
 	config.Mode = strings.TrimSpace(config.Mode)
 	if config.Mode == "" {
@@ -299,6 +319,12 @@ func normalizeConfig(config Config) (Config, error) {
 	}
 	if config.Namespace != strings.TrimSpace(config.Namespace) || !isSafeNamespace(config.Namespace) {
 		return Config{}, fmt.Errorf("%w: namespace", ErrInvalidKey)
+	}
+	config.AddressMap = cloneAddressMap(config.AddressMap)
+	for advertised, reachable := range config.AddressMap {
+		if !isSafeAddress(advertised) || !isSafeAddress(reachable) {
+			return Config{}, fmt.Errorf("%w: address map contains unsafe endpoint", ErrInvalidConfig)
+		}
 	}
 
 	config.DialTimeout = withDefaultTimeout(config.DialTimeout)
@@ -333,6 +359,30 @@ func normalizeConfig(config Config) (Config, error) {
 	}
 
 	return config, nil
+}
+
+func (config Config) dialer() func(context.Context, string, string) (net.Conn, error) {
+	if len(config.AddressMap) == 0 {
+		return nil
+	}
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		if mapped, ok := config.AddressMap[address]; ok && strings.TrimSpace(mapped) != "" {
+			address = mapped
+		}
+		dialer := &net.Dialer{Timeout: config.DialTimeout, KeepAlive: 5 * time.Minute}
+		return dialer.DialContext(ctx, network, address)
+	}
+}
+
+func cloneAddressMap(input map[string]string) map[string]string {
+	if len(input) == 0 {
+		return nil
+	}
+	output := make(map[string]string, len(input))
+	for key, value := range input {
+		output[strings.TrimSpace(key)] = strings.TrimSpace(value)
+	}
+	return output
 }
 
 func withDefaultTimeout(timeout time.Duration) time.Duration {

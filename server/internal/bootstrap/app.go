@@ -419,6 +419,7 @@ func redisOptions(cfg config.RedisConfig) (rediscache.Config, error) {
 		Addr:         cfg.Addr,
 		Addrs:        append([]string(nil), cfg.Addrs...),
 		MasterName:   cfg.MasterName,
+		AddressMap:   cloneStringMap(cfg.AddressMap),
 		Username:     cfg.Username,
 		Password:     cfg.Password,
 		DB:           cfg.DB,
@@ -431,6 +432,17 @@ func redisOptions(cfg config.RedisConfig) (rediscache.Config, error) {
 		options.Mode = rediscache.ModeSingle
 	}
 	return options, nil
+}
+
+func cloneStringMap(input map[string]string) map[string]string {
+	if len(input) == 0 {
+		return nil
+	}
+	output := make(map[string]string, len(input))
+	for key, value := range input {
+		output[key] = value
+	}
+	return output
 }
 
 func readinessTimeout(cfg config.Config) time.Duration {
