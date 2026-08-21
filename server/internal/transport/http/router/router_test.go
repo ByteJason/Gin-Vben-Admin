@@ -6,6 +6,11 @@ import (
 	"net/http/httptest"
 	"testing"
 	"testing/fstest"
+
+	settingsapp "example.com/gin-vben-admin/server/internal/application/settings"
+	adminhttp "example.com/gin-vben-admin/server/internal/transport/http/admin"
+	settingshttp "example.com/gin-vben-admin/server/internal/transport/http/settings"
+	"github.com/gin-gonic/gin"
 )
 
 func TestPublicHTTPSeam(t *testing.T) {
@@ -101,5 +106,17 @@ func TestRouterMountsInstallerBundleWithoutCatchingAPIRoutes(t *testing.T) {
 		if response.Code != item.status {
 			t.Fatalf("GET %s status = %d, want %d; body=%s", item.path, response.Code, item.status, response.Body.String())
 		}
+	}
+}
+
+func TestRouterMountsSettingsCapabilityWhenProvided(t *testing.T) {
+	service := settingsapp.NewService(settingsapp.NewMemoryRepository(), nil, nil, nil)
+	handler := settingshttp.NewHandler(service, func(*gin.Context) settingsapp.Actor { return settingsapp.Actor{ID: "admin"} })
+	router := NewRouterWithRuntime(nil, nil, nil, nil, nil, nil, adminhttp.AuxiliaryRoutes{Settings: handler})
+	request := httptest.NewRequest(http.MethodGet, "/api/admin/v1/settings/site.name", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("settings route status=%d body=%s", response.Code, response.Body.String())
 	}
 }

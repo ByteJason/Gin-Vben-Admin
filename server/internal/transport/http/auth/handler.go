@@ -36,6 +36,15 @@ type Handler struct {
 	captcha  appauth.CaptchaProvider
 }
 
+// Service exposes the transport's authentication port for composing other
+// protected management route groups without duplicating token middleware.
+func (h *Handler) Service() appauth.AuthService {
+	if h == nil {
+		return nil
+	}
+	return h.service
+}
+
 func NewHandler(service appauth.AuthService, cfg config.AuthConfig, limiters ...appauth.RateLimiter) *Handler {
 	var limiter appauth.RateLimiter
 	if len(limiters) > 0 {

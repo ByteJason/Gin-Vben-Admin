@@ -52,7 +52,7 @@ func NewRouterWithComponents(readinessChecker health.ReadinessChecker, authHandl
 // installation status gate is optional for compatibility constructors but is
 // enabled by the production bootstrap so business routes stay closed before
 // the marker is atomically published.
-func NewRouterWithRuntime(readinessChecker health.ReadinessChecker, authHandler *authhttp.Handler, iamHandler *iamhttp.Handler, installHandler *installhttp.Handler, installStatus *installer.StatusService, staticAssets fs.FS) *gin.Engine {
+func NewRouterWithRuntime(readinessChecker health.ReadinessChecker, authHandler *authhttp.Handler, iamHandler *iamhttp.Handler, installHandler *installhttp.Handler, installStatus *installer.StatusService, staticAssets fs.FS, auxiliary ...admin.AuxiliaryRoutes) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery(), middleware.RequestID(), middleware.SecurityHeaders(), middleware.StructuredAccessLog(slog.Default()))
 	if installStatus != nil {
@@ -63,7 +63,7 @@ func NewRouterWithRuntime(readinessChecker health.ReadinessChecker, authHandler 
 	}
 	health.RegisterRoutes(r, readinessChecker)
 	installhttp.RegisterRoutes(r, installHandler)
-	admin.RegisterRoutesWithIAM(r, authHandler, iamHandler)
+	admin.RegisterRoutesWithIAM(r, authHandler, iamHandler, auxiliary...)
 	client.RegisterRoutes(r)
 	if staticAssets != nil {
 		staticui.RegisterApplicationRoutes(r, staticAssets, installStatus)
