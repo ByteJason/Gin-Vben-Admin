@@ -112,6 +112,28 @@ test('installation contract exposes database and Redis connection checks', () =>
   assert.doesNotMatch(checkSchema, /password|dsn|absolutePath|rootPath|jwtSecret|redisPassword/i);
 });
 
+test('installation contract exposes one credential-write-only apply operation', () => {
+  const install = readFileSync(join(root, 'contracts/openapi/install-v1.yaml'), 'utf8');
+  const errors = readFileSync(join(root, 'contracts/errors/error-codes.yaml'), 'utf8');
+  const path = '/api/system/install/v1/apply:';
+  assert.match(install, new RegExp(`\\n  ${path.replaceAll('/', '\\/')}`));
+  const sectionStart = install.indexOf(`  ${path}`);
+  const nextSection = install.indexOf('\n  /', sectionStart + 4);
+  const section = install.slice(sectionStart, nextSection === -1 ? undefined : nextSection);
+  assert.match(section, /post:/);
+  assert.match(section, /ApplyRequest/);
+  for (const status of ['200', '400', '409', '422', '500', '503']) {
+    assert.match(section, new RegExp(`'${status}':`), `apply ${status}`);
+  }
+  assert.match(install, /AdminAccount/);
+  assert.match(install, /confirmCleanup/);
+  assert.match(install, /password:[\s\S]*?writeOnly: true/);
+  const result = install.slice(install.indexOf('    ApplyResult:'), install.indexOf('    ApplyErrorEnvelope:'));
+  assert.doesNotMatch(result, /password|dsn|secret/i);
+  assert.match(errors, /code: 10006[\s\S]*?key: installation_completed[\s\S]*?http_status: 409/);
+  assert.match(errors, /code: 10007[\s\S]*?key: installation_running[\s\S]*?http_status: 409/);
+});
+
 test('installation workspace smoke and runtime artifacts stay cross-platform', () => {
   const smoke = runNode('install/tests/smoke.test.mjs');
   assert.equal(smoke.status, 0, smoke.stdout + smoke.stderr);

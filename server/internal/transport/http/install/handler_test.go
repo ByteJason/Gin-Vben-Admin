@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -261,6 +262,101 @@ func TestDependencyCheckEndpointsHideProbeErrorsAndRejectMalformedJSON(t *testin
 	}
 }
 
+func TestApplyEndpointReturnsCredentialFreeResult(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	provider := &applyProviderStub{result: installer.ApplyResult{
+		State: "installed", SelectedUI: "antd", Mode: "embedded", InstalledAt: time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC),
+		Steps: []installer.ApplyStep{{ID: "lock", Status: installer.StepCompleted}},
+	}}
+	router := gin.New()
+	RegisterRoutes(router, NewHandlerWithApply(statusProviderStub{}, nil, nil, nil, provider))
+
+	body := `{"selectedUi":"antd","mode":"embedded","confirmCleanup":true,"database":{"driver":"mysql","mode":"single","host":"db","port":3306,"database":"app","username":"root","password":"database-secret"},"redis":{"mode":"single","addr":"redis:6379","password":"redis-secret"},"admin":{"username":"admin","password":"administrator-secret"}}`
+	request := httptest.NewRequest(http.MethodPost, "/api/system/install/v1/apply", bytes.NewBufferString(body))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", response.Code, response.Body.String())
+	}
+	if provider.request.Admin.Password != "administrator-secret" || provider.request.Database.Password != "database-secret" {
+		t.Fatalf("provider did not receive installation credentials")
+	}
+	for _, forbidden := range []string{"administrator-secret", "database-secret", "redis-secret", "password", "dsn"} {
+		if strings.Contains(strings.ToLower(response.Body.String()), forbidden) {
+			t.Fatalf("apply response leaked %q: %s", forbidden, response.Body.String())
+		}
+	}
+	var envelope struct {
+		Code int                   `json:"code"`
+		Data installer.ApplyResult `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if envelope.Code != 0 || envelope.Data.State != "installed" || len(envelope.Data.Steps) != 1 {
+		t.Fatalf("unexpected apply response: %#v", envelope)
+	}
+}
+
+func TestApplyEndpointMapsStableErrorsWithoutLeakingCause(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, testCase := range []struct {
+		name   string
+		err    error
+		status int
+		code   int
+	}{
+		{name: "installed", err: installer.ErrAlreadyInstalled, status: http.StatusConflict, code: 10006},
+		{name: "busy", err: installer.ErrApplyBusy, status: http.StatusConflict, code: 10007},
+		{name: "invalid", err: installer.ErrInvalidApply, status: http.StatusBadRequest, code: 10000},
+		{name: "preflight", err: installer.ErrPreflightFailed, status: http.StatusUnprocessableEntity, code: 10001},
+		{name: "internal", err: errors.New("password=must-not-leak"), status: http.StatusInternalServerError, code: 50000},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			router := gin.New()
+			RegisterRoutes(router, NewHandlerWithApply(statusProviderStub{}, nil, nil, nil, &applyProviderStub{err: testCase.err}))
+			request := httptest.NewRequest(http.MethodPost, "/api/system/install/v1/apply", bytes.NewBufferString(`{"selectedUi":"antd"}`))
+			request.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+			if response.Code != testCase.status {
+				t.Fatalf("status = %d, want %d; body=%s", response.Code, testCase.status, response.Body.String())
+			}
+			var envelope struct {
+				Code int `json:"code"`
+			}
+			if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if envelope.Code != testCase.code {
+				t.Fatalf("code = %d, want %d", envelope.Code, testCase.code)
+			}
+			if strings.Contains(strings.ToLower(response.Body.String()), "must-not-leak") || strings.Contains(strings.ToLower(response.Body.String()), "password") {
+				t.Fatalf("response leaked apply error: %s", response.Body.String())
+			}
+		})
+	}
+}
+
+func TestApplyEndpointRejectsUnknownFieldsBeforeCallingService(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	provider := &applyProviderStub{}
+	router := gin.New()
+	RegisterRoutes(router, NewHandlerWithApply(statusProviderStub{}, nil, nil, nil, provider))
+	request := httptest.NewRequest(http.MethodPost, "/api/system/install/v1/apply", bytes.NewBufferString(`{"selectedUi":"antd","unexpected":true}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", response.Code, response.Body.String())
+	}
+	if provider.calls != 0 {
+		t.Fatalf("apply service calls = %d, want 0", provider.calls)
+	}
+}
+
 type statusProviderStub struct {
 	status installer.Status
 	err    error
@@ -297,6 +393,19 @@ type dependencyProviderStub struct {
 	redisErr        error
 	databaseRequest installer.DatabaseConnection
 	redisRequest    installer.RedisConnection
+}
+
+type applyProviderStub struct {
+	result  installer.ApplyResult
+	err     error
+	request installer.ApplyRequest
+	calls   int
+}
+
+func (s *applyProviderStub) Apply(_ context.Context, request installer.ApplyRequest) (installer.ApplyResult, error) {
+	s.calls++
+	s.request = request
+	return s.result, s.err
 }
 
 func (s *dependencyProviderStub) CheckDatabase(_ context.Context, request installer.DatabaseConnection) (installer.DependencyCheck, error) {

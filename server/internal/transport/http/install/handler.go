@@ -2,6 +2,9 @@ package install
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -27,11 +30,16 @@ type DependencyCheckProvider interface {
 	CheckRedis(context.Context, installer.RedisConnection) (installer.DependencyCheck, error)
 }
 
+type ApplyProvider interface {
+	Apply(context.Context, installer.ApplyRequest) (installer.ApplyResult, error)
+}
+
 type Handler struct {
 	status       StatusProvider
 	capabilities CapabilityProvider
 	plan         PlanProvider
 	dependencies DependencyCheckProvider
+	apply        ApplyProvider
 }
 
 func NewHandler(status StatusProvider, capabilities ...CapabilityProvider) *Handler {
@@ -48,6 +56,10 @@ func NewHandlerWithComponents(status StatusProvider, capabilities CapabilityProv
 		dependencyChecks = dependencies[0]
 	}
 	return &Handler{status: status, capabilities: capabilities, plan: plan, dependencies: dependencyChecks}
+}
+
+func NewHandlerWithApply(status StatusProvider, capabilities CapabilityProvider, plan PlanProvider, dependencies DependencyCheckProvider, apply ApplyProvider) *Handler {
+	return &Handler{status: status, capabilities: capabilities, plan: plan, dependencies: dependencies, apply: apply}
 }
 
 func RegisterRoutes(router gin.IRouter, handler *Handler) {
@@ -133,4 +145,44 @@ func RegisterRoutes(router gin.IRouter, handler *Handler) {
 		}
 		response.OK(c, result)
 	})
+	group.POST("/apply", func(c *gin.Context) {
+		if handler == nil || handler.apply == nil {
+			response.Error(c, http.StatusServiceUnavailable, 40001, "installation service unavailable")
+			return
+		}
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 64<<10)
+		var request installer.ApplyRequest
+		decoder := json.NewDecoder(c.Request.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&request); err != nil || !jsonDocumentEnded(decoder) {
+			response.Error(c, http.StatusBadRequest, 10000, "invalid installation request")
+			return
+		}
+		result, err := handler.apply.Apply(c.Request.Context(), request)
+		if err != nil {
+			writeApplyError(c, err)
+			return
+		}
+		response.OK(c, result)
+	})
+}
+
+func jsonDocumentEnded(decoder *json.Decoder) bool {
+	var extra any
+	return errors.Is(decoder.Decode(&extra), io.EOF)
+}
+
+func writeApplyError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, installer.ErrAlreadyInstalled):
+		response.Error(c, http.StatusConflict, 10006, "installation already completed")
+	case errors.Is(err, installer.ErrApplyBusy):
+		response.Error(c, http.StatusConflict, 10007, "installation already running")
+	case errors.Is(err, installer.ErrInvalidApply):
+		response.Error(c, http.StatusBadRequest, 10000, "invalid installation request")
+	case errors.Is(err, installer.ErrPreflightFailed):
+		response.Error(c, http.StatusUnprocessableEntity, 10001, "installation preflight failed")
+	default:
+		response.Error(c, http.StatusInternalServerError, 50000, "installation failed")
+	}
 }

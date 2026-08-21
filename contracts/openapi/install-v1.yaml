@@ -124,6 +124,57 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/InstallServiceUnavailableEnvelope'
+  /api/system/install/v1/apply:
+    post:
+      tags: [Installation]
+      operationId: applyInstallation
+      summary: 执行已确认的首次安装事务
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApplyRequest'
+      responses:
+        '200':
+          description: 安装事务完成
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplyResultEnvelope'
+        '400':
+          description: 安装请求无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplyErrorEnvelope'
+        '409':
+          description: 已完成安装或另一个安装事务正在运行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplyErrorEnvelope'
+        '422':
+          description: 权限或依赖预检未通过
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplyErrorEnvelope'
+        '500':
+          description: 安装事务失败且已执行补偿
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplyErrorEnvelope'
+        '503':
+          description: 安装服务未接通
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstallServiceUnavailableEnvelope'
 components:
   headers:
     RequestId:
@@ -415,6 +466,102 @@ components:
         message:
           type: string
           enum: [invalid database connection, invalid redis connection]
+        data:
+          type: 'null'
+        traceId:
+          type: string
+        meta:
+          $ref: '#/components/schemas/ResponseMeta'
+    ApplyRequest:
+      type: object
+      additionalProperties: false
+      required: [selectedUi, mode, database, redis, admin, confirmCleanup]
+      properties:
+        selectedUi:
+          type: string
+          enum: [antd, ele, naive]
+        mode:
+          type: string
+          enum: [embedded, standalone, api_only, dev]
+        database:
+          $ref: '#/components/schemas/DatabaseConnection'
+        redis:
+          $ref: '#/components/schemas/RedisConnection'
+        admin:
+          $ref: '#/components/schemas/AdminAccount'
+        confirmCleanup:
+          type: boolean
+          const: true
+    AdminAccount:
+      type: object
+      additionalProperties: false
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 64
+        password:
+          type: string
+          format: password
+          minLength: 12
+          maxLength: 128
+          writeOnly: true
+    ApplyResultEnvelope:
+      type: object
+      required: [code, message, data, traceId, meta]
+      properties:
+        code:
+          type: integer
+          const: 0
+        message:
+          type: string
+          const: success
+        data:
+          $ref: '#/components/schemas/ApplyResult'
+        traceId:
+          type: string
+        meta:
+          $ref: '#/components/schemas/ResponseMeta'
+    ApplyResult:
+      type: object
+      required: [state, selectedUi, mode, installedAt, steps]
+      properties:
+        state:
+          type: string
+          const: installed
+        selectedUi:
+          type: string
+          enum: [antd, ele, naive]
+        mode:
+          type: string
+          enum: [embedded, standalone, api_only, dev]
+        installedAt:
+          type: string
+          format: date-time
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/ApplyStep'
+    ApplyStep:
+      type: object
+      required: [id, status]
+      properties:
+        id:
+          type: string
+          enum: [plan, database, redis, schema, assets, identity, environment, lock]
+        status:
+          type: string
+          const: completed
+    ApplyErrorEnvelope:
+      type: object
+      required: [code, message, data, traceId, meta]
+      properties:
+        code:
+          type: integer
+          enum: [10000, 10001, 10006, 10007, 50000]
+        message:
+          type: string
         data:
           type: 'null'
         traceId:
