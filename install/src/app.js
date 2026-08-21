@@ -4,6 +4,7 @@ const planEndpoint = '/api/system/install/v1/plan';
 const databaseCheckEndpoint = '/api/system/install/v1/check/database';
 const redisCheckEndpoint = '/api/system/install/v1/check/redis';
 const applyEndpoint = '/api/system/install/v1/apply';
+const progressEndpoint = '/api/system/install/v1/progress';
 
 const title = document.querySelector('#status-title');
 const badge = document.querySelector('#status-badge');
@@ -42,6 +43,7 @@ const adminPasswordConfirm = document.querySelector('#admin-password-confirm');
 const confirmCleanup = document.querySelector('#confirm-cleanup');
 const applyButton = document.querySelector('#apply-button');
 const applyResult = document.querySelector('#apply-result');
+const applyProgress = document.querySelector('#apply-progress');
 const applySteps = document.querySelector('#apply-steps');
 
 const uiLabels = { antd: 'Ant Design Vue', ele: 'Element Plus', naive: 'Naive UI' };
@@ -50,6 +52,19 @@ const modeLabels = {
   standalone: '静态资源独立部署',
   api_only: '仅 API',
   dev: '开发调试',
+};
+const stepLabels = {
+  queued: '等待执行',
+  plan: '复核目录权限',
+  database: '验证数据库',
+  redis: '验证 Redis',
+  schema: '执行数据库迁移',
+  assets: '构建并暂存界面资源',
+  identity: '初始化管理员',
+  environment: '写入运行配置',
+  lock: '写入安装锁',
+  complete: '安装完成',
+  failed: '安装失败',
 };
 
 let currentPlan = null;
@@ -324,6 +339,8 @@ function dependencyFormValues() {
 }
 
 function renderApplyResult(result) {
+  applyProgress.value = 100;
+  applyProgress.textContent = '100%';
   applyResult.textContent = '安装已完成。请按提示重启服务后进入管理端。';
   applyResult.dataset.tone = 'success';
   applySteps.replaceChildren();
@@ -332,6 +349,43 @@ function renderApplyResult(result) {
     item.textContent = `${step.id || 'step'}：${step.status || 'completed'}`;
     applySteps.append(item);
   }
+}
+
+function renderJobProgress(job) {
+  const progress = Math.max(0, Math.min(100, Number(job.progress || 0)));
+  const step = stepLabels[job.currentStep] || '正在执行安装任务';
+  applyProgress.value = progress;
+  applyProgress.textContent = `${progress}%`;
+  applyResult.textContent = `${step}（${progress}%）`;
+  applyResult.dataset.tone = job.state === 'failed' ? 'error' : job.state === 'completed' ? 'success' : 'pending';
+  applySteps.replaceChildren();
+  for (const completed of Array.isArray(job.steps) ? job.steps : []) {
+    const item = document.createElement('li');
+    item.textContent = `${stepLabels[completed.id] || completed.id}：已完成`;
+    applySteps.append(item);
+  }
+}
+
+function wait(milliseconds) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+async function pollInstallation(jobId) {
+  for (let attempt = 0; attempt < 1800; attempt += 1) {
+    if (attempt > 0) await wait(1000);
+    const response = await fetch(`${progressEndpoint}/${encodeURIComponent(jobId)}`, {
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json' },
+    });
+    const envelope = await response.json();
+    if (!response.ok || envelope.code !== 0 || !envelope.data) {
+      throw new Error('installation progress unavailable');
+    }
+    const job = envelope.data;
+    renderJobProgress(job);
+    if (job.state === 'completed' || job.state === 'failed') return job;
+  }
+  throw new Error('installation progress timed out');
 }
 
 function applyErrorMessage(status) {
@@ -343,6 +397,8 @@ function applyErrorMessage(status) {
 
 async function requestInstallation(event) {
   event.preventDefault();
+  applyProgress.value = 0;
+  applyProgress.textContent = '0%';
   if (!currentPlan || !databaseCheckPassed || !redisCheckPassed) {
     applyResult.textContent = '请先完成目录、数据库和 Redis 检查。';
     applyResult.dataset.tone = 'error';
@@ -380,26 +436,44 @@ async function requestInstallation(event) {
       applyResult.dataset.tone = 'error';
       return;
     }
-    renderApplyResult(envelope.data);
+    let result = envelope.data;
+    if (response.status === 202 && result.id) {
+      clearInstallSecrets();
+      renderJobProgress(result);
+      result = await pollInstallation(result.id);
+      if (result.state === 'failed') {
+        applyResult.textContent = result.canRetry
+          ? '安装未完成，已自动回滚本次副作用。请重新输入凭据后重试。'
+          : '安装未完成，请检查实例状态后再继续。';
+        applyResult.dataset.tone = 'error';
+        return;
+      }
+    }
+    renderApplyResult(result);
     renderStatus({
       installed: true,
       installerVersion: 'current',
-      selectedUi: envelope.data.selectedUi,
-      mode: envelope.data.mode,
+      selectedUi: result.selectedUi,
+      mode: result.mode,
     });
+    currentPlan = { ...currentPlan, installed: true };
   } catch {
     applyResult.textContent = '安装请求未完成，请确认服务仍在运行后重试。';
     applyResult.dataset.tone = 'error';
   } finally {
-    clearSensitiveFields(databaseForm);
-    clearSensitiveFields(redisForm);
-    clearSensitiveFields(adminForm);
+    clearInstallSecrets();
     if (!currentPlan || !currentPlan.installed) {
       applyButton.disabled = false;
       applyButton.textContent = '开始安装';
       updateApplyButton();
     }
   }
+}
+
+function clearInstallSecrets() {
+  clearSensitiveFields(databaseForm);
+  clearSensitiveFields(redisForm);
+  clearSensitiveFields(adminForm);
 }
 
 function clearSensitiveFields(form) {

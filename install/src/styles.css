@@ -597,6 +597,22 @@ h1 {
   line-height: 1.7;
 }
 
+.progress-label {
+  display: block;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+#apply-progress {
+  display: block;
+  width: 100%;
+  height: 0.75rem;
+  margin-top: 6px;
+  accent-color: var(--accent);
+}
+
 .connection-result[data-tone="pending"] {
   color: var(--muted);
 }
