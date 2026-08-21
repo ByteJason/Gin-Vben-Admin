@@ -51,9 +51,12 @@ test('all management templates expose equivalent observability settings', () => 
       'observability.tracing.endpoint',
       'observability.tracing.protocol',
       'observability.tracing.sample_rate',
+      '<section',
+      'aria-labelledby="observability-title"',
       'aria-live="polite"',
     ]) {
       assert.match(view, new RegExp(token.replaceAll('.', '\\.')));
     }
+    assert.doesNotMatch(view, /<main\b/);
   }
 });

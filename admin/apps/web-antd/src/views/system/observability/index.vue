@@ -148,11 +148,15 @@ onMounted(load);
 </script>
 
 <template>
-  <main class="observability-page" :aria-busy="loading">
+  <section
+    class="observability-page"
+    :aria-busy="loading"
+    aria-labelledby="observability-title"
+  >
     <header class="page-heading">
       <div>
         <p class="eyebrow">{{ $t('page.observability.eyebrow') }}</p>
-        <h1>{{ $t('page.observability.title') }}</h1>
+        <h1 id="observability-title">{{ $t('page.observability.title') }}</h1>
         <p class="description">{{ $t('page.observability.description') }}</p>
       </div>
       <span class="status-chip">{{ $t('page.observability.external') }}</span>
@@ -293,7 +297,7 @@ onMounted(load);
         </button>
       </div>
     </form>
-  </main>
+  </section>
 </template>
 
 <style scoped>
