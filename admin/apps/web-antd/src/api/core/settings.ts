@@ -33,7 +33,9 @@ const settingPath = (key: string) =>
   `${ADMIN_ENDPOINTS.getSetting.replace('{key}', encodeURIComponent(key))}`;
 
 export async function listSettingDefinitionsApi() {
-  return requestClient.get<SettingDefinition[]>(ADMIN_ENDPOINTS.listSettingDefinitions);
+  return requestClient.get<SettingDefinition[]>(
+    ADMIN_ENDPOINTS.listSettingDefinitions,
+  );
 }
 
 export async function getSettingApi(key: string) {
