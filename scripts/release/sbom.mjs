@@ -3,8 +3,9 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = resolve(dirname(new URL(import.meta.url).pathname), '../..');
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const args = process.argv.slice(2);
 const value = (flag) => {
   const i = args.indexOf(flag);
@@ -28,7 +29,7 @@ function goComponents() {
     const key = `${match[1]}@${match[2]}`;
     if (seen.has(key)) return [];
     seen.add(key);
-    return [{ type: 'library', name: match[1], version: match[2], purl: `pkg:golang/${match[1]}@${match[2]}`, licenses: license(), properties: [{ name: 'source', value: 'server/go.sum' }] }];
+    return [{ type: 'library', name: match[1], version: match[2], purl: `pkg:golang/${match[1]}@${match[2]}`, licenses: license('NOASSERTION'), properties: [{ name: 'source', value: 'server/go.sum' }, { name: 'licenseEvidence', value: 'lockfile-does-not-declare-spdx' }] }];
   });
 }
 
@@ -45,7 +46,7 @@ function pnpmComponents() {
     const name = key.slice(0, at);
     const version = key.slice(at + 1).split('(')[0];
     if (!version || version.startsWith('link:')) return [];
-    return [{ type: 'library', name, version, purl: `pkg:npm/${name}@${version}`, licenses: license(), properties: [{ name: 'source', value: 'admin/pnpm-lock.yaml' }] }];
+    return [{ type: 'library', name, version, purl: `pkg:npm/${name}@${version}`, licenses: license('NOASSERTION'), properties: [{ name: 'source', value: 'admin/pnpm-lock.yaml' }, { name: 'licenseEvidence', value: 'lockfile-does-not-declare-spdx' }] }];
   });
 }
 
@@ -63,7 +64,11 @@ function build() {
     sourceComponent('admin/pnpm-lock.yaml', 'admin/pnpm-lock.yaml'),
     ...goComponents(),
     ...pnpmComponents(),
-  ].sort((a, b) => `${a.type}:${a.name}:${a.version}`.localeCompare(`${b.type}:${b.name}:${b.version}`));
+  ].sort((a, b) => {
+    const left = `${a.type}:${a.name}:${a.version}`;
+    const right = `${b.type}:${b.name}:${b.version}`;
+    return left < right ? -1 : left > right ? 1 : 0;
+  });
   return {
     bomFormat: 'CycloneDX',
     specVersion: '1.5',
