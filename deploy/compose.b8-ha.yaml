@@ -74,6 +74,7 @@ services:
   redis-replica:
     image: redis:8.10
     command: ["redis-server", "--bind", "0.0.0.0", "--protected-mode", "no", "--replicaof", "redis-primary", "6379", "--appendonly", "yes"]
+    ports: ["${B8_REDIS_REPLICA_PORT:-16371}:6379"]
     volumes: [b8-redis-replica:/data]
     depends_on: {redis-primary: {condition: service_healthy}}
 
