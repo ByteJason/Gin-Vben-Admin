@@ -3,6 +3,7 @@ package observabilityplatform
 import (
 	"context"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,8 @@ import (
 	"time"
 
 	domainobs "example.com/gin-vben-admin/server/internal/domain/observability"
+	collectortrace "go.opentelemetry.io/proto/otlp/collector/trace/v1"
+	"google.golang.org/grpc"
 )
 
 func TestRuntimeCollectsPrometheusMetricsOnlyWhenEnabled(t *testing.T) {
@@ -103,5 +106,55 @@ func TestRuntimeExporterFailureDegradesAndCountsDroppedSpan(t *testing.T) {
 	runtime.ServeMetrics(result, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), "app_observability_export_dropped_total 1") {
 		t.Fatalf("degradation metrics = %d %q", result.Code, result.Body.String())
+	}
+}
+
+type grpcTraceCollector struct {
+	collectortrace.UnimplementedTraceServiceServer
+	received chan *collectortrace.ExportTraceServiceRequest
+}
+
+func (c *grpcTraceCollector) Export(_ context.Context, request *collectortrace.ExportTraceServiceRequest) (*collectortrace.ExportTraceServiceResponse, error) {
+	c.received <- request
+	return &collectortrace.ExportTraceServiceResponse{}, nil
+}
+
+func TestRuntimeExportsSampledOTLPSpanOverGRPC(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := grpc.NewServer()
+	collector := &grpcTraceCollector{received: make(chan *collectortrace.ExportTraceServiceRequest, 1)}
+	collectortrace.RegisterTraceServiceServer(server, collector)
+	go func() { _ = server.Serve(listener) }()
+	t.Cleanup(func() {
+		server.Stop()
+		_ = listener.Close()
+	})
+
+	runtime, err := NewRuntime(domainobs.Config{
+		TracingEnabled: true,
+		OTLPEndpoint:   "http://" + listener.Addr().String(),
+		OTLPProtocol:   "grpc",
+		SampleRate:     1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runtime.Close() })
+	runtime.RecordHTTP("GET", "/health/live", http.StatusOK, time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := runtime.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case request := <-collector.received:
+		if len(request.ResourceSpans) != 1 {
+			t.Fatalf("resource spans = %d, want 1", len(request.ResourceSpans))
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for gRPC OTLP payload")
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,6 +22,10 @@ import (
 	commonv1 "go.opentelemetry.io/proto/otlp/common/v1"
 	resourcev1 "go.opentelemetry.io/proto/otlp/resource/v1"
 	tracev1 "go.opentelemetry.io/proto/otlp/trace/v1"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -35,7 +40,7 @@ const (
 type Runtime struct {
 	config      domainobs.Config
 	metrics     *metricsRegistry
-	exporter    *otlpExporter
+	exporter    spanExporter
 	queue       chan spanRecord
 	queueMu     sync.Mutex
 	closed      bool
@@ -44,6 +49,7 @@ type Runtime struct {
 	pendingDone chan struct{}
 	workers     sync.WaitGroup
 	closeOnce   sync.Once
+	closeErr    error
 	dropped     atomic.Uint64
 }
 
@@ -75,10 +81,21 @@ type spanRecord struct {
 	end       time.Time
 }
 
-type otlpExporter struct {
+type spanExporter interface {
+	Export(context.Context, spanRecord) error
+	Close() error
+}
+
+type otlpHTTPExporter struct {
 	endpoint string
 	apiKey   string
 	client   *http.Client
+}
+
+type otlpGRPCExporter struct {
+	connection *grpc.ClientConn
+	client     collectortrace.TraceServiceClient
+	apiKey     string
 }
 
 // NewRuntime validates the B6 configuration and constructs only the enabled
@@ -92,18 +109,21 @@ func NewRuntime(config domainobs.Config) (*Runtime, error) {
 		runtime.metrics = &metricsRegistry{requests: make(map[metricKey]metricValue)}
 	}
 	if config.TracingEnabled {
-		if config.OTLPProtocol != "http/protobuf" {
-			// gRPC remains a configuration-compatible seam; the B8 runtime
-			// intentionally reports it as unavailable instead of silently
-			// pretending to export spans.
-			return nil, fmt.Errorf("otlp protocol %q requires the gRPC exporter", config.OTLPProtocol)
-		}
-		transport := http.DefaultTransport.(*http.Transport).Clone()
-		transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: !config.TLSVerify} // #nosec G402 -- explicit user setting
-		runtime.exporter = &otlpExporter{
-			endpoint: normalizeOTLPEndpoint(config.OTLPEndpoint),
-			apiKey:   config.OTLPAPIKey,
-			client:   &http.Client{Transport: transport, Timeout: 5 * time.Second},
+		switch config.OTLPProtocol {
+		case "http/protobuf":
+			transport := http.DefaultTransport.(*http.Transport).Clone()
+			transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: !config.TLSVerify} // #nosec G402 -- explicit user setting
+			runtime.exporter = &otlpHTTPExporter{
+				endpoint: normalizeOTLPEndpoint(config.OTLPEndpoint),
+				apiKey:   config.OTLPAPIKey,
+				client:   &http.Client{Transport: transport, Timeout: 5 * time.Second},
+			}
+		case "grpc":
+			exporter, err := newOTLPGRPCExporter(config)
+			if err != nil {
+				return nil, err
+			}
+			runtime.exporter = exporter
 		}
 		runtime.queue = make(chan spanRecord, spanQueueSize)
 		runtime.workers.Add(1)
@@ -220,8 +240,11 @@ func (r *Runtime) Close() error {
 			r.queueMu.Unlock()
 			r.workers.Wait()
 		}
+		if r.exporter != nil {
+			r.closeErr = r.exporter.Close()
+		}
 	})
-	return nil
+	return r.closeErr
 }
 
 func (r *Runtime) exportLoop() {
@@ -282,25 +305,11 @@ func (m *metricsRegistry) render(dropped uint64) string {
 	return b.String()
 }
 
-func (e *otlpExporter) Export(ctx context.Context, span spanRecord) error {
+func (e *otlpHTTPExporter) Export(ctx context.Context, span spanRecord) error {
 	if e == nil || e.client == nil {
 		return errors.New("otlp exporter is not configured")
 	}
-	payload := &collectortrace.ExportTraceServiceRequest{ResourceSpans: []*tracev1.ResourceSpans{{
-		Resource: &resourcev1.Resource{Attributes: []*commonv1.KeyValue{stringAttribute("service.name", defaultServiceName)}},
-		ScopeSpans: []*tracev1.ScopeSpans{{Spans: []*tracev1.Span{{
-			TraceId: span.traceID, SpanId: span.spanID, Name: span.name,
-			Kind:              tracev1.Span_SPAN_KIND_SERVER,
-			StartTimeUnixNano: uint64(span.start.UnixNano()), EndTimeUnixNano: uint64(span.end.UnixNano()),
-			Attributes: []*commonv1.KeyValue{
-				stringAttribute("http.request.method", span.method),
-				stringAttribute("http.route", span.route),
-				stringAttribute("http.request_id", span.requestID),
-				intAttribute("http.response.status_code", int64(span.status)),
-			},
-			Status: spanStatus(span.status),
-		}}}},
-	}}}
+	payload := exportRequest(span)
 	body, err := proto.Marshal(payload)
 	if err != nil {
 		return err
@@ -322,6 +331,62 @@ func (e *otlpExporter) Export(ctx context.Context, span spanRecord) error {
 		return fmt.Errorf("otlp collector returned HTTP %d", resp.StatusCode)
 	}
 	return nil
+}
+
+func (e *otlpHTTPExporter) Close() error { return nil }
+
+func newOTLPGRPCExporter(config domainobs.Config) (*otlpGRPCExporter, error) {
+	parsed, err := url.Parse(strings.TrimSpace(config.OTLPEndpoint))
+	if err != nil || parsed.Host == "" {
+		return nil, errors.New("invalid OTLP gRPC endpoint")
+	}
+	var transportCredentials credentials.TransportCredentials
+	if parsed.Scheme == "https" {
+		transportCredentials = credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: !config.TLSVerify}) // #nosec G402 -- explicit user setting
+	} else {
+		transportCredentials = insecure.NewCredentials()
+	}
+	connection, err := grpc.NewClient(parsed.Host, grpc.WithTransportCredentials(transportCredentials))
+	if err != nil {
+		return nil, fmt.Errorf("configure OTLP gRPC exporter: %w", err)
+	}
+	return &otlpGRPCExporter{connection: connection, client: collectortrace.NewTraceServiceClient(connection), apiKey: config.OTLPAPIKey}, nil
+}
+
+func (e *otlpGRPCExporter) Export(ctx context.Context, span spanRecord) error {
+	if e == nil || e.client == nil {
+		return errors.New("otlp gRPC exporter is not configured")
+	}
+	if e.apiKey != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+e.apiKey)
+	}
+	_, err := e.client.Export(ctx, exportRequest(span))
+	return err
+}
+
+func (e *otlpGRPCExporter) Close() error {
+	if e == nil || e.connection == nil {
+		return nil
+	}
+	return e.connection.Close()
+}
+
+func exportRequest(span spanRecord) *collectortrace.ExportTraceServiceRequest {
+	return &collectortrace.ExportTraceServiceRequest{ResourceSpans: []*tracev1.ResourceSpans{{
+		Resource: &resourcev1.Resource{Attributes: []*commonv1.KeyValue{stringAttribute("service.name", defaultServiceName)}},
+		ScopeSpans: []*tracev1.ScopeSpans{{Spans: []*tracev1.Span{{
+			TraceId: span.traceID, SpanId: span.spanID, Name: span.name,
+			Kind:              tracev1.Span_SPAN_KIND_SERVER,
+			StartTimeUnixNano: uint64(span.start.UnixNano()), EndTimeUnixNano: uint64(span.end.UnixNano()),
+			Attributes: []*commonv1.KeyValue{
+				stringAttribute("http.request.method", span.method),
+				stringAttribute("http.route", span.route),
+				stringAttribute("http.request_id", span.requestID),
+				intAttribute("http.response.status_code", int64(span.status)),
+			},
+			Status: spanStatus(span.status),
+		}}}},
+	}}}
 }
 
 func stringAttribute(key, value string) *commonv1.KeyValue {
