@@ -7,6 +7,24 @@ import (
 	"testing"
 )
 
+func TestDefaultDefinitionsExposeCompleteObservabilitySettings(t *testing.T) {
+	definitions := DefaultDefinitions()
+	for _, key := range []string{
+		"observability.metrics.enabled",
+		"observability.metrics.endpoint",
+		"observability.tracing.enabled",
+		"observability.tracing.endpoint",
+		"observability.tracing.protocol",
+		"observability.tracing.tls_verify",
+		"observability.tracing.sample_rate",
+		"observability.otlp.api_key",
+	} {
+		if _, ok := definitions[key]; !ok {
+			t.Fatalf("missing observability setting definition %q", key)
+		}
+	}
+}
+
 func TestServiceUpdateRequiresExpectedVersionAndInvalidatesCache(t *testing.T) {
 	repo := NewMemoryRepository()
 	cache := &recordingInvalidator{}

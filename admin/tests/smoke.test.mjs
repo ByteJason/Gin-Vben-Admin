@@ -27,3 +27,33 @@ test('workspace contains its frontend build closure', () => {
     assert.ok(existsSync(resolve(root, path)), path);
   }
 });
+
+test('all management templates expose equivalent observability settings', () => {
+  for (const app of requiredApps) {
+    const viewPath = resolve(
+      root,
+      'apps',
+      app,
+      'src/views/system/observability/index.vue',
+    );
+    const routePath = resolve(
+      root,
+      'apps',
+      app,
+      'src/router/routes/modules/system.ts',
+    );
+    assert.ok(existsSync(viewPath), `${app} observability view`);
+    assert.ok(existsSync(routePath), `${app} observability route`);
+    const view = readFileSync(viewPath, 'utf8');
+    for (const token of [
+      'observability.metrics.enabled',
+      'observability.tracing.enabled',
+      'observability.tracing.endpoint',
+      'observability.tracing.protocol',
+      'observability.tracing.sample_rate',
+      'aria-live="polite"',
+    ]) {
+      assert.match(view, new RegExp(token.replaceAll('.', '\\.')));
+    }
+  }
+});

@@ -50,6 +50,7 @@ func DefaultDefinitions() map[string]Definition {
 		"observability.tracing.enabled":     {Key: "observability.tracing.enabled", Kind: KindBool, Default: `false`},
 		"observability.tracing.endpoint":    {Key: "observability.tracing.endpoint", Kind: KindString, Default: `""`},
 		"observability.tracing.protocol":    {Key: "observability.tracing.protocol", Kind: KindString, Default: `"http/protobuf"`, Allowed: []string{"grpc", "http/protobuf"}},
+		"observability.tracing.tls_verify":  {Key: "observability.tracing.tls_verify", Kind: KindBool, Default: `true`},
 		"observability.tracing.sample_rate": {Key: "observability.tracing.sample_rate", Kind: KindNumber, Default: `0`},
 		"observability.otlp.api_key":        {Key: "observability.otlp.api_key", Kind: KindSecret, Sensitive: true, Default: `""`},
 	}
