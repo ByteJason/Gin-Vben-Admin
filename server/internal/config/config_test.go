@@ -72,6 +72,47 @@ func TestObservabilityConfigurationIsDisabledAndRedactedByDefault(t *testing.T) 
 	}
 }
 
+func TestDynamicObservabilitySettingsRespectExplicitConfigurationSources(t *testing.T) {
+	defaults := Default()
+	if !defaults.DynamicObservabilityAllowed("observability.metrics.enabled") {
+		t.Fatal("compiled default should allow a persisted runtime setting")
+	}
+	if defaults.DynamicObservabilityAllowed("site.name") {
+		t.Fatal("unknown dynamic key must be denied")
+	}
+
+	root := t.TempDir()
+	configDir := filepath.Join(root, "server", "configs")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(configs) error = %v", err)
+	}
+	configPath := filepath.Join(configDir, "server.yaml")
+	if err := os.WriteFile(configPath, []byte("observability:\n  metrics_enabled: false\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".env"), []byte("OBSERVABILITY_OTLP_ENDPOINT=https://collector.env.example/v1/traces\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(.env) error = %v", err)
+	}
+	t.Setenv("OBSERVABILITY_SAMPLE_RATE", "0.75")
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	for _, key := range []string{
+		"observability.metrics.enabled",
+		"observability.tracing.endpoint",
+		"observability.tracing.sample_rate",
+	} {
+		if cfg.DynamicObservabilityAllowed(key) {
+			t.Fatalf("explicitly configured key %q must not be overridden by the database", key)
+		}
+	}
+	if !cfg.DynamicObservabilityAllowed("observability.tracing.enabled") {
+		t.Fatal("an unset key should remain eligible for a persisted runtime setting")
+	}
+}
+
 func TestLoadReadsYAMLAndEnvironmentTakesPrecedence(t *testing.T) {
 	path := writeConfigFile(t, `
 logging:

@@ -26,6 +26,12 @@ type Config struct {
 	Install       InstallConfig        `mapstructure:"install" yaml:"install"`
 	Tenant        TenantConfig         `mapstructure:"tenant" yaml:"tenant"`
 	Observability observability.Config `mapstructure:"observability" yaml:"observability"`
+
+	// dynamicObservabilityLocked records values that came from an explicit
+	// process environment, root .env, or YAML source. Persisted settings may
+	// fill compiled defaults, but must not override these higher-authority
+	// sources (DEC-018).
+	dynamicObservabilityLocked map[string]bool
 }
 
 type ServerConfig struct {
@@ -260,6 +266,7 @@ func Load(path string) (Config, error) {
 	}
 	applyDotEnvOverrides(v, dotEnv)
 	applyListEnvironmentOverrides(v, dotEnv)
+	dynamicObservabilityLocked := explicitObservabilitySettings(v, dotEnv)
 
 	cfg := Default()
 	if err := v.Unmarshal(&cfg); err != nil {
@@ -268,7 +275,18 @@ func Load(path string) (Config, error) {
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
+	cfg.dynamicObservabilityLocked = dynamicObservabilityLocked
 	return cfg, nil
+}
+
+// DynamicObservabilityAllowed reports whether a persisted setting may fill
+// this runtime value. Unknown keys are denied. Explicit process environment,
+// root .env, and YAML values retain authority over database settings.
+func (cfg Config) DynamicObservabilityAllowed(settingKey string) bool {
+	if _, known := dynamicObservabilitySources[settingKey]; !known {
+		return false
+	}
+	return !cfg.dynamicObservabilityLocked[settingKey]
 }
 
 // Validate checks the configuration before external clients are constructed.
@@ -668,6 +686,34 @@ var environmentBindings = map[string]string{
 	"observability.tls_verify":       "OBSERVABILITY_TLS_VERIFY",
 	"observability.sample_rate":      "OBSERVABILITY_SAMPLE_RATE",
 	"observability.otlp_api_key":     "OBSERVABILITY_OTLP_API_KEY",
+}
+
+type observabilitySource struct {
+	configKey   string
+	environment string
+}
+
+var dynamicObservabilitySources = map[string]observabilitySource{
+	"observability.metrics.enabled":     {configKey: "observability.metrics_enabled", environment: "OBSERVABILITY_METRICS_ENABLED"},
+	"observability.metrics.endpoint":    {configKey: "observability.metrics_endpoint", environment: "OBSERVABILITY_METRICS_ENDPOINT"},
+	"observability.tracing.enabled":     {configKey: "observability.tracing_enabled", environment: "OBSERVABILITY_TRACING_ENABLED"},
+	"observability.tracing.endpoint":    {configKey: "observability.otlp_endpoint", environment: "OBSERVABILITY_OTLP_ENDPOINT"},
+	"observability.tracing.protocol":    {configKey: "observability.otlp_protocol", environment: "OBSERVABILITY_OTLP_PROTOCOL"},
+	"observability.tracing.tls_verify":  {configKey: "observability.tls_verify", environment: "OBSERVABILITY_TLS_VERIFY"},
+	"observability.tracing.sample_rate": {configKey: "observability.sample_rate", environment: "OBSERVABILITY_SAMPLE_RATE"},
+	"observability.otlp.api_key":        {configKey: "observability.otlp_api_key", environment: "OBSERVABILITY_OTLP_API_KEY"},
+}
+
+func explicitObservabilitySettings(v *viper.Viper, dotEnv map[string]string) map[string]bool {
+	locked := make(map[string]bool, len(dynamicObservabilitySources))
+	for settingKey, source := range dynamicObservabilitySources {
+		_, fromProcess := os.LookupEnv(source.environment)
+		_, fromDotEnv := dotEnv[source.environment]
+		if fromProcess || fromDotEnv || v.InConfig(source.configKey) {
+			locked[settingKey] = true
+		}
+	}
+	return locked
 }
 
 func resolvePath(path string) (string, bool) {
