@@ -38,7 +38,8 @@ export const useAuthStore = defineStore('auth', () => {
       loginError.value = null;
       loginSuccess.value = false;
       const { accessToken } = await loginApi({
-        captcha: typeof params.captcha === 'string' ? params.captcha : undefined,
+        captcha:
+          typeof params.captcha === 'string' ? params.captcha : undefined,
         password: params.password,
         username: params.username,
       });

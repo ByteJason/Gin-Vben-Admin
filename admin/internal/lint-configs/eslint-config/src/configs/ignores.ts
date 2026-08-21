@@ -8,6 +8,8 @@ export async function ignores(): Promise<Linter.Config[]> {
         '**/dist',
         '**/dist-*',
         '**/*-dist',
+        '**/packages/api-client/src/generated/**',
+        'packages/api-client/src/generated/**',
         '**/.husky',
         '**/.output',
         '**/Dockerfile',

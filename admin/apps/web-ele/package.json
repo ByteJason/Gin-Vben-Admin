@@ -26,8 +26,8 @@
     "#/*": "./src/*"
   },
   "dependencies": {
-    "@vben/api-client": "workspace:*",
     "@vben/access": "workspace:*",
+    "@vben/api-client": "workspace:*",
     "@vben/common-ui": "workspace:*",
     "@vben/constants": "workspace:*",
     "@vben/hooks": "workspace:*",

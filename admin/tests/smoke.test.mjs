@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '..');
 const requiredApps = ['web-antd', 'web-ele', 'web-naive'];

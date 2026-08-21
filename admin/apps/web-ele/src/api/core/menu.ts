@@ -1,5 +1,6 @@
-import { MENU_ENDPOINT } from '@vben/api-client';
 import type { RouteRecordStringComponent } from '@vben/types';
+
+import { MENU_ENDPOINT } from '@vben/api-client';
 
 import { requestClient } from '#/api/request';
 

@@ -3,6 +3,7 @@ import {
   AUTH_ENDPOINTS,
   type AuthApi,
 } from '@vben/api-client';
+
 import { baseRequestClient, requestClient } from '#/api/request';
 
 function normalizeTokenData(
@@ -83,13 +84,21 @@ export async function registerApi(data: AuthApi.RegisterParams) {
 
 /** 请求密码重置；未知账号也返回相同结果以避免账号枚举。 */
 export async function requestPasswordResetApi(username: string) {
-  return requestClient.post<void>(AUTH_ENDPOINTS.passwordResetRequest, { username }, {
-    withCredentials: true,
-  });
+  return requestClient.post<void>(
+    AUTH_ENDPOINTS.passwordResetRequest,
+    { username },
+    {
+      withCredentials: true,
+    },
+  );
 }
 
 /** 使用一次性令牌提交新密码。 */
-export async function resetPasswordApi(data: Required<Pick<AuthApi.PasswordResetRequestParams, 'token' | 'password'>>) {
+export async function resetPasswordApi(
+  data: Required<
+    Pick<AuthApi.PasswordResetRequestParams, 'password' | 'token'>
+  >,
+) {
   return requestClient.post<void>(AUTH_ENDPOINTS.passwordReset, data, {
     withCredentials: true,
   });
@@ -104,9 +113,12 @@ export async function listSessionsApi() {
 
 /** 撤销当前账号名下的指定设备会话。 */
 export async function revokeSessionApi(sessionId: string) {
-  return requestClient.delete<void>(`${AUTH_ENDPOINTS.sessions}/${encodeURIComponent(sessionId)}`, {
-    withCredentials: true,
-  });
+  return requestClient.delete<void>(
+    `${AUTH_ENDPOINTS.sessions}/${encodeURIComponent(sessionId)}`,
+    {
+      withCredentials: true,
+    },
+  );
 }
 
 /** 获取当前账号的权限码。 */
