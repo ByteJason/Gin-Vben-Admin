@@ -594,7 +594,7 @@ components:
           description: image、slider、turnstile 或 provider 自定义类型
         payload:
           type: string
-          description: 可公开渲染数据；禁止包含答案或凭据
+          description: 可公开渲染数据（图片 provider 返回 data URI）；答案不作为字段、日志或 Redis 明文保存
         expiresIn:
           type: integer
           minimum: 1

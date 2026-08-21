@@ -37,6 +37,7 @@ var allowedInstallerEnvironmentKeys = map[string]struct{}{
 	"AUTH_CAPTCHA_ENABLED":         {},
 	"AUTH_CAPTCHA_RISK_THRESHOLD":  {},
 	"AUTH_CAPTCHA_RISK_WINDOW":     {},
+	"AUTH_CAPTCHA_CHALLENGE_TTL":   {},
 	"AUTH_CAPTCHA_KEY_PREFIX":      {},
 	"AUTH_RATE_LIMIT_MAX_ATTEMPTS": {},
 	"AUTH_RATE_LIMIT_WINDOW":       {},

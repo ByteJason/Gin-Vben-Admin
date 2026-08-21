@@ -33,6 +33,32 @@ func TestDefaultAuthTokenTTLsMatchV010Contract(t *testing.T) {
 	}
 }
 
+func TestDefaultCaptchaChallengeTTLAndEnvironmentOverride(t *testing.T) {
+	cfg := Default()
+	if cfg.Auth.CaptchaChallengeTTL != 2*time.Minute {
+		t.Fatalf("default captcha challenge ttl = %s, want 2m", cfg.Auth.CaptchaChallengeTTL)
+	}
+	path := writeConfigFile(t, "auth:\n  enabled: false\n")
+	t.Setenv("AUTH_CAPTCHA_CHALLENGE_TTL", "45s")
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if loaded.Auth.CaptchaChallengeTTL != 45*time.Second {
+		t.Fatalf("environment captcha challenge ttl = %s, want 45s", loaded.Auth.CaptchaChallengeTTL)
+	}
+}
+
+func TestAuthValidationRejectsInvalidCaptchaChallengeTTL(t *testing.T) {
+	cfg := Default()
+	cfg.Auth.Enabled = true
+	cfg.Auth.JWTSecret = "01234567890123456789012345678901"
+	cfg.Auth.CaptchaChallengeTTL = 0
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want invalid captcha challenge ttl")
+	}
+}
+
 func TestTenantConfigurationLoadsAndValidates(t *testing.T) {
 	path := writeConfigFile(t, `
 tenant:
@@ -430,18 +456,19 @@ func TestCaptchaRiskDefaultsAndEnvironmentOverrides(t *testing.T) {
 	if cfg.Auth.CaptchaEnabled {
 		t.Fatal("captcha must be disabled by default")
 	}
-	if cfg.Auth.CaptchaRiskThreshold != 3 || cfg.Auth.CaptchaRiskWindow != 15*time.Minute || cfg.Auth.CaptchaKeyPrefix != "auth-captcha" {
+	if cfg.Auth.CaptchaRiskThreshold != 3 || cfg.Auth.CaptchaRiskWindow != 15*time.Minute || cfg.Auth.CaptchaChallengeTTL != 2*time.Minute || cfg.Auth.CaptchaKeyPrefix != "auth-captcha" {
 		t.Fatalf("unexpected captcha risk defaults: %#v", cfg.Auth)
 	}
 	t.Setenv("AUTH_CAPTCHA_ENABLED", "true")
 	t.Setenv("AUTH_CAPTCHA_RISK_THRESHOLD", "4")
 	t.Setenv("AUTH_CAPTCHA_RISK_WINDOW", "9m")
+	t.Setenv("AUTH_CAPTCHA_CHALLENGE_TTL", "45s")
 	t.Setenv("AUTH_CAPTCHA_KEY_PREFIX", "fixture-captcha")
 	loaded, err := Load("")
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if !loaded.Auth.CaptchaEnabled || loaded.Auth.CaptchaRiskThreshold != 4 || loaded.Auth.CaptchaRiskWindow != 9*time.Minute || loaded.Auth.CaptchaKeyPrefix != "fixture-captcha" {
+	if !loaded.Auth.CaptchaEnabled || loaded.Auth.CaptchaRiskThreshold != 4 || loaded.Auth.CaptchaRiskWindow != 9*time.Minute || loaded.Auth.CaptchaChallengeTTL != 45*time.Second || loaded.Auth.CaptchaKeyPrefix != "fixture-captcha" {
 		t.Fatalf("captcha environment overrides not applied: %#v", loaded.Auth)
 	}
 }
@@ -449,9 +476,10 @@ func TestCaptchaRiskDefaultsAndEnvironmentOverrides(t *testing.T) {
 func TestCaptchaRiskPolicyValidation(t *testing.T) {
 	cfg := Default()
 	for name, edit := range map[string]func(*AuthConfig){
-		"threshold": func(auth *AuthConfig) { auth.CaptchaRiskThreshold = 0 },
-		"window":    func(auth *AuthConfig) { auth.CaptchaRiskWindow = 0 },
-		"prefix":    func(auth *AuthConfig) { auth.CaptchaKeyPrefix = "bad prefix" },
+		"threshold":     func(auth *AuthConfig) { auth.CaptchaRiskThreshold = 0 },
+		"window":        func(auth *AuthConfig) { auth.CaptchaRiskWindow = 0 },
+		"challenge ttl": func(auth *AuthConfig) { auth.CaptchaChallengeTTL = 0 },
+		"prefix":        func(auth *AuthConfig) { auth.CaptchaKeyPrefix = "bad prefix" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			candidate := cfg

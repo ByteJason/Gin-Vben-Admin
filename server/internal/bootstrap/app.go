@@ -187,7 +187,13 @@ func New(cfg config.Config) (*App, error) {
 		app.applyJobs = installer.NewApplyJobService(applyService)
 		app.closers = append(app.closers, app.applyJobs)
 	}
-	app.http = newHTTPServerWithPlan(cfg, app.readiness, app.auth, limiter, app.iam, recovery, app.install, installPlan, installplatform.NewSystemDependencyProbe(), applyService, app.applyJobs, app.settings, app.audit, app.observability)
+	var captchaProvider appauth.CaptchaProvider
+	var captchaRisk appauth.CaptchaRiskStore
+	if cfg.Auth.Enabled && app.redis != nil {
+		captchaProvider = authplatform.NewRedisCaptchaProvider(app.redis, cfg.Auth.CaptchaKeyPrefix, cfg.Auth.CaptchaChallengeTTL)
+		captchaRisk = authplatform.NewRedisCaptchaRiskStore(app.redis, cfg.Auth.CaptchaKeyPrefix)
+	}
+	app.http = newHTTPServerWithPlanAndCaptcha(cfg, app.readiness, app.auth, limiter, app.iam, recovery, app.install, installPlan, installplatform.NewSystemDependencyProbe(), applyService, app.applyJobs, app.settings, app.audit, captchaProvider, captchaRisk, app.observability)
 	return app, nil
 }
 

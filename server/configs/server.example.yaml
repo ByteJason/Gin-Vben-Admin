@@ -89,5 +89,6 @@ auth:
   captcha_enabled: false
   captcha_risk_threshold: 3
   captcha_risk_window: 15m
+  captcha_challenge_ttl: 2m
   captcha_key_prefix: auth-captcha
   registration_enabled: false

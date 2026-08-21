@@ -56,6 +56,22 @@ func TestRedisJSONAndLockIntegration(t *testing.T) {
 	if got != want {
 		t.Fatalf("GetJSON() = %#v, want %#v", got, want)
 	}
+	var consumed struct {
+		ID   int    `json:"id"`
+		Name string `json:"name"`
+	}
+	if err := client.TakeJSON(ctx, key, &consumed); err != nil {
+		t.Fatalf("TakeJSON() error = %v", err)
+	}
+	if consumed != want {
+		t.Fatalf("TakeJSON() = %#v, want %#v", consumed, want)
+	}
+	if err := client.TakeJSON(ctx, key, &consumed); !errors.Is(err, ErrCacheMiss) {
+		t.Fatalf("TakeJSON(replay) error = %v, want ErrCacheMiss", err)
+	}
+	if err := client.SetJSON(ctx, key, want, time.Minute); err != nil {
+		t.Fatalf("SetJSON(recreate) error = %v", err)
+	}
 
 	lock, err := client.AcquireLock(ctx, "redis-integration-lock", time.Minute)
 	if err != nil {

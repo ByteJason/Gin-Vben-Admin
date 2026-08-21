@@ -172,7 +172,39 @@ func (c *Client) GetJSON(ctx context.Context, key string, dst any) error {
 	if err != nil {
 		return err
 	}
-	return json.Unmarshal(payload, dst)
+	return json.Unmarshal([]byte(payload), dst)
+}
+
+const takeJSONScript = `
+local value = redis.call("GET", KEYS[1])
+if not value then
+  return nil
+end
+redis.call("DEL", KEYS[1])
+return value
+`
+
+var takeJSON = redis.NewScript(takeJSONScript)
+
+// TakeJSON atomically reads and removes a namespaced JSON value. It is used
+// for one-time credentials such as captcha challenges where a separate GET
+// followed by DEL could allow two concurrent verifications to succeed.
+func (c *Client) TakeJSON(ctx context.Context, key string, dst any) error {
+	if !c.isPhysicalKey(key) {
+		return ErrInvalidKey
+	}
+	value, err := takeJSON.Run(ctx, c.client, []string{key}).Result()
+	if errors.Is(err, redis.Nil) {
+		return ErrCacheMiss
+	}
+	if err != nil {
+		return err
+	}
+	payload, ok := value.(string)
+	if !ok {
+		return fmt.Errorf("redis take returned unexpected value type %T", value)
+	}
+	return json.Unmarshal([]byte(payload), dst)
 }
 
 // Delete removes a namespaced key.

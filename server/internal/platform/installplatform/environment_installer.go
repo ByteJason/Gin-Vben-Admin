@@ -79,6 +79,7 @@ func (s *EnvironmentInstaller) Publish(ctx context.Context, request installer.Ap
 		"AUTH_CAPTCHA_ENABLED":         "false",
 		"AUTH_CAPTCHA_RISK_THRESHOLD":  "3",
 		"AUTH_CAPTCHA_RISK_WINDOW":     "15m",
+		"AUTH_CAPTCHA_CHALLENGE_TTL":   "2m",
 		"AUTH_CAPTCHA_KEY_PREFIX":      "auth-captcha",
 		"AUTH_RATE_LIMIT_MAX_ATTEMPTS": "10",
 		"AUTH_RATE_LIMIT_WINDOW":       "1m",

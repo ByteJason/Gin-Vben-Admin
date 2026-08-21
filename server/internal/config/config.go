@@ -97,6 +97,7 @@ type AuthConfig struct {
 	CaptchaEnabled       bool          `mapstructure:"captcha_enabled" yaml:"captcha_enabled"`
 	CaptchaRiskThreshold int           `mapstructure:"captcha_risk_threshold" yaml:"captcha_risk_threshold"`
 	CaptchaRiskWindow    time.Duration `mapstructure:"captcha_risk_window" yaml:"captcha_risk_window"`
+	CaptchaChallengeTTL  time.Duration `mapstructure:"captcha_challenge_ttl" yaml:"captcha_challenge_ttl"`
 	CaptchaKeyPrefix     string        `mapstructure:"captcha_key_prefix" yaml:"captcha_key_prefix"`
 	RegistrationEnabled  bool          `mapstructure:"registration_enabled" yaml:"registration_enabled"`
 }
@@ -179,6 +180,7 @@ type AuthSummary struct {
 	CaptchaEnabled       bool          `json:"captcha_enabled"`
 	CaptchaRiskThreshold int           `json:"captcha_risk_threshold"`
 	CaptchaRiskWindow    time.Duration `json:"captcha_risk_window"`
+	CaptchaChallengeTTL  time.Duration `json:"captcha_challenge_ttl"`
 	CaptchaKeyPrefix     string        `json:"captcha_key_prefix"`
 	RegistrationEnabled  bool          `json:"registration_enabled"`
 }
@@ -239,6 +241,7 @@ func Default() Config {
 			CaptchaEnabled:       false,
 			CaptchaRiskThreshold: 3,
 			CaptchaRiskWindow:    15 * time.Minute,
+			CaptchaChallengeTTL:  2 * time.Minute,
 			CaptchaKeyPrefix:     "auth-captcha",
 			RegistrationEnabled:  false,
 		},
@@ -398,8 +401,8 @@ func (cfg AuthConfig) validate() error {
 	if cfg.LockoutThreshold <= 0 || cfg.LockoutDuration <= 0 {
 		return errors.New("lockout threshold and duration must be positive")
 	}
-	if cfg.CaptchaRiskThreshold <= 0 || cfg.CaptchaRiskWindow <= 0 {
-		return errors.New("captcha risk threshold and window must be positive")
+	if cfg.CaptchaRiskThreshold <= 0 || cfg.CaptchaRiskWindow <= 0 || cfg.CaptchaChallengeTTL <= 0 {
+		return errors.New("captcha risk threshold, risk window, and challenge ttl must be positive")
 	}
 	if strings.TrimSpace(cfg.CaptchaKeyPrefix) == "" || strings.ContainsAny(cfg.CaptchaKeyPrefix, "\r\n :") {
 		return errors.New("captcha key prefix must be a safe segment")
@@ -555,6 +558,7 @@ func (cfg Config) SafeSummary() Summary {
 			CaptchaEnabled:       cfg.Auth.CaptchaEnabled,
 			CaptchaRiskThreshold: cfg.Auth.CaptchaRiskThreshold,
 			CaptchaRiskWindow:    cfg.Auth.CaptchaRiskWindow,
+			CaptchaChallengeTTL:  cfg.Auth.CaptchaChallengeTTL,
 			CaptchaKeyPrefix:     cfg.Auth.CaptchaKeyPrefix,
 			RegistrationEnabled:  cfg.Auth.RegistrationEnabled,
 		},
@@ -629,6 +633,7 @@ func newViper() *viper.Viper {
 	v.SetDefault("auth.captcha_enabled", cfg.Auth.CaptchaEnabled)
 	v.SetDefault("auth.captcha_risk_threshold", cfg.Auth.CaptchaRiskThreshold)
 	v.SetDefault("auth.captcha_risk_window", cfg.Auth.CaptchaRiskWindow)
+	v.SetDefault("auth.captcha_challenge_ttl", cfg.Auth.CaptchaChallengeTTL)
 	v.SetDefault("auth.captcha_key_prefix", cfg.Auth.CaptchaKeyPrefix)
 	v.SetDefault("auth.registration_enabled", cfg.Auth.RegistrationEnabled)
 	v.SetDefault("install.state_dir", cfg.Install.StateDir)
@@ -700,6 +705,7 @@ var environmentBindings = map[string]string{
 	"auth.captcha_enabled":           "AUTH_CAPTCHA_ENABLED",
 	"auth.captcha_risk_threshold":    "AUTH_CAPTCHA_RISK_THRESHOLD",
 	"auth.captcha_risk_window":       "AUTH_CAPTCHA_RISK_WINDOW",
+	"auth.captcha_challenge_ttl":     "AUTH_CAPTCHA_CHALLENGE_TTL",
 	"auth.captcha_key_prefix":        "AUTH_CAPTCHA_KEY_PREFIX",
 	"auth.registration_enabled":      "AUTH_REGISTRATION_ENABLED",
 	"install.state_dir":              "INSTALL_STATE_DIR",

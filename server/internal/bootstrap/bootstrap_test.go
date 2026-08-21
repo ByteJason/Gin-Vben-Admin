@@ -290,6 +290,22 @@ func TestHTTPCompositionWiresDeviceSessionRoutes(t *testing.T) {
 	}
 }
 
+func TestHTTPCompositionWiresCaptchaProviderAndRiskStore(t *testing.T) {
+	cfg := config.Default()
+	cfg.Auth.Enabled = true
+	service := &bootstrapAuthSessionFake{}
+	provider := &bootstrapCaptchaProvider{}
+	risk := &bootstrapCaptchaRiskStore{}
+	server := newHTTPServerWithPlanAndCaptcha(cfg, nil, service, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, provider, risk)
+
+	request := httptest.NewRequest(http.MethodGet, "/api/admin/v1/auth/captcha", nil)
+	response := httptest.NewRecorder()
+	server.Handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"kind":"image"`) {
+		t.Fatalf("captcha route status = %d, body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestHTTPCompositionAppliesConfiguredTenantPolicy(t *testing.T) {
 	cfg := config.Default()
 	cfg.Tenant.Mode = "multi"
@@ -306,6 +322,23 @@ func TestHTTPCompositionAppliesConfiguredTenantPolicy(t *testing.T) {
 }
 
 type bootstrapAuthSessionFake struct{}
+
+type bootstrapCaptchaProvider struct{}
+
+func (*bootstrapCaptchaProvider) Issue(context.Context) (appauth.CaptchaChallenge, error) {
+	return appauth.CaptchaChallenge{ID: "fixture", Kind: "image", Payload: "data:image/svg+xml;base64,fixture", ExpiresIn: 120}, nil
+}
+func (*bootstrapCaptchaProvider) Verify(context.Context, string, string) error { return nil }
+
+type bootstrapCaptchaRiskStore struct{}
+
+func (*bootstrapCaptchaRiskStore) Requires(context.Context, string, int, time.Duration) (bool, error) {
+	return false, nil
+}
+func (*bootstrapCaptchaRiskStore) RecordFailure(context.Context, string, time.Duration) error {
+	return nil
+}
+func (*bootstrapCaptchaRiskStore) Reset(context.Context, string) error { return nil }
 
 func (*bootstrapAuthSessionFake) Login(context.Context, string, string) (authdomain.TokenPair, error) {
 	return authdomain.TokenPair{}, nil

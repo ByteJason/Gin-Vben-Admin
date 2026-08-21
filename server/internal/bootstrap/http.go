@@ -38,9 +38,15 @@ func newHTTPServer(cfg config.Config, readiness health.ReadinessChecker, authSer
 }
 
 func newHTTPServerWithPlan(cfg config.Config, readiness health.ReadinessChecker, authService appauth.AuthService, limiter appauth.RateLimiter, iamService *iamapp.Service, recovery appauth.AccountRecoveryService, installStatus *installer.StatusService, installPlan installer.PlanProvider, dependencyChecks installhttp.DependencyCheckProvider, applyService *installer.ApplyService, jobService *installer.ApplyJobService, settingsService *settingsapp.Service, auditService *auditapp.Service, observations ...httpmiddleware.ObservabilityRuntime) *http.Server {
+	return newHTTPServerWithPlanAndCaptcha(cfg, readiness, authService, limiter, iamService, recovery, installStatus, installPlan, dependencyChecks, applyService, jobService, settingsService, auditService, nil, nil, observations...)
+}
+
+func newHTTPServerWithPlanAndCaptcha(cfg config.Config, readiness health.ReadinessChecker, authService appauth.AuthService, limiter appauth.RateLimiter, iamService *iamapp.Service, recovery appauth.AccountRecoveryService, installStatus *installer.StatusService, installPlan installer.PlanProvider, dependencyChecks installhttp.DependencyCheckProvider, applyService *installer.ApplyService, jobService *installer.ApplyJobService, settingsService *settingsapp.Service, auditService *auditapp.Service, captchaProvider appauth.CaptchaProvider, captchaRisk appauth.CaptchaRiskStore, observations ...httpmiddleware.ObservabilityRuntime) *http.Server {
 	var authHandler *authhttp.Handler
 	if authService != nil {
 		authHandler = authhttp.NewHandler(authService, cfg.Auth, limiter)
+		authHandler.SetCaptchaProvider(captchaProvider)
+		authHandler.SetCaptchaRiskStore(captchaRisk)
 		authHandler.SetAccountRecovery(recovery)
 		if sessionManager, ok := authService.(appauth.SessionManagementService); ok {
 			authHandler.SetSessionManager(sessionManager)

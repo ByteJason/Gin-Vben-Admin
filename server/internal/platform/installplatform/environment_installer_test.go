@@ -48,6 +48,7 @@ func TestEnvironmentInstallerPublishesAndRollsBackPrivateRootEnv(t *testing.T) {
 		`AUTH_CAPTCHA_ENABLED="false"`,
 		`AUTH_CAPTCHA_RISK_THRESHOLD="3"`,
 		`AUTH_CAPTCHA_RISK_WINDOW="15m"`,
+		`AUTH_CAPTCHA_CHALLENGE_TTL="2m"`,
 		`AUTH_CAPTCHA_KEY_PREFIX="auth-captcha"`,
 	} {
 		if !strings.Contains(string(contents), required) {

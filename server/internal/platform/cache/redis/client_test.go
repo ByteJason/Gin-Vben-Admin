@@ -65,6 +65,7 @@ func TestOperationsRejectKeysOutsideNamespaceBeforeNetworkIO(t *testing.T) {
 			return client.SetJSON(ctx, "foreign:key", struct{}{}, time.Second)
 		}},
 		{"get", func() error { return client.GetJSON(ctx, "foreign:key", &map[string]string{}) }},
+		{"take", func() error { return client.TakeJSON(ctx, "foreign:key", &map[string]string{}) }},
 		{"delete", func() error { return client.Delete(ctx, "foreign:key") }},
 	} {
 		t.Run(operation.name, func(t *testing.T) {
