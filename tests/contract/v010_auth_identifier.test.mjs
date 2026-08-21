@@ -28,3 +28,31 @@ test('0.10 authentication contract exposes username/email identifiers and profil
     assert.equal(existsSync(join(root, `server/migrations/${driver}/000009_user_profile.down.sql`)), true);
   }
 });
+
+test('0.10 all admin login forms submit a shared username-or-email identifier field', () => {
+  for (const ui of ['web-antd', 'web-ele', 'web-naive']) {
+    const login = readFileSync(
+      join(root, `admin/apps/${ui}/src/views/_core/authentication/login.vue`),
+      'utf8',
+    );
+    assert.match(login, /fieldName:\s*'identifier'/, `${ui} identifier field`);
+    assert.match(login, /authentication\.identifier['"]/, `${ui} identifier label`);
+    assert.match(login, /authentication\.identifierTip['"]/, `${ui} identifier tip`);
+    assert.doesNotMatch(login, /fieldName:\s*'username'/, `${ui} legacy username field`);
+
+    const store = readFileSync(join(root, `admin/apps/${ui}/src/store/auth.ts`), 'utf8');
+    assert.match(store, /identifier:\s*params\.identifier(?:\s*\?\?\s*params\.username)?/, `${ui} store identifier payload`);
+    assert.doesNotMatch(store, /username:\s*params\.username/, `${ui} legacy username payload`);
+  }
+
+  const zh = JSON.parse(
+    readFileSync(join(root, 'admin/packages/locales/src/langs/zh-CN/authentication.json'), 'utf8'),
+  );
+  const en = JSON.parse(
+    readFileSync(join(root, 'admin/packages/locales/src/langs/en-US/authentication.json'), 'utf8'),
+  );
+  assert.equal(zh.identifier, '用户名或邮箱');
+  assert.equal(zh.identifierTip, '请输入用户名或邮箱');
+  assert.equal(en.identifier, 'Username or email');
+  assert.equal(en.identifierTip, 'Please enter username or email');
+});

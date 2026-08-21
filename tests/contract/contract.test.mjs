@@ -385,7 +385,7 @@ test('management login forms do not expose mock accounts or preset passwords', (
       'utf8',
     );
     assert.doesNotMatch(login, /MOCK_USER_OPTIONS|selectAccount|123456/, `${ui} mock credentials`);
-    for (const field of ['username', 'password', 'captcha']) {
+    for (const field of ['identifier', 'password', 'captcha']) {
       assert.match(login, new RegExp(`fieldName:\\s*['"]${field}['"]`), `${ui} ${field}`);
     }
   }

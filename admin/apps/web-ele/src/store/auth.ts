@@ -41,7 +41,7 @@ export const useAuthStore = defineStore('auth', () => {
         captcha:
           typeof params.captcha === 'string' ? params.captcha : undefined,
         password: params.password,
-        username: params.username,
+        identifier: params.identifier ?? params.username,
       });
 
       // 如果成功获取到 accessToken
