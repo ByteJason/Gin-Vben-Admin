@@ -3,9 +3,16 @@
 import { createHash } from 'node:crypto';
 import {
   accessSync,
+  cpSync,
   constants,
+  existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
 } from 'node:fs';
 import {
   delimiter,
@@ -14,6 +21,7 @@ import {
   join,
   relative,
   resolve,
+  sep,
 } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -25,6 +33,12 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 function fail(message, exitCode = 2) {
   process.stderr.write(`BUILD_ERROR=${message}\n`);
   process.exit(exitCode);
+}
+
+function buildError(message) {
+  const error = new Error(message);
+  error.name = 'BuildError';
+  return error;
 }
 
 function parseArgs(argv) {
@@ -62,7 +76,10 @@ function parseArgs(argv) {
   if (options.ui === 'all' && options.mode !== 'embedded') {
     fail('ui all is only valid for embedded mode');
   }
-  if (!options.check && options.mode !== 'api_only') {
+  if (options.output && options.mode !== 'api_only') {
+    fail('--output is only valid for api_only mode');
+  }
+  if (!options.check && !['api_only', 'standalone'].includes(options.mode)) {
     fail(`build execution is not available yet for mode: ${options.mode}`);
   }
 
@@ -80,8 +97,21 @@ function boundedApiOutput(value) {
   return output;
 }
 
-function runApiOnlyBuild(outputValue) {
-  const output = boundedApiOutput(outputValue);
+function runCommand(command, args) {
+  const result = spawnSync(command, args, {
+    cwd: root,
+    encoding: 'utf8',
+    env: process.env,
+    shell: false,
+  });
+  if (result.status !== 0) {
+    process.stderr.write(result.stdout || '');
+    process.stderr.write(result.stderr || '');
+    throw buildError(`${command} failed with status ${result.status ?? 'unknown'}`);
+  }
+}
+
+function runGoBuild(output, tags = []) {
   const runtimeRoot = join(root, '.runtime');
   const goCache = join(runtimeRoot, 'go-cache');
   const goTmp = join(runtimeRoot, 'go-tmp');
@@ -90,9 +120,14 @@ function runApiOnlyBuild(outputValue) {
   mkdirSync(goTmp, { recursive: true });
 
   const outputFromServer = relative(join(root, 'server'), output);
+  const args = ['-C', 'server', 'build', '-trimpath'];
+  if (tags.length > 0) {
+    args.push('-tags', tags.join(','));
+  }
+  args.push('-o', outputFromServer, './cmd/api');
   const result = spawnSync(
     'go',
-    ['-C', 'server', 'build', '-trimpath', '-o', outputFromServer, './cmd/api'],
+    args,
     {
       cwd: root,
       encoding: 'utf8',
@@ -107,12 +142,110 @@ function runApiOnlyBuild(outputValue) {
   if (result.status !== 0) {
     process.stderr.write(result.stdout || '');
     process.stderr.write(result.stderr || '');
-    fail(`go build failed with status ${result.status ?? 'unknown'}`, 1);
+    rmSync(output, { force: true });
+    throw buildError(`go build failed with status ${result.status ?? 'unknown'}`);
   }
 
-  const digest = createHash('sha256').update(readFileSync(output)).digest('hex');
+  return createHash('sha256').update(readFileSync(output)).digest('hex');
+}
+
+function runApiOnlyBuild(outputValue) {
+  const output = boundedApiOutput(outputValue);
+  const digest = runGoBuild(output);
+
   process.stdout.write(`BUILD_ARTIFACT=${relative(root, output)}\n`);
   process.stdout.write(`BUILD_SHA256=${digest}\n`);
+  process.stdout.write('BUILD_OK\n');
+}
+
+function portablePath(value) {
+  return value.split(sep).join('/');
+}
+
+function fileManifest(directory) {
+  const files = {};
+  const walk = (current) => {
+    for (const entry of readdirSync(current, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const absolute = join(current, entry.name);
+      if (entry.isSymbolicLink()) {
+        throw buildError(`generated artifact contains a symbolic link: ${portablePath(relative(directory, absolute))}`);
+      }
+      if (entry.isDirectory()) {
+        walk(absolute);
+        continue;
+      }
+      if (!entry.isFile()) {
+        throw buildError(`generated artifact contains an unsupported entry: ${portablePath(relative(directory, absolute))}`);
+      }
+      const name = portablePath(relative(directory, absolute));
+      files[name] = createHash('sha256').update(readFileSync(absolute)).digest('hex');
+    }
+  };
+  walk(directory);
+  return files;
+}
+
+function publishDirectory(staging, output, backup) {
+  rmSync(backup, { force: true, recursive: true });
+  let previousMoved = false;
+  try {
+    if (existsSync(output)) {
+      renameSync(output, backup);
+      previousMoved = true;
+    }
+    renameSync(staging, output);
+    rmSync(backup, { force: true, recursive: true });
+  } catch (error) {
+    if (!existsSync(output) && previousMoved && existsSync(backup)) {
+      renameSync(backup, output);
+    }
+    throw error;
+  }
+}
+
+function runStandaloneBuild(ui) {
+  const buildRoot = join(root, '.runtime', 'build');
+  const output = join(buildRoot, 'standalone');
+  const staging = join(buildRoot, `.standalone-staging-${process.pid}`);
+  const backup = join(buildRoot, `.standalone-backup-${process.pid}`);
+  const binaryName = process.platform === 'win32' ? 'server-api.exe' : 'server-api';
+
+  rmSync(staging, { force: true, recursive: true });
+  mkdirSync(staging, { recursive: true });
+
+  try {
+    runCommand(process.execPath, ['install/scripts/build.mjs']);
+    runCommand('pnpm', ['--dir', 'admin', 'run', `build:${ui}`]);
+
+    const uiDist = join(root, 'admin', 'apps', `web-${ui}`, 'dist');
+    const installDist = join(root, 'install', 'dist');
+    if (!statSync(uiDist).isDirectory() || !statSync(installDist).isDirectory()) {
+      fail('frontend build did not produce the expected dist directories', 1);
+    }
+    cpSync(uiDist, join(staging, 'html'), { recursive: true });
+    cpSync(installDist, join(staging, 'html', 'install'), { recursive: true });
+    cpSync(join(root, 'admin', 'nginx.conf'), join(staging, 'nginx.conf'));
+    runGoBuild(join(staging, binaryName));
+
+    const manifest = {
+      schema: 1,
+      mode: 'standalone',
+      ui,
+      files: fileManifest(staging),
+    };
+    writeFileSync(
+      join(staging, 'artifact-manifest.json'),
+      `${JSON.stringify(manifest, null, 2)}\n`,
+      { mode: 0o644 },
+    );
+    publishDirectory(staging, output, backup);
+  } catch (error) {
+    rmSync(staging, { force: true, recursive: true });
+    throw error;
+  }
+
+  process.stdout.write(`BUILD_ARTIFACT=${portablePath(relative(root, output))}\n`);
+  process.stdout.write('BUILD_MANIFEST=artifact-manifest.json\n');
   process.stdout.write('BUILD_OK\n');
 }
 
@@ -171,8 +304,17 @@ validate(options);
 process.stdout.write(`BUILD_MODE=${options.mode}\n`);
 process.stdout.write(`BUILD_UI=${options.ui}\n`);
 process.stdout.write(`BUILD_PLATFORM=${process.platform}\n`);
-if (options.check) {
-  process.stdout.write('BUILD_CHECK_OK\n');
-} else {
-  runApiOnlyBuild(options.output);
+try {
+  if (options.check) {
+    process.stdout.write('BUILD_CHECK_OK\n');
+  } else {
+    if (options.mode === 'api_only') {
+      runApiOnlyBuild(options.output);
+    } else {
+      runStandaloneBuild(options.ui);
+    }
+  }
+} catch (error) {
+  process.stderr.write(`BUILD_ERROR=${error instanceof Error ? error.message : 'unknown build failure'}\n`);
+  process.exit(1);
 }
