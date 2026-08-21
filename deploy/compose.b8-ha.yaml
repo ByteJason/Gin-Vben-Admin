@@ -73,9 +73,11 @@ services:
 
   redis-replica:
     image: redis:8.10
-    command: ["redis-server", "--bind", "0.0.0.0", "--protected-mode", "no", "--replicaof", "redis-primary", "6379", "--appendonly", "yes"]
+    entrypoint: ["/usr/local/bin/replica-entrypoint.sh"]
     ports: ["${B8_REDIS_REPLICA_PORT:-16371}:6379"]
-    volumes: [b8-redis-replica:/data]
+    volumes:
+      - b8-redis-replica:/data
+      - ./redis/replica/replica-entrypoint.sh:/usr/local/bin/replica-entrypoint.sh:ro
     depends_on: {redis-primary: {condition: service_healthy}}
 
   redis-sentinel-a: &sentinel
