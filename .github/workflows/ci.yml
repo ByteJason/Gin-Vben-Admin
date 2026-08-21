@@ -221,3 +221,34 @@ jobs:
         with:
           name: rc-security-evidence
           path: .runtime/security
+
+  artifact-gates:
+    name: Local RC archive gates
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache-dependency-path: server/go.sum
+      - name: Build API-only and embedded archives
+        run: |
+          node scripts/release/package.mjs --build --mode api_only --output .runtime/release-api
+          node scripts/release/package.mjs --build --mode embedded --output .runtime/release-embedded
+          shasum -a 256 -c .runtime/release-api/SHA256SUMS
+          shasum -a 256 -c .runtime/release-embedded/SHA256SUMS
+      - name: Upload RC archives and provenance
+        uses: actions/upload-artifact@v4
+        with:
+          name: rc-cross-platform-archives
+          path: |
+            .runtime/release-api
+            .runtime/release-embedded
