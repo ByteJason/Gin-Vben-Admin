@@ -109,3 +109,38 @@ func TestAtomicEnvStoreBacksUpReplacementAndRollsBack(t *testing.T) {
 		t.Fatalf("backup artifacts remain after rollback: %v", entries)
 	}
 }
+
+func TestAtomicEnvStoreRejectsUnapprovedKeysAndLineInjection(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		values map[string]string
+	}{
+		{
+			name: "unapproved key",
+			values: map[string]string{
+				"SHELL": "/bin/sh",
+			},
+		},
+		{
+			name: "line injection",
+			values: map[string]string{
+				"DATABASE_DSN": "valid\nAUTH_ENABLED=\"false\"",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), ".env")
+			store := installplatform.NewAtomicEnvStore(path)
+			if _, err := store.Write(context.Background(), tt.values); err == nil {
+				t.Fatal("Write() error = nil, want validation error")
+			}
+			if _, err := os.Lstat(path); !os.IsNotExist(err) {
+				t.Fatalf("invalid input created target: %v", err)
+			}
+		})
+	}
+}

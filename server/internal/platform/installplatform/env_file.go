@@ -23,6 +23,57 @@ var (
 
 const maxEnvironmentBytes = 1 << 20
 
+var allowedInstallerEnvironmentKeys = map[string]struct{}{
+	"APP_UI_ACTIVE":                {},
+	"APP_UI_MODE":                  {},
+	"AUTH_ACCESS_TTL":              {},
+	"AUTH_AUDIENCE":                {},
+	"AUTH_BCRYPT_COST":             {},
+	"AUTH_ENABLED":                 {},
+	"AUTH_ISSUER":                  {},
+	"AUTH_JWT_SECRET":              {},
+	"AUTH_LOCKOUT_DURATION":        {},
+	"AUTH_LOCKOUT_THRESHOLD":       {},
+	"AUTH_RATE_LIMIT_MAX_ATTEMPTS": {},
+	"AUTH_RATE_LIMIT_WINDOW":       {},
+	"AUTH_REFRESH_COOKIE_NAME":     {},
+	"AUTH_REFRESH_TTL":             {},
+	"AUTH_REGISTRATION_ENABLED":    {},
+	"AUTH_SECURE_COOKIE":           {},
+	"DATABASE_CONN_MAX_IDLE_TIME":  {},
+	"DATABASE_CONN_MAX_LIFETIME":   {},
+	"DATABASE_DRIVER":              {},
+	"DATABASE_DSN":                 {},
+	"DATABASE_ENABLED":             {},
+	"DATABASE_MAX_IDLE_CONNS":      {},
+	"DATABASE_MAX_OPEN_CONNS":      {},
+	"DATABASE_MODE":                {},
+	"DATABASE_PING_TIMEOUT":        {},
+	"DATABASE_PRIMARY_DSN":         {},
+	"DATABASE_READ_POLICY":         {},
+	"DATABASE_REPLICA_DSNS":        {},
+	"INSTALL_STATE_DIR":            {},
+	"LOGGING_LEVEL":                {},
+	"REDIS_ADDR":                   {},
+	"REDIS_ADDRS":                  {},
+	"REDIS_DB":                     {},
+	"REDIS_DIAL_TIMEOUT":           {},
+	"REDIS_ENABLED":                {},
+	"REDIS_MASTER_NAME":            {},
+	"REDIS_MODE":                   {},
+	"REDIS_NAMESPACE":              {},
+	"REDIS_PASSWORD":               {},
+	"REDIS_PING_TIMEOUT":           {},
+	"REDIS_READ_TIMEOUT":           {},
+	"REDIS_USERNAME":               {},
+	"REDIS_WRITE_TIMEOUT":          {},
+	"SERVER_ADDR":                  {},
+	"SERVER_IDLE_TIMEOUT":          {},
+	"SERVER_READ_TIMEOUT":          {},
+	"SERVER_SHUTDOWN_TIMEOUT":      {},
+	"SERVER_WRITE_TIMEOUT":         {},
+}
+
 // EnvWriteReceipt is a credential-free summary of a published environment
 // file. It is safe to persist in an installation transaction manifest.
 type EnvWriteReceipt struct {
@@ -283,6 +334,9 @@ func renderEnvironment(values map[string]string) ([]byte, error) {
 	for key, value := range values {
 		if !validEnvironmentKey(key) {
 			return nil, errors.New("environment key is invalid")
+		}
+		if _, allowed := allowedInstallerEnvironmentKeys[key]; !allowed {
+			return nil, errors.New("environment key is not approved for installation")
 		}
 		if strings.ContainsAny(value, "\x00\r\n") {
 			return nil, fmt.Errorf("environment value for %s contains a line break", key)
