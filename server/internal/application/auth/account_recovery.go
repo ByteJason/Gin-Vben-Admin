@@ -110,9 +110,21 @@ func (s *Service) RequestPasswordReset(ctx context.Context, identifier string) e
 	if user.ID == "" || !user.Active {
 		return nil
 	}
-	if err := s.reset.Request(ctx, canonical); err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return err
+	var requestErr error
+	if recipientProvider, ok := s.reset.(PasswordResetRecipientProvider); ok {
+		// Username requests use the already-loaded profile email. If a profile
+		// has no email, keep the enumeration-safe success response and leave the
+		// administrator/development reset path available.
+		if strings.TrimSpace(user.Email) == "" {
+			return nil
+		}
+		requestErr = recipientProvider.RequestTo(ctx, canonical, user.Email)
+	} else {
+		requestErr = s.reset.Request(ctx, canonical)
+	}
+	if requestErr != nil {
+		if errors.Is(requestErr, context.Canceled) || errors.Is(requestErr, context.DeadlineExceeded) {
+			return requestErr
 		}
 		return authdomain.ErrDependencyUnavailable
 	}

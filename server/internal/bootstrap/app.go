@@ -16,6 +16,7 @@ import (
 	appauth "example.com/gin-vben-admin/server/internal/application/auth"
 	iamapp "example.com/gin-vben-admin/server/internal/application/iam"
 	installer "example.com/gin-vben-admin/server/internal/application/installer"
+	appnotification "example.com/gin-vben-admin/server/internal/application/notification"
 	settingsapp "example.com/gin-vben-admin/server/internal/application/settings"
 	"example.com/gin-vben-admin/server/internal/config"
 	"example.com/gin-vben-admin/server/internal/domain/tenant"
@@ -25,6 +26,7 @@ import (
 	platformhealth "example.com/gin-vben-admin/server/internal/platform/health"
 	"example.com/gin-vben-admin/server/internal/platform/iamplatform"
 	"example.com/gin-vben-admin/server/internal/platform/installplatform"
+	notificationplatform "example.com/gin-vben-admin/server/internal/platform/notification"
 	observabilityplatform "example.com/gin-vben-admin/server/internal/platform/observability"
 	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
 	"example.com/gin-vben-admin/server/internal/platform/settingsplatform"
@@ -128,6 +130,20 @@ func New(cfg config.Config) (*App, error) {
 		authService.SetSessionJournal(durableSessions)
 		authService.SetSessionQuery(durableSessions)
 		authService.SetAuditSink(authplatform.NewGORMAuditSink(app.database))
+		if cfg.Mail.Enabled {
+			smtpMailer, mailErr := notificationplatform.NewSMTPMailer(appnotification.SMTPConfig{
+				Host:     cfg.Mail.Host,
+				Port:     cfg.Mail.Port,
+				Username: cfg.Mail.Username,
+				Password: cfg.Mail.Password,
+				From:     cfg.Mail.From,
+				StartTLS: cfg.Mail.StartTLS,
+			})
+			if mailErr != nil {
+				return cleanupOnError(errors.New("configure SMTP notification"))
+			}
+			authService.SetPasswordResetProvider(appauth.NewSMTPPasswordResetProvider(15*time.Minute, appnotification.NewService(smtpMailer)))
+		}
 		app.auth = authService
 		persistentIAM := iamplatform.NewGORMStore(app.database)
 		app.iam = iamapp.NewServiceWithRepositories(persistentIAM, persistentIAM, persistentIAM, persistentIAM, persistentIAM, persistentIAM)
