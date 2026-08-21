@@ -2,7 +2,7 @@
 
 基于 Go、Gin、Vue 3 与 Vue Vben Admin 的企业级后台管理基础平台。
 
-当前版本：`0.2.0-dev`
+当前版本：`0.6.0-dev`
 
 ## 项目链接
 
@@ -20,9 +20,12 @@
 - 管理端布局、路由、主题和国际化基础能力
 - 管理端接口契约与统一响应模型
 - 管理端登录、refresh 轮换、登出、账号/IP 限流和失败锁定（启用认证配置后）
+- `tenant_id` 必填的租户/组织隔离与默认拒绝策略
 - Gin 健康检查、统一响应和 request ID
 - OpenAPI、错误码和响应 schema
-- MySQL、PostgreSQL、Redis 开发环境编排与显式数据库迁移
+- MySQL/PostgreSQL 的单机、读写分离与集群端点配置；Redis single/Sentinel/Cluster 配置
+- 显式数据库迁移、本地加密备份与恢复校验
+- Prometheus 指标和 OTLP tracing 导出（默认关闭，可在管理端配置）
 - Windows、macOS、Linux 通用的 Node.js 开发命令
 - 源码运行与 Docker Compose 部署
 

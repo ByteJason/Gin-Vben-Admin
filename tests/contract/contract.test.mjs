@@ -494,10 +494,10 @@ test('dev orchestrator exposes a cross-platform check mode', () => {
   assert.match(check.stdout, /pnpm --dir admin run dev:antd/);
 });
 
-test('v0.2 public surface documents config topologies and explicit migrations', () => {
+test('public surface documents config topologies and explicit migrations', () => {
   const readme = readFileSync(join(root, 'README.md'), 'utf8');
   const example = readFileSync(join(root, 'server/configs/server.example.yaml'), 'utf8');
-  assert.match(readme, /0\.2\.0-dev/);
+  assert.match(readme, /0\.6\.0-dev/);
   assert.match(readme, /cmd\/migrate/);
   assert.match(readme, /migrate status/);
   for (const mode of ['single', 'read_write', 'cluster_endpoint']) assert.match(example, new RegExp(mode));
