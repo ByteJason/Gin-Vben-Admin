@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"example.com/gin-vben-admin/server/internal/domain/observability"
 	"github.com/spf13/viper"
 )
 
@@ -17,12 +18,13 @@ const defaultConfigPath = "configs/server.yaml"
 // Config contains the runtime settings used by the HTTP service and its optional
 // infrastructure dependencies.
 type Config struct {
-	Server   ServerConfig   `mapstructure:"server" yaml:"server"`
-	Logging  LoggingConfig  `mapstructure:"logging" yaml:"logging"`
-	Database DatabaseConfig `mapstructure:"database" yaml:"database"`
-	Redis    RedisConfig    `mapstructure:"redis" yaml:"redis"`
-	Auth     AuthConfig     `mapstructure:"auth" yaml:"auth"`
-	Install  InstallConfig  `mapstructure:"install" yaml:"install"`
+	Server        ServerConfig         `mapstructure:"server" yaml:"server"`
+	Logging       LoggingConfig        `mapstructure:"logging" yaml:"logging"`
+	Database      DatabaseConfig       `mapstructure:"database" yaml:"database"`
+	Redis         RedisConfig          `mapstructure:"redis" yaml:"redis"`
+	Auth          AuthConfig           `mapstructure:"auth" yaml:"auth"`
+	Install       InstallConfig        `mapstructure:"install" yaml:"install"`
+	Observability observability.Config `mapstructure:"observability" yaml:"observability"`
 }
 
 type ServerConfig struct {
@@ -98,12 +100,13 @@ func (cfg InstallConfig) MarkerPath() string {
 // Summary is a redacted, log-safe view of a Config. It deliberately excludes
 // database DSNs and all usernames and passwords.
 type Summary struct {
-	Server   ServerSummary   `json:"server"`
-	Logging  LoggingSummary  `json:"logging"`
-	Database DatabaseSummary `json:"database"`
-	Redis    RedisSummary    `json:"redis"`
-	Auth     AuthSummary     `json:"auth"`
-	Install  InstallSummary  `json:"install"`
+	Server        ServerSummary        `json:"server"`
+	Logging       LoggingSummary       `json:"logging"`
+	Database      DatabaseSummary      `json:"database"`
+	Redis         RedisSummary         `json:"redis"`
+	Auth          AuthSummary          `json:"auth"`
+	Install       InstallSummary       `json:"install"`
+	Observability observability.Config `json:"observability"`
 }
 
 type ServerSummary struct {
@@ -198,7 +201,8 @@ func Default() Config {
 			LockoutDuration:      15 * time.Minute,
 			RegistrationEnabled:  false,
 		},
-		Install: InstallConfig{StateDir: filepath.FromSlash("../install")},
+		Install:       InstallConfig{StateDir: filepath.FromSlash("../install")},
+		Observability: observability.DefaultConfig(),
 	}
 }
 
@@ -259,6 +263,9 @@ func (cfg Config) Validate() error {
 	}
 	if err := cfg.Install.validate(); err != nil {
 		return fmt.Errorf("install: %w", err)
+	}
+	if err := cfg.Observability.Validate(); err != nil {
+		return fmt.Errorf("observability: %w", err)
 	}
 	return nil
 }
@@ -440,6 +447,11 @@ func (cfg Config) SafeSummary() Summary {
 			RegistrationEnabled:  cfg.Auth.RegistrationEnabled,
 		},
 		Install: InstallSummary{StateDirectoryAbsolute: filepath.IsAbs(cfg.Install.StateDir)},
+		Observability: func() observability.Config {
+			redacted := cfg.Observability
+			redacted.OTLPAPIKey = ""
+			return redacted
+		}(),
 	}
 }
 
@@ -496,6 +508,14 @@ func newViper() *viper.Viper {
 	v.SetDefault("auth.lockout_duration", cfg.Auth.LockoutDuration)
 	v.SetDefault("auth.registration_enabled", cfg.Auth.RegistrationEnabled)
 	v.SetDefault("install.state_dir", cfg.Install.StateDir)
+	v.SetDefault("observability.metrics_enabled", cfg.Observability.MetricsEnabled)
+	v.SetDefault("observability.metrics_endpoint", cfg.Observability.MetricsEndpoint)
+	v.SetDefault("observability.tracing_enabled", cfg.Observability.TracingEnabled)
+	v.SetDefault("observability.otlp_endpoint", cfg.Observability.OTLPEndpoint)
+	v.SetDefault("observability.otlp_protocol", cfg.Observability.OTLPProtocol)
+	v.SetDefault("observability.tls_verify", cfg.Observability.TLSVerify)
+	v.SetDefault("observability.sample_rate", cfg.Observability.SampleRate)
+	v.SetDefault("observability.otlp_api_key", cfg.Observability.OTLPAPIKey)
 
 	for key, environment := range environmentBindings {
 		_ = v.BindEnv(key, environment)
@@ -504,52 +524,60 @@ func newViper() *viper.Viper {
 }
 
 var environmentBindings = map[string]string{
-	"server.addr":                  "SERVER_ADDR",
-	"server.read_timeout":          "SERVER_READ_TIMEOUT",
-	"server.write_timeout":         "SERVER_WRITE_TIMEOUT",
-	"server.idle_timeout":          "SERVER_IDLE_TIMEOUT",
-	"server.shutdown_timeout":      "SERVER_SHUTDOWN_TIMEOUT",
-	"logging.level":                "LOGGING_LEVEL",
-	"database.enabled":             "DATABASE_ENABLED",
-	"database.driver":              "DATABASE_DRIVER",
-	"database.dsn":                 "DATABASE_DSN",
-	"database.mode":                "DATABASE_MODE",
-	"database.primary_dsn":         "DATABASE_PRIMARY_DSN",
-	"database.replica_dsns":        "DATABASE_REPLICA_DSNS",
-	"database.read_policy":         "DATABASE_READ_POLICY",
-	"database.max_open_conns":      "DATABASE_MAX_OPEN_CONNS",
-	"database.max_idle_conns":      "DATABASE_MAX_IDLE_CONNS",
-	"database.conn_max_lifetime":   "DATABASE_CONN_MAX_LIFETIME",
-	"database.conn_max_idle_time":  "DATABASE_CONN_MAX_IDLE_TIME",
-	"database.ping_timeout":        "DATABASE_PING_TIMEOUT",
-	"redis.enabled":                "REDIS_ENABLED",
-	"redis.addr":                   "REDIS_ADDR",
-	"redis.username":               "REDIS_USERNAME",
-	"redis.password":               "REDIS_PASSWORD",
-	"redis.db":                     "REDIS_DB",
-	"redis.namespace":              "REDIS_NAMESPACE",
-	"redis.mode":                   "REDIS_MODE",
-	"redis.addrs":                  "REDIS_ADDRS",
-	"redis.master_name":            "REDIS_MASTER_NAME",
-	"redis.dial_timeout":           "REDIS_DIAL_TIMEOUT",
-	"redis.read_timeout":           "REDIS_READ_TIMEOUT",
-	"redis.write_timeout":          "REDIS_WRITE_TIMEOUT",
-	"redis.ping_timeout":           "REDIS_PING_TIMEOUT",
-	"auth.enabled":                 "AUTH_ENABLED",
-	"auth.jwt_secret":              "AUTH_JWT_SECRET",
-	"auth.issuer":                  "AUTH_ISSUER",
-	"auth.audience":                "AUTH_AUDIENCE",
-	"auth.access_ttl":              "AUTH_ACCESS_TTL",
-	"auth.refresh_ttl":             "AUTH_REFRESH_TTL",
-	"auth.refresh_cookie_name":     "AUTH_REFRESH_COOKIE_NAME",
-	"auth.secure_cookie":           "AUTH_SECURE_COOKIE",
-	"auth.bcrypt_cost":             "AUTH_BCRYPT_COST",
-	"auth.rate_limit_window":       "AUTH_RATE_LIMIT_WINDOW",
-	"auth.rate_limit_max_attempts": "AUTH_RATE_LIMIT_MAX_ATTEMPTS",
-	"auth.lockout_threshold":       "AUTH_LOCKOUT_THRESHOLD",
-	"auth.lockout_duration":        "AUTH_LOCKOUT_DURATION",
-	"auth.registration_enabled":    "AUTH_REGISTRATION_ENABLED",
-	"install.state_dir":            "INSTALL_STATE_DIR",
+	"server.addr":                    "SERVER_ADDR",
+	"server.read_timeout":            "SERVER_READ_TIMEOUT",
+	"server.write_timeout":           "SERVER_WRITE_TIMEOUT",
+	"server.idle_timeout":            "SERVER_IDLE_TIMEOUT",
+	"server.shutdown_timeout":        "SERVER_SHUTDOWN_TIMEOUT",
+	"logging.level":                  "LOGGING_LEVEL",
+	"database.enabled":               "DATABASE_ENABLED",
+	"database.driver":                "DATABASE_DRIVER",
+	"database.dsn":                   "DATABASE_DSN",
+	"database.mode":                  "DATABASE_MODE",
+	"database.primary_dsn":           "DATABASE_PRIMARY_DSN",
+	"database.replica_dsns":          "DATABASE_REPLICA_DSNS",
+	"database.read_policy":           "DATABASE_READ_POLICY",
+	"database.max_open_conns":        "DATABASE_MAX_OPEN_CONNS",
+	"database.max_idle_conns":        "DATABASE_MAX_IDLE_CONNS",
+	"database.conn_max_lifetime":     "DATABASE_CONN_MAX_LIFETIME",
+	"database.conn_max_idle_time":    "DATABASE_CONN_MAX_IDLE_TIME",
+	"database.ping_timeout":          "DATABASE_PING_TIMEOUT",
+	"redis.enabled":                  "REDIS_ENABLED",
+	"redis.addr":                     "REDIS_ADDR",
+	"redis.username":                 "REDIS_USERNAME",
+	"redis.password":                 "REDIS_PASSWORD",
+	"redis.db":                       "REDIS_DB",
+	"redis.namespace":                "REDIS_NAMESPACE",
+	"redis.mode":                     "REDIS_MODE",
+	"redis.addrs":                    "REDIS_ADDRS",
+	"redis.master_name":              "REDIS_MASTER_NAME",
+	"redis.dial_timeout":             "REDIS_DIAL_TIMEOUT",
+	"redis.read_timeout":             "REDIS_READ_TIMEOUT",
+	"redis.write_timeout":            "REDIS_WRITE_TIMEOUT",
+	"redis.ping_timeout":             "REDIS_PING_TIMEOUT",
+	"auth.enabled":                   "AUTH_ENABLED",
+	"auth.jwt_secret":                "AUTH_JWT_SECRET",
+	"auth.issuer":                    "AUTH_ISSUER",
+	"auth.audience":                  "AUTH_AUDIENCE",
+	"auth.access_ttl":                "AUTH_ACCESS_TTL",
+	"auth.refresh_ttl":               "AUTH_REFRESH_TTL",
+	"auth.refresh_cookie_name":       "AUTH_REFRESH_COOKIE_NAME",
+	"auth.secure_cookie":             "AUTH_SECURE_COOKIE",
+	"auth.bcrypt_cost":               "AUTH_BCRYPT_COST",
+	"auth.rate_limit_window":         "AUTH_RATE_LIMIT_WINDOW",
+	"auth.rate_limit_max_attempts":   "AUTH_RATE_LIMIT_MAX_ATTEMPTS",
+	"auth.lockout_threshold":         "AUTH_LOCKOUT_THRESHOLD",
+	"auth.lockout_duration":          "AUTH_LOCKOUT_DURATION",
+	"auth.registration_enabled":      "AUTH_REGISTRATION_ENABLED",
+	"install.state_dir":              "INSTALL_STATE_DIR",
+	"observability.metrics_enabled":  "OBSERVABILITY_METRICS_ENABLED",
+	"observability.metrics_endpoint": "OBSERVABILITY_METRICS_ENDPOINT",
+	"observability.tracing_enabled":  "OBSERVABILITY_TRACING_ENABLED",
+	"observability.otlp_endpoint":    "OBSERVABILITY_OTLP_ENDPOINT",
+	"observability.otlp_protocol":    "OBSERVABILITY_OTLP_PROTOCOL",
+	"observability.tls_verify":       "OBSERVABILITY_TLS_VERIFY",
+	"observability.sample_rate":      "OBSERVABILITY_SAMPLE_RATE",
+	"observability.otlp_api_key":     "OBSERVABILITY_OTLP_API_KEY",
 }
 
 func resolvePath(path string) (string, bool) {

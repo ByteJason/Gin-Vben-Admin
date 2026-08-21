@@ -2,6 +2,7 @@ package router
 
 import (
 	"io/fs"
+	"log/slog"
 
 	"github.com/gin-gonic/gin"
 
@@ -53,7 +54,7 @@ func NewRouterWithComponents(readinessChecker health.ReadinessChecker, authHandl
 // the marker is atomically published.
 func NewRouterWithRuntime(readinessChecker health.ReadinessChecker, authHandler *authhttp.Handler, iamHandler *iamhttp.Handler, installHandler *installhttp.Handler, installStatus *installer.StatusService, staticAssets fs.FS) *gin.Engine {
 	r := gin.New()
-	r.Use(gin.Recovery(), middleware.RequestID(), middleware.SecurityHeaders())
+	r.Use(gin.Recovery(), middleware.RequestID(), middleware.SecurityHeaders(), middleware.StructuredAccessLog(slog.Default()))
 	if installStatus != nil {
 		r.Use(installhttp.InstallationGate(installStatus))
 	}

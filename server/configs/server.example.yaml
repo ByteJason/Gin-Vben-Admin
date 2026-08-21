@@ -10,6 +10,17 @@ server:
 logging:
   level: info
 
+observability:
+  # B6 contract only: exporters/collectors are wired and tested in B8.
+  metrics_enabled: false
+  metrics_endpoint: ""
+  tracing_enabled: false
+  otlp_endpoint: ""
+  otlp_protocol: http/protobuf
+  tls_verify: true
+  sample_rate: 0
+  otlp_api_key: ""
+
 install:
   # Source development resolves this from server/ to the root install/ workspace.
   # Container deployments should set INSTALL_STATE_DIR to a persistent volume.

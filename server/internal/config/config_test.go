@@ -23,6 +23,21 @@ func TestDefaultIsUsable(t *testing.T) {
 	}
 }
 
+func TestObservabilityConfigurationIsDisabledAndRedactedByDefault(t *testing.T) {
+	cfg := Default()
+	if cfg.Observability.MetricsEnabled || cfg.Observability.TracingEnabled {
+		t.Fatal("observability is enabled by default")
+	}
+	cfg.Observability.OTLPAPIKey = "TOKEN"
+	encoded, err := json.Marshal(cfg.SafeSummary())
+	if err != nil {
+		t.Fatalf("marshal SafeSummary() = %v", err)
+	}
+	if strings.Contains(string(encoded), "TOKEN") {
+		t.Fatalf("SafeSummary exposed OTLP API key: %s", encoded)
+	}
+}
+
 func TestLoadReadsYAMLAndEnvironmentTakesPrecedence(t *testing.T) {
 	path := writeConfigFile(t, `
 logging:
