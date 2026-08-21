@@ -37,7 +37,7 @@ func newHTTPServer(cfg config.Config, readiness health.ReadinessChecker, authSer
 	return newHTTPServerWithPlan(cfg, readiness, authService, limiter, iamService, recovery, installStatus, nil, nil, nil, nil, nil, nil)
 }
 
-func newHTTPServerWithPlan(cfg config.Config, readiness health.ReadinessChecker, authService appauth.AuthService, limiter appauth.RateLimiter, iamService *iamapp.Service, recovery appauth.AccountRecoveryService, installStatus *installer.StatusService, installPlan installer.PlanProvider, dependencyChecks installhttp.DependencyCheckProvider, applyService *installer.ApplyService, jobService *installer.ApplyJobService, settingsService *settingsapp.Service, auditService *auditapp.Service) *http.Server {
+func newHTTPServerWithPlan(cfg config.Config, readiness health.ReadinessChecker, authService appauth.AuthService, limiter appauth.RateLimiter, iamService *iamapp.Service, recovery appauth.AccountRecoveryService, installStatus *installer.StatusService, installPlan installer.PlanProvider, dependencyChecks installhttp.DependencyCheckProvider, applyService *installer.ApplyService, jobService *installer.ApplyJobService, settingsService *settingsapp.Service, auditService *auditapp.Service, observations ...httpmiddleware.ObservabilityRuntime) *http.Server {
 	var authHandler *authhttp.Handler
 	if authService != nil {
 		authHandler = authhttp.NewHandler(authService, cfg.Auth, limiter)
@@ -75,9 +75,13 @@ func newHTTPServerWithPlan(cfg config.Config, readiness health.ReadinessChecker,
 	if assets, available := webassets.Static(); available {
 		staticAssets = append(staticAssets, assets)
 	}
+	var observation httpmiddleware.ObservabilityRuntime
+	if len(observations) > 0 {
+		observation = observations[0]
+	}
 	return &http.Server{
 		Addr:              cfg.Server.Addr,
-		Handler:           router.NewRouterWithRuntime(readiness, authHandler, iamHandler, installHandler, installStatus, firstStaticAsset(staticAssets), auxiliary),
+		Handler:           router.NewRouterWithRuntimeAndObservability(readiness, authHandler, iamHandler, installHandler, installStatus, firstStaticAsset(staticAssets), observation, auxiliary),
 		ReadTimeout:       cfg.Server.ReadTimeout,
 		ReadHeaderTimeout: cfg.Server.ReadTimeout,
 		WriteTimeout:      cfg.Server.WriteTimeout,

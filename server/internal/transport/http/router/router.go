@@ -3,6 +3,7 @@ package router
 import (
 	"io/fs"
 	"log/slog"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 
@@ -53,8 +54,19 @@ func NewRouterWithComponents(readinessChecker health.ReadinessChecker, authHandl
 // enabled by the production bootstrap so business routes stay closed before
 // the marker is atomically published.
 func NewRouterWithRuntime(readinessChecker health.ReadinessChecker, authHandler *authhttp.Handler, iamHandler *iamhttp.Handler, installHandler *installhttp.Handler, installStatus *installer.StatusService, staticAssets fs.FS, auxiliary ...admin.AuxiliaryRoutes) *gin.Engine {
+	return NewRouterWithRuntimeAndObservability(readinessChecker, authHandler, iamHandler, installHandler, installStatus, staticAssets, nil, auxiliary...)
+}
+
+// NewRouterWithRuntimeAndObservability composes the production router with an
+// optional metrics/tracing runtime. Existing constructors intentionally remain
+// dependency-free for unit tests and local probes.
+func NewRouterWithRuntimeAndObservability(readinessChecker health.ReadinessChecker, authHandler *authhttp.Handler, iamHandler *iamhttp.Handler, installHandler *installhttp.Handler, installStatus *installer.StatusService, staticAssets fs.FS, observation middleware.ObservabilityRuntime, auxiliary ...admin.AuxiliaryRoutes) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery(), middleware.RequestID(), middleware.SecurityHeaders(), middleware.StructuredAccessLog(slog.Default()))
+	if observation != nil {
+		r.Use(middleware.Observability(observation))
+		r.GET("/metrics", gin.WrapH(http.HandlerFunc(observation.ServeMetrics)))
+	}
 	if installStatus != nil {
 		r.Use(installhttp.InstallationGate(installStatus))
 	}

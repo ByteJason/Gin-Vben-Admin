@@ -24,6 +24,7 @@ import (
 	platformhealth "example.com/gin-vben-admin/server/internal/platform/health"
 	"example.com/gin-vben-admin/server/internal/platform/iamplatform"
 	"example.com/gin-vben-admin/server/internal/platform/installplatform"
+	observabilityplatform "example.com/gin-vben-admin/server/internal/platform/observability"
 	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
 	"example.com/gin-vben-admin/server/internal/platform/settingsplatform"
 )
@@ -32,19 +33,20 @@ import (
 // constructed only when enabled in configuration; constructors deliberately do
 // not perform network probes. Readiness owns the live connectivity checks.
 type App struct {
-	config    config.Config
-	http      *http.Server
-	database  *gormdb.Store
-	redis     *rediscache.Client
-	auth      appauth.AuthService
-	iam       *iamapp.Service
-	settings  *settingsapp.Service
-	audit     *auditapp.Service
-	install   *installer.StatusService
-	apply     *installer.ApplyService
-	applyJobs *installer.ApplyJobService
-	readiness *platformhealth.Checker
-	closers   []io.Closer
+	config        config.Config
+	http          *http.Server
+	database      *gormdb.Store
+	redis         *rediscache.Client
+	auth          appauth.AuthService
+	iam           *iamapp.Service
+	settings      *settingsapp.Service
+	audit         *auditapp.Service
+	observability *observabilityplatform.Runtime
+	install       *installer.StatusService
+	apply         *installer.ApplyService
+	applyJobs     *installer.ApplyJobService
+	readiness     *platformhealth.Checker
+	closers       []io.Closer
 
 	shutdownOnce sync.Once
 	shutdownErr  error
@@ -59,6 +61,12 @@ func New(cfg config.Config) (*App, error) {
 	}
 
 	app := &App{config: cfg}
+	observability, err := observabilityplatform.NewRuntime(cfg.Observability)
+	if err != nil {
+		return nil, fmt.Errorf("configure observability runtime: %w", err)
+	}
+	app.observability = observability
+	app.closers = append(app.closers, observability)
 	app.install = installer.NewStatusService(installplatform.NewFileMarkerStore(cfg.Install.MarkerPath()))
 	cleanupOnError := func(cause error) (*App, error) {
 		_ = closeResources(app.closers)
@@ -175,7 +183,7 @@ func New(cfg config.Config) (*App, error) {
 		app.applyJobs = installer.NewApplyJobService(applyService)
 		app.closers = append(app.closers, app.applyJobs)
 	}
-	app.http = newHTTPServerWithPlan(cfg, app.readiness, app.auth, limiter, app.iam, recovery, app.install, installPlan, installplatform.NewSystemDependencyProbe(), applyService, app.applyJobs, app.settings, app.audit)
+	app.http = newHTTPServerWithPlan(cfg, app.readiness, app.auth, limiter, app.iam, recovery, app.install, installPlan, installplatform.NewSystemDependencyProbe(), applyService, app.applyJobs, app.settings, app.audit, app.observability)
 	return app, nil
 }
 
@@ -254,6 +262,15 @@ func (a *App) Audit() *auditapp.Service {
 		return nil
 	}
 	return a.audit
+}
+
+// Observability returns the runtime metrics/tracing collector. It is always
+// present after New; disabled configurations expose zero collectors.
+func (a *App) Observability() *observabilityplatform.Runtime {
+	if a == nil {
+		return nil
+	}
+	return a.observability
 }
 
 // Installation returns the credential-free installation status service.

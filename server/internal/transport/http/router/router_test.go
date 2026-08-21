@@ -4,10 +4,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"testing/fstest"
 
 	settingsapp "example.com/gin-vben-admin/server/internal/application/settings"
+	domainobs "example.com/gin-vben-admin/server/internal/domain/observability"
+	observabilityplatform "example.com/gin-vben-admin/server/internal/platform/observability"
 	adminhttp "example.com/gin-vben-admin/server/internal/transport/http/admin"
 	settingshttp "example.com/gin-vben-admin/server/internal/transport/http/settings"
 	"github.com/gin-gonic/gin"
@@ -119,4 +122,29 @@ func TestRouterMountsSettingsCapabilityWhenProvided(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("settings route status=%d body=%s", response.Code, response.Body.String())
 	}
+}
+
+func TestRouterMountsMetricsAndRecordsRequestsWhenObservabilityEnabled(t *testing.T) {
+	runtime, err := observabilityplatform.NewRuntime(observabilityConfigForTest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	r := NewRouterWithRuntimeAndObservability(nil, nil, nil, nil, nil, nil, runtime)
+	request := httptest.NewRequest(http.MethodGet, "/health/live", nil)
+	response := httptest.NewRecorder()
+	r.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("health status=%d body=%s", response.Code, response.Body.String())
+	}
+	metricsRequest := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	metricsResponse := httptest.NewRecorder()
+	r.ServeHTTP(metricsResponse, metricsRequest)
+	if metricsResponse.Code != http.StatusOK || !strings.Contains(metricsResponse.Body.String(), `route="/health/live"`) {
+		t.Fatalf("metrics status=%d body=%s", metricsResponse.Code, metricsResponse.Body.String())
+	}
+}
+
+func observabilityConfigForTest() domainobs.Config {
+	return domainobs.Config{MetricsEnabled: true, MetricsEndpoint: "http://127.0.0.1:9090/metrics", SampleRate: 1, TLSVerify: true, OTLPProtocol: "http/protobuf"}
 }
