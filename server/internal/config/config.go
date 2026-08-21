@@ -220,7 +220,12 @@ func Load(path string) (Config, error) {
 		}
 	}
 
-	applyListEnvironmentOverrides(v)
+	dotEnv, err := loadRootDotEnv(configPath)
+	if err != nil {
+		return Config{}, err
+	}
+	applyDotEnvOverrides(v, dotEnv)
+	applyListEnvironmentOverrides(v, dotEnv)
 
 	cfg := Default()
 	if err := v.Unmarshal(&cfg); err != nil {
@@ -557,11 +562,15 @@ func resolvePath(path string) (string, bool) {
 	return filepath.FromSlash(defaultConfigPath), false
 }
 
-func applyListEnvironmentOverrides(v *viper.Viper) {
+func applyListEnvironmentOverrides(v *viper.Viper, dotEnv map[string]string) {
 	if value, ok := os.LookupEnv("DATABASE_REPLICA_DSNS"); ok {
+		v.Set("database.replica_dsns", splitCommaSeparated(value))
+	} else if value, ok := dotEnv["DATABASE_REPLICA_DSNS"]; ok {
 		v.Set("database.replica_dsns", splitCommaSeparated(value))
 	}
 	if value, ok := os.LookupEnv("REDIS_ADDRS"); ok {
+		v.Set("redis.addrs", splitCommaSeparated(value))
+	} else if value, ok := dotEnv["REDIS_ADDRS"]; ok {
 		v.Set("redis.addrs", splitCommaSeparated(value))
 	}
 }

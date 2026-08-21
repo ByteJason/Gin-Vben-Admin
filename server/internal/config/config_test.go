@@ -90,6 +90,34 @@ install:
 	}
 }
 
+func TestLoadReadsRootDotEnvBetweenYAMLAndProcessEnvironment(t *testing.T) {
+	root := t.TempDir()
+	configDir := filepath.Join(root, "server", "configs")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(configs) error = %v", err)
+	}
+	configPath := filepath.Join(configDir, "server.yaml")
+	if err := os.WriteFile(configPath, []byte("logging:\n  level: warn\nserver:\n  addr: 127.0.0.1:9100\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+	envPath := filepath.Join(root, ".env")
+	if err := os.WriteFile(envPath, []byte("LOGGING_LEVEL=\"debug\"\nSERVER_ADDR=\"127.0.0.1:9200\"\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(.env) error = %v", err)
+	}
+
+	t.Setenv("SERVER_ADDR", "127.0.0.1:9300")
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got := cfg.Logging.Level; got != "debug" {
+		t.Fatalf("logging level = %q, want root .env value debug", got)
+	}
+	if got := cfg.Server.Addr; got != "127.0.0.1:9300" {
+		t.Fatalf("server addr = %q, want process environment value", got)
+	}
+}
+
 func TestInstallConfigUsesRootInstallDirectoryAndSafeSummaryHidesPath(t *testing.T) {
 	cfg := Default()
 	if got, want := filepath.Clean(cfg.Install.StateDir), filepath.Clean("../install"); got != want {
