@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	domain "example.com/gin-vben-admin/server/internal/domain/iam"
+	"example.com/gin-vben-admin/server/internal/domain/tenant"
 )
 
 func TestServiceAuthorizesRolePolicyAndScopes(t *testing.T) {
@@ -74,5 +76,54 @@ func TestServiceExposesManagementCollections(t *testing.T) {
 	permissions, err := service.ListPermissions(context.Background())
 	if err != nil || len(permissions) != 1 || permissions[0].ID != "perm-home" {
 		t.Fatalf("permissions=%+v err=%v", permissions, err)
+	}
+}
+
+func TestServiceListUsersPageFiltersPaginatesAndKeepsTenantBoundary(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a", Organization: "org-a"})
+	users := []domain.User{
+		{ID: "1", Username: "alice", DisplayName: "Alice", Email: "alice@example.test", TenantID: "tenant-a", OrgID: "org-a", Active: true, LastLoginAt: time.Unix(1, 0)},
+		{ID: "2", Username: "albert", DisplayName: "Albert", Email: "albert@example.test", TenantID: "tenant-a", OrgID: "org-a", Active: true, LastLoginAt: time.Unix(2, 0)},
+		{ID: "3", Username: "bob", DisplayName: "Bob", Email: "bob@example.test", TenantID: "tenant-a", OrgID: "org-b", Active: false, LastLoginAt: time.Unix(3, 0)},
+		{ID: "4", Username: "alice-other", DisplayName: "Other", Email: "other@example.test", TenantID: "tenant-b", OrgID: "org-a", Active: true},
+	}
+	for _, user := range users {
+		if err := store.SaveUser(ctx, user); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page, err := NewService(store).ListUsersPage(ctx, domain.UserListQuery{
+		Page: 1, PageSize: 1, Keyword: "AL", Status: "active", OrgID: "org-a", Sort: "-username",
+	})
+	if err != nil {
+		t.Fatalf("ListUsersPage() error = %v", err)
+	}
+	if page.Total != 2 || page.Page != 1 || page.PageSize != 1 || len(page.Items) != 1 || page.Items[0].Username != "alice" {
+		t.Fatalf("page = %+v", page)
+	}
+	if _, err := NewService(store).ListUsersPage(ctx, domain.UserListQuery{PageSize: 101}); !errors.Is(err, ErrInvalidUserQuery) {
+		t.Fatalf("oversized page error = %v, want ErrInvalidUserQuery", err)
+	}
+	if _, err := NewService(store).ListUsersPage(ctx, domain.UserListQuery{OrgID: "org-b"}); !errors.Is(err, tenant.ErrOrganizationDenied) {
+		t.Fatalf("cross-organization query error = %v, want organization denied", err)
+	}
+}
+
+func TestUserListQueryDefaultsAndRejectsUnknownSortOrStatus(t *testing.T) {
+	query, err := (domain.UserListQuery{}).Normalize()
+	if err != nil || query.Page != 1 || query.PageSize != 20 || query.Sort != "id" {
+		t.Fatalf("normalized defaults = %+v err=%v", query, err)
+	}
+	for _, invalid := range []domain.UserListQuery{{Page: -1}, {PageSize: 101}, {Status: "pending"}, {Sort: "username;drop"}} {
+		if _, err := invalid.Normalize(); !errors.Is(err, domain.ErrInvalidUserQuery) {
+			t.Fatalf("Normalize(%+v) error = %v, want ErrInvalidUserQuery", invalid, err)
+		}
+	}
+}
+
+func TestServiceListUsersPageRequiresTenantContextForLegacyRepository(t *testing.T) {
+	if _, err := NewService(NewMemoryStore()).ListUsersPage(context.Background(), domain.UserListQuery{}); !errors.Is(err, tenant.ErrTenantContextMissing) {
+		t.Fatalf("missing tenant error = %v, want tenant context missing", err)
 	}
 }

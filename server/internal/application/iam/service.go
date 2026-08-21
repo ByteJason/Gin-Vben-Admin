@@ -16,6 +16,7 @@ import (
 var (
 	ErrInvalidID         = errors.New("id is required")
 	ErrRepositoryMissing = errors.New("iam repository capability is unavailable")
+	ErrInvalidUserQuery  = domain.ErrInvalidUserQuery
 )
 
 // MemoryStore is a local adapter used by unit tests and the initial bootstrap.
@@ -343,6 +344,143 @@ func (s *Service) ListUsers(ctx context.Context) ([]domain.User, error) {
 		return nil, ErrRepositoryMissing
 	}
 	return repo.ListUsers(ctx)
+}
+
+// ListUsersPage is the bounded read-side seam used by the first user
+// management slice. Persistent adapters may push filtering/counting into SQL;
+// legacy repositories fall back to the same deterministic in-memory rules.
+func (s *Service) ListUsersPage(ctx context.Context, query domain.UserListQuery) (domain.UserPage, error) {
+	if s == nil {
+		return domain.UserPage{}, ErrRepositoryMissing
+	}
+	normalized, err := query.Normalize()
+	if err != nil {
+		return domain.UserPage{}, ErrInvalidUserQuery
+	}
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return domain.UserPage{}, err
+		}
+	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return domain.UserPage{}, err
+	}
+	if !scope.PlatformAdmin && scope.Organization != "" {
+		if normalized.OrgID != "" && normalized.OrgID != scope.Organization {
+			return domain.UserPage{}, tenant.ErrOrganizationDenied
+		}
+		normalized.OrgID = scope.Organization
+	}
+	if repo, ok := s.Users.(domain.UserPageRepository); ok {
+		return repo.ListUsersPage(ctx, normalized)
+	}
+	users, err := s.ListUsers(ctx)
+	if err != nil {
+		return domain.UserPage{}, err
+	}
+	filtered := filterUsers(users, normalized, scope)
+	return paginateUsers(filtered, normalized), nil
+}
+
+func filterUsers(users []domain.User, query domain.UserListQuery, scope tenant.Context) []domain.User {
+	keyword := strings.ToLower(query.Keyword)
+	filtered := make([]domain.User, 0, len(users))
+	for _, user := range users {
+		if !scope.PlatformAdmin && user.TenantID != "" && user.TenantID != scope.TenantID {
+			continue
+		}
+		if query.OrgID != "" && user.OrgID != query.OrgID {
+			continue
+		}
+		if query.Status == "active" && !user.Active || query.Status == "disabled" && user.Active {
+			continue
+		}
+		if query.RoleID != "" && !containsString(user.RoleIDs, query.RoleID) {
+			continue
+		}
+		if keyword != "" {
+			values := []string{user.Username, user.DisplayName, user.Nickname, user.Email}
+			matched := false
+			for _, value := range values {
+				if strings.Contains(strings.ToLower(value), keyword) {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
+		}
+		filtered = append(filtered, cloneUser(user))
+	}
+	sortUsers(filtered, query.Sort)
+	return filtered
+}
+
+func paginateUsers(users []domain.User, query domain.UserListQuery) domain.UserPage {
+	page := domain.UserPage{Total: len(users), Page: query.Page, PageSize: query.PageSize, Items: []domain.User{}}
+	offset := (query.Page - 1) * query.PageSize
+	if offset >= len(users) {
+		return page
+	}
+	end := offset + query.PageSize
+	if end > len(users) {
+		end = len(users)
+	}
+	page.Items = append(page.Items, users[offset:end]...)
+	return page
+}
+
+func sortUsers(users []domain.User, sortValue string) {
+	desc := strings.HasPrefix(sortValue, "-")
+	key := strings.TrimPrefix(sortValue, "-")
+	compare := func(left, right domain.User) int {
+		var l, r string
+		switch key {
+		case "username":
+			l, r = strings.ToLower(left.Username), strings.ToLower(right.Username)
+		case "displayName":
+			l, r = strings.ToLower(left.DisplayName), strings.ToLower(right.DisplayName)
+		case "email":
+			l, r = strings.ToLower(left.Email), strings.ToLower(right.Email)
+		case "lastLoginAt":
+			l, r = left.LastLoginAt.UTC().Format(time.RFC3339Nano), right.LastLoginAt.UTC().Format(time.RFC3339Nano)
+		case "orgId":
+			l, r = left.OrgID, right.OrgID
+		default:
+			l, r = left.ID, right.ID
+		}
+		if l < r {
+			return -1
+		}
+		if l > r {
+			return 1
+		}
+		if left.ID < right.ID {
+			return -1
+		}
+		if left.ID > right.ID {
+			return 1
+		}
+		return 0
+	}
+	sort.SliceStable(users, func(i, j int) bool {
+		result := compare(users[i], users[j])
+		if desc {
+			return result > 0
+		}
+		return result < 0
+	})
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) SaveUser(ctx context.Context, user domain.User) error {

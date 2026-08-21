@@ -4,7 +4,9 @@ package iamhttp
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	appauth "example.com/gin-vben-admin/server/internal/application/auth"
 	iamapp "example.com/gin-vben-admin/server/internal/application/iam"
@@ -133,11 +135,28 @@ type userRequest struct {
 }
 
 type userResponse struct {
-	ID          string   `json:"id"`
-	Username    string   `json:"username"`
-	DisplayName string   `json:"displayName"`
-	Active      bool     `json:"active"`
-	RoleIDs     []string `json:"roleIds"`
+	ID                string     `json:"id"`
+	Username          string     `json:"username"`
+	DisplayName       string     `json:"displayName"`
+	Nickname          string     `json:"nickname"`
+	Avatar            string     `json:"avatar"`
+	Email             string     `json:"email"`
+	Phone             string     `json:"phone"`
+	LastLoginIP       string     `json:"lastLoginIp"`
+	LastLoginAt       *time.Time `json:"lastLoginAt,omitempty"`
+	PasswordChangedAt *time.Time `json:"passwordChangedAt,omitempty"`
+	TenantID          string     `json:"tenantId"`
+	OrgID             string     `json:"orgId"`
+	Active            bool       `json:"active"`
+	Status            string     `json:"status"`
+	RoleIDs           []string   `json:"roleIds"`
+}
+
+type userPageResponse struct {
+	Items    []userResponse `json:"items"`
+	Total    int            `json:"total"`
+	Page     int            `json:"page"`
+	PageSize int            `json:"pageSize"`
 }
 
 type currentUserResponse struct {
@@ -165,16 +184,64 @@ func (h *Handler) listUsers(c *gin.Context) {
 	if !h.guard(c) {
 		return
 	}
-	users, err := h.service.ListUsers(c.Request.Context())
+	query, err := parseUserListQuery(c)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid user query")
+		return
+	}
+	page, err := h.service.ListUsersPage(c.Request.Context(), query)
 	if err != nil {
 		writeServiceError(c, err)
 		return
 	}
-	out := make([]userResponse, 0, len(users))
-	for _, user := range users {
-		out = append(out, userResponse{ID: user.ID, Username: user.Username, DisplayName: user.DisplayName, Active: user.Active, RoleIDs: append([]string(nil), user.RoleIDs...)})
+	out := userPageResponse{Items: make([]userResponse, 0, len(page.Items)), Total: page.Total, Page: page.Page, PageSize: page.PageSize}
+	for _, user := range page.Items {
+		out.Items = append(out.Items, responseFromUser(user))
 	}
 	response.OK(c, out)
+}
+
+func parseUserListQuery(c *gin.Context) (domain.UserListQuery, error) {
+	query := domain.UserListQuery{Keyword: c.Query("keyword"), Status: c.Query("status"), RoleID: c.Query("roleId"), OrgID: c.Query("orgId"), Sort: c.Query("sort")}
+	var err error
+	if value := strings.TrimSpace(c.Query("page")); value != "" {
+		query.Page, err = strconv.Atoi(value)
+		if err != nil {
+			return domain.UserListQuery{}, err
+		}
+	}
+	if value := strings.TrimSpace(c.Query("pageSize")); value != "" {
+		query.PageSize, err = strconv.Atoi(value)
+		if err != nil {
+			return domain.UserListQuery{}, err
+		}
+	}
+	return query, nil
+}
+
+func responseFromUser(user domain.User) userResponse {
+	return userResponse{
+		ID: user.ID, Username: user.Username, DisplayName: user.DisplayName,
+		Nickname: user.Nickname, Avatar: user.Avatar, Email: user.Email, Phone: user.Phone,
+		LastLoginIP: user.LastLoginIP, LastLoginAt: timePointer(user.LastLoginAt),
+		PasswordChangedAt: timePointer(user.PasswordChangedAt), TenantID: user.TenantID, OrgID: user.OrgID,
+		Active: user.Active, Status: userStatus(user.Active), RoleIDs: append([]string(nil), user.RoleIDs...),
+	}
+}
+
+func userStatus(active bool) string {
+	if active {
+		return "active"
+	}
+	return "disabled"
+}
+
+func timePointer(value time.Time) *time.Time {
+	if value.IsZero() {
+		return nil
+	}
+	copy := value
+	return &copy
 }
 
 func (h *Handler) createUser(c *gin.Context) {
@@ -194,7 +261,7 @@ func (h *Handler) createUser(c *gin.Context) {
 		writeServiceError(c, err)
 		return
 	}
-	response.OK(c, userResponse{ID: req.ID, Username: req.Username, DisplayName: req.DisplayName, Active: active, RoleIDs: req.RoleIDs})
+	response.OK(c, responseFromUser(domain.User{ID: req.ID, Username: req.Username, DisplayName: req.DisplayName, Active: active, RoleIDs: req.RoleIDs}))
 }
 
 type roleRequest struct {
@@ -415,8 +482,16 @@ func writeServiceError(c *gin.Context, err error) {
 		response.Error(c, http.StatusServiceUnavailable, codeUnavailable, "dependency unavailable")
 		return
 	}
-	if errors.Is(err, iamapp.ErrInvalidID) || errors.Is(err, domain.ErrInvalidPolicy) {
+	if errors.Is(err, iamapp.ErrInvalidID) || errors.Is(err, iamapp.ErrInvalidUserQuery) || errors.Is(err, domain.ErrInvalidPolicy) {
 		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid request")
+		return
+	}
+	if errors.Is(err, tenant.ErrTenantContextMissing) || errors.Is(err, tenant.ErrInvalidTenantID) || errors.Is(err, tenant.ErrInvalidOrganization) {
+		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid tenant context")
+		return
+	}
+	if errors.Is(err, tenant.ErrCrossTenant) || errors.Is(err, tenant.ErrOrganizationDenied) {
+		response.Error(c, http.StatusForbidden, codeForbidden, "forbidden")
 		return
 	}
 	response.Error(c, http.StatusInternalServerError, codeInternalError, "internal error")

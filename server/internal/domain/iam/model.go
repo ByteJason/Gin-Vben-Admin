@@ -15,6 +15,7 @@ var (
 	ErrInvalidPolicy     = errors.New("policy is invalid")
 	ErrDataScopeNotFound = errors.New("data scope not found")
 	ErrResourceNotFound  = errors.New("resource not found")
+	ErrInvalidUserQuery  = errors.New("invalid user list query")
 )
 
 type Effect string
@@ -44,6 +45,76 @@ type User struct {
 	TenantID, OrgID           string
 	Active                    bool
 	RoleIDs                   []string
+}
+
+// UserListQuery is the bounded read-side contract for the management user
+// collection. It deliberately contains no write or credential fields.
+type UserListQuery struct {
+	Page     int    `json:"page"`
+	PageSize int    `json:"pageSize"`
+	Keyword  string `json:"keyword"`
+	Status   string `json:"status"`
+	RoleID   string `json:"roleId"`
+	OrgID    string `json:"orgId"`
+	Sort     string `json:"sort"`
+}
+
+type UserPage struct {
+	Items    []User `json:"items"`
+	Total    int    `json:"total"`
+	Page     int    `json:"page"`
+	PageSize int    `json:"pageSize"`
+}
+
+// Normalize applies the public pagination defaults and rejects values that
+// could bypass the collection bound or produce ambiguous SQL ordering.
+func (q UserListQuery) Normalize() (UserListQuery, error) {
+	if q.Page == 0 {
+		q.Page = 1
+	}
+	if q.PageSize == 0 {
+		q.PageSize = 20
+	}
+	if q.Page < 1 || q.PageSize < 1 || q.PageSize > 100 {
+		return UserListQuery{}, ErrInvalidUserQuery
+	}
+	q.Keyword = strings.TrimSpace(q.Keyword)
+	if len(q.Keyword) > 256 {
+		return UserListQuery{}, ErrInvalidUserQuery
+	}
+	q.Status = strings.ToLower(strings.TrimSpace(q.Status))
+	switch q.Status {
+	case "", "all", "active", "disabled":
+	default:
+		return UserListQuery{}, ErrInvalidUserQuery
+	}
+	q.RoleID = strings.TrimSpace(q.RoleID)
+	q.OrgID = strings.TrimSpace(q.OrgID)
+	if len(q.RoleID) > 128 || len(q.OrgID) > 128 {
+		return UserListQuery{}, ErrInvalidUserQuery
+	}
+	q.Sort = strings.TrimSpace(q.Sort)
+	if q.Sort == "" {
+		q.Sort = "id"
+	}
+	sortKey := strings.TrimPrefix(q.Sort, "-")
+	switch sortKey {
+	case "id", "username", "displayName", "email", "lastLoginAt", "orgId":
+	default:
+		return UserListQuery{}, ErrInvalidUserQuery
+	}
+	if q.Page > int(^uint(0)>>1)/q.PageSize {
+		return UserListQuery{}, ErrInvalidUserQuery
+	}
+	return q, nil
+}
+
+// SortKey returns a normalized field key and direction. Persistence adapters
+// map the key to their own safe query expression.
+func (q UserListQuery) SortKey() (string, bool) {
+	desc := strings.HasPrefix(q.Sort, "-")
+	key := strings.TrimPrefix(q.Sort, "-")
+	return key, desc
 }
 
 type Role struct {
@@ -94,6 +165,10 @@ type Request struct {
 type UserRepository interface {
 	FindUser(context.Context, string) (User, error)
 	SaveUser(context.Context, User) error
+}
+
+type UserPageRepository interface {
+	ListUsersPage(context.Context, UserListQuery) (UserPage, error)
 }
 type RoleRepository interface {
 	FindRole(context.Context, string) (Role, error)

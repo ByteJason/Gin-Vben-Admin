@@ -139,6 +139,76 @@ func (s *GORMStore) ListUsers(ctx context.Context) ([]domain.User, error) {
 	return out, nil
 }
 
+// ListUsersPage keeps user collection filtering/counting in the read endpoint
+// while preserving the tenant predicate for every query. The sort column is
+// selected from the normalized domain allowlist and never interpolates raw
+// request input.
+func (s *GORMStore) ListUsersPage(ctx context.Context, filter domain.UserListQuery) (domain.UserPage, error) {
+	filter, err := filter.Normalize()
+	if err != nil {
+		return domain.UserPage{}, err
+	}
+	if s == nil || s.db == nil {
+		return domain.UserPage{}, ErrStoreUnavailable
+	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return domain.UserPage{}, err
+	}
+	if !scope.PlatformAdmin && scope.Organization != "" {
+		if filter.OrgID != "" && filter.OrgID != scope.Organization {
+			return domain.UserPage{}, tenant.ErrOrganizationDenied
+		}
+		filter.OrgID = scope.Organization
+	}
+	tenantID := scope.TenantID
+	base := s.read(ctx).Table("users").Where("tenant_id = ?", tenantID)
+	if filter.Keyword != "" {
+		pattern := "%" + strings.ToLower(filter.Keyword) + "%"
+		base = base.Where("LOWER(username) LIKE ? OR LOWER(COALESCE(nickname, '')) LIKE ? OR LOWER(COALESCE(email, '')) LIKE ?", pattern, pattern, pattern)
+	}
+	switch filter.Status {
+	case "active":
+		base = base.Where("status = ?", "active")
+	case "disabled":
+		base = base.Where("status <> ?", "active")
+	}
+	if filter.RoleID != "" {
+		base = base.Where("EXISTS (SELECT 1 FROM user_roles ur WHERE ur.tenant_id = users.tenant_id AND ur.user_id = users.id AND ur.role_id = ?)", filter.RoleID)
+	}
+	if filter.OrgID != "" {
+		base = base.Where("org_id = ?", filter.OrgID)
+	}
+	var total int64
+	if err := base.Session(&gorm.Session{}).Count(&total).Error; err != nil {
+		return domain.UserPage{}, ErrStoreUnavailable
+	}
+	sortKey, descending := filter.SortKey()
+	sortColumns := map[string]string{
+		"id": "id", "username": "username", "displayName": "COALESCE(nickname, username)",
+		"email": "email", "lastLoginAt": "last_login_at", "orgId": "org_id",
+	}
+	sortColumn := sortColumns[sortKey]
+	order := sortColumn + " ASC"
+	if descending {
+		order = sortColumn + " DESC"
+	}
+	var rows []userRow
+	offset := (filter.Page - 1) * filter.PageSize
+	if err := base.Order(order).Order("id ASC").Limit(filter.PageSize).Offset(offset).Find(&rows).Error; err != nil {
+		return domain.UserPage{}, ErrStoreUnavailable
+	}
+	items := make([]domain.User, 0, len(rows))
+	for _, row := range rows {
+		roles, roleErr := s.roleIDs(ctx, tenantID, row.ID)
+		if roleErr != nil {
+			return domain.UserPage{}, roleErr
+		}
+		items = append(items, row.toDomain(roles))
+	}
+	return domain.UserPage{Items: items, Total: int(total), Page: filter.Page, PageSize: filter.PageSize}, nil
+}
+
 func (s *GORMStore) FindRole(ctx context.Context, id string) (domain.Role, error) {
 	if s == nil || s.db == nil {
 		return domain.Role{}, ErrStoreUnavailable
@@ -601,5 +671,6 @@ var (
 		FindUser(context.Context, string) (domain.User, error)
 		SaveUser(context.Context, domain.User) error
 		ListUsers(context.Context) ([]domain.User, error)
+		ListUsersPage(context.Context, domain.UserListQuery) (domain.UserPage, error)
 	} = (*GORMStore)(nil)
 )

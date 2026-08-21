@@ -109,10 +109,13 @@ func TestIAMUserListUsesRolePolicyAndDefaultDeny(t *testing.T) {
 		t.Fatalf("allowed status=%d body=%s", resp.Code, resp.Body.String())
 	}
 	var envelope struct {
-		Code int           `json:"code"`
-		Data []domain.User `json:"data"`
+		Code int `json:"code"`
+		Data struct {
+			Items []domain.User `json:"items"`
+			Total int           `json:"total"`
+		} `json:"data"`
 	}
-	if err := json.Unmarshal(resp.Body.Bytes(), &envelope); err != nil || envelope.Code != 0 || len(envelope.Data) != 2 {
+	if err := json.Unmarshal(resp.Body.Bytes(), &envelope); err != nil || envelope.Code != 0 || envelope.Data.Total != 2 || len(envelope.Data.Items) != 2 {
 		t.Fatalf("allowed envelope=%s err=%v", resp.Body.String(), err)
 	}
 
@@ -151,6 +154,64 @@ func TestIAMUsesValidatedTenantContextInsteadOfRawHeader(t *testing.T) {
 	r.ServeHTTP(resp, req)
 	if resp.Code != http.StatusForbidden || !strings.Contains(resp.Body.String(), `"code":30000`) {
 		t.Fatalf("mismatched tenant status=%d body=%s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestIAMUserListSupportsBoundedPaginationAndSearch(t *testing.T) {
+	store := iamapp.NewMemoryStore()
+	for _, user := range []domain.User{
+		{ID: "1", Username: "alice", DisplayName: "Alice", TenantID: "default", Active: true},
+		{ID: "2", Username: "albert", DisplayName: "Albert", TenantID: "default", Active: true},
+		{ID: "3", Username: "bob", DisplayName: "Bob", TenantID: "default", Active: false},
+	} {
+		if err := store.SaveUser(context.Background(), user); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.SavePolicy(context.Background(), domain.Policy{Subject: "u1", Method: http.MethodGet, Path: "/api/admin/v1/iam/users", Effect: domain.EffectAllow}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveUser(context.Background(), domain.User{ID: "u1", Username: "admin", TenantID: "default", Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	r := newIAMTestRouter(store, authdomain.Claims{Subject: "u1", Type: authdomain.AccessToken, ExpiresAt: time.Now().Add(time.Minute)})
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/v1/iam/users?page=2&pageSize=1&keyword=al&status=active&sort=username", nil)
+	req.Header.Set("Authorization", "Bearer test")
+	resp := httptest.NewRecorder()
+	r.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	var envelope struct {
+		Code int `json:"code"`
+		Data struct {
+			Items []struct {
+				Username string `json:"username"`
+			} `json:"items"`
+			Total    int `json:"total"`
+			Page     int `json:"page"`
+			PageSize int `json:"pageSize"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Code != 0 || envelope.Data.Total != 2 || envelope.Data.Page != 2 || envelope.Data.PageSize != 1 || len(envelope.Data.Items) != 1 || envelope.Data.Items[0].Username != "alice" {
+		t.Fatalf("page envelope=%s", resp.Body.String())
+	}
+}
+
+func TestIAMUserListRejectsInvalidPagination(t *testing.T) {
+	store := iamapp.NewMemoryStore()
+	_ = store.SaveUser(context.Background(), domain.User{ID: "u1", Username: "admin", TenantID: "default", Active: true})
+	_ = store.SavePolicy(context.Background(), domain.Policy{Subject: "u1", Method: http.MethodGet, Path: "/api/admin/v1/iam/users", Effect: domain.EffectAllow})
+	r := newIAMTestRouter(store, authdomain.Claims{Subject: "u1", Type: authdomain.AccessToken, ExpiresAt: time.Now().Add(time.Minute)})
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/v1/iam/users?pageSize=101", nil)
+	req.Header.Set("Authorization", "Bearer test")
+	resp := httptest.NewRecorder()
+	r.ServeHTTP(resp, req)
+	if resp.Code != http.StatusBadRequest || !strings.Contains(resp.Body.String(), `"code":10000`) {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
 	}
 }
 

@@ -35,6 +35,13 @@ func TestIAMPersistenceRequiresTenantContext(t *testing.T) {
 	}
 }
 
+func TestGORMStoreUserPageRejectsInvalidQueryBeforeDatabaseAccess(t *testing.T) {
+	store := NewGORMStore(nil)
+	if _, err := store.ListUsersPage(tenant.WithContext(context.Background(), tenant.Context{TenantID: "default"}), domain.UserListQuery{PageSize: 101}); !errors.Is(err, domain.ErrInvalidUserQuery) {
+		t.Fatalf("ListUsersPage() error = %v, want ErrInvalidUserQuery", err)
+	}
+}
+
 func TestUserRowMapsProfileFieldsAndNormalizedUpdate(t *testing.T) {
 	lastLogin := time.Unix(100, 0).UTC()
 	passwordChanged := time.Unix(90, 0).UTC()
