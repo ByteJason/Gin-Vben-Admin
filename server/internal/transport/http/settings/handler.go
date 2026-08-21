@@ -130,7 +130,7 @@ func writeError(c *gin.Context, err error) {
 	case errors.Is(err, settingsapp.ErrSettingNotFound):
 		response.Error(c, http.StatusNotFound, 10001, "setting not found")
 	case errors.Is(err, settingsapp.ErrVersionConflict):
-		response.Error(c, http.StatusConflict, 10006, "version conflict")
+		response.Error(c, http.StatusConflict, 10010, "version conflict")
 	case errors.Is(err, settingsapp.ErrInvalidSetting):
 		response.Error(c, http.StatusBadRequest, 10000, "invalid setting")
 	case strings.Contains(err.Error(), "repository unavailable"):

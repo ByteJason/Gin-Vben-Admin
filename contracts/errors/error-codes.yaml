@@ -45,6 +45,10 @@ codes:
     key: installation_rollback_unavailable
     http_status: 409
     retryable: false
+  - code: 10010
+    key: setting_version_conflict
+    http_status: 409
+    retryable: true
   - code: 40001
     key: dependency_unavailable
     http_status: 503

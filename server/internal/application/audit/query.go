@@ -15,14 +15,14 @@ import (
 var ErrInvalidFilter = errors.New("invalid audit filter")
 
 type Event struct {
-	ID        string
-	ActorID   string
-	Action    string
-	Resource  string
-	Outcome   string
-	RequestID string
-	Details   map[string]any
-	CreatedAt time.Time
+	ID        string         `json:"id"`
+	ActorID   string         `json:"actorId"`
+	Action    string         `json:"action"`
+	Resource  string         `json:"resource"`
+	Outcome   string         `json:"outcome"`
+	RequestID string         `json:"requestId"`
+	Details   map[string]any `json:"details,omitempty"`
+	CreatedAt time.Time      `json:"createdAt"`
 }
 
 type Filter struct {
@@ -48,6 +48,13 @@ type Repository interface {
 	Query(context.Context, Filter) ([]Event, error)
 }
 
+// PageRepository lets database adapters return a total without loading every
+// matching row. MemoryRepository intentionally uses the simpler Repository
+// contract for deterministic unit tests.
+type PageRepository interface {
+	QueryPage(context.Context, Filter) ([]Event, int, error)
+}
+
 type Service struct {
 	repo Repository
 }
@@ -67,11 +74,21 @@ func (s *Service) Query(ctx context.Context, filter Filter) (Page, error) {
 	if s == nil || s.repo == nil {
 		return Page{}, errors.New("audit repository unavailable")
 	}
-	events, err := s.repo.Query(ctx, filter)
+	var (
+		events []Event
+		total  int
+		err    error
+	)
+	if paged, ok := s.repo.(PageRepository); ok {
+		events, total, err = paged.QueryPage(ctx, filter)
+	} else {
+		events, err = s.repo.Query(ctx, filter)
+		total = len(events)
+	}
 	if err != nil {
 		return Page{}, err
 	}
-	page := Page{Total: len(events), Limit: filter.Limit, Offset: filter.Offset}
+	page := Page{Total: total, Limit: filter.Limit, Offset: filter.Offset}
 	if filter.Offset >= len(events) {
 		return page, nil
 	}
@@ -133,7 +150,7 @@ func redactMap(input map[string]any) map[string]any {
 	output := make(map[string]any, len(input))
 	for key, value := range input {
 		lower := strings.ToLower(key)
-		if strings.Contains(lower, "password") || strings.Contains(lower, "secret") || strings.Contains(lower, "token") || strings.Contains(lower, "authorization") || strings.Contains(lower, "api_key") {
+		if strings.Contains(lower, "password") || strings.Contains(lower, "secret") || strings.Contains(lower, "token") || strings.Contains(lower, "authorization") || strings.Contains(lower, "api_key") || strings.Contains(lower, "apikey") {
 			output[key] = "[REDACTED]"
 			continue
 		}

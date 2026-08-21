@@ -304,6 +304,28 @@ test('RBAC management contract exposes guarded collections and denial code', () 
   }
 });
 
+test('settings and audit contracts expose versioned guarded management seams', () => {
+  const admin = readFileSync(join(root, 'contracts/openapi/admin-v1.yaml'), 'utf8');
+  const errors = readFileSync(join(root, 'contracts/errors/error-codes.yaml'), 'utf8');
+  for (const path of [
+    '/api/admin/v1/settings:',
+    '/api/admin/v1/settings/{key}:',
+    '/api/admin/v1/settings/{key}/history:',
+    '/api/admin/v1/settings/{key}/rollback:',
+    '/api/admin/v1/audit/events:',
+  ]) {
+    assert.match(admin, new RegExp(`\\n  ${path.replaceAll('/', '\\/')}`), path);
+    const start = admin.indexOf(`  ${path}`);
+    const next = admin.indexOf('\n  /', start + 4);
+    const section = admin.slice(start, next === -1 ? undefined : next);
+    assert.match(section, /BearerAuth/, `${path} bearer security`);
+  }
+  assert.match(admin, /SettingData/);
+  assert.match(admin, /AuditPage/);
+  assert.match(admin, /expectedVersion/);
+  assert.match(errors, /code: 10010[\s\S]*?key: setting_version_conflict[\s\S]*?http_status: 409/);
+});
+
 test('web-antd auth seam uses the versioned API and sends the refresh cookie', () => {
   const auth = readFileSync(join(root, 'admin/apps/web-antd/src/api/core/auth.ts'), 'utf8');
   const generated = readFileSync(join(root, 'admin/packages/api-client/src/generated/admin-v1.ts'), 'utf8');
@@ -336,6 +358,23 @@ test('all management UIs expose equivalent login loading and result states', () 
     assert.match(login, /role="alert"/, `${ui} error announcement`);
     assert.match(login, /data-testid="login-success"/, `${ui} success target`);
     assert.match(login, /role="status"/, `${ui} success announcement`);
+  }
+});
+
+test('all management UIs expose versioned settings and audit clients', () => {
+  const generated = readFileSync(join(root, 'admin/packages/api-client/src/generated/admin-v1.ts'), 'utf8');
+  for (const ui of ['web-antd', 'web-ele', 'web-naive']) {
+    const settings = readFileSync(join(root, `admin/apps/${ui}/src/api/core/settings.ts`), 'utf8');
+    const audit = readFileSync(join(root, `admin/apps/${ui}/src/api/core/audit.ts`), 'utf8');
+    for (const fn of ['listSettingDefinitionsApi', 'getSettingApi', 'updateSettingApi', 'listSettingHistoryApi', 'rollbackSettingApi']) {
+      assert.match(settings, new RegExp(`export async function ${fn}`), `${ui} ${fn}`);
+    }
+    assert.match(audit, /export async function queryAuditEventsApi/);
+    assert.match(settings, /ADMIN_ENDPOINTS\.getSetting/);
+    assert.match(audit, /ADMIN_ENDPOINTS\.queryAuditEvents/);
+  }
+  for (const endpoint of ['/admin/v1/settings', '/admin/v1/settings/{key}', '/admin/v1/audit/events']) {
+    assert.match(generated, new RegExp(endpoint.replaceAll('/', '\\/')));
   }
 });
 

@@ -12,16 +12,20 @@ import (
 	"sync"
 	"time"
 
+	auditapp "example.com/gin-vben-admin/server/internal/application/audit"
 	appauth "example.com/gin-vben-admin/server/internal/application/auth"
 	iamapp "example.com/gin-vben-admin/server/internal/application/iam"
 	installer "example.com/gin-vben-admin/server/internal/application/installer"
+	settingsapp "example.com/gin-vben-admin/server/internal/application/settings"
 	"example.com/gin-vben-admin/server/internal/config"
+	"example.com/gin-vben-admin/server/internal/platform/auditplatform"
 	"example.com/gin-vben-admin/server/internal/platform/authplatform"
 	rediscache "example.com/gin-vben-admin/server/internal/platform/cache/redis"
 	platformhealth "example.com/gin-vben-admin/server/internal/platform/health"
 	"example.com/gin-vben-admin/server/internal/platform/iamplatform"
 	"example.com/gin-vben-admin/server/internal/platform/installplatform"
 	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
+	"example.com/gin-vben-admin/server/internal/platform/settingsplatform"
 )
 
 // App is the composition root for the API process. Optional infrastructure is
@@ -34,6 +38,8 @@ type App struct {
 	redis     *rediscache.Client
 	auth      appauth.AuthService
 	iam       *iamapp.Service
+	settings  *settingsapp.Service
+	audit     *auditapp.Service
 	install   *installer.StatusService
 	apply     *installer.ApplyService
 	applyJobs *installer.ApplyJobService
@@ -117,6 +123,15 @@ func New(cfg config.Config) (*App, error) {
 		app.iam = iamapp.NewServiceWithRepositories(persistentIAM, persistentIAM, persistentIAM, persistentIAM, persistentIAM, persistentIAM)
 		app.iam.SetPermissionCache(iamplatform.NewRedisPermissionCache(app.redis), 30*time.Second)
 	}
+	if app.database != nil {
+		app.settings = settingsapp.NewService(
+			settingsplatform.NewGORMRepository(app.database),
+			settingsplatform.NewGORMAuditSink(app.database),
+			nil,
+			nil,
+		)
+		app.audit = auditapp.NewService(auditplatform.NewGORMRepository(app.database))
+	}
 
 	app.readiness = platformhealth.NewChecker(readinessTimeout(cfg), dependencies...)
 	var limiter appauth.RateLimiter
@@ -160,7 +175,7 @@ func New(cfg config.Config) (*App, error) {
 		app.applyJobs = installer.NewApplyJobService(applyService)
 		app.closers = append(app.closers, app.applyJobs)
 	}
-	app.http = newHTTPServerWithPlan(cfg, app.readiness, app.auth, limiter, app.iam, recovery, app.install, installPlan, installplatform.NewSystemDependencyProbe(), applyService, app.applyJobs)
+	app.http = newHTTPServerWithPlan(cfg, app.readiness, app.auth, limiter, app.iam, recovery, app.install, installPlan, installplatform.NewSystemDependencyProbe(), applyService, app.applyJobs, app.settings, app.audit)
 	return app, nil
 }
 
@@ -223,6 +238,22 @@ func (a *App) IAM() *iamapp.Service {
 		return nil
 	}
 	return a.iam
+}
+
+// Settings returns the optional versioned settings service.
+func (a *App) Settings() *settingsapp.Service {
+	if a == nil {
+		return nil
+	}
+	return a.settings
+}
+
+// Audit returns the optional read-side audit query service.
+func (a *App) Audit() *auditapp.Service {
+	if a == nil {
+		return nil
+	}
+	return a.audit
 }
 
 // Installation returns the credential-free installation status service.

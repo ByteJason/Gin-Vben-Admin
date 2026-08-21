@@ -388,6 +388,105 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /api/admin/v1/settings:
+    get:
+      tags: [Settings]
+      operationId: listSettingDefinitions
+      summary: 查询系统设置定义
+      security: [{BearerAuth: []}]
+      responses:
+        '200': { $ref: '#/components/responses/SettingDefinitionsResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
+  /api/admin/v1/settings/{key}:
+    get:
+      tags: [Settings]
+      operationId: getSetting
+      summary: 查询单项系统设置
+      security: [{BearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/SettingKey'
+      responses:
+        '200': { $ref: '#/components/responses/SettingResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
+    put:
+      tags: [Settings]
+      operationId: updateSetting
+      summary: 以乐观版本号更新系统设置
+      security: [{BearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/SettingKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SettingUpdateRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/SettingResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/SettingConflict' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
+  /api/admin/v1/settings/{key}/history:
+    get:
+      tags: [Settings]
+      operationId: listSettingHistory
+      summary: 查询设置历史版本
+      security: [{BearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/SettingKey'
+      responses:
+        '200': { $ref: '#/components/responses/SettingHistoryResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/admin/v1/settings/{key}/rollback:
+    post:
+      tags: [Settings]
+      operationId: rollbackSetting
+      summary: 回滚设置到指定历史版本
+      security: [{BearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/SettingKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SettingRollbackRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/SettingResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/SettingConflict' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
+  /api/admin/v1/audit/events:
+    get:
+      tags: [Audit]
+      operationId: queryAuditEvents
+      summary: 分页查询管理审计事件
+      security: [{BearerAuth: []}]
+      parameters:
+        - { name: actorId, in: query, schema: { type: string } }
+        - { name: action, in: query, schema: { type: string } }
+        - { name: resource, in: query, schema: { type: string } }
+        - { name: outcome, in: query, schema: { type: string } }
+        - { name: requestId, in: query, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 0, maximum: 200, default: 50 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+      responses:
+        '200': { $ref: '#/components/responses/AuditPageResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
 components:
   securitySchemes:
     BearerAuth:
@@ -416,6 +515,14 @@ components:
       schema:
         type: string
         minLength: 1
+    SettingKey:
+      name: key
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
   schemas:
     HealthData:
       type: object
@@ -664,6 +771,61 @@ components:
     IAMDataScopeRequest:
       allOf:
         - $ref: '#/components/schemas/IAMDataScope'
+    SettingDefinition:
+      type: object
+      required: [key, kind, sensitive]
+      properties:
+        key: { type: string }
+        kind: { type: string, enum: [string, bool, number, json, secret] }
+        sensitive: { type: boolean }
+        default: { type: string }
+        allowed:
+          type: array
+          items: { type: string }
+    SettingData:
+      type: object
+      required: [key, value, version, sensitive]
+      properties:
+        key: { type: string }
+        value: { type: string }
+        version: { type: integer, minimum: 0 }
+        sensitive: { type: boolean }
+        updatedBy: { type: string }
+        updatedAt: { type: string, format: date-time }
+    SettingUpdateRequest:
+      type: object
+      required: [value, expectedVersion]
+      properties:
+        value: {}
+        expectedVersion: { type: integer, minimum: 0 }
+    SettingRollbackRequest:
+      type: object
+      required: [version, expectedVersion]
+      properties:
+        version: { type: integer, minimum: 1 }
+        expectedVersion: { type: integer, minimum: 1 }
+    AuditEvent:
+      type: object
+      required: [id, action, resource, outcome, requestId, createdAt]
+      properties:
+        id: { type: string }
+        actorId: { type: string }
+        action: { type: string }
+        resource: { type: string }
+        outcome: { type: string }
+        requestId: { type: string }
+        details: { type: object, additionalProperties: true }
+        createdAt: { type: string, format: date-time }
+    AuditPage:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AuditEvent' }
+        total: { type: integer, minimum: 0 }
+        limit: { type: integer, minimum: 0 }
+        offset: { type: integer, minimum: 0 }
     ErrorEnvelope:
       type: object
       required: [code, message, data, traceId, meta]
@@ -711,6 +873,78 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/SuccessEnvelope'
+    SettingDefinitionsResponse:
+      description: 设置定义查询成功
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/SuccessEnvelope'
+              - type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/SettingDefinition' }
+    SettingResponse:
+      description: 设置读取或写入成功
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/SuccessEnvelope'
+              - type: object
+                properties:
+                  data: { $ref: '#/components/schemas/SettingData' }
+    SettingHistoryResponse:
+      description: 设置历史查询成功
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/SuccessEnvelope'
+              - type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/SettingData' }
+    AuditPageResponse:
+      description: 审计事件查询成功
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/SuccessEnvelope'
+              - type: object
+                properties:
+                  data: { $ref: '#/components/schemas/AuditPage' }
+    SettingConflict:
+      description: 设置版本已变化，需要重新读取后再写入
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ErrorEnvelope'
+              - type: object
+                properties:
+                  code:
+                    const: 10010
+    NotFound:
+      description: 资源不存在
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ErrorEnvelope'
+              - type: object
+                properties:
+                  code:
+                    const: 10001
     Forbidden:
       description: 当前主体没有资源权限；服务端默认拒绝
       headers:
