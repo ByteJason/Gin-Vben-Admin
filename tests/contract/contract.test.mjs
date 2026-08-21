@@ -321,6 +321,19 @@ test('all management UIs expose equivalent login loading and result states', () 
   }
 });
 
+test('management login forms do not expose mock accounts or preset passwords', () => {
+  for (const ui of ['web-antd', 'web-ele', 'web-naive']) {
+    const login = readFileSync(
+      join(root, `admin/apps/${ui}/src/views/_core/authentication/login.vue`),
+      'utf8',
+    );
+    assert.doesNotMatch(login, /MOCK_USER_OPTIONS|selectAccount|123456/, `${ui} mock credentials`);
+    for (const field of ['username', 'password', 'captcha']) {
+      assert.match(login, new RegExp(`fieldName:\\s*['"]${field}['"]`), `${ui} ${field}`);
+    }
+  }
+});
+
 test('management UI clients use versioned authentication and menu endpoints', () => {
   for (const ui of ['web-antd', 'web-ele', 'web-naive']) {
     const auth = readFileSync(join(root, `admin/apps/${ui}/src/api/core/auth.ts`), 'utf8');
