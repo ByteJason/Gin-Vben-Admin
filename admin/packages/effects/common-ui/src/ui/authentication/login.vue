@@ -124,13 +124,14 @@ defineExpose({
         </VbenCheckbox>
       </div>
 
-      <span
+      <button
         v-if="showForgetPassword"
-        class="vben-link text-sm font-normal"
+        class="text-foreground text-sm font-medium underline-offset-4 hover:underline"
+        type="button"
         @click="handleGo(forgetPasswordPath)"
       >
         {{ $t('authentication.forgetPassword') }}
-      </span>
+      </button>
     </div>
     <VbenButton
       :class="{
@@ -174,12 +175,13 @@ defineExpose({
     <slot name="to-register">
       <div v-if="showRegister" class="mt-3 text-center text-sm">
         {{ $t('authentication.accountTip') }}
-        <span
-          class="vben-link text-sm font-normal"
+        <button
+          class="text-foreground text-sm font-medium underline-offset-4 hover:underline"
+          type="button"
           @click="handleGo(registerPath)"
         >
           {{ $t('authentication.createAccount') }}
-        </span>
+        </button>
       </div>
     </slot>
   </div>

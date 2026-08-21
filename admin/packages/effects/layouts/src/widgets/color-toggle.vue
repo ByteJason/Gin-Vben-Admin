@@ -2,6 +2,7 @@
 import type { BuiltinThemeType } from '@vben/types';
 
 import { Palette } from '@vben/icons';
+import { $t } from '@vben/locales';
 import {
   COLOR_PRESETS,
   preferences,
@@ -31,6 +32,7 @@ function handleUpdate(colorPrimary: string, type: BuiltinThemeType) {
     >
       <template v-for="preset in COLOR_PRESETS" :key="preset.color">
         <VbenIconButton
+          :aria-label="`${$t('preferences.theme.builtin.title')}: ${preset.type}`"
           class="flex-center shrink-0"
           @click="handleUpdate(preset.color, preset.type)"
         >
@@ -57,7 +59,7 @@ function handleUpdate(colorPrimary: string, type: BuiltinThemeType) {
       </template>
     </div>
 
-    <VbenIconButton>
+    <VbenIconButton :aria-label="$t('preferences.theme.title')">
       <Palette class="size-4 text-primary" />
     </VbenIconButton>
   </div>

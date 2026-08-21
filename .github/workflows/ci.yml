@@ -88,6 +88,10 @@ jobs:
           pnpm --dir admin --filter @vben/web-antd exec vue-tsc --noEmit --skipLibCheck
           pnpm --dir admin --filter @vben/web-ele exec vue-tsc --noEmit --skipLibCheck
           pnpm --dir admin --filter @vben/web-naive exec vue-tsc --noEmit --skipLibCheck
+      - name: Install Chromium for accessibility gates
+        run: pnpm --dir admin exec playwright install --with-deps chromium
+      - name: Run management UI and installer E2E accessibility gates
+        run: pnpm --dir admin run test:e2e:a11y
 
   server:
     name: Gin server gates

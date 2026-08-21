@@ -55,7 +55,7 @@ function handleUpdate(value: string | undefined) {
     :model-value="preferences.app.authPageLayout"
     @update:model-value="handleUpdate"
   >
-    <VbenIconButton>
+    <VbenIconButton :aria-label="$t('preferences.layout')">
       <PanelRight v-if="authPanelRight" class="size-4" />
       <PanelLeft v-if="authPanelLeft" class="size-4" />
       <InspectionPanel v-if="authPanelCenter" class="size-4" />

@@ -2,6 +2,7 @@
 import { ref } from 'vue';
 
 import { Settings } from '@vben/icons';
+import { $t } from '@vben/locales';
 
 import { VbenIconButton } from '@vben-core/shadcn-ui';
 
@@ -22,6 +23,7 @@ const preferencesRef = ref<InstanceType<typeof Preferences> | null>(null);
     @clear-preferences-and-logout="clearPreferencesAndLogout"
   >
     <VbenIconButton
+      :aria-label="$t('preferences.title')"
       class="hover:animate-[shrink_0.3s_ease-in-out]"
       @click="preferencesRef?.open()"
     >

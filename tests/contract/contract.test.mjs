@@ -334,6 +334,23 @@ test('management login forms do not expose mock accounts or preset passwords', (
   }
 });
 
+test('management UIs and installer expose a Playwright axe gate', () => {
+  const pkg = JSON.parse(readFileSync(join(root, 'admin/package.json'), 'utf8'));
+  const workflow = readFileSync(join(root, '.github/workflows/ci.yml'), 'utf8');
+  assert.match(pkg.scripts?.['test:e2e:a11y'] ?? '', /playwright test/);
+  assert.ok(pkg.devDependencies?.['@axe-core/playwright']);
+  assert.ok(pkg.devDependencies?.['@playwright/test']);
+  for (const path of [
+    'admin/playwright.config.ts',
+    'admin/tests/e2e/accessibility.spec.ts',
+    'admin/tests/e2e/static-server.mjs',
+  ]) {
+    assert.equal(existsSync(join(root, path)), true, path);
+  }
+  assert.match(workflow, /playwright install --with-deps chromium/);
+  assert.match(workflow, /pnpm --dir admin run test:e2e:a11y/);
+});
+
 test('management UI clients use versioned authentication and menu endpoints', () => {
   for (const ui of ['web-antd', 'web-ele', 'web-naive']) {
     const auth = readFileSync(join(root, `admin/apps/${ui}/src/api/core/auth.ts`), 'utf8');

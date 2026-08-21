@@ -52,6 +52,7 @@
     "publint": "vsh publint",
     "reinstall": "pnpm run clean -- --del-lock && pnpm install",
     "test:benchmark": "vitest bench --run",
+    "test:e2e:a11y": "pnpm run build:antd && pnpm run build:ele && pnpm run build:naive && pnpm --dir ../install run build && playwright test --config playwright.config.ts",
     "test:unit": "vitest run --dom",
     "test:e2e": "turbo run test:e2e",
     "update:deps": "npx taze -r -w",
@@ -63,8 +64,10 @@
     "sortablejs": "catalog:"
   },
   "devDependencies": {
+    "@axe-core/playwright": "catalog:",
     "@changesets/changelog-github": "catalog:",
     "@changesets/cli": "catalog:",
+    "@playwright/test": "catalog:",
     "@tsdown/css": "catalog:",
     "@types/node": "catalog:",
     "@vben/commitlint-config": "workspace:*",

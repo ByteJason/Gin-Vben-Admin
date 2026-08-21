@@ -10,6 +10,8 @@ import { VbenTooltip } from '../tooltip';
 import VbenButton from './button.vue';
 
 interface Props extends VbenButtonProps {
+  /** Accessible name for icon-only controls. Falls back to the tooltip text. */
+  ariaLabel?: string;
   class?: any;
   disabled?: boolean;
   onClick?: ((e?: MouseEvent) => void)[] | ((e?: MouseEvent) => void);
@@ -45,6 +47,7 @@ function handleClick(e: MouseEvent) {
 <template>
   <VbenButton
     v-if="!showTooltip"
+    :aria-label="ariaLabel || undefined"
     :class="cn('rounded-full', props.class)"
     :disabled="disabled"
     :variant="variant"
@@ -61,6 +64,7 @@ function handleClick(e: MouseEvent) {
   >
     <template #trigger>
       <VbenButton
+        :aria-label="ariaLabel || tooltip || undefined"
         :class="cn('rounded-full', props.class)"
         :disabled="disabled"
         :variant="variant"
