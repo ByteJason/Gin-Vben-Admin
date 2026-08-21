@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -283,6 +284,21 @@ func TestHTTPCompositionWiresDeviceSessionRoutes(t *testing.T) {
 	server.Handler.ServeHTTP(res, req)
 	if res.Code != http.StatusOK {
 		t.Fatalf("device session route status = %d, want 200; body=%s", res.Code, res.Body.String())
+	}
+}
+
+func TestHTTPCompositionAppliesConfiguredTenantPolicy(t *testing.T) {
+	cfg := config.Default()
+	cfg.Tenant.Mode = "multi"
+	cfg.Auth.Enabled = true
+	service := &bootstrapAuthSessionFake{}
+	server := newHTTPServer(cfg, nil, service, nil, nil, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/v1/auth/sessions", nil)
+	req.Header.Set("Authorization", "Bearer access")
+	res := httptest.NewRecorder()
+	server.Handler.ServeHTTP(res, req)
+	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), `"code":10000`) {
+		t.Fatalf("missing tenant status = %d, want 400; body=%s", res.Code, res.Body.String())
 	}
 }
 

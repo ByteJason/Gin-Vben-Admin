@@ -26,6 +26,16 @@ install:
   # Container deployments should set INSTALL_STATE_DIR to a persistent volume.
   state_dir: ../install
 
+tenant:
+  # single keeps the default tenant boundary; multi requires X-Tenant-ID on
+  # every protected operation. X-Platform-Admin is never accepted from a
+  # request; platform-admin scope is resolved by authenticated server code.
+  enabled: true
+  mode: single
+  default_id: default
+  tenant_header: X-Tenant-ID
+  organization_header: X-Org-ID
+
 database:
   enabled: false
   driver: mysql

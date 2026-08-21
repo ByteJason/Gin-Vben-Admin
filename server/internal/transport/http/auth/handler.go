@@ -13,6 +13,7 @@ import (
 	appauth "example.com/gin-vben-admin/server/internal/application/auth"
 	"example.com/gin-vben-admin/server/internal/config"
 	"example.com/gin-vben-admin/server/internal/domain/authdomain"
+	httpmiddleware "example.com/gin-vben-admin/server/internal/transport/http/middleware"
 	"example.com/gin-vben-admin/server/internal/transport/http/response"
 	"github.com/gin-gonic/gin"
 )
@@ -76,7 +77,7 @@ func (h *Handler) SetSessionManager(manager appauth.SessionManagementService) {
 // RegisterRoutes installs login, refresh, and logout. A nil handler is a
 // deliberate disabled seam that returns a safe dependency error rather than
 // accidentally accepting credentials.
-func RegisterRoutes(r gin.IRouter, handler *Handler) {
+func RegisterRoutes(r gin.IRouter, handler *Handler, policies ...httpmiddleware.TenantPolicy) {
 	group := r.Group(authPath)
 	if handler == nil || !handler.config.Enabled || handler.service == nil {
 		group.GET("/captcha", disabled)
@@ -89,6 +90,10 @@ func RegisterRoutes(r gin.IRouter, handler *Handler) {
 		group.GET("/sessions", disabled)
 		group.DELETE("/sessions/:id", disabled)
 		return
+	}
+	policy := httpmiddleware.TenantPolicy{Mode: "single", DefaultTenantID: "default"}
+	if len(policies) > 0 {
+		policy = policies[0]
 	}
 	group.GET("/captcha", handler.issueCaptcha)
 	group.POST("/login", handler.login)
@@ -107,8 +112,8 @@ func RegisterRoutes(r gin.IRouter, handler *Handler) {
 		group.POST("/password/reset", disabled)
 	}
 	if handler.sessions != nil {
-		group.GET("/sessions", Middleware(handler.service), handler.listSessions)
-		group.DELETE("/sessions/:id", Middleware(handler.service), handler.revokeSession)
+		group.GET("/sessions", Middleware(handler.service), httpmiddleware.TenantContext(policy), handler.listSessions)
+		group.DELETE("/sessions/:id", Middleware(handler.service), httpmiddleware.TenantContext(policy), handler.revokeSession)
 	} else {
 		group.GET("/sessions", disabled)
 		group.DELETE("/sessions/:id", disabled)

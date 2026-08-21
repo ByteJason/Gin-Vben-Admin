@@ -6,6 +6,7 @@ import (
 	audithttp "example.com/gin-vben-admin/server/internal/transport/http/audit"
 	authhttp "example.com/gin-vben-admin/server/internal/transport/http/auth"
 	iamhttp "example.com/gin-vben-admin/server/internal/transport/http/iam"
+	httpmiddleware "example.com/gin-vben-admin/server/internal/transport/http/middleware"
 	"example.com/gin-vben-admin/server/internal/transport/http/response"
 	settingshttp "example.com/gin-vben-admin/server/internal/transport/http/settings"
 )
@@ -14,8 +15,9 @@ import (
 // container optional preserves the dependency-free router seam used by health
 // and contract tests.
 type AuxiliaryRoutes struct {
-	Settings *settingshttp.Handler
-	Audit    *audithttp.Handler
+	Settings     *settingshttp.Handler
+	Audit        *audithttp.Handler
+	TenantPolicy *httpmiddleware.TenantPolicy
 }
 
 func RegisterRoutes(r gin.IRouter, authHandlers ...*authhttp.Handler) {
@@ -27,18 +29,22 @@ func RegisterRoutes(r gin.IRouter, authHandlers ...*authhttp.Handler) {
 }
 
 func RegisterRoutesWithIAM(r gin.IRouter, authHandler *authhttp.Handler, iamHandler *iamhttp.Handler, auxiliary ...AuxiliaryRoutes) {
+	policy := httpmiddleware.TenantPolicy{Mode: "single", DefaultTenantID: "default"}
+	if len(auxiliary) > 0 && auxiliary[0].TenantPolicy != nil {
+		policy = *auxiliary[0].TenantPolicy
+	}
 	admin := r.Group("/api/admin/v1")
 	admin.GET("/ping", func(c *gin.Context) {
 		response.OK(c, gin.H{"service": "admin", "status": "ok"})
 	})
-	authhttp.RegisterRoutes(r, authHandler)
-	iamhttp.RegisterRoutes(r, iamHandler)
+	authhttp.RegisterRoutes(r, authHandler, policy)
+	iamhttp.RegisterRoutes(r, iamHandler, policy)
 	if len(auxiliary) == 0 {
 		return
 	}
 	capabilities := auxiliary[0]
 	if authHandler != nil && authHandler.Service() != nil {
-		protected := r.Group("/api/admin/v1", authhttp.Middleware(authHandler.Service()))
+		protected := r.Group("/api/admin/v1", authhttp.Middleware(authHandler.Service()), httpmiddleware.TenantContext(policy))
 		settingshttp.RegisterRoutesOn(protected, capabilities.Settings)
 		audithttp.RegisterRoutesOn(protected, capabilities.Audit)
 		return

@@ -18,6 +18,7 @@ import (
 	"example.com/gin-vben-admin/server/internal/transport/http/health"
 	iamhttp "example.com/gin-vben-admin/server/internal/transport/http/iam"
 	installhttp "example.com/gin-vben-admin/server/internal/transport/http/install"
+	httpmiddleware "example.com/gin-vben-admin/server/internal/transport/http/middleware"
 	"example.com/gin-vben-admin/server/internal/transport/http/router"
 	settingshttp "example.com/gin-vben-admin/server/internal/transport/http/settings"
 )
@@ -60,6 +61,16 @@ func newHTTPServerWithPlan(cfg config.Config, readiness health.ReadinessChecker,
 	if auditService != nil {
 		auxiliary.Audit = audithttp.NewHandler(auditService)
 	}
+	tenantPolicy := httpmiddleware.TenantPolicy{
+		Mode:               cfg.Tenant.Mode,
+		DefaultTenantID:    cfg.Tenant.DefaultID,
+		TenantHeader:       cfg.Tenant.TenantHeader,
+		OrganizationHeader: cfg.Tenant.OrganizationHeader,
+	}
+	if !cfg.Tenant.Enabled {
+		tenantPolicy = httpmiddleware.TenantPolicy{Mode: "single", DefaultTenantID: "default"}
+	}
+	auxiliary.TenantPolicy = &tenantPolicy
 	var staticAssets []fs.FS
 	if assets, available := webassets.Static(); available {
 		staticAssets = append(staticAssets, assets)
