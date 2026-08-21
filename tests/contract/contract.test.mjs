@@ -69,7 +69,8 @@ test('installation contract exposes credential-free status on its own scope', ()
   assert.match(install, /selectedUi/);
   assert.match(install, /enum: \[antd, ele, naive\]/);
   assert.match(install, /enum: \[embedded, standalone, api_only, dev\]/);
-  assert.doesNotMatch(install, /password|dsn|jwtSecret|redisPassword/i);
+  const statusSchema = install.slice(install.indexOf('    InstallationStatus:'), install.indexOf('    ErrorEnvelope:'));
+  assert.doesNotMatch(statusSchema, /password|dsn|jwtSecret|redisPassword/i);
   assert.doesNotMatch(install, /\/api\/admin\/v1|\/api\/client\/v1/);
 });
 
@@ -85,7 +86,30 @@ test('installation contract exposes a permission plan without filesystem details
   assert.match(install, /requiresRestart/);
   assert.match(install, /path:/);
   assert.match(install, /action:/);
-  assert.doesNotMatch(install, /absolutePath|rootPath|password|dsn|jwtSecret|redisPassword/i);
+  const planSchema = install.slice(install.indexOf('    InstallationPlan:'), install.indexOf('    PlanErrorEnvelope:'));
+  assert.doesNotMatch(planSchema, /absolutePath|rootPath|password|dsn|jwtSecret|redisPassword/i);
+});
+
+test('installation contract exposes database and Redis connection checks', () => {
+  const install = readFileSync(join(root, 'contracts/openapi/install-v1.yaml'), 'utf8');
+  for (const path of ['/api/system/install/v1/check/database:', '/api/system/install/v1/check/redis:']) {
+    assert.match(install, new RegExp(`\\n  ${path.replaceAll('/', '\\/')}`), path);
+    const sectionStart = install.indexOf(`  ${path}`);
+    const nextSection = install.indexOf('\n  /', sectionStart + 4);
+    const section = install.slice(sectionStart, nextSection === -1 ? undefined : nextSection);
+    assert.match(section, /post:/, `${path} method`);
+    assert.match(section, /'200':/, `${path} success`);
+    assert.match(section, /'400':/, `${path} validation`);
+    assert.match(section, /'503':/, `${path} unavailable`);
+  }
+  assert.match(install, /DatabaseConnection/);
+  assert.match(install, /RedisConnection/);
+  assert.match(install, /DependencyCheck/);
+  assert.match(install, /latencyMs/);
+  assert.match(install, /password:[\s\S]*?writeOnly: true/);
+  assert.match(install, /dsn:[\s\S]*?writeOnly: true/);
+  const checkSchema = install.slice(install.indexOf('    DependencyCheck:'), install.indexOf('    ConnectionErrorEnvelope:'));
+  assert.doesNotMatch(checkSchema, /password|dsn|absolutePath|rootPath|jwtSecret|redisPassword/i);
 });
 
 test('installation workspace smoke and runtime artifacts stay cross-platform', () => {

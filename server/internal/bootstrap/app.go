@@ -130,7 +130,7 @@ func New(cfg config.Config) (*App, error) {
 			installPlan = installer.NewPlanService(inspector)
 		}
 	}
-	app.http = newHTTPServerWithPlan(cfg, app.readiness, app.auth, limiter, app.iam, recovery, app.install, installPlan)
+	app.http = newHTTPServerWithPlan(cfg, app.readiness, app.auth, limiter, app.iam, recovery, app.install, installPlan, installplatform.NewSystemDependencyProbe())
 	return app, nil
 }
 

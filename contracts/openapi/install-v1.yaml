@@ -64,6 +64,66 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/InstallServiceUnavailableEnvelope'
+  /api/system/install/v1/check/database:
+    post:
+      tags: [Installation]
+      operationId: checkInstallationDatabase
+      summary: 测试 MySQL 或 PostgreSQL 连接
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DatabaseConnection'
+      responses:
+        '200':
+          description: 返回不含连接材料的可达性结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DependencyCheckEnvelope'
+        '400':
+          description: 连接参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectionErrorEnvelope'
+        '503':
+          description: 安装服务未接通
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstallServiceUnavailableEnvelope'
+  /api/system/install/v1/check/redis:
+    post:
+      tags: [Installation]
+      operationId: checkInstallationRedis
+      summary: 测试 Redis 连接
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RedisConnection'
+      responses:
+        '200':
+          description: 返回不含连接材料的可达性结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DependencyCheckEnvelope'
+        '400':
+          description: 连接参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectionErrorEnvelope'
+        '503':
+          description: 安装服务未接通
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstallServiceUnavailableEnvelope'
 components:
   headers:
     RequestId:
@@ -240,6 +300,121 @@ components:
         message:
           type: string
           const: installation service unavailable
+        data:
+          type: 'null'
+        traceId:
+          type: string
+        meta:
+          $ref: '#/components/schemas/ResponseMeta'
+    DatabaseConnection:
+      type: object
+      required: [driver, mode]
+      additionalProperties: false
+      properties:
+        driver:
+          type: string
+          enum: [mysql, postgres]
+        mode:
+          type: string
+          enum: [single, read_write, cluster_endpoint]
+        host:
+          type: string
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        database:
+          type: string
+        username:
+          type: string
+        password:
+          type: string
+          format: password
+          writeOnly: true
+        dsn:
+          type: string
+          writeOnly: true
+        primaryDsn:
+          type: string
+          writeOnly: true
+        replicaDsns:
+          type: array
+          writeOnly: true
+          items:
+            type: string
+        tlsMode:
+          type: string
+    RedisConnection:
+      type: object
+      required: [mode]
+      additionalProperties: false
+      properties:
+        mode:
+          type: string
+          enum: [single, sentinel, cluster]
+        addr:
+          type: string
+        addrs:
+          type: array
+          items:
+            type: string
+        masterName:
+          type: string
+        username:
+          type: string
+        password:
+          type: string
+          format: password
+          writeOnly: true
+        db:
+          type: integer
+          minimum: 0
+    DependencyCheckEnvelope:
+      type: object
+      required: [code, message, data, traceId, meta]
+      properties:
+        code:
+          type: integer
+          const: 0
+        message:
+          type: string
+          const: success
+        data:
+          $ref: '#/components/schemas/DependencyCheck'
+        traceId:
+          type: string
+        meta:
+          $ref: '#/components/schemas/ResponseMeta'
+    DependencyCheck:
+      type: object
+      required: [kind, mode, ok, reason]
+      properties:
+        kind:
+          type: string
+          enum: [database, redis]
+        driver:
+          type: string
+          enum: [mysql, postgres]
+        mode:
+          type: string
+        ok:
+          type: boolean
+        reason:
+          type: string
+          enum: [reachable, connection_failed]
+        latencyMs:
+          type: integer
+          minimum: 0
+    ConnectionErrorEnvelope:
+      type: object
+      required: [code, message, data, traceId, meta]
+      properties:
+        code:
+          type: integer
+          const: 10000
+        message:
+          type: string
+          enum: [invalid database connection, invalid redis connection]
         data:
           type: 'null'
         traceId:

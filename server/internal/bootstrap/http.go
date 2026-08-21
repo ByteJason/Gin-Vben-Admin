@@ -26,10 +26,10 @@ func newHTTPServer(cfg config.Config, readiness health.ReadinessChecker, authSer
 	if len(installStatuses) > 0 {
 		installStatus = installStatuses[0]
 	}
-	return newHTTPServerWithPlan(cfg, readiness, authService, limiter, iamService, recovery, installStatus, nil)
+	return newHTTPServerWithPlan(cfg, readiness, authService, limiter, iamService, recovery, installStatus, nil, nil)
 }
 
-func newHTTPServerWithPlan(cfg config.Config, readiness health.ReadinessChecker, authService appauth.AuthService, limiter appauth.RateLimiter, iamService *iamapp.Service, recovery appauth.AccountRecoveryService, installStatus *installer.StatusService, installPlan installer.PlanProvider) *http.Server {
+func newHTTPServerWithPlan(cfg config.Config, readiness health.ReadinessChecker, authService appauth.AuthService, limiter appauth.RateLimiter, iamService *iamapp.Service, recovery appauth.AccountRecoveryService, installStatus *installer.StatusService, installPlan installer.PlanProvider, dependencyChecks installhttp.DependencyCheckProvider) *http.Server {
 	var authHandler *authhttp.Handler
 	if authService != nil {
 		authHandler = authhttp.NewHandler(authService, cfg.Auth, limiter)
@@ -44,7 +44,7 @@ func newHTTPServerWithPlan(cfg config.Config, readiness health.ReadinessChecker,
 	}
 	var installHandler *installhttp.Handler
 	if installStatus != nil {
-		installHandler = installhttp.NewHandlerWithComponents(installStatus, installplatform.NewSystemCapabilityProbe(), installPlan)
+		installHandler = installhttp.NewHandlerWithComponents(installStatus, installplatform.NewSystemCapabilityProbe(), installPlan, dependencyChecks)
 	}
 	return &http.Server{
 		Addr:              cfg.Server.Addr,

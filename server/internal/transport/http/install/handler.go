@@ -22,10 +22,16 @@ type PlanProvider interface {
 	Plan(context.Context, installer.PlanRequest) (installer.Plan, error)
 }
 
+type DependencyCheckProvider interface {
+	CheckDatabase(context.Context, installer.DatabaseConnection) (installer.DependencyCheck, error)
+	CheckRedis(context.Context, installer.RedisConnection) (installer.DependencyCheck, error)
+}
+
 type Handler struct {
 	status       StatusProvider
 	capabilities CapabilityProvider
 	plan         PlanProvider
+	dependencies DependencyCheckProvider
 }
 
 func NewHandler(status StatusProvider, capabilities ...CapabilityProvider) *Handler {
@@ -36,8 +42,12 @@ func NewHandler(status StatusProvider, capabilities ...CapabilityProvider) *Hand
 	return NewHandlerWithComponents(status, capability, nil)
 }
 
-func NewHandlerWithComponents(status StatusProvider, capabilities CapabilityProvider, plan PlanProvider) *Handler {
-	return &Handler{status: status, capabilities: capabilities, plan: plan}
+func NewHandlerWithComponents(status StatusProvider, capabilities CapabilityProvider, plan PlanProvider, dependencies ...DependencyCheckProvider) *Handler {
+	var dependencyChecks DependencyCheckProvider
+	if len(dependencies) > 0 {
+		dependencyChecks = dependencies[0]
+	}
+	return &Handler{status: status, capabilities: capabilities, plan: plan, dependencies: dependencyChecks}
 }
 
 func RegisterRoutes(router gin.IRouter, handler *Handler) {
@@ -86,5 +96,41 @@ func RegisterRoutes(router gin.IRouter, handler *Handler) {
 			return
 		}
 		response.OK(c, plan)
+	})
+	group.POST("/check/database", func(c *gin.Context) {
+		if handler == nil || handler.dependencies == nil {
+			response.Error(c, http.StatusServiceUnavailable, 40001, "installation service unavailable")
+			return
+		}
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 32<<10)
+		var request installer.DatabaseConnection
+		if err := c.ShouldBindJSON(&request); err != nil {
+			response.Error(c, http.StatusBadRequest, 10000, "invalid database connection")
+			return
+		}
+		result, err := handler.dependencies.CheckDatabase(c.Request.Context(), request)
+		if err != nil {
+			response.Error(c, http.StatusBadRequest, 10000, "invalid database connection")
+			return
+		}
+		response.OK(c, result)
+	})
+	group.POST("/check/redis", func(c *gin.Context) {
+		if handler == nil || handler.dependencies == nil {
+			response.Error(c, http.StatusServiceUnavailable, 40001, "installation service unavailable")
+			return
+		}
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 32<<10)
+		var request installer.RedisConnection
+		if err := c.ShouldBindJSON(&request); err != nil {
+			response.Error(c, http.StatusBadRequest, 10000, "invalid redis connection")
+			return
+		}
+		result, err := handler.dependencies.CheckRedis(c.Request.Context(), request)
+		if err != nil {
+			response.Error(c, http.StatusBadRequest, 10000, "invalid redis connection")
+			return
+		}
+		response.OK(c, result)
 	})
 }

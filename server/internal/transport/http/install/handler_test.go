@@ -204,6 +204,63 @@ func TestPlanEndpointRejectsMalformedRequestAndHidesProviderFailure(t *testing.T
 	}
 }
 
+func TestDependencyCheckEndpointsReturnCredentialFreeResults(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	provider := &dependencyProviderStub{
+		database: installer.DependencyCheck{Kind: "database", Driver: "mysql", Mode: "single", OK: true, Reason: "reachable", LatencyMS: 2},
+		redis:    installer.DependencyCheck{Kind: "redis", Mode: "single", OK: true, Reason: "reachable", LatencyMS: 1},
+	}
+	router := gin.New()
+	RegisterRoutes(router, NewHandlerWithComponents(statusProviderStub{}, capabilityProviderStub{}, nil, provider))
+	requests := []struct {
+		path string
+		body string
+	}{
+		{path: "/api/system/install/v1/check/database", body: `{"driver":"mysql","mode":"single","host":"db","port":3306,"database":"app","username":"root","password":"secret"}`},
+		{path: "/api/system/install/v1/check/redis", body: `{"mode":"single","addr":"redis:6379","password":"secret"}`},
+	}
+	for _, item := range requests {
+		request := httptest.NewRequest(http.MethodPost, item.path, bytes.NewBufferString(item.body))
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, want 200; body=%s", item.path, response.Code, response.Body.String())
+		}
+		if strings.Contains(strings.ToLower(response.Body.String()), "secret") || strings.Contains(strings.ToLower(response.Body.String()), "password") {
+			t.Fatalf("%s response leaked credentials: %s", item.path, response.Body.String())
+		}
+	}
+	if provider.databaseRequest.Password != "secret" || provider.redisRequest.Password != "secret" {
+		t.Fatalf("provider requests lost credentials before probe: db=%#v redis=%#v", provider.databaseRequest, provider.redisRequest)
+	}
+}
+
+func TestDependencyCheckEndpointsHideProbeErrorsAndRejectMalformedJSON(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	provider := &dependencyProviderStub{databaseErr: errors.New("dsn=postgres://user:secret@host/app"), redisErr: errors.New("password=secret")}
+	router := gin.New()
+	RegisterRoutes(router, NewHandlerWithComponents(statusProviderStub{}, nil, nil, provider))
+	for _, item := range []struct {
+		path string
+		body string
+	}{
+		{path: "/api/system/install/v1/check/database", body: `{"driver":"mysql"`},
+		{path: "/api/system/install/v1/check/redis", body: `{"mode":"single","addr":"redis:6379"}`},
+	} {
+		request := httptest.NewRequest(http.MethodPost, item.path, bytes.NewBufferString(item.body))
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("%s status = %d, want 400; body=%s", item.path, response.Code, response.Body.String())
+		}
+		if strings.Contains(strings.ToLower(response.Body.String()), "secret") || strings.Contains(strings.ToLower(response.Body.String()), "postgres://") {
+			t.Fatalf("%s response leaked probe error: %s", item.path, response.Body.String())
+		}
+	}
+}
+
 type statusProviderStub struct {
 	status installer.Status
 	err    error
@@ -231,4 +288,23 @@ type planProviderStub struct {
 func (s *planProviderStub) Plan(_ context.Context, request installer.PlanRequest) (installer.Plan, error) {
 	s.request = request
 	return s.plan, s.err
+}
+
+type dependencyProviderStub struct {
+	database        installer.DependencyCheck
+	redis           installer.DependencyCheck
+	databaseErr     error
+	redisErr        error
+	databaseRequest installer.DatabaseConnection
+	redisRequest    installer.RedisConnection
+}
+
+func (s *dependencyProviderStub) CheckDatabase(_ context.Context, request installer.DatabaseConnection) (installer.DependencyCheck, error) {
+	s.databaseRequest = request
+	return s.database, s.databaseErr
+}
+
+func (s *dependencyProviderStub) CheckRedis(_ context.Context, request installer.RedisConnection) (installer.DependencyCheck, error) {
+	s.redisRequest = request
+	return s.redis, s.redisErr
 }
