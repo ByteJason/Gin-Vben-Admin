@@ -168,3 +168,32 @@ jobs:
           TEST_POSTGRES_DSN: postgres://postgres:postgres@127.0.0.1:5432/gin_vben_admin?sslmode=disable
           TEST_REDIS_ADDR: 127.0.0.1:6379
         run: go -C server test ./tests/integration -count=1 -v
+
+  release-gates:
+    name: Reproducible RC release gates
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Generate deterministic SBOM
+        run: |
+          mkdir -p .runtime/release
+          node scripts/release/sbom.mjs --output .runtime/release/sbom.cdx.json
+          node scripts/release/license-policy.mjs \
+            --sbom .runtime/release/sbom.cdx.json \
+            --notice NOTICE > .runtime/release/license-summary.json
+      - name: Run reproducibility checks
+        run: |
+          node scripts/release/sbom.mjs --output .runtime/release/sbom.cdx.json --check
+          node scripts/release-smoke.mjs --check --ui antd,ele,naive
+      - name: Upload release evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: rc-release-evidence
+          path: .runtime/release
