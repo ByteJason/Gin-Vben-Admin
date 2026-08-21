@@ -10,6 +10,7 @@ import (
 	"time"
 
 	rediscache "example.com/gin-vben-admin/server/internal/platform/cache/redis"
+	"example.com/gin-vben-admin/server/internal/platform/migration"
 	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
 )
 
@@ -52,6 +53,14 @@ func TestHATopologyRoundTrip(t *testing.T) {
 
 func testReadWriteTopology(t *testing.T, ctx context.Context, driver, primaryDSN, replicaDSN string) {
 	t.Helper()
+	runner, err := migration.New(driver, primaryDSN)
+	if err != nil {
+		t.Fatalf("open %s migration runner: %v", driver, err)
+	}
+	t.Cleanup(func() { _ = runner.Close() })
+	if err := runner.Up(); err != nil {
+		t.Fatalf("migrate %s primary: %v", driver, err)
+	}
 	store, err := gormdb.Open(gormdb.Options{
 		Driver:      driver,
 		Mode:        gormdb.ModeReadWrite,

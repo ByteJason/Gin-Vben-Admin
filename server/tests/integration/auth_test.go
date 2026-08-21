@@ -21,6 +21,7 @@ import (
 	"example.com/gin-vben-admin/server/internal/bootstrap"
 	"example.com/gin-vben-admin/server/internal/config"
 	installstate "example.com/gin-vben-admin/server/internal/domain/installstate"
+	"example.com/gin-vben-admin/server/internal/domain/tenant"
 	"example.com/gin-vben-admin/server/internal/platform/authplatform"
 	rediscache "example.com/gin-vben-admin/server/internal/platform/cache/redis"
 	"example.com/gin-vben-admin/server/internal/platform/migration"
@@ -179,6 +180,7 @@ func testAuthRefreshRotation(t *testing.T, driver, dsn, redisAddr string) {
 		"X-Request-ID":  "it-req-" + driver,
 		"X-Device-ID":   "device-" + driver,
 		"X-Device-Name": "integration-browser",
+		"X-Tenant-ID":   "default",
 		"User-Agent":    "gin-vben-integration/0.3",
 	}
 	loginResponse := doAuthRequest(t, client, http.MethodPost, loginURL, `{"username":"`+username+`","password":"`+password+`"}`, nil, requestHeaders)
@@ -208,7 +210,7 @@ func testAuthRefreshRotation(t *testing.T, driver, dsn, redisAddr string) {
 		t.Fatalf("durable auth session count = %d, want 1", sessionCount)
 	}
 	durableSessions := authplatform.NewGORMSessionStore(app.Database())
-	storedSession, err := durableSessions.Get(ctx, claims.SessionID)
+	storedSession, err := durableSessions.Get(tenant.WithContext(ctx, tenant.Context{TenantID: "default"}), claims.SessionID)
 	if err != nil || !storedSession.MatchesRefreshJTI(claims.TokenID) {
 		t.Fatalf("durable session lookup = %+v err=%v", storedSession, err)
 	}
@@ -264,7 +266,7 @@ func testAuthRefreshRotation(t *testing.T, driver, dsn, redisAddr string) {
 	if err != nil {
 		t.Fatalf("parse rotated refresh token error = %v", err)
 	}
-	storedSession, err = durableSessions.Get(ctx, claims.SessionID)
+	storedSession, err = durableSessions.Get(tenant.WithContext(ctx, tenant.Context{TenantID: "default"}), claims.SessionID)
 	if err != nil || !storedSession.MatchesRefreshJTI(rotatedClaims.TokenID) {
 		t.Fatalf("rotated durable session lookup = %+v err=%v", storedSession, err)
 	}
@@ -278,7 +280,7 @@ func testAuthRefreshRotation(t *testing.T, driver, dsn, redisAddr string) {
 	if logoutResponse.status != http.StatusOK || logoutResponse.envelope.Code != 0 {
 		t.Fatalf("logout status/code = %d/%d, body=%s", logoutResponse.status, logoutResponse.envelope.Code, logoutResponse.body)
 	}
-	storedSession, err = durableSessions.Get(ctx, claims.SessionID)
+	storedSession, err = durableSessions.Get(tenant.WithContext(ctx, tenant.Context{TenantID: "default"}), claims.SessionID)
 	if err != nil || !storedSession.Revoked {
 		t.Fatalf("revoked durable session lookup = %+v err=%v", storedSession, err)
 	}
