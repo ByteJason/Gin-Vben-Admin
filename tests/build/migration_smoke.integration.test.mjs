@@ -42,6 +42,10 @@ test('migration smoke source encodes safe command and rollback boundaries', () =
   assert.match(source, /0\.6\.0-dev/);
   assert.match(source, /0\.9\.0-rc/);
   assert.match(source, /server[\\/]cmd[\\/]migrate/);
+  assert.equal(source.includes("'./cmd/migrate', action, '--config'") , true);
+  assert.equal(source.includes("'./cmd/migrate', '--', action"), false);
+  assert.match(source, /detached: process\.platform !== 'win32'/);
+  assert.match(source, /terminateProcessTree/);
   assert.match(source, /backup-preflight/);
   assert.match(source, /health\/live/);
   assert.match(source, /rollback|restore/i);

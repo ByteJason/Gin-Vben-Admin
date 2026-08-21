@@ -72,7 +72,9 @@ function configYAML(driver, dsn, addr) {
 
 function migrate(configPath, action, steps = 1) {
   // Reuse the existing server/cmd/migrate entry point; no schema code is duplicated here.
-  const migrationArgs = ['go', '-C', 'server', 'run', './cmd/migrate', '--', action, '--config', configPath];
+  // `go run` consumes its package arguments directly; an extra `--` would be
+  // forwarded to the CLI and make the command parser reject the action.
+  const migrationArgs = ['go', '-C', 'server', 'run', './cmd/migrate', action, '--config', configPath];
   if (action === 'down') migrationArgs.push('--steps', String(steps));
   const result = command(migrationArgs, { timeout: 180_000 });
   return { rc: result.status ?? 1, output: `${result.stdout ?? ''}${result.stderr ?? ''}` };
@@ -82,7 +84,8 @@ async function healthSmoke(configPath, addr) {
   const child = spawn('go', ['-C', 'server', 'run', './cmd/api', '--config', configPath], {
     cwd: ROOT,
     env: { ...process.env },
-    stdio: ['ignore', 'pipe', 'pipe'],
+    detached: process.platform !== 'win32',
+    stdio: 'ignore',
   });
   const started = Date.now();
   try {
@@ -97,12 +100,20 @@ async function healthSmoke(configPath, addr) {
     }
     return { rc: 1, error: lastError || 'health timeout' };
   } finally {
-    child.kill('SIGTERM');
+    terminateProcessTree(child);
     await new Promise((resolve) => {
-      const timer = setTimeout(() => { child.kill('SIGKILL'); resolve(); }, 5_000);
+      const timer = setTimeout(() => { terminateProcessTree(child, 'SIGKILL'); resolve(); }, 5_000);
       child.once('exit', () => { clearTimeout(timer); resolve(); });
     });
   }
+}
+
+function terminateProcessTree(child, signal = 'SIGTERM') {
+  if (!child?.pid) return;
+  if (process.platform !== 'win32') {
+    try { process.kill(-child.pid, signal); return; } catch { /* process already exited */ }
+  }
+  try { child.kill(signal); } catch { /* process already exited */ }
 }
 
 async function runIntegration() {
@@ -123,25 +134,33 @@ async function runIntegration() {
       await writeFile(configPath, configYAML(driver, dsn, addr), { mode: 0o600 });
       const statusBefore = migrate(configPath, 'status');
       emit('migration-status', statusBefore.rc === 0 ? 'passed' : 'failed', { driver, phase: 'before', rc: statusBefore.rc });
-      if (statusBefore.rc !== 0) throw new Error(`${driver} status before failed`);
+      if (statusBefore.rc !== 0) throw new Error(`${driver} status before failed: ${redactOutput(statusBefore.output)}`);
       const up = migrate(configPath, 'up');
       emit('migration-up', up.rc === 0 ? 'passed' : 'failed', { driver, rc: up.rc });
-      if (up.rc !== 0) throw new Error(`${driver} migration up failed`);
+      if (up.rc !== 0) throw new Error(`${driver} migration up failed: ${redactOutput(up.output)}`);
       const health = await healthSmoke(configPath, addr);
       emit('health/live', health.rc === 0 ? 'passed' : 'failed', { driver, rc: health.rc, http: health.status });
       if (health.rc !== 0) throw new Error(`${driver} health smoke failed`);
       const down = migrate(configPath, 'down', 1);
       emit('migration-down', down.rc === 0 ? 'passed' : 'failed', { driver, rc: down.rc, reversible: true });
-      if (down.rc !== 0) throw new Error(`${driver} migration down failed`);
+      if (down.rc !== 0) throw new Error(`${driver} migration down failed: ${redactOutput(down.output)}`);
       const restore = migrate(configPath, 'up');
       emit('restore', restore.rc === 0 ? 'passed' : 'failed', { driver, rc: restore.rc, source: 'local-backup-contract' });
-      if (restore.rc !== 0) throw new Error(`${driver} restore/up failed`);
+      if (restore.rc !== 0) throw new Error(`${driver} restore/up failed: ${redactOutput(restore.output)}`);
     }
   } finally {
     await rm(workspace, { recursive: true, force: true });
     cleanup.removed = true;
     emit('cleanup', cleanup.removed ? 'passed' : 'failed', { workspace_removed: cleanup.removed });
   }
+}
+
+function redactOutput(output) {
+  return String(output ?? '')
+    .replace(/(password|passwd|pwd|secret|token)=?[^\s&]+/gi, '$1=[REDACTED]')
+    .replace(/root:[^@\s]+@/gi, 'root:[REDACTED]@')
+    .trim()
+    .slice(-400);
 }
 
 async function main() {
