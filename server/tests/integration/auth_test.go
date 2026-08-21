@@ -109,6 +109,25 @@ func testAuthRefreshRotation(t *testing.T, driver, dsn, redisAddr string) {
 		t.Fatalf("bootstrap.New() error = %v", err)
 	}
 	t.Cleanup(func() { _ = app.Close() })
+	cleanupRedis, err := rediscache.New(rediscache.Config{
+		Mode:      rediscache.ModeSingle,
+		Addr:      redisAddr,
+		Namespace: cfg.Redis.Namespace,
+	})
+	if err != nil {
+		t.Fatalf("redis cleanup client error = %v", err)
+	}
+	redisCleanupKeys := make([]string, 0, 4)
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		for _, key := range redisCleanupKeys {
+			if err := cleanupRedis.Delete(cleanupCtx, key); err != nil {
+				t.Logf("redis cleanup key %q: %v", key, err)
+			}
+		}
+		_ = cleanupRedis.Close()
+	})
 
 	username := fmt.Sprintf("it_auth_%s_%d", driver, time.Now().UnixNano())
 	password := "integration-password-012345"
@@ -220,14 +239,14 @@ func testAuthRefreshRotation(t *testing.T, driver, dsn, redisAddr string) {
 	if err != nil {
 		t.Fatalf("build session cleanup key error = %v", err)
 	}
-	t.Cleanup(func() { _ = app.Redis().Delete(context.Background(), sessionKey) })
+	redisCleanupKeys = append(redisCleanupKeys, sessionKey)
 	for _, logical := range []string{"account:" + username, "ip:127.0.0.1"} {
 		digest := sha256.Sum256([]byte(logical))
 		rateKey, keyErr := app.Redis().Key("auth-rate", hex.EncodeToString(digest[:]))
 		if keyErr != nil {
 			t.Fatalf("build rate-limit cleanup key error = %v", keyErr)
 		}
-		t.Cleanup(func() { _ = app.Redis().Delete(context.Background(), rateKey) })
+		redisCleanupKeys = append(redisCleanupKeys, rateKey)
 	}
 
 	refreshResponse := doAuthRequest(t, client, http.MethodPost, refreshURL, "", loginCookie, requestHeaders)
@@ -283,6 +302,11 @@ func testAuthRefreshRotation(t *testing.T, driver, dsn, redisAddr string) {
 	if err != nil {
 		t.Fatalf("parse second refresh token error = %v", err)
 	}
+	secondSessionKey, err := app.Redis().Key("auth-session", secondClaims.SessionID)
+	if err != nil {
+		t.Fatalf("build second session cleanup key error = %v", err)
+	}
+	redisCleanupKeys = append(redisCleanupKeys, secondSessionKey)
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()
