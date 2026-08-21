@@ -1,6 +1,8 @@
 const endpoint = '/api/system/install/v1/status';
 const capabilitiesEndpoint = '/api/system/install/v1/capabilities';
 const planEndpoint = '/api/system/install/v1/plan';
+const databaseCheckEndpoint = '/api/system/install/v1/check/database';
+const redisCheckEndpoint = '/api/system/install/v1/check/redis';
 
 const title = document.querySelector('#status-title');
 const badge = document.querySelector('#status-badge');
@@ -24,6 +26,14 @@ const planBuild = document.querySelector('#plan-build');
 const planEnv = document.querySelector('#plan-env');
 const planRestart = document.querySelector('#plan-restart');
 const planEntries = document.querySelector('#plan-entries');
+const connectionPanel = document.querySelector('#connection-panel');
+const databaseForm = document.querySelector('#database-form');
+const databaseDriver = document.querySelector('#database-driver');
+const databasePort = document.querySelector('#database-port');
+const databaseResult = document.querySelector('#database-result');
+const redisForm = document.querySelector('#redis-form');
+const redisAddress = document.querySelector('#redis-address');
+const redisResult = document.querySelector('#redis-result');
 
 const uiLabels = { antd: 'Ant Design Vue', ele: 'Element Plus', naive: 'Naive UI' };
 const modeLabels = {
@@ -93,6 +103,7 @@ function renderStatus(status) {
     selectedUi.textContent = uiLabels[status.selectedUi] || status.selectedUi || '—';
     selectedMode.textContent = modeLabels[status.mode] || status.mode || '—';
     selectionPanel.hidden = true;
+    connectionPanel.hidden = true;
     return;
   }
 
@@ -103,6 +114,7 @@ function renderStatus(status) {
   selectedUi.textContent = '尚未选择';
   selectedMode.textContent = '尚未选择';
   selectionPanel.hidden = false;
+  connectionPanel.hidden = true;
 }
 
 function renderError() {
@@ -114,6 +126,7 @@ function renderError() {
   details.hidden = true;
   retryButton.hidden = false;
   selectionPanel.hidden = true;
+  connectionPanel.hidden = true;
 }
 
 function renderCapabilities(capabilities) {
@@ -195,6 +208,7 @@ function renderPlan(plan) {
   planMessage.textContent = ready ? '预检通过，可以继续填写服务连接信息。' : '部分目录权限需要处理，尚未执行任何文件变更。';
   planMessage.dataset.tone = ready ? 'success' : 'error';
   planPanel.hidden = false;
+  connectionPanel.hidden = !ready;
 }
 
 function yesNo(value) {
@@ -205,10 +219,61 @@ function actionLabel(action) {
   return { keep: '保留', remove: '待移除', create: '待创建', write: '待写入' }[action] || '检查';
 }
 
+async function requestDependencyCheck(event, endpoint, resultElement) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const submit = form.querySelector('button[type="submit"]');
+  submit.disabled = true;
+  submit.textContent = '测试中';
+  resultElement.textContent = '正在建立临时连接。';
+  resultElement.dataset.tone = 'pending';
+  const formValues = Object.fromEntries(new FormData(form).entries());
+  if (endpoint === databaseCheckEndpoint) {
+    formValues.port = Number(formValues.port);
+    if (!formValues.dsn) delete formValues.dsn;
+  } else {
+    formValues.db = Number(formValues.db || 0);
+    formValues.addr = redisAddress.value.trim();
+  }
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify(formValues),
+    });
+    const envelope = await response.json();
+    if (!response.ok || envelope.code !== 0 || !envelope.data) {
+      throw new Error('dependency check failed');
+    }
+    const result = envelope.data;
+    resultElement.textContent = result.ok
+      ? `连接成功，耗时 ${Number(result.latencyMs || 0)} ms。`
+      : '连接未成功，请检查地址和账号后重试。';
+    resultElement.dataset.tone = result.ok ? 'success' : 'error';
+  } catch {
+    resultElement.textContent = '连接测试未完成，请检查服务状态和输入。';
+    resultElement.dataset.tone = 'error';
+  } finally {
+    submit.disabled = false;
+    submit.textContent = endpoint === databaseCheckEndpoint ? '测试数据库连接' : '测试 Redis 连接';
+    clearSensitiveFields(form);
+  }
+}
+
+function clearSensitiveFields(form) {
+  for (const input of form.querySelectorAll('input[type="password"]')) input.value = '';
+}
+
 async function loadAll() {
   await Promise.allSettled([loadStatus(), loadCapabilities()]);
 }
 
 retryButton.addEventListener('click', loadAll);
 planForm.addEventListener('submit', requestPlan);
+databaseForm.addEventListener('submit', (event) => requestDependencyCheck(event, databaseCheckEndpoint, databaseResult));
+redisForm.addEventListener('submit', (event) => requestDependencyCheck(event, redisCheckEndpoint, redisResult));
+databaseDriver.addEventListener('change', () => {
+  databasePort.value = databaseDriver.value === 'postgres' ? '5432' : '3306';
+});
 loadAll();

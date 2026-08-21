@@ -116,6 +116,74 @@
             </div>
           </section>
 
+          <section id="connection-panel" class="connection-panel" aria-labelledby="connection-title" hidden>
+            <div class="capability-panel__heading">
+              <h3 id="connection-title">配置服务连接</h3>
+              <span>凭据仅用于本次测试</span>
+            </div>
+            <form id="database-form" class="connection-form">
+              <h4>数据库</h4>
+              <div class="form-field">
+                <label for="database-driver">类型</label>
+                <select id="database-driver" name="driver" required>
+                  <option value="mysql">MySQL</option>
+                  <option value="postgres">PostgreSQL</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label for="database-host">主机</label>
+                <input id="database-host" name="host" value="127.0.0.1" autocomplete="off" required />
+              </div>
+              <div class="form-field">
+                <label for="database-port">端口</label>
+                <input id="database-port" name="port" type="number" min="1" max="65535" value="3306" inputmode="numeric" required />
+              </div>
+              <div class="form-field">
+                <label for="database-name">数据库名</label>
+                <input id="database-name" name="database" autocomplete="off" required />
+              </div>
+              <div class="form-field">
+                <label for="database-username">账号</label>
+                <input id="database-username" name="username" autocomplete="username" required />
+              </div>
+              <div class="form-field">
+                <label for="database-password">密码</label>
+                <input id="database-password" name="password" type="password" autocomplete="new-password" required />
+              </div>
+              <details class="advanced-fields">
+                <summary>高级 DSN（可选）</summary>
+                <div class="form-field">
+                  <label for="database-dsn">DSN</label>
+                  <input id="database-dsn" name="dsn" type="password" autocomplete="new-password" />
+                </div>
+              </details>
+              <button class="primary-button" type="submit">测试数据库连接</button>
+              <div id="database-result" class="connection-result" role="status" aria-live="polite"></div>
+            </form>
+
+            <form id="redis-form" class="connection-form">
+              <h4>Redis</h4>
+              <div class="form-field">
+                <label for="redis-address">地址</label>
+                <input id="redis-address" name="addr" value="127.0.0.1:6379" autocomplete="off" required />
+              </div>
+              <div class="form-field">
+                <label for="redis-username">账号（可选）</label>
+                <input id="redis-username" name="username" autocomplete="username" />
+              </div>
+              <div class="form-field">
+                <label for="redis-password">密码（可选）</label>
+                <input id="redis-password" name="password" type="password" autocomplete="new-password" />
+              </div>
+              <div class="form-field">
+                <label for="redis-db">数据库编号</label>
+                <input id="redis-db" name="db" type="number" min="0" value="0" inputmode="numeric" />
+              </div>
+              <button class="primary-button" type="submit">测试 Redis 连接</button>
+              <div id="redis-result" class="connection-result" role="status" aria-live="polite"></div>
+            </form>
+          </section>
+
           <button id="retry-button" class="secondary-button" type="button" hidden>
             重新检查
           </button>

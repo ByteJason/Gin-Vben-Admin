@@ -355,7 +355,8 @@ h1 {
 }
 
 .selection-panel[hidden],
-.plan-result[hidden] {
+.plan-result[hidden],
+.connection-panel[hidden] {
   display: none;
 }
 
@@ -377,6 +378,7 @@ h1 {
 }
 
 .form-field select,
+.form-field input,
 .primary-button {
   min-height: 44px;
   padding: 0 12px;
@@ -390,6 +392,10 @@ h1 {
 .form-field select {
   width: 100%;
   cursor: pointer;
+}
+
+.form-field input {
+  width: 100%;
 }
 
 .primary-button {
@@ -501,6 +507,69 @@ h1 {
   color: var(--danger);
 }
 
+.connection-panel {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+
+.connection-form {
+  margin-top: 14px;
+  padding: 16px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  background: var(--canvas);
+  border-radius: 12px;
+}
+
+.connection-form + .connection-form {
+  margin-top: 12px;
+}
+
+.connection-form h4,
+.connection-form .advanced-fields,
+.connection-form .primary-button,
+.connection-result {
+  grid-column: 1 / -1;
+}
+
+.connection-form h4 {
+  margin: 0;
+  font-size: 0.88rem;
+}
+
+.advanced-fields {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.advanced-fields summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.advanced-fields[open] .form-field {
+  margin-top: 8px;
+}
+
+.connection-result {
+  min-height: 22px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.connection-result[data-tone="success"] {
+  color: var(--accent);
+}
+
+.connection-result[data-tone="error"] {
+  color: var(--danger);
+}
+
 .secondary-button {
   min-height: 44px;
   margin-top: 24px;
@@ -586,7 +655,8 @@ footer {
   }
 
   .plan-form,
-  .plan-summary {
+  .plan-summary,
+  .connection-form {
     grid-template-columns: 1fr;
   }
 
