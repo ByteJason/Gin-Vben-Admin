@@ -1,16 +1,30 @@
 <script lang="ts" setup>
 import type { VbenFormSchema } from '@vben/common-ui';
+import type { Recordable } from '@vben/types';
 
-import { computed, markRaw } from 'vue';
+import { computed, markRaw, ref } from 'vue';
 
-import { AuthenticationLogin, SliderCaptcha, z } from '@vben/common-ui';
+import { AuthenticationLogin, ImageCaptcha, z } from '@vben/common-ui';
 import { $t } from '@vben/locales';
 
+import { getCaptchaApi } from '#/api';
 import { useAuthStore } from '#/store';
 
 defineOptions({ name: 'Login' });
 
 const authStore = useAuthStore();
+const captchaId = ref('');
+
+function handleCaptchaId(id: string) {
+  captchaId.value = id;
+}
+
+async function handleSubmit(values: Recordable<any>) {
+  return authStore.authLogin({
+    ...values,
+    captchaId: captchaId.value,
+  });
+}
 
 const formSchema = computed((): VbenFormSchema[] => {
   return [
@@ -33,11 +47,17 @@ const formSchema = computed((): VbenFormSchema[] => {
       rules: z.string().min(1, { message: $t('authentication.passwordTip') }),
     },
     {
-      component: markRaw(SliderCaptcha),
+      component: markRaw(ImageCaptcha),
+      componentProps: {
+        alt: $t('authentication.captchaImageAlt'),
+        inputPlaceholder: $t('authentication.captchaTip'),
+        onChallengeId: handleCaptchaId,
+        refreshText: $t('authentication.captchaRefresh'),
+        request: getCaptchaApi,
+      },
       fieldName: 'captcha',
-      rules: z.boolean().refine((value) => value, {
-        message: $t('authentication.verifyRequiredTip'),
-      }),
+      // The server decides whether the challenge is required (risk/default-off policy).
+      rules: z.string().optional(),
     },
   ];
 });
@@ -47,7 +67,7 @@ const formSchema = computed((): VbenFormSchema[] => {
   <AuthenticationLogin
     :form-schema="formSchema"
     :loading="authStore.loginLoading"
-    @submit="authStore.authLogin"
+    @submit="handleSubmit"
   />
   <p
     v-if="authStore.loginError"

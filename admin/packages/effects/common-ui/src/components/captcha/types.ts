@@ -2,6 +2,26 @@ import type { CSSProperties } from 'vue';
 
 import type { ClassType } from '@vben/types';
 
+/** Public challenge returned by the versioned admin captcha endpoint. */
+export interface ImageCaptchaChallenge {
+  expiresIn: number;
+  id: string;
+  kind: string;
+  payload?: string;
+}
+
+export type ImageCaptchaRequest = () => Promise<ImageCaptchaChallenge>;
+
+export interface ImageCaptchaProps {
+  alt?: string;
+  disabled?: boolean;
+  inputPlaceholder?: string;
+  name?: string;
+  onChallengeId?: (id: string) => void;
+  refreshText?: string;
+  request: ImageCaptchaRequest;
+}
+
 export interface CaptchaData {
   /**
    * x
