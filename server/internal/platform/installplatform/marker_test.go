@@ -104,3 +104,36 @@ func TestFileMarkerStoreReportsUninstalledWithoutCreatingFiles(t *testing.T) {
 		t.Fatalf("Load() created state directory or returned unexpected error: %v", err)
 	}
 }
+
+func TestFileMarkerStoreRemovesOnlyTheExpectedInstallation(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "install", ".installed")
+	store := installplatform.NewFileMarkerStore(path)
+	marker := installstate.Marker{
+		SchemaVersion: installstate.CurrentSchemaVersion, InstallerVersion: "0.4.0-dev",
+		InstalledAt: time.Date(2026, time.August, 21, 15, 0, 0, 0, time.UTC),
+		SelectedUI:  installstate.UIAntd, Mode: installstate.ModeEmbedded,
+		ArtifactHash: strings.Repeat("a", 64), ManifestHash: strings.Repeat("b", 64),
+	}
+	if err := store.Create(context.Background(), marker); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	different := marker
+	different.ManifestHash = strings.Repeat("c", 64)
+	if err := store.Remove(context.Background(), different); !errors.Is(err, installplatform.ErrInstallationChanged) {
+		t.Fatalf("Remove(different) error = %v, want ErrInstallationChanged", err)
+	}
+	if _, installed, err := store.Load(context.Background()); err != nil || !installed {
+		t.Fatalf("different marker was removed: installed=%v error=%v", installed, err)
+	}
+	if err := store.Remove(context.Background(), marker); err != nil {
+		t.Fatalf("Remove(expected) error = %v", err)
+	}
+	if _, installed, err := store.Load(context.Background()); err != nil || installed {
+		t.Fatalf("expected marker still exists: installed=%v error=%v", installed, err)
+	}
+	if err := store.Remove(context.Background(), marker); err != nil {
+		t.Fatalf("Remove(missing) error = %v, want idempotent nil", err)
+	}
+}

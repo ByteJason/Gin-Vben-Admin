@@ -14,14 +14,67 @@ import (
 )
 
 var (
-	ErrAlreadyInstalled = errors.New("application is already installed")
-	ErrInstallationBusy = errors.New("installation marker is being written")
+	ErrAlreadyInstalled    = errors.New("application is already installed")
+	ErrInstallationBusy    = errors.New("installation marker is being written")
+	ErrInstallationChanged = errors.New("installation marker belongs to a different transaction")
 )
 
 const maxMarkerBytes = 16 << 10
 
 type FileMarkerStore struct {
 	path string
+}
+
+// Remove deletes a marker only when it is byte-for-byte equivalent to the
+// transaction marker supplied by the caller. A missing marker is an idempotent
+// success; a different marker is never removed.
+func (s *FileMarkerStore) Remove(ctx context.Context, expected installstate.Marker) error {
+	if err := contextError(ctx); err != nil {
+		return err
+	}
+	if s == nil || s.path == "." || s.path == "" {
+		return errors.New("installation marker path is required")
+	}
+	if err := expected.Validate(); err != nil {
+		return fmt.Errorf("validate expected installation marker: %w", err)
+	}
+	if _, err := os.Lstat(s.path); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("inspect installation marker: %w", err)
+	}
+
+	lockPath := s.path + ".lock"
+	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		return ErrInstallationBusy
+	}
+	if err != nil {
+		return fmt.Errorf("acquire installation marker lock: %w", err)
+	}
+	if err := lock.Close(); err != nil {
+		_ = os.Remove(lockPath)
+		return fmt.Errorf("close installation marker lock: %w", err)
+	}
+	defer os.Remove(lockPath)
+
+	current, installed, err := s.Load(ctx)
+	if err != nil {
+		return err
+	}
+	if !installed {
+		return nil
+	}
+	if current != expected {
+		return ErrInstallationChanged
+	}
+	if err := os.Remove(s.path); err != nil {
+		return fmt.Errorf("remove installation marker: %w", err)
+	}
+	if err := syncDirectory(filepath.Dir(s.path)); err != nil {
+		return fmt.Errorf("sync installation state directory: %w", err)
+	}
+	return nil
 }
 
 func NewFileMarkerStore(path string) *FileMarkerStore {
