@@ -4,12 +4,14 @@
     {
       "source": "server/go.sum",
       "license": "NOASSERTION",
+      "owner": "release-engineering",
       "reason": "go.sum records checksums but no SPDX license metadata; resolve from module source before 1.0.0",
       "expires": "2026-12-31"
     },
     {
       "source": "admin/pnpm-lock.yaml",
       "license": "NOASSERTION",
+      "owner": "release-engineering",
       "reason": "pnpm lockfile records integrity but no SPDX license metadata; resolve from package manifests before 1.0.0",
       "expires": "2026-12-31"
     }

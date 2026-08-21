@@ -18,7 +18,7 @@ const exceptionPath = resolve(fileURLToPath(new URL('./license-exceptions.json',
 const exceptions = JSON.parse(readFileSync(exceptionPath, 'utf8')).exceptions ?? [];
 const exceptionFor = (component, id) => {
   const source = component.properties?.find((property) => property.name === 'source')?.value;
-  return exceptions.find((item) => item.source === source && item.license === id && item.expires >= new Date().toISOString().slice(0, 10));
+  return exceptions.find((item) => item.source === source && item.license === id && item.owner && item.reason && item.expires >= new Date().toISOString().slice(0, 10));
 };
 const counts = {};
 const unknown = [];

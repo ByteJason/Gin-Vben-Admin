@@ -39,6 +39,7 @@ test('license policy accepts the project SBOM and rejects unknown licenses', () 
   });
   const summary = execFileSync(process.execPath, [POLICY, '--sbom', sbom, '--notice', join(ROOT, 'NOTICE')], { cwd: ROOT, encoding: 'utf8' });
   assert.match(summary, /registeredExceptions/);
+  assert.match(summary, /"status":"passed"/);
   const bad = JSON.parse(readFileSync(sbom, 'utf8'));
   bad.components.push({ name: 'fixture-unknown', version: '1.0.0', licenses: [{ license: { id: 'UNKNOWN' } }] });
   writeFileSync(join(dir, 'bad.json'), `${JSON.stringify(bad, null, 2)}\n`);
