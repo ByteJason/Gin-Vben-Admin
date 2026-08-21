@@ -69,6 +69,11 @@ test('integration mode rejects non-loopback targets before any request', () => {
   assert.doesNotMatch(`${result.stdout}${result.stderr}`, /PERF_REQUEST_SENT/);
 });
 
+test('integration contract includes IPv6 loopback handling', () => {
+  const source = readFileSync(runner, 'utf8');
+  assert.match(source, /\[::1\]/);
+});
+
 test('integration mode is explicit and never upgrades an unavailable loopback into a pass', () => {
   const result = run(
     ['--integration', '--base-url', 'http://127.0.0.1:1'],

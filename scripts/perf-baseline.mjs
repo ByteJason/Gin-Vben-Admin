@@ -101,7 +101,7 @@ function assertLoopback(raw) {
     throw new Error('base URL must be a valid http loopback URL');
   }
   if (parsed.protocol !== 'http:') throw new Error('base URL must use http for isolated smoke');
-  if (!['127.0.0.1', 'localhost', '::1'].includes(parsed.hostname)) {
+  if (!['127.0.0.1', 'localhost', '::1', '[::1]'].includes(parsed.hostname)) {
     throw new Error('base URL must target loopback; remote targets are not permitted');
   }
   if (parsed.username || parsed.password) throw new Error('base URL must not contain credentials');
