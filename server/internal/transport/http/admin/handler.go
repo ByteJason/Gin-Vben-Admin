@@ -39,8 +39,8 @@ func RegisterRoutesWithIAM(r gin.IRouter, authHandler *authhttp.Handler, iamHand
 	capabilities := auxiliary[0]
 	if authHandler != nil && authHandler.Service() != nil {
 		protected := r.Group("/api/admin/v1", authhttp.Middleware(authHandler.Service()))
-		settingshttp.RegisterRoutes(protected, capabilities.Settings)
-		audithttp.RegisterRoutes(protected, capabilities.Audit)
+		settingshttp.RegisterRoutesOn(protected, capabilities.Settings)
+		audithttp.RegisterRoutesOn(protected, capabilities.Audit)
 		return
 	}
 	settingshttp.RegisterRoutes(r, capabilities.Settings)

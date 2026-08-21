@@ -19,11 +19,22 @@ type Handler struct{ service *auditapp.Service }
 func NewHandler(service *auditapp.Service) *Handler { return &Handler{service: service} }
 
 func RegisterRoutes(r gin.IRouter, handler *Handler) {
+	group := r.Group(basePath)
+	registerRoutes(group, handler)
+}
+
+// RegisterRoutesOn mounts audit routes below an already-prefixed router
+// group. This keeps middleware composition separate from path ownership.
+func RegisterRoutesOn(group gin.IRouter, handler *Handler) {
+	registerRoutes(group.Group("/audit/events"), handler)
+}
+
+func registerRoutes(group gin.IRouter, handler *Handler) {
 	if handler == nil || handler.service == nil {
-		r.GET(basePath, disabled)
+		group.GET("", disabled)
 		return
 	}
-	r.GET(basePath, handler.query)
+	group.GET("", handler.query)
 }
 
 func (h *Handler) query(c *gin.Context) {

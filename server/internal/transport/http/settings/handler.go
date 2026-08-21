@@ -32,6 +32,17 @@ func NewHandler(service *settingsapp.Service, resolvers ...ActorResolver) *Handl
 
 func RegisterRoutes(r gin.IRouter, handler *Handler) {
 	group := r.Group(basePath)
+	registerRoutes(group, handler)
+}
+
+// RegisterRoutesOn mounts settings routes below an already-prefixed router
+// group. The application composition root uses this seam to attach the
+// shared admin authentication middleware without duplicating /api/admin/v1.
+func RegisterRoutesOn(group gin.IRouter, handler *Handler) {
+	registerRoutes(group.Group("/settings"), handler)
+}
+
+func registerRoutes(group gin.IRouter, handler *Handler) {
 	if handler == nil || handler.service == nil {
 		group.GET("/*path", disabled)
 		group.PUT("/*path", disabled)

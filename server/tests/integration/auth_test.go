@@ -13,12 +13,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"example.com/gin-vben-admin/server/internal/bootstrap"
 	"example.com/gin-vben-admin/server/internal/config"
+	installstate "example.com/gin-vben-admin/server/internal/domain/installstate"
 	"example.com/gin-vben-admin/server/internal/platform/authplatform"
 	rediscache "example.com/gin-vben-admin/server/internal/platform/cache/redis"
 	"example.com/gin-vben-admin/server/internal/platform/migration"
@@ -83,6 +85,24 @@ func testAuthRefreshRotation(t *testing.T, driver, dsn, redisAddr string) {
 	cfg.Auth.BcryptCost = 10
 	cfg.Auth.SecureCookie = false
 	cfg.Auth.RegistrationEnabled = true
+	stateDir := t.TempDir()
+	cfg.Install.StateDir = stateDir
+	marker := installstate.Marker{
+		SchemaVersion:    installstate.CurrentSchemaVersion,
+		InstallerVersion: "integration",
+		InstalledAt:      time.Now().UTC(),
+		SelectedUI:       installstate.UIAntd,
+		Mode:             installstate.ModeAPIOnly,
+		ArtifactHash:     strings.Repeat("a", 64),
+		ManifestHash:     strings.Repeat("b", 64),
+	}
+	markerBytes, err := json.Marshal(marker)
+	if err != nil {
+		t.Fatalf("marshal integration install marker: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, ".installed"), markerBytes, 0o600); err != nil {
+		t.Fatalf("write integration install marker: %v", err)
+	}
 
 	app, err := bootstrap.New(cfg)
 	if err != nil {
