@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/mail"
 	"strings"
 	"time"
 )
@@ -80,7 +81,10 @@ type SMTPConfig struct {
 }
 
 func (c SMTPConfig) Validate() error {
-	if strings.TrimSpace(c.Host) == "" || c.Port <= 0 || c.Port > 65535 || !strings.Contains(c.From, "@") {
+	if strings.TrimSpace(c.Host) == "" || c.Port <= 0 || c.Port > 65535 || strings.ContainsAny(c.Host+c.Username+c.Password+c.From, "\r\n") {
+		return ErrInvalidMessage
+	}
+	if _, err := mail.ParseAddress(strings.TrimSpace(c.From)); err != nil {
 		return ErrInvalidMessage
 	}
 	return nil

@@ -1,0 +1,27 @@
+name: gin-vben-admin-mailpit
+
+# Isolated local SMTP fixture. Compose this file together with compose.dev.yaml:
+#   docker compose -f deploy/compose.dev.yaml -f deploy/compose.mailpit.yaml --profile mailpit up
+services:
+  server:
+    environment:
+      MAIL_ENABLED: "true"
+      MAIL_HOST: mailpit
+      MAIL_PORT: "1025"
+      MAIL_FROM: no-reply@example.test
+      MAIL_START_TLS: "false"
+    depends_on:
+      mailpit:
+        condition: service_healthy
+
+  mailpit:
+    image: axllent/mailpit:v1.21
+    profiles: [mailpit]
+    ports:
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1:8025/api/v1/info"]
+      interval: 5s
+      timeout: 3s
+      retries: 12

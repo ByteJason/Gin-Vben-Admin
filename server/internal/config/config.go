@@ -23,6 +23,7 @@ type Config struct {
 	Database      DatabaseConfig       `mapstructure:"database" yaml:"database"`
 	Redis         RedisConfig          `mapstructure:"redis" yaml:"redis"`
 	Auth          AuthConfig           `mapstructure:"auth" yaml:"auth"`
+	Mail          MailConfig           `mapstructure:"mail" yaml:"mail"`
 	Install       InstallConfig        `mapstructure:"install" yaml:"install"`
 	Tenant        TenantConfig         `mapstructure:"tenant" yaml:"tenant"`
 	Observability observability.Config `mapstructure:"observability" yaml:"observability"`
@@ -102,6 +103,19 @@ type AuthConfig struct {
 	RegistrationEnabled  bool          `mapstructure:"registration_enabled" yaml:"registration_enabled"`
 }
 
+// MailConfig is the optional SMTP transport configuration. It stays in the
+// configuration layer so loading does not depend on an application service.
+// Password is intentionally excluded from serialized summaries.
+type MailConfig struct {
+	Enabled  bool   `mapstructure:"enabled" yaml:"enabled"`
+	Host     string `mapstructure:"host" yaml:"host"`
+	Port     int    `mapstructure:"port" yaml:"port"`
+	Username string `mapstructure:"username" yaml:"username"`
+	Password string `mapstructure:"password" yaml:"password" json:"-"`
+	From     string `mapstructure:"from" yaml:"from"`
+	StartTLS bool   `mapstructure:"start_tls" yaml:"start_tls"`
+}
+
 type InstallConfig struct {
 	StateDir string `mapstructure:"state_dir" yaml:"state_dir"`
 }
@@ -130,6 +144,7 @@ type Summary struct {
 	Database      DatabaseSummary      `json:"database"`
 	Redis         RedisSummary         `json:"redis"`
 	Auth          AuthSummary          `json:"auth"`
+	Mail          MailSummary          `json:"mail"`
 	Install       InstallSummary       `json:"install"`
 	Tenant        TenantSummary        `json:"tenant"`
 	Observability observability.Config `json:"observability"`
@@ -183,6 +198,14 @@ type AuthSummary struct {
 	CaptchaChallengeTTL  time.Duration `json:"captcha_challenge_ttl"`
 	CaptchaKeyPrefix     string        `json:"captcha_key_prefix"`
 	RegistrationEnabled  bool          `json:"registration_enabled"`
+}
+
+type MailSummary struct {
+	Enabled  bool   `json:"enabled"`
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	From     string `json:"from"`
+	StartTLS bool   `json:"start_tls"`
 }
 
 type InstallSummary struct {
@@ -245,6 +268,7 @@ func Default() Config {
 			CaptchaKeyPrefix:     "auth-captcha",
 			RegistrationEnabled:  false,
 		},
+		Mail:    MailConfig{Port: 1025},
 		Install: InstallConfig{StateDir: filepath.FromSlash("../install")},
 		Tenant: TenantConfig{
 			Enabled:            true,
@@ -323,6 +347,9 @@ func (cfg Config) Validate() error {
 	}
 	if err := cfg.Auth.validate(); err != nil {
 		return fmt.Errorf("auth: %w", err)
+	}
+	if err := cfg.Mail.validate(); err != nil {
+		return fmt.Errorf("mail: %w", err)
 	}
 	if err := cfg.Install.validate(); err != nil {
 		return fmt.Errorf("install: %w", err)
@@ -415,6 +442,25 @@ func (cfg AuthConfig) validate() error {
 	}
 	if strings.TrimSpace(cfg.Issuer) == "" || strings.TrimSpace(cfg.Audience) == "" {
 		return errors.New("issuer and audience are required when auth is enabled")
+	}
+	return nil
+}
+
+func (cfg MailConfig) validate() error {
+	if !cfg.Enabled {
+		return nil
+	}
+	if strings.TrimSpace(cfg.Host) == "" {
+		return errors.New("host is required when mail is enabled")
+	}
+	if cfg.Port <= 0 || cfg.Port > 65535 {
+		return errors.New("port must be between 1 and 65535")
+	}
+	if strings.TrimSpace(cfg.From) == "" || strings.ContainsAny(cfg.From, "\r\n") || !strings.Contains(cfg.From, "@") {
+		return errors.New("from must be a valid email address")
+	}
+	if strings.ContainsAny(cfg.Host+cfg.Username+cfg.Password, "\r\n") {
+		return errors.New("mail values must be single-line")
 	}
 	return nil
 }
@@ -562,6 +608,13 @@ func (cfg Config) SafeSummary() Summary {
 			CaptchaKeyPrefix:     cfg.Auth.CaptchaKeyPrefix,
 			RegistrationEnabled:  cfg.Auth.RegistrationEnabled,
 		},
+		Mail: MailSummary{
+			Enabled:  cfg.Mail.Enabled,
+			Host:     cfg.Mail.Host,
+			Port:     cfg.Mail.Port,
+			From:     cfg.Mail.From,
+			StartTLS: cfg.Mail.StartTLS,
+		},
 		Install: InstallSummary{StateDirectoryAbsolute: filepath.IsAbs(cfg.Install.StateDir)},
 		Tenant: TenantSummary{
 			Enabled:            cfg.Tenant.Enabled,
@@ -636,6 +689,13 @@ func newViper() *viper.Viper {
 	v.SetDefault("auth.captcha_challenge_ttl", cfg.Auth.CaptchaChallengeTTL)
 	v.SetDefault("auth.captcha_key_prefix", cfg.Auth.CaptchaKeyPrefix)
 	v.SetDefault("auth.registration_enabled", cfg.Auth.RegistrationEnabled)
+	v.SetDefault("mail.enabled", cfg.Mail.Enabled)
+	v.SetDefault("mail.host", cfg.Mail.Host)
+	v.SetDefault("mail.port", cfg.Mail.Port)
+	v.SetDefault("mail.username", cfg.Mail.Username)
+	v.SetDefault("mail.password", cfg.Mail.Password)
+	v.SetDefault("mail.from", cfg.Mail.From)
+	v.SetDefault("mail.start_tls", cfg.Mail.StartTLS)
 	v.SetDefault("install.state_dir", cfg.Install.StateDir)
 	v.SetDefault("tenant.enabled", cfg.Tenant.Enabled)
 	v.SetDefault("tenant.mode", cfg.Tenant.Mode)
@@ -708,6 +768,13 @@ var environmentBindings = map[string]string{
 	"auth.captcha_challenge_ttl":     "AUTH_CAPTCHA_CHALLENGE_TTL",
 	"auth.captcha_key_prefix":        "AUTH_CAPTCHA_KEY_PREFIX",
 	"auth.registration_enabled":      "AUTH_REGISTRATION_ENABLED",
+	"mail.enabled":                   "MAIL_ENABLED",
+	"mail.host":                      "MAIL_HOST",
+	"mail.port":                      "MAIL_PORT",
+	"mail.username":                  "MAIL_USERNAME",
+	"mail.password":                  "MAIL_PASSWORD",
+	"mail.from":                      "MAIL_FROM",
+	"mail.start_tls":                 "MAIL_START_TLS",
 	"install.state_dir":              "INSTALL_STATE_DIR",
 	"tenant.enabled":                 "TENANT_ENABLED",
 	"tenant.mode":                    "TENANT_MODE",

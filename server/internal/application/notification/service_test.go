@@ -36,6 +36,22 @@ func TestServiceRejectsInvalidRecipientAndProviderErrors(t *testing.T) {
 	}
 }
 
+func TestSMTPConfigValidationRejectsHeaderInjection(t *testing.T) {
+	valid := SMTPConfig{Host: "mailpit", Port: 1025, From: "no-reply@example.test"}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid SMTP config rejected: %v", err)
+	}
+	for _, candidate := range []SMTPConfig{
+		{Host: "mailpit\nfixture", Port: 1025, From: "no-reply@example.test"},
+		{Host: "mailpit", Port: 1025, From: "no-reply@example.test\r\nBcc:leak@example.test"},
+		{Host: "mailpit", Port: 1025, From: "not-an-email"},
+	} {
+		if err := candidate.Validate(); !errors.Is(err, ErrInvalidMessage) {
+			t.Fatalf("SMTP config %#v error = %v, want ErrInvalidMessage", candidate, err)
+		}
+	}
+}
+
 type failingMailer struct{ err error }
 
 func (m failingMailer) Send(context.Context, Message) error { return m.err }

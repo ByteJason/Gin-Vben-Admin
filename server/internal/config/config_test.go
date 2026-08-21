@@ -493,3 +493,50 @@ func TestCaptchaRiskPolicyValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestMailConfigDefaultsEnvironmentOverridesAndRedactedSummary(t *testing.T) {
+	cfg := Default()
+	if cfg.Mail.Enabled || cfg.Mail.Port != 1025 {
+		t.Fatalf("unexpected mail defaults: %#v", cfg.Mail)
+	}
+	t.Setenv("MAIL_ENABLED", "true")
+	t.Setenv("MAIL_HOST", "mailpit")
+	t.Setenv("MAIL_PORT", "1025")
+	t.Setenv("MAIL_USERNAME", "fixture-user")
+	t.Setenv("MAIL_PASSWORD", "fixture-secret")
+	t.Setenv("MAIL_FROM", "no-reply@example.test")
+	t.Setenv("MAIL_START_TLS", "false")
+	loaded, err := Load("")
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !loaded.Mail.Enabled || loaded.Mail.Host != "mailpit" || loaded.Mail.Port != 1025 || loaded.Mail.From != "no-reply@example.test" {
+		t.Fatalf("mail environment overrides not applied: %#v", loaded.Mail)
+	}
+	encoded, err := json.Marshal(loaded.SafeSummary())
+	if err != nil {
+		t.Fatalf("marshal SafeSummary() = %v", err)
+	}
+	if strings.Contains(string(encoded), "fixture-secret") || strings.Contains(string(encoded), "fixture-user") {
+		t.Fatalf("mail credentials leaked in summary: %s", encoded)
+	}
+}
+
+func TestMailConfigValidationRejectsIncompleteEnabledTransport(t *testing.T) {
+	base := Default()
+	for name, edit := range map[string]func(*MailConfig){
+		"missing host":     func(mail *MailConfig) { mail.Host = "" },
+		"invalid port":     func(mail *MailConfig) { mail.Port = 70000 },
+		"invalid from":     func(mail *MailConfig) { mail.From = "not-an-email" },
+		"header injection": func(mail *MailConfig) { mail.Host = "mail\n pit" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate := base
+			candidate.Mail = MailConfig{Enabled: true, Host: "mailpit", Port: 1025, From: "no-reply@example.test"}
+			edit(&candidate.Mail)
+			if err := candidate.Validate(); err == nil {
+				t.Fatal("Validate() error = nil, want invalid mail configuration")
+			}
+		})
+	}
+}

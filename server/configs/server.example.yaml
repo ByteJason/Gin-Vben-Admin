@@ -92,3 +92,14 @@ auth:
   captcha_challenge_ttl: 2m
   captcha_key_prefix: auth-captcha
   registration_enabled: false
+
+mail:
+  # Optional SMTP transport. Keep disabled for local runs unless the isolated
+  # Mailpit profile is enabled (deploy/compose.mailpit.yaml).
+  enabled: false
+  host: "127.0.0.1"
+  port: 1025
+  username: ""
+  password: ""
+  from: "no-reply@example.test"
+  start_tls: false
