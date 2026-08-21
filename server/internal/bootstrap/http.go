@@ -58,10 +58,17 @@ func newHTTPServerWithPlan(cfg config.Config, readiness health.ReadinessChecker,
 	}
 	return &http.Server{
 		Addr:              cfg.Server.Addr,
-		Handler:           router.NewRouterWithComponents(readiness, authHandler, iamHandler, installHandler, staticAssets...),
+		Handler:           router.NewRouterWithRuntime(readiness, authHandler, iamHandler, installHandler, installStatus, firstStaticAsset(staticAssets)),
 		ReadTimeout:       cfg.Server.ReadTimeout,
 		ReadHeaderTimeout: cfg.Server.ReadTimeout,
 		WriteTimeout:      cfg.Server.WriteTimeout,
 		IdleTimeout:       cfg.Server.IdleTimeout,
 	}
+}
+
+func firstStaticAsset(assets []fs.FS) fs.FS {
+	if len(assets) == 0 {
+		return nil
+	}
+	return assets[0]
 }

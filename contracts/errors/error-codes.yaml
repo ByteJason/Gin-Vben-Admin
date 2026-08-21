@@ -37,6 +37,10 @@ codes:
     key: installation_running
     http_status: 409
     retryable: true
+  - code: 10008
+    key: installation_required
+    http_status: 423
+    retryable: false
   - code: 40001
     key: dependency_unavailable
     http_status: 503

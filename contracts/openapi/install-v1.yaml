@@ -559,7 +559,7 @@ components:
       properties:
         code:
           type: integer
-          enum: [10000, 10001, 10006, 10007, 50000]
+          enum: [10000, 10001, 10006, 10007, 10008, 50000]
         message:
           type: string
         data:

@@ -132,6 +132,8 @@ test('installation contract exposes one credential-write-only apply operation', 
   assert.doesNotMatch(result, /password|dsn|secret/i);
   assert.match(errors, /code: 10006[\s\S]*?key: installation_completed[\s\S]*?http_status: 409/);
   assert.match(errors, /code: 10007[\s\S]*?key: installation_running[\s\S]*?http_status: 409/);
+  assert.match(errors, /code: 10008[\s\S]*?key: installation_required[\s\S]*?http_status: 423/);
+  assert.match(install, /10008/);
 });
 
 test('installation workspace smoke and runtime artifacts stay cross-platform', () => {
