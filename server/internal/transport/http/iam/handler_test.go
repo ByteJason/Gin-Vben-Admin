@@ -13,6 +13,7 @@ import (
 	iamapp "example.com/gin-vben-admin/server/internal/application/iam"
 	"example.com/gin-vben-admin/server/internal/domain/authdomain"
 	domain "example.com/gin-vben-admin/server/internal/domain/iam"
+	httpmiddleware "example.com/gin-vben-admin/server/internal/transport/http/middleware"
 	"github.com/gin-gonic/gin"
 )
 
@@ -32,6 +33,12 @@ var _ appauth.AuthService = authStub{}
 func newIAMTestRouter(store *iamapp.MemoryStore, claims authdomain.Claims) *gin.Engine {
 	r := gin.New()
 	RegisterRoutes(r, NewHandler(iamapp.NewService(store), authStub{claims: claims}))
+	return r
+}
+
+func newIAMTestRouterWithTenantPolicy(store *iamapp.MemoryStore, claims authdomain.Claims, policy httpmiddleware.TenantPolicy) *gin.Engine {
+	r := gin.New()
+	RegisterRoutes(r, NewHandler(iamapp.NewService(store), authStub{claims: claims}), policy)
 	return r
 }
 
@@ -120,6 +127,30 @@ func TestIAMUserListUsesRolePolicyAndDefaultDeny(t *testing.T) {
 	r.ServeHTTP(resp, req)
 	if resp.Code != http.StatusForbidden || !strings.Contains(resp.Body.String(), `"code":30000`) {
 		t.Fatalf("default deny status=%d body=%s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestIAMUsesValidatedTenantContextInsteadOfRawHeader(t *testing.T) {
+	store := iamapp.NewMemoryStore()
+	_ = store.SaveUser(context.Background(), domain.User{ID: "u1", Username: "alice", Active: true})
+	_ = store.SavePolicy(context.Background(), domain.Policy{Subject: "u1", Domain: "tenant-a", Method: http.MethodGet, Path: "/api/admin/v1/iam/users", Effect: domain.EffectAllow})
+	r := newIAMTestRouterWithTenantPolicy(store, authdomain.Claims{Subject: "u1", Type: authdomain.AccessToken, ExpiresAt: time.Now().Add(time.Minute)}, httpmiddleware.TenantPolicy{Mode: "multi"})
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/v1/iam/users", nil)
+	req.Header.Set("Authorization", "Bearer test")
+	req.Header.Set("X-Tenant-ID", "tenant-a")
+	resp := httptest.NewRecorder()
+	r.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("matching tenant status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/admin/v1/iam/users", nil)
+	req.Header.Set("Authorization", "Bearer test")
+	req.Header.Set("X-Tenant-ID", "tenant-b")
+	resp = httptest.NewRecorder()
+	r.ServeHTTP(resp, req)
+	if resp.Code != http.StatusForbidden || !strings.Contains(resp.Body.String(), `"code":30000`) {
+		t.Fatalf("mismatched tenant status=%d body=%s", resp.Code, resp.Body.String())
 	}
 }
 

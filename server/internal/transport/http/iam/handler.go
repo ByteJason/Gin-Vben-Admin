@@ -10,7 +10,9 @@ import (
 	iamapp "example.com/gin-vben-admin/server/internal/application/iam"
 	"example.com/gin-vben-admin/server/internal/domain/authdomain"
 	domain "example.com/gin-vben-admin/server/internal/domain/iam"
+	"example.com/gin-vben-admin/server/internal/domain/tenant"
 	authhttp "example.com/gin-vben-admin/server/internal/transport/http/auth"
+	httpmiddleware "example.com/gin-vben-admin/server/internal/transport/http/middleware"
 	"example.com/gin-vben-admin/server/internal/transport/http/response"
 	"github.com/gin-gonic/gin"
 )
@@ -34,13 +36,17 @@ func NewHandler(service *iamapp.Service, auth appauth.AuthService) *Handler {
 
 // RegisterRoutes installs protected CRUD/read seams. The server remains
 // default-deny: a missing service or auth dependency exposes only 503 stubs.
-func RegisterRoutes(r gin.IRouter, handler *Handler) {
+func RegisterRoutes(r gin.IRouter, handler *Handler, policies ...httpmiddleware.TenantPolicy) {
 	group := r.Group(basePath)
 	if handler == nil || handler.service == nil || handler.auth == nil {
 		registerDisabled(group)
 		return
 	}
-	group.Use(authhttp.Middleware(handler.auth))
+	policy := httpmiddleware.TenantPolicy{Mode: "single", DefaultTenantID: "default"}
+	if len(policies) > 0 {
+		policy = policies[0]
+	}
+	group.Use(authhttp.Middleware(handler.auth), httpmiddleware.TenantContext(policy))
 	group.GET("/me", handler.currentUser)
 	group.GET("/users", handler.listUsers)
 	group.POST("/users", handler.createUser)
@@ -54,7 +60,7 @@ func RegisterRoutes(r gin.IRouter, handler *Handler) {
 	group.POST("/data-scopes", handler.createDataScope)
 	// The UI contract uses this compact menu path; it is the same guarded
 	// collection as /iam/menus and deliberately has no separate policy source.
-	r.Group("/api/admin/v1").Use(authhttp.Middleware(handler.auth)).GET("/menu/all", handler.listMenus)
+	r.Group("/api/admin/v1").Use(authhttp.Middleware(handler.auth), httpmiddleware.TenantContext(policy)).GET("/menu/all", handler.listMenus)
 }
 
 func registerDisabled(group *gin.RouterGroup) {
@@ -97,8 +103,13 @@ func (h *Handler) authorizedUser(c *gin.Context) (domain.User, bool) {
 		response.Error(c, http.StatusForbidden, codeForbidden, "forbidden")
 		return domain.User{}, false
 	}
+	scope, err := tenant.RequireContext(c.Request.Context())
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid tenant context")
+		return domain.User{}, false
+	}
 	allowed, err := h.service.Authorize(c.Request.Context(), domain.Subject{UserID: user.ID, RoleIDs: user.RoleIDs}, domain.Request{
-		Domain: c.GetHeader("X-Tenant-ID"),
+		Domain: scope.TenantID,
 		Method: c.Request.Method,
 		Path:   c.FullPath(),
 	})
