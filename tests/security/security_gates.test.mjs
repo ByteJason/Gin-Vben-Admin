@@ -42,7 +42,7 @@ test('security gate refuses non-loopback DAST targets and never runs destructive
 });
 
 test('security gate fails an unregistered high severity fixture', () => {
-  const result = run('--fixture', 'HIGH:unregistered');
+  const result = run('--fixture', 'HIGH:unregistered', '--output', '.runtime/security/fixture-report.json');
   assert.notEqual(result.status, 0);
   assert.match(result.stdout + result.stderr, /High|Critical|unregistered/i);
 });

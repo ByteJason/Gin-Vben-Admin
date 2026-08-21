@@ -197,3 +197,27 @@ jobs:
         with:
           name: rc-release-evidence
           path: .runtime/release
+
+  security-gates:
+    name: Local security policy gates
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Generate security report
+        run: |
+          mkdir -p .runtime/security
+          node scripts/security-gates.mjs --output .runtime/security/security-report.json
+          node --test tests/security/security_gates.test.mjs
+          node scripts/security-gates.mjs --output .runtime/security/security-report.json --check
+      - name: Upload security evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: rc-security-evidence
+          path: .runtime/security
