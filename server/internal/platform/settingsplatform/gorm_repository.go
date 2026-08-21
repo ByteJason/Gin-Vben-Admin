@@ -7,8 +7,10 @@ import (
 	"time"
 
 	"example.com/gin-vben-admin/server/internal/application/settings"
+	"example.com/gin-vben-admin/server/internal/domain/tenant"
 	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type GORMRepository struct{ db *gormdb.Store }
@@ -23,6 +25,8 @@ type settingVersionRecord struct {
 	Sensitive bool      `gorm:"column:sensitive"`
 	UpdatedBy string    `gorm:"column:updated_by"`
 	UpdatedAt time.Time `gorm:"column:updated_at"`
+	TenantID  string    `gorm:"column:tenant_id"`
+	OrgID     string    `gorm:"column:org_id"`
 }
 
 func (settingVersionRecord) TableName() string { return "setting_versions" }
@@ -31,8 +35,12 @@ func (r *GORMRepository) Current(ctx context.Context, key string) (settings.Stor
 	if r == nil || r.db == nil {
 		return settings.StoredSetting{}, errors.New("settings repository is not initialized")
 	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return settings.StoredSetting{}, err
+	}
 	var record settingVersionRecord
-	err := r.db.Read(ctx).Where("key = ?", key).Order("version DESC").First(&record).Error
+	err = settingScope(r.db.Read(ctx), scope.TenantID, key).Order("version DESC").First(&record).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return settings.StoredSetting{}, settings.ErrSettingNotFound
 	}
@@ -46,14 +54,20 @@ func (r *GORMRepository) Append(ctx context.Context, value settings.StoredSettin
 	if r == nil || r.db == nil {
 		return settings.StoredSetting{}, errors.New("settings repository is not initialized")
 	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return settings.StoredSetting{}, err
+	}
 	var record settingVersionRecord
-	err := r.db.Write(ctx).Transaction(func(tx *gorm.DB) error {
+	err = r.db.Write(ctx).Transaction(func(tx *gorm.DB) error {
 		var current int64
-		if err := tx.Model(&settingVersionRecord{}).Where("key = ?", value.Key).Select("COALESCE(MAX(version), 0)").Scan(&current).Error; err != nil {
+		if err := settingScope(tx.Model(&settingVersionRecord{}), scope.TenantID, value.Key).Select("COALESCE(MAX(version), 0)").Scan(&current).Error; err != nil {
 			return err
 		}
 		record = fromStored(value)
 		record.Version = current + 1
+		record.TenantID = scope.TenantID
+		record.OrgID = scope.Organization
 		return tx.Create(&record).Error
 	})
 	if err != nil {
@@ -66,8 +80,12 @@ func (r *GORMRepository) History(ctx context.Context, key string) ([]settings.St
 	if r == nil || r.db == nil {
 		return nil, errors.New("settings repository is not initialized")
 	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return nil, err
+	}
 	var records []settingVersionRecord
-	if err := r.db.Read(ctx).Where("key = ?", key).Order("version ASC").Find(&records).Error; err != nil {
+	if err := settingScope(r.db.Read(ctx), scope.TenantID, key).Order("version ASC").Find(&records).Error; err != nil {
 		return nil, err
 	}
 	if len(records) == 0 {
@@ -86,6 +104,10 @@ func toStored(record settingVersionRecord) settings.StoredSetting {
 
 func fromStored(value settings.StoredSetting) settingVersionRecord {
 	return settingVersionRecord{Key: value.Key, Value: append([]byte(nil), value.RawValue...), Version: value.Version, Sensitive: value.Sensitive, UpdatedBy: value.UpdatedBy, UpdatedAt: value.UpdatedAt}
+}
+
+func settingScope(db *gorm.DB, tenantID, key string) *gorm.DB {
+	return db.Where("tenant_id = ?", tenantID).Where(clause.Eq{Column: clause.Column{Name: "key"}, Value: key})
 }
 
 var _ settings.Repository = (*GORMRepository)(nil)

@@ -91,7 +91,11 @@ func testDatabaseLifecycle(t *testing.T, driver, dsn string) {
 	if err := runner.Up(); err != nil {
 		t.Fatalf("migration.Up() error = %v", err)
 	}
-	assertMigrationStatus(t, runner, 5, true)
+	statusAfterUp, err := runner.Status()
+	if err != nil {
+		t.Fatalf("migration.Status() after up error = %v", err)
+	}
+	assertMigrationStatus(t, runner, statusAfterUp.Version, true)
 	assertMetadataTable(t, store, ctx, true)
 	assertMetadataRow(t, store, ctx, "product", true)
 	assertAuthTables(t, store, ctx, true)
@@ -128,8 +132,8 @@ func testDatabaseLifecycle(t *testing.T, driver, dsn string) {
 	assertMetadataRow(t, store, ctx, rollbackKey, false)
 
 	cleanupKeys()
-	if err := runner.Down(5); err != nil {
-		t.Fatalf("migration.Down(5) error = %v", err)
+	if err := runner.Down(statusAfterUp.Version); err != nil {
+		t.Fatalf("migration.Down(%d) error = %v", statusAfterUp.Version, err)
 	}
 	assertMigrationStatus(t, runner, 0, false)
 	assertMetadataTable(t, store, ctx, false)
@@ -137,7 +141,11 @@ func testDatabaseLifecycle(t *testing.T, driver, dsn string) {
 	if err := runner.Up(); err != nil {
 		t.Fatalf("migration.Up() restore error = %v", err)
 	}
-	assertMigrationStatus(t, runner, 5, true)
+	_, err = runner.Status()
+	if err != nil {
+		t.Fatalf("migration.Status() after restore error = %v", err)
+	}
+	assertMigrationStatus(t, runner, statusAfterUp.Version, true)
 	assertMetadataTable(t, store, ctx, true)
 	assertMetadataRow(t, store, ctx, "product", true)
 	assertAuthTables(t, store, ctx, true)

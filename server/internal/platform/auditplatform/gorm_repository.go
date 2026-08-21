@@ -9,6 +9,7 @@ import (
 	"time"
 
 	auditapp "example.com/gin-vben-admin/server/internal/application/audit"
+	"example.com/gin-vben-admin/server/internal/domain/tenant"
 	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
 )
 
@@ -24,6 +25,8 @@ type auditRecord struct {
 	RequestID string            `gorm:"column:request_id"`
 	Metadata  map[string]string `gorm:"column:metadata;serializer:json"`
 	CreatedAt time.Time         `gorm:"column:created_at"`
+	TenantID  string            `gorm:"column:tenant_id"`
+	OrgID     string            `gorm:"column:org_id"`
 }
 
 func (auditRecord) TableName() string { return "auth_audit_events" }
@@ -37,7 +40,15 @@ func (r *GORMRepository) QueryPage(ctx context.Context, filter auditapp.Filter) 
 	if r == nil || r.db == nil {
 		return nil, 0, errors.New("audit repository unavailable")
 	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
 	query := r.db.Read(ctx).Model(&auditRecord{})
+	query = query.Where("tenant_id = ?", scope.TenantID)
+	if scope.Organization != "" {
+		query = query.Where("org_id = ?", scope.Organization)
+	}
 	if filter.ActorID != "" {
 		if id, err := strconv.ParseUint(filter.ActorID, 10, 64); err == nil {
 			query = query.Where("user_id = ?", id)

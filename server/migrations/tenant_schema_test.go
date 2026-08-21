@@ -55,3 +55,22 @@ func TestTenantMigrationScopesUsernameUniqueness(t *testing.T) {
 		}
 	}
 }
+
+func TestTenantSettingsMigrationScopesVersionUniqueness(t *testing.T) {
+	for _, driver := range []string{"mysql", "postgres"} {
+		up, err := migrations.FS.ReadFile(driver + "/000008_tenant_settings_key.up.sql")
+		if err != nil {
+			t.Fatalf("read %s settings migration: %v", driver, err)
+		}
+		sql := strings.ToLower(string(up))
+		for _, token := range []string{"setting_versions", "tenant_id", "key", "version"} {
+			if !strings.Contains(sql, token) {
+				t.Fatalf("%s settings migration missing %q", driver, token)
+			}
+		}
+		down, err := migrations.FS.ReadFile(driver + "/000008_tenant_settings_key.down.sql")
+		if err != nil || len(strings.TrimSpace(string(down))) == 0 {
+			t.Fatalf("%s settings migration has no down asset: %v", driver, err)
+		}
+	}
+}

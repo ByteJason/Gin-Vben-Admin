@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"example.com/gin-vben-admin/server/internal/domain/authdomain"
+	"example.com/gin-vben-admin/server/internal/domain/tenant"
 	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
 )
 
@@ -30,6 +31,8 @@ type authAuditRecord struct {
 	UserAgent string            `gorm:"column:user_agent"`
 	Metadata  map[string]string `gorm:"column:metadata;serializer:json"`
 	CreatedAt time.Time         `gorm:"column:created_at"`
+	TenantID  string            `gorm:"column:tenant_id"`
+	OrgID     string            `gorm:"column:org_id"`
 }
 
 func (authAuditRecord) TableName() string { return "auth_audit_events" }
@@ -37,6 +40,10 @@ func (authAuditRecord) TableName() string { return "auth_audit_events" }
 func (s *GORMAuditSink) Record(ctx context.Context, event authdomain.AuditEvent) error {
 	if s == nil || s.db == nil {
 		return authdomain.ErrDependencyUnavailable
+	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return err
 	}
 	if strings.TrimSpace(event.EventType) == "" || strings.TrimSpace(event.Outcome) == "" {
 		return authdomain.ErrInvalidAuditEvent
@@ -64,7 +71,7 @@ func (s *GORMAuditSink) Record(ctx context.Context, event authdomain.AuditEvent)
 		UserID: userID, SessionID: bounded(event.SessionID, 128), EventType: bounded(event.EventType, 64),
 		Outcome: bounded(event.Outcome, 32), RequestID: bounded(event.RequestID, 128),
 		IPAddress: bounded(event.IPAddress, 64), UserAgent: bounded(event.UserAgent, 512),
-		Metadata: metadata, CreatedAt: createdAt.UTC(),
+		Metadata: metadata, CreatedAt: createdAt.UTC(), TenantID: scope.TenantID, OrgID: scope.Organization,
 	}
 	if err := s.db.Write(ctx).Create(&record).Error; err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
