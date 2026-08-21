@@ -123,6 +123,17 @@ func NewApplyService(markers ApplyMarkerStore, plans PlanProvider, dependencies 
 }
 
 func (s *ApplyService) Apply(ctx context.Context, request ApplyRequest) (ApplyResult, error) {
+	return s.apply(ctx, request, nil)
+}
+
+// ApplyWithProgress is the asynchronous-install seam. The callback receives
+// only allowlisted stage identifiers and never receives credentials or raw
+// infrastructure errors.
+func (s *ApplyService) ApplyWithProgress(ctx context.Context, request ApplyRequest, report func(string)) (ApplyResult, error) {
+	return s.apply(ctx, request, report)
+}
+
+func (s *ApplyService) apply(ctx context.Context, request ApplyRequest, report func(string)) (ApplyResult, error) {
 	if s == nil || s.markers == nil || s.plans == nil || s.dependencies == nil || s.schemas == nil || s.assets == nil || s.identity == nil || s.environment == nil {
 		return ApplyResult{}, errors.New("installation apply service is not configured")
 	}
@@ -152,22 +163,26 @@ func (s *ApplyService) Apply(ctx context.Context, request ApplyRequest) (ApplyRe
 		return ApplyResult{}, ErrPreflightFailed
 	}
 	steps = appendCompleted(steps, "plan")
+	reportApplyStep(report, "plan")
 
 	database, err := s.dependencies.CheckDatabase(ctx, request.Database)
 	if err != nil || !database.OK {
 		return ApplyResult{}, ErrPreflightFailed
 	}
 	steps = appendCompleted(steps, "database")
+	reportApplyStep(report, "database")
 	redis, err := s.dependencies.CheckRedis(ctx, request.Redis)
 	if err != nil || !redis.OK {
 		return ApplyResult{}, ErrPreflightFailed
 	}
 	steps = appendCompleted(steps, "redis")
+	reportApplyStep(report, "redis")
 
 	if _, err := s.schemas.Up(ctx, request.Database); err != nil {
 		return ApplyResult{}, errors.New("install database schema")
 	}
 	steps = appendCompleted(steps, "schema")
+	reportApplyStep(report, "schema")
 	assetReceipt, err := s.assets.Prepare(ctx, plan)
 	if err != nil || !validDigest(assetReceipt.ArtifactHash) || !validDigest(assetReceipt.ManifestHash) {
 		var rollbackErr error
@@ -177,18 +192,21 @@ func (s *ApplyService) Apply(ctx context.Context, request ApplyRequest) (ApplyRe
 		return ApplyResult{}, applyFailure("assets", rollbackErr)
 	}
 	steps = appendCompleted(steps, "assets")
+	reportApplyStep(report, "assets")
 	identityReceipt, err := s.identity.Initialize(ctx, request.Database, request.Admin)
 	if err != nil {
 		rollbackErr := s.rollback(ctx, nil, receiptPointer(identityReceipt), &assetReceipt)
 		return ApplyResult{}, applyFailure("identity", rollbackErr)
 	}
 	steps = appendCompleted(steps, "identity")
+	reportApplyStep(report, "identity")
 	environmentReceipt, err := s.environment.Publish(ctx, request, assetReceipt)
 	if err != nil {
 		rollbackErr := s.rollback(ctx, receiptPointer(environmentReceipt), &identityReceipt, &assetReceipt)
 		return ApplyResult{}, applyFailure("environment", rollbackErr)
 	}
 	steps = appendCompleted(steps, "environment")
+	reportApplyStep(report, "environment")
 
 	installedAt := s.now().UTC()
 	marker := installstate.Marker{
@@ -209,7 +227,14 @@ func (s *ApplyService) Apply(ctx context.Context, request ApplyRequest) (ApplyRe
 		return ApplyResult{}, applyFailure("lock", rollbackErr)
 	}
 	steps = appendCompleted(steps, "lock")
+	reportApplyStep(report, "lock")
 	return ApplyResult{State: StateInstalled, SelectedUI: ui, Mode: mode, InstalledAt: installedAt, Steps: steps}, nil
+}
+
+func reportApplyStep(report func(string), step string) {
+	if report != nil {
+		report(step)
+	}
 }
 
 func (s *ApplyService) rollbackMarker(marker installstate.Marker) error {
