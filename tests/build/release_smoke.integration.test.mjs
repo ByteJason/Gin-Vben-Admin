@@ -34,6 +34,13 @@ test('release smoke check supports serial UI selection and manifest contract', (
   assert.match(result.stdout, /MANIFEST_CONTRACT_OK/);
 });
 
+
+test('release smoke runner resolves URL paths with spaces portably', () => {
+  const source = readFileSync(runner, 'utf8');
+  assert.equal(source.includes("fileURLToPath(new URL('.', import.meta.url))"), true);
+  assert.equal(source.includes("new URL('.', import.meta.url).pathname"), false);
+});
+
 test('release smoke integration remains opt-in', () => {
   const result = run('--check');
   assert.equal(result.status, 0);

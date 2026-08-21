@@ -4,8 +4,9 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync, rmSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-const root = resolve(join(new URL('.', import.meta.url).pathname, '..'));
+const root = resolve(join(fileURLToPath(new URL('.', import.meta.url)), '..'));
 const modes = ['api_only', 'embedded', 'standalone'];
 const availableUis = ['antd', 'ele', 'naive'];
 
