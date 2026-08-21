@@ -92,6 +92,11 @@ func (s *Service) recordAudit(ctx context.Context, event authdomain.AuditEvent) 
 }
 
 func (s *Service) Login(ctx context.Context, identifier, password string) (authdomain.TokenPair, error) {
+	canonicalIdentifier, _, err := authdomain.NormalizeIdentifier(identifier)
+	if err != nil {
+		return authdomain.TokenPair{}, err
+	}
+	identifier = canonicalIdentifier
 	if s.attempts != nil {
 		locked, err := s.attempts.IsLocked(ctx, identifier)
 		if err != nil {

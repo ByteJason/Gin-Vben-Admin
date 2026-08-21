@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"time"
 )
 
 var (
@@ -34,6 +35,13 @@ const (
 
 type User struct {
 	ID, Username, DisplayName string
+	UsernameNormalized        string
+	Email, EmailNormalized    string
+	Nickname, Avatar, Phone   string
+	LastLoginIP               string
+	LastLoginAt               time.Time
+	PasswordChangedAt         time.Time
+	TenantID, OrgID           string
 	Active                    bool
 	RoleIDs                   []string
 }

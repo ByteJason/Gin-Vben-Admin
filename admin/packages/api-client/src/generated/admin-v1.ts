@@ -1,5 +1,5 @@
 // Generated from contracts/openapi/admin-v1.yaml; DO NOT EDIT.
-// CONTRACT_SHA256=f51de8a14ad557acba16b41a1ded0ea1b536f1c085189516dafd987cccf31e73
+// CONTRACT_SHA256=9e90ad7f65df7c4397d0cbad17ff7477d52adc200e302b66351ab75f0695624b
 
 export const ADMIN_API_PREFIX = '/admin/v1' as const;
 
@@ -53,8 +53,10 @@ export namespace AuthApi {
   export interface LoginParams {
     captcha?: string;
     captchaId?: string;
+    identifier?: string;
+    identifierType?: "username" | "email";
     password: string;
-    username: string;
+    username?: string;
   }
 
   export interface RegisterParams {

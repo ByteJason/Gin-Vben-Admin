@@ -17,21 +17,23 @@ import (
 )
 
 type fakeAuthService struct {
-	loginPair   authdomain.TokenPair
-	refreshPair authdomain.TokenPair
-	loginErr    error
-	refreshErr  error
-	logoutErr   error
-	logoutToken string
-	refreshGot  string
-	claims      authdomain.Claims
-	loginMeta   appauth.RequestMetadata
-	refreshMeta appauth.RequestMetadata
-	logoutMeta  appauth.RequestMetadata
+	loginPair       authdomain.TokenPair
+	refreshPair     authdomain.TokenPair
+	loginErr        error
+	refreshErr      error
+	logoutErr       error
+	logoutToken     string
+	refreshGot      string
+	claims          authdomain.Claims
+	loginMeta       appauth.RequestMetadata
+	refreshMeta     appauth.RequestMetadata
+	logoutMeta      appauth.RequestMetadata
+	loginIdentifier string
 }
 
-func (f *fakeAuthService) Login(ctx context.Context, _ string, _ string) (authdomain.TokenPair, error) {
+func (f *fakeAuthService) Login(ctx context.Context, identifier string, _ string) (authdomain.TokenPair, error) {
 	f.loginMeta = appauth.RequestMetadataFromContext(ctx)
+	f.loginIdentifier = identifier
 	return f.loginPair, f.loginErr
 }
 
@@ -109,6 +111,51 @@ func TestLoginReturnsCamelCaseAccessTokenAndHttpOnlyRefreshCookie(t *testing.T) 
 	cookie := res.Result().Cookies()
 	if len(cookie) != 1 || cookie[0].Name != "refresh_token" || cookie[0].Value != "refresh-1" || !cookie[0].HttpOnly || cookie[0].SameSite != http.SameSiteLaxMode || cookie[0].Path != "/api/admin/v1/auth" {
 		t.Fatalf("unexpected refresh cookie: %+v", cookie)
+	}
+}
+
+func TestLoginAcceptsCanonicalEmailIdentifierPayload(t *testing.T) {
+	service := &fakeAuthService{loginPair: authdomain.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 60}}
+	r := newAuthRouter(service, testAuthConfig())
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/v1/auth/login", strings.NewReader(`{"identifier":"  Alice@Example.TEST ","identifierType":"email","password":"secret"}`))
+	req.Header.Set("Content-Type", "application/json")
+	res := httptest.NewRecorder()
+	r.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("email login status = %d, body=%s", res.Code, res.Body.String())
+	}
+	if service.loginIdentifier != "alice@example.test" {
+		t.Fatalf("service identifier = %q, want canonical email", service.loginIdentifier)
+	}
+}
+
+func TestLoginRejectsPhoneIdentifierPayload(t *testing.T) {
+	service := &fakeAuthService{loginPair: authdomain.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 60}}
+	r := newAuthRouter(service, testAuthConfig())
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/v1/auth/login", strings.NewReader(`{"identifier":"+8613800138000","identifierType":"phone","password":"secret"}`))
+	req.Header.Set("Content-Type", "application/json")
+	res := httptest.NewRecorder()
+	r.ServeHTTP(res, req)
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("phone login status = %d, want 400; body=%s", res.Code, res.Body.String())
+	}
+	if service.loginIdentifier != "" {
+		t.Fatalf("phone identifier reached service: %q", service.loginIdentifier)
+	}
+}
+
+func TestLoginRejectsConflictingCompatibilityIdentifiers(t *testing.T) {
+	service := &fakeAuthService{loginPair: authdomain.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 60}}
+	r := newAuthRouter(service, testAuthConfig())
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/v1/auth/login", strings.NewReader(`{"username":"alice","identifier":"bob","password":"secret"}`))
+	req.Header.Set("Content-Type", "application/json")
+	res := httptest.NewRecorder()
+	r.ServeHTTP(res, req)
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("conflicting identifiers status = %d, want 400; body=%s", res.Code, res.Body.String())
+	}
+	if service.loginIdentifier != "" {
+		t.Fatalf("conflicting identifiers reached service: %q", service.loginIdentifier)
 	}
 }
 

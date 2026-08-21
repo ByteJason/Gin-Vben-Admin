@@ -601,12 +601,25 @@ components:
     LoginRequest:
       type: object
       additionalProperties: false
-      required: [username, password]
+      required: [password]
+      anyOf:
+        - required: [username]
+        - required: [identifier]
       properties:
         username:
           type: string
           minLength: 1
           maxLength: 128
+          description: 兼容字段；与 identifier 二选一
+        identifier:
+          type: string
+          minLength: 1
+          maxLength: 254
+          description: 规范化前的用户名或邮箱
+        identifierType:
+          type: string
+          enum: [username, email]
+          description: 可选显式标识类型；服务端会校验与 identifier 一致
         password:
           type: string
           minLength: 1
@@ -689,6 +702,13 @@ components:
         id: { type: string, minLength: 1 }
         username: { type: string, minLength: 1 }
         displayName: { type: string }
+        nickname: { type: string }
+        avatar: { type: string }
+        email: { type: string, format: email }
+        phone: { type: string, pattern: '^\\+[1-9][0-9]{7,14}$' }
+        lastLoginIp: { type: string }
+        lastLoginAt: { type: string, format: date-time }
+        passwordChangedAt: { type: string, format: date-time }
         active: { type: boolean }
         roleIds:
           type: array
@@ -702,6 +722,12 @@ components:
         username: { type: string, minLength: 1 }
         realName: { type: string }
         avatar: { type: string }
+        nickname: { type: string }
+        email: { type: string, format: email }
+        phone: { type: string }
+        lastLoginIp: { type: string }
+        lastLoginAt: { type: string, format: date-time }
+        passwordChangedAt: { type: string, format: date-time }
         roles:
           type: array
           items: { type: string }

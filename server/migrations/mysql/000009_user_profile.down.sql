@@ -1,0 +1,14 @@
+ALTER TABLE users
+  DROP INDEX uq_users_tenant_email_normalized,
+  DROP INDEX uq_users_tenant_username_normalized,
+  DROP INDEX idx_users_tenant_status_created,
+  DROP CHECK chk_users_phone_e164,
+  DROP COLUMN password_changed_at,
+  DROP COLUMN last_login_at,
+  DROP COLUMN last_login_ip,
+  DROP COLUMN phone,
+  DROP COLUMN avatar,
+  DROP COLUMN nickname,
+  DROP COLUMN email_normalized,
+  DROP COLUMN email,
+  DROP COLUMN username_normalized;

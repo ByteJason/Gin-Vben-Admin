@@ -85,7 +85,7 @@ func testRBACHTTP(t *testing.T, driver, dsn, redisAddr string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := app.Database().Write(ctx).Exec("INSERT INTO users (username, password_hash, status) VALUES (?, ?, ?)", username, hash, "active").Error; err != nil {
+	if err := app.Database().Write(ctx).Exec("INSERT INTO users (username, username_normalized, password_hash, status) VALUES (?, ?, ?, ?)", username, strings.ToLower(username), hash, "active").Error; err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {

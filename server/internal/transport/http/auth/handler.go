@@ -122,10 +122,15 @@ func RegisterRoutes(r gin.IRouter, handler *Handler, policies ...httpmiddleware.
 }
 
 type loginRequest struct {
-	Username  string `json:"username"`
-	Password  string `json:"password"`
-	CaptchaID string `json:"captchaId,omitempty"`
-	Captcha   string `json:"captcha,omitempty"`
+	// Username remains a wire-compatible alias for older clients. New clients
+	// may send identifier + identifierType so username/email semantics are
+	// explicit without introducing a new API generation.
+	Username       string `json:"username,omitempty"`
+	Identifier     string `json:"identifier,omitempty"`
+	IdentifierType string `json:"identifierType,omitempty"`
+	Password       string `json:"password"`
+	CaptchaID      string `json:"captchaId,omitempty"`
+	Captcha        string `json:"captcha,omitempty"`
 }
 
 type registerRequest struct {
@@ -159,11 +164,20 @@ type tokenData struct {
 
 func (h *Handler) login(c *gin.Context) {
 	var request loginRequest
-	if err := c.ShouldBindJSON(&request); err != nil || strings.TrimSpace(request.Username) == "" || request.Password == "" {
+	if err := c.ShouldBindJSON(&request); err != nil || request.Password == "" {
 		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid request")
 		return
 	}
-	if !h.checkRateLimit(c, request.Username) {
+	identifier, identifierType, err := canonicalLoginIdentifier(request)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid request")
+		return
+	}
+	if request.IdentifierType != "" && request.IdentifierType != string(identifierType) {
+		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid request")
+		return
+	}
+	if !h.checkRateLimit(c, identifier) {
 		return
 	}
 	if h.captcha != nil {
@@ -181,13 +195,30 @@ func (h *Handler) login(c *gin.Context) {
 			return
 		}
 	}
-	pair, err := h.service.Login(requestContext(c), strings.TrimSpace(request.Username), request.Password)
+	pair, err := h.service.Login(requestContext(c), identifier, request.Password)
 	if err != nil {
 		handleAuthError(c, err, true)
 		return
 	}
 	h.setRefreshCookie(c, pair.RefreshToken, false)
 	response.OK(c, tokenData{AccessToken: pair.AccessToken, TokenType: "Bearer", ExpiresIn: pair.ExpiresIn})
+}
+
+func canonicalLoginIdentifier(request loginRequest) (string, authdomain.IdentifierType, error) {
+	identifier := strings.TrimSpace(request.Identifier)
+	username := strings.TrimSpace(request.Username)
+	if identifier != "" && username != "" {
+		canonicalUsername, _, usernameErr := authdomain.NormalizeIdentifier(username)
+		canonicalIdentifier, _, identifierErr := authdomain.NormalizeIdentifier(identifier)
+		if usernameErr != nil || identifierErr != nil || canonicalUsername != canonicalIdentifier {
+			return "", "", authdomain.ErrInvalidIdentifier
+		}
+	}
+	value := identifier
+	if value == "" {
+		value = username
+	}
+	return authdomain.NormalizeIdentifier(value)
 }
 
 func (h *Handler) register(c *gin.Context) {

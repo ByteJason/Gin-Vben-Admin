@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 	"unsafe"
 
 	"example.com/gin-vben-admin/server/internal/domain/authdomain"
@@ -30,7 +31,7 @@ func TestGORMUserRepositoryFindByIdentifier(t *testing.T) {
 		wantErr    error
 		wantText   string
 	}{
-		{name: "active user", identifier: "alice", result: queryResult{rows: [][]driver.Value{{int64(7), "alice", "hash", "active"}}}, want: authdomain.User{ID: "7", Identifier: "alice", PasswordHash: "hash", Active: true}},
+		{name: "active user", identifier: "alice", result: queryResult{rows: [][]driver.Value{{int64(7), "alice", "hash", "active"}}}, want: authdomain.User{ID: "7", Identifier: "alice", Username: "alice", PasswordHash: "hash", Active: true}},
 		{name: "missing user", identifier: "nobody", result: queryResult{}, wantErr: authdomain.ErrInvalidCredentials},
 		{name: "database error is sanitized", identifier: "error", result: queryResult{err: errors.New("pq: password leaked in SQL detail")}, wantErr: ErrUserLookup, wantText: "user lookup failed"},
 	}
@@ -67,9 +68,53 @@ func TestGORMUserRepositoryFindByIdentifierMySQLDialect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FindByIdentifier() error = %v", err)
 	}
-	want := authdomain.User{ID: "8", Identifier: "bob", PasswordHash: "hash", Active: false}
+	want := authdomain.User{ID: "8", Identifier: "bob", Username: "bob", PasswordHash: "hash", Active: false}
 	if got != want {
 		t.Fatalf("FindByIdentifier() = %+v, want %+v", got, want)
+	}
+}
+
+func TestGORMUserRepositoryFindsEmailAndReturnsProfileFields(t *testing.T) {
+	store := newTestStoreWithDialect(t, queryResult{
+		columns: []string{"id", "tenant_id", "username", "username_normalized", "email", "email_normalized", "nickname", "avatar", "phone", "password_hash", "status", "last_login_ip", "last_login_at", "password_changed_at", "org_id"},
+		rows:    [][]driver.Value{{int64(9), "default", "Alice", "alice", "Alice@Example.TEST", "alice@example.test", "Alice A", "avatar-key", "+8613800138000", "hash", "active", "192.0.2.9", time.Unix(100, 0), time.Unix(90, 0), "org-1"}},
+	}, "postgres")
+
+	got, err := NewGORMUserRepository(store).FindByIdentifier(
+		tenant.WithContext(context.Background(), tenant.Context{TenantID: "default"}),
+		"  ALICE@EXAMPLE.TEST ",
+	)
+	if err != nil {
+		t.Fatalf("FindByIdentifier(email) error = %v", err)
+	}
+	want := authdomain.User{
+		ID: "9", Identifier: "Alice", Username: "Alice", UsernameNormalized: "alice",
+		Email: "Alice@Example.TEST", EmailNormalized: "alice@example.test",
+		Nickname: "Alice A", Avatar: "avatar-key", Phone: "+8613800138000",
+		PasswordHash: "hash", Active: true, LastLoginIP: "192.0.2.9",
+		LastLoginAt: time.Unix(100, 0).UTC(), PasswordChangedAt: time.Unix(90, 0).UTC(),
+		TenantID: "default", OrgID: "org-1",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("FindByIdentifier(email) = %+v, want %+v", got, want)
+	}
+}
+
+func TestGORMUserRepositoryRejectsPhoneAsAuthenticationIdentifier(t *testing.T) {
+	store := newTestStoreWithDialect(t, queryResult{err: errors.New("query should not run")}, "postgres")
+	_, err := NewGORMUserRepository(store).FindByIdentifier(
+		tenant.WithContext(context.Background(), tenant.Context{TenantID: "default"}),
+		"+8613800138000",
+	)
+	if !errors.Is(err, authdomain.ErrInvalidIdentifier) {
+		t.Fatalf("FindByIdentifier(phone) error = %v, want ErrInvalidIdentifier", err)
+	}
+}
+
+func TestUserRowFromDomainRejectsMalformedProfilePhone(t *testing.T) {
+	_, err := userRowFromDomain(authdomain.User{Username: "alice", Phone: "13800138000", PasswordHash: "hash"}, "default")
+	if !errors.Is(err, authdomain.ErrInvalidPhone) {
+		t.Fatalf("userRowFromDomain() error = %v, want ErrInvalidPhone", err)
 	}
 }
 
@@ -84,6 +129,7 @@ func TestGORMUserRepositoryRequiresTenantContext(t *testing.T) {
 var _ authdomain.UserRepository = (*GORMUserRepository)(nil)
 
 type queryResult struct {
+	columns []string
 	rows    [][]driver.Value
 	err     error
 	execErr error
@@ -107,7 +153,7 @@ func (c testConn) QueryContext(_ context.Context, _ string, _ []driver.NamedValu
 	if c.result.err != nil {
 		return nil, c.result.err
 	}
-	return &testRows{columns: []string{"id", "username", "password_hash", "status"}, rows: c.result.rows}, nil
+	return &testRows{columns: resultColumns(c.result), rows: c.result.rows}, nil
 }
 func (c testConn) ExecContext(_ context.Context, _ string, _ []driver.NamedValue) (driver.Result, error) {
 	if c.result.execErr != nil {
@@ -135,7 +181,17 @@ func (s testStmt) Query([]driver.Value) (driver.Rows, error) {
 	if s.result.err != nil {
 		return nil, s.result.err
 	}
-	return &testRows{columns: []string{"id", "username", "password_hash", "status"}, rows: s.result.rows}, nil
+	return &testRows{columns: resultColumns(s.result), rows: s.result.rows}, nil
+}
+
+func resultColumns(result queryResult) []string {
+	if len(result.columns) > 0 {
+		return result.columns
+	}
+	if len(result.rows) > 0 && len(result.rows[0]) >= 5 {
+		return []string{"id", "tenant_id", "username", "password_hash", "status"}
+	}
+	return []string{"id", "username", "password_hash", "status"}
 }
 
 type testResult struct{}

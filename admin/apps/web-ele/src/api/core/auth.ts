@@ -33,9 +33,16 @@ export async function getCaptchaApi() {
 
 /** 登录；服务端在响应头设置 HttpOnly refresh cookie。 */
 export async function loginApi(data: AuthApi.LoginParams) {
+  const identifier = data.identifier ?? data.username ?? '';
   const payload: AuthApi.LoginParams = {
     password: data.password,
-    username: data.username,
+    ...(data.username ? { username: data.username } : {}),
+    ...(identifier ? { identifier } : {}),
+    ...(data.identifierType
+      ? { identifierType: data.identifierType }
+      : identifier.includes('@')
+        ? { identifierType: 'email' as const }
+        : { identifierType: 'username' as const }),
   };
   if (typeof data.captcha === 'string' && data.captcha.length > 0) {
     payload.captcha = data.captcha;

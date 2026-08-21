@@ -8,7 +8,9 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"time"
 
+	"example.com/gin-vben-admin/server/internal/domain/authdomain"
 	domain "example.com/gin-vben-admin/server/internal/domain/iam"
 	"example.com/gin-vben-admin/server/internal/domain/tenant"
 	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
@@ -68,7 +70,7 @@ func (s *GORMStore) FindUser(ctx context.Context, id string) (domain.User, error
 	if err != nil {
 		return domain.User{}, err
 	}
-	return domain.User{ID: strconv.FormatUint(row.ID, 10), Username: row.Username, Active: row.Status == "active", RoleIDs: roles}, nil
+	return row.toDomain(roles), nil
 }
 
 func (s *GORMStore) SaveUser(ctx context.Context, user domain.User) error {
@@ -94,10 +96,12 @@ func (s *GORMStore) SaveUser(ctx context.Context, user domain.User) error {
 		}
 		return ErrStoreUnavailable
 	}
-	result := s.write(ctx).Table("users").Where("tenant_id = ? AND id = ?", tenantID, numericID).Updates(map[string]any{
-		"username": user.Username,
-		"status":   status,
-	})
+	values, err := profileUpdateValues(user)
+	if err != nil {
+		return err
+	}
+	values["status"] = status
+	result := s.write(ctx).Table("users").Where("tenant_id = ? AND id = ?", tenantID, numericID).Updates(values)
 	if result.Error != nil {
 		return ErrStoreUnavailable
 	}
@@ -130,7 +134,7 @@ func (s *GORMStore) ListUsers(ctx context.Context) ([]domain.User, error) {
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, domain.User{ID: strconv.FormatUint(row.ID, 10), Username: row.Username, Active: row.Status == "active", RoleIDs: roles})
+		out = append(out, row.toDomain(roles))
 	}
 	return out, nil
 }
@@ -456,10 +460,104 @@ func statusValue(active bool) string {
 }
 
 type userRow struct {
-	ID       uint64 `gorm:"column:id"`
-	Username string `gorm:"column:username"`
-	Status   string `gorm:"column:status"`
+	ID                 uint64     `gorm:"column:id"`
+	TenantID           string     `gorm:"column:tenant_id"`
+	OrgID              *string    `gorm:"column:org_id"`
+	Username           string     `gorm:"column:username"`
+	UsernameNormalized *string    `gorm:"column:username_normalized"`
+	Email              *string    `gorm:"column:email"`
+	EmailNormalized    *string    `gorm:"column:email_normalized"`
+	Nickname           *string    `gorm:"column:nickname"`
+	Avatar             *string    `gorm:"column:avatar"`
+	Phone              *string    `gorm:"column:phone"`
+	Status             string     `gorm:"column:status"`
+	LastLoginIP        *string    `gorm:"column:last_login_ip"`
+	LastLoginAt        *time.Time `gorm:"column:last_login_at"`
+	PasswordChangedAt  *time.Time `gorm:"column:password_changed_at"`
 }
+
+func (row userRow) toDomain(roleIDs []string) domain.User {
+	nickname := stringValue(row.Nickname)
+	displayName := nickname
+	if displayName == "" {
+		displayName = row.Username
+	}
+	return domain.User{
+		ID:                 strconv.FormatUint(row.ID, 10),
+		Username:           row.Username,
+		DisplayName:        displayName,
+		UsernameNormalized: stringValue(row.UsernameNormalized),
+		Email:              stringValue(row.Email),
+		EmailNormalized:    stringValue(row.EmailNormalized),
+		Nickname:           nickname,
+		Avatar:             stringValue(row.Avatar),
+		Phone:              stringValue(row.Phone),
+		LastLoginIP:        stringValue(row.LastLoginIP),
+		LastLoginAt:        timeValue(row.LastLoginAt),
+		PasswordChangedAt:  timeValue(row.PasswordChangedAt),
+		TenantID:           row.TenantID,
+		OrgID:              stringValue(row.OrgID),
+		Active:             row.Status == "active",
+		RoleIDs:            append([]string(nil), roleIDs...),
+	}
+}
+
+func profileUpdateValues(user domain.User) (map[string]any, error) {
+	username := strings.TrimSpace(user.Username)
+	normalizedUsername, identifierType, err := authdomain.NormalizeIdentifier(username)
+	if err != nil || identifierType != authdomain.IdentifierUsername {
+		return nil, authdomain.ErrInvalidIdentifier
+	}
+	phone, err := authdomain.NormalizePhone(user.Phone)
+	if err != nil {
+		return nil, err
+	}
+	values := map[string]any{
+		"username":            username,
+		"username_normalized": normalizedUsername,
+		"nickname":            nullableString(firstNonEmpty(user.Nickname, user.DisplayName)),
+		"avatar":              nullableString(user.Avatar),
+		"phone":               nullableString(phone),
+	}
+	if email := strings.TrimSpace(user.Email); email != "" {
+		normalizedEmail, kind, normalizeErr := authdomain.NormalizeIdentifier(email)
+		if normalizeErr != nil || kind != authdomain.IdentifierEmail {
+			return nil, authdomain.ErrInvalidIdentifier
+		}
+		values["email"] = email
+		values["email_normalized"] = normalizedEmail
+	} else {
+		values["email"] = nil
+		values["email_normalized"] = nil
+	}
+	return values, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func stringPtr(value string) *string { return &value }
+
+func stringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func timeValue(value *time.Time) time.Time {
+	if value == nil {
+		return time.Time{}
+	}
+	return value.UTC()
+}
+
 type roleRow struct {
 	ID        string
 	Name      string

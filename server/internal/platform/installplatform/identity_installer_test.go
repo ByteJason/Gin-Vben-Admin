@@ -44,6 +44,16 @@ func TestIdentityInstallerHashesInitialPasswordAndUsesOpaqueRollbackReference(t 
 	}
 }
 
+func TestInstallationUserRowStoresNormalizedUsername(t *testing.T) {
+	row, err := newInstallationUserRow(" Alice ", "hash")
+	if err != nil {
+		t.Fatalf("newInstallationUserRow() error = %v", err)
+	}
+	if row.Username != "Alice" || row.UsernameNormalized == nil || *row.UsernameNormalized != "alice" {
+		t.Fatalf("installation row = %+v", row)
+	}
+}
+
 type passwordHasherStub struct {
 	password string
 	hash     string

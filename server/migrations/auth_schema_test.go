@@ -22,3 +22,22 @@ func TestSecondMigrationCreatesAuthTables(t *testing.T) {
 		}
 	}
 }
+
+func TestUserProfileMigrationAddsNormalizedIdentifiersAndProfileFields(t *testing.T) {
+	for _, driver := range []string{"mysql", "postgres"} {
+		up, err := fs.ReadFile(migrations.FS, driver+"/000009_user_profile.up.sql")
+		if err != nil {
+			t.Fatalf("read %s user profile migration: %v", driver, err)
+		}
+		sql := strings.ToLower(string(up))
+		for _, token := range []string{"alter table users", "username_normalized", "email_normalized", "nickname", "avatar", "phone", "last_login_ip", "last_login_at", "password_changed_at", "unique", "e164", "lower", "trim"} {
+			if !strings.Contains(sql, token) {
+				t.Fatalf("%s user profile migration missing %q", driver, token)
+			}
+		}
+		down, err := fs.ReadFile(migrations.FS, driver+"/000009_user_profile.down.sql")
+		if err != nil || len(strings.TrimSpace(string(down))) == 0 {
+			t.Fatalf("%s user profile migration has no down asset: %v", driver, err)
+		}
+	}
+}

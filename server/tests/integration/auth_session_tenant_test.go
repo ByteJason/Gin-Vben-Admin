@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -104,7 +105,8 @@ func testAuthSessionTenantIsolation(t *testing.T, driver, dsn string) {
 		}
 	}
 	var userID uint64
-	if err := store.Write(ctx).Table("users").Create(map[string]any{"tenant_id": tenantA, "username": "session-user-" + suffix, "password_hash": "hash", "status": "active"}).Error; err != nil {
+	username := "session-user-" + suffix
+	if err := store.Write(ctx).Table("users").Create(map[string]any{"tenant_id": tenantA, "username": username, "username_normalized": strings.ToLower(username), "password_hash": "hash", "status": "active"}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Read(ctx).Table("users").Where("tenant_id = ?", tenantA).Pluck("id", &userID).Error; err != nil {

@@ -52,10 +52,24 @@ type AuditEvent struct {
 }
 
 type User struct {
-	ID           string
-	Identifier   string
-	PasswordHash string
-	Active       bool
+	ID string
+	// Identifier is retained as the compatibility-facing login identifier.
+	// Username and Email carry the profile values used by the management APIs.
+	Identifier         string
+	Username           string
+	UsernameNormalized string
+	Email              string
+	EmailNormalized    string
+	Nickname           string
+	Avatar             string
+	Phone              string
+	PasswordHash       string
+	Active             bool
+	LastLoginIP        string
+	LastLoginAt        time.Time
+	PasswordChangedAt  time.Time
+	TenantID           string
+	OrgID              string
 }
 
 type Session struct {

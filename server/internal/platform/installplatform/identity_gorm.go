@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	installer "example.com/gin-vben-admin/server/internal/application/installer"
+	"example.com/gin-vben-admin/server/internal/domain/authdomain"
 	"example.com/gin-vben-admin/server/internal/platform/authplatform"
 	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
 	"gorm.io/gorm"
@@ -52,11 +53,12 @@ type installationIdentityMetadata struct {
 }
 
 type installationUserRow struct {
-	ID                 uint64 `gorm:"column:id;primaryKey"`
-	Username           string `gorm:"column:username"`
-	PasswordHash       string `gorm:"column:password_hash"`
-	Status             string `gorm:"column:status"`
-	MustChangePassword bool   `gorm:"column:must_change_password"`
+	ID                 uint64  `gorm:"column:id;primaryKey"`
+	Username           string  `gorm:"column:username"`
+	UsernameNormalized *string `gorm:"column:username_normalized"`
+	PasswordHash       string  `gorm:"column:password_hash"`
+	Status             string  `gorm:"column:status"`
+	MustChangePassword bool    `gorm:"column:must_change_password"`
 }
 
 func (installationUserRow) TableName() string { return "users" }
@@ -80,9 +82,12 @@ func (s *GORMIdentityStore) Initialize(ctx context.Context, reference, username,
 		}).Error; err != nil {
 			return err
 		}
-		user := installationUserRow{
-			Username: username, PasswordHash: passwordHash, Status: "active", MustChangePassword: true,
+		user, err := newInstallationUserRow(username, passwordHash)
+		if err != nil {
+			return err
 		}
+		user.Status = "active"
+		user.MustChangePassword = true
 		if err := tx.Create(&user).Error; err != nil {
 			return err
 		}
@@ -105,6 +110,15 @@ func (s *GORMIdentityStore) Initialize(ctx context.Context, reference, username,
 		return ErrIdentityInstallation
 	}
 	return nil
+}
+
+func newInstallationUserRow(username, passwordHash string) (installationUserRow, error) {
+	username = strings.TrimSpace(username)
+	normalized, identifierType, err := authdomain.NormalizeIdentifier(username)
+	if err != nil || identifierType != authdomain.IdentifierUsername || strings.TrimSpace(passwordHash) == "" {
+		return installationUserRow{}, authdomain.ErrInvalidIdentifier
+	}
+	return installationUserRow{Username: username, UsernameNormalized: &normalized, PasswordHash: passwordHash}, nil
 }
 
 func (s *GORMIdentityStore) Rollback(ctx context.Context, reference string) error {

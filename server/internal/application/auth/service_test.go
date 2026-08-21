@@ -17,6 +17,16 @@ func (r userRepo) FindByIdentifier(context.Context, string) (authdomain.User, er
 	return r.user, nil
 }
 
+type recordingUserRepo struct {
+	user       authdomain.User
+	identifier string
+}
+
+func (r *recordingUserRepo) FindByIdentifier(_ context.Context, identifier string) (authdomain.User, error) {
+	r.identifier = identifier
+	return r.user, nil
+}
+
 type failingUserRepo struct{}
 
 func (failingUserRepo) FindByIdentifier(context.Context, string) (authdomain.User, error) {
@@ -70,6 +80,22 @@ func TestSessionJournalTracksLifecycle(t *testing.T) {
 	}
 	if journal.created != 1 || journal.rotated != 1 || journal.revoked != 1 {
 		t.Fatalf("journal calls = create:%d rotate:%d revoke:%d", journal.created, journal.rotated, journal.revoked)
+	}
+}
+
+func TestLoginNormalizesEmailBeforeLookup(t *testing.T) {
+	hasher := authplatform.BcryptHasher{Cost: 4}
+	hash, err := hasher.Hash("correct-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := &recordingUserRepo{user: authdomain.User{ID: "user-1", Email: "Alice@Example.test", Identifier: "Alice", PasswordHash: hash, Active: true}}
+	svc := auth.NewService(repo, hasher, authplatform.NewJWTService([]byte("test-secret"), time.Minute, time.Hour), authplatform.NewMemorySessionStore())
+	if _, err := svc.Login(context.Background(), "  ALICE@EXAMPLE.TEST ", "correct-password"); err != nil {
+		t.Fatalf("Login() error = %v", err)
+	}
+	if repo.identifier != "alice@example.test" {
+		t.Fatalf("repository identifier = %q, want canonical email", repo.identifier)
 	}
 }
 

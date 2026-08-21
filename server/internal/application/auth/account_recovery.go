@@ -51,18 +51,29 @@ var _ AccountRecoveryService = (*Service)(nil)
 // Register creates an active account after hashing its password. The
 // plaintext password never crosses the AccountProvisioner boundary.
 func (s *Service) Register(ctx context.Context, identifier, password string) error {
-	identifier = strings.TrimSpace(identifier)
 	if s == nil || s.accounts == nil {
 		return authdomain.ErrDependencyUnavailable
 	}
-	if err := validateAccountInput(identifier, password); err != nil {
+	canonical, identifierType, err := normalizeAccountIdentifier(identifier)
+	if err != nil {
+		return err
+	}
+	if err := validateAccountInput(canonical, password); err != nil {
 		return err
 	}
 	hash, err := s.hasher.Hash(password)
 	if err != nil {
 		return authdomain.ErrDependencyUnavailable
 	}
-	err = s.accounts.CreateUser(ctx, authdomain.User{Identifier: identifier, PasswordHash: hash, Active: true})
+	// Keep the legacy users.username NOT NULL key populated even when the
+	// caller chooses an email identifier; email remains an additional alias.
+	user := authdomain.User{Identifier: canonical, Username: canonical, PasswordHash: hash, Active: true}
+	if identifierType == authdomain.IdentifierEmail {
+		user.Email = canonical
+	} else {
+		user.Username = canonical
+	}
+	err = s.accounts.CreateUser(ctx, user)
 	switch {
 	case err == nil:
 		_ = s.recordAudit(ctx, authdomain.AuditEvent{EventType: authdomain.AuditRegister, Outcome: authdomain.AuditOutcomeSuccess})
@@ -79,14 +90,14 @@ func (s *Service) Register(ctx context.Context, identifier, password string) err
 // RequestPasswordReset deliberately returns success for an unknown account,
 // preventing the endpoint from becoming an account-enumeration oracle.
 func (s *Service) RequestPasswordReset(ctx context.Context, identifier string) error {
-	identifier = strings.TrimSpace(identifier)
 	if s == nil || s.reset == nil {
 		return authdomain.ErrDependencyUnavailable
 	}
-	if identifier == "" {
-		return authdomain.ErrInvalidAccount
+	canonical, _, err := normalizeAccountIdentifier(identifier)
+	if err != nil {
+		return err
 	}
-	user, err := s.users.FindByIdentifier(ctx, identifier)
+	user, err := s.users.FindByIdentifier(ctx, canonical)
 	if err != nil {
 		if errors.Is(err, authdomain.ErrInvalidCredentials) {
 			return nil
@@ -99,7 +110,7 @@ func (s *Service) RequestPasswordReset(ctx context.Context, identifier string) e
 	if user.ID == "" || !user.Active {
 		return nil
 	}
-	if err := s.reset.Request(ctx, user.Identifier); err != nil {
+	if err := s.reset.Request(ctx, canonical); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return err
 		}
@@ -126,15 +137,15 @@ func (s *Service) ResetPassword(ctx context.Context, token, password string) err
 		}
 		return authdomain.ErrPasswordResetInvalid
 	}
-	identifier = strings.TrimSpace(identifier)
-	if identifier == "" {
+	canonical, _, normalizeErr := normalizeAccountIdentifier(identifier)
+	if normalizeErr != nil {
 		return authdomain.ErrPasswordResetInvalid
 	}
 	hash, err := s.hasher.Hash(password)
 	if err != nil {
 		return authdomain.ErrDependencyUnavailable
 	}
-	if err := s.accounts.UpdatePassword(ctx, identifier, hash); err != nil {
+	if err := s.accounts.UpdatePassword(ctx, canonical, hash); err != nil {
 		if errors.Is(err, authdomain.ErrInvalidCredentials) {
 			return authdomain.ErrPasswordResetInvalid
 		}
@@ -152,6 +163,14 @@ func validateAccountInput(identifier, password string) error {
 		return authdomain.ErrInvalidAccount
 	}
 	return validatePassword(password)
+}
+
+func normalizeAccountIdentifier(identifier string) (string, authdomain.IdentifierType, error) {
+	canonical, identifierType, err := authdomain.NormalizeIdentifier(identifier)
+	if err != nil {
+		return "", "", authdomain.ErrInvalidAccount
+	}
+	return canonical, identifierType, nil
 }
 
 func validatePassword(password string) error {

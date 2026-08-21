@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -60,7 +61,7 @@ func testTenantIsolation(t *testing.T, driver, dsn string) {
 	var userA, userB uint64
 	for index, tenantID := range []string{tenantA, tenantB} {
 		result := store.Write(ctx).Table("users").Create(map[string]any{
-			"tenant_id": tenantID, "username": username, "password_hash": "test-hash", "status": "active",
+			"tenant_id": tenantID, "username": username, "username_normalized": strings.ToLower(username), "password_hash": "test-hash", "status": "active",
 		})
 		if result.Error != nil {
 			t.Fatal(result.Error)

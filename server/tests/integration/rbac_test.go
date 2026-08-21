@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -65,7 +66,7 @@ func testRBACPersistence(t *testing.T, driver, dsn string) {
 	}
 	t.Cleanup(cleanup)
 
-	if err := store.Write(ctx).Exec("INSERT INTO users (username, password_hash, status) VALUES (?, ?, ?)", username, "test-hash", "active").Error; err != nil {
+	if err := store.Write(ctx).Exec("INSERT INTO users (username, username_normalized, password_hash, status) VALUES (?, ?, ?, ?)", username, strings.ToLower(username), "test-hash", "active").Error; err != nil {
 		t.Fatal(err)
 	}
 	var userID uint64

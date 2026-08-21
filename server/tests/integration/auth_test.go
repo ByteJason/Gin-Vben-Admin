@@ -140,8 +140,8 @@ func testAuthRefreshRotation(t *testing.T, driver, dsn, redisAddr string) {
 		t.Fatalf("password hash error = %v", err)
 	}
 	if err := app.Database().Write(ctx).Exec(
-		"INSERT INTO users (username, password_hash, status) VALUES (?, ?, ?)",
-		username, passwordHash, "active",
+		"INSERT INTO users (username, username_normalized, password_hash, status) VALUES (?, ?, ?, ?)",
+		username, strings.ToLower(username), passwordHash, "active",
 	).Error; err != nil {
 		t.Fatalf("create integration user error = %v", err)
 	}
