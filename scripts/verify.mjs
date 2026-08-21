@@ -57,6 +57,8 @@ const required = [
   'contracts/openapi/admin-v1.yaml',
   'contracts/openapi/client-v1.yaml',
   'contracts/openapi/install-v1.yaml',
+  'admin/packages/api-client/package.json',
+  'admin/packages/api-client/src/generated/admin-v1.ts',
   'install/src/index.html',
   'install/src/app.js',
   'install/src/styles.css',
@@ -131,6 +133,7 @@ if (scope !== 'basic' && scope !== 'template') {
   process.exit(2);
 }
 
+await run(process.execPath, ['scripts/generate-openapi.mjs', '--check']);
 if (await exists('server/go.mod')) await run('go', ['test', './...'], path.join(root, 'server'));
 console.log(`VERIFY_SCOPE=${scope}`);
 console.log('VERIFY_OK');

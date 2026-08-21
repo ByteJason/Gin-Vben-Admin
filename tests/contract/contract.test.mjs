@@ -59,6 +59,29 @@ test('OpenAPI scopes stay separate and expose the HTTP seams', () => {
   assert.doesNotMatch(client, /\/api\/admin\/v1/);
 });
 
+test('management UIs consume the generated admin API client contract', () => {
+  const packagePath = join(root, 'admin/packages/api-client/package.json');
+  const generatedPath = join(root, 'admin/packages/api-client/src/generated/admin-v1.ts');
+  assert.equal(existsSync(packagePath), true, packagePath);
+  assert.equal(existsSync(generatedPath), true, generatedPath);
+  const generated = readFileSync(generatedPath, 'utf8');
+  assert.match(generated, /Generated from contracts\/openapi\/admin-v1\.yaml/);
+  assert.match(generated, /adminAuthLogin:\s*'\/admin\/v1\/auth\/login'/);
+  assert.match(generated, /listVisibleMenus:\s*'\/admin\/v1\/menu\/all'/);
+  for (const app of ['web-antd', 'web-ele', 'web-naive']) {
+    const packageJSON = readFileSync(join(root, `admin/apps/${app}/package.json`), 'utf8');
+    const auth = readFileSync(join(root, `admin/apps/${app}/src/api/core/auth.ts`), 'utf8');
+    const menu = readFileSync(join(root, `admin/apps/${app}/src/api/core/menu.ts`), 'utf8');
+    assert.match(packageJSON, /"@vben\/api-client":\s*"workspace:\*"/, app);
+    assert.match(auth, /from '@vben\/api-client'/, `${app} auth client`);
+    assert.match(menu, /from '@vben\/api-client'/, `${app} menu client`);
+    assert.doesNotMatch(auth, /export const AUTH_ENDPOINTS/, `${app} duplicated auth endpoints`);
+  }
+  const generation = runNode('scripts/generate-openapi.mjs', '--check');
+  assert.equal(generation.status, 0, generation.stderr || generation.stdout);
+  assert.match(generation.stdout, /OPENAPI_CLIENT_CHECK_OK/);
+});
+
 test('installation contract exposes credential-free status on its own scope', () => {
   const install = readFileSync(join(root, 'contracts/openapi/install-v1.yaml'), 'utf8');
   assert.match(install, /\/api\/system\/install\/v1\/status:/);
@@ -264,14 +287,19 @@ test('RBAC management contract exposes guarded collections and denial code', () 
 
 test('web-antd auth seam uses the versioned API and sends the refresh cookie', () => {
   const auth = readFileSync(join(root, 'admin/apps/web-antd/src/api/core/auth.ts'), 'utf8');
+  const generated = readFileSync(join(root, 'admin/packages/api-client/src/generated/admin-v1.ts'), 'utf8');
   const login = readFileSync(
     join(root, 'admin/apps/web-antd/src/views/_core/authentication/login.vue'),
     'utf8',
   );
 
-  assert.match(auth, /\/admin\/v1\/auth\/login/);
-  assert.match(auth, /\/admin\/v1\/auth\/refresh/);
-  assert.match(auth, /\/admin\/v1\/auth\/logout/);
+  assert.match(auth, /from '@vben\/api-client'/);
+  assert.match(auth, /AUTH_ENDPOINTS\.login/);
+  assert.match(auth, /AUTH_ENDPOINTS\.refresh/);
+  assert.match(auth, /AUTH_ENDPOINTS\.logout/);
+  for (const endpoint of ['/admin/v1/auth/login', '/admin/v1/auth/refresh', '/admin/v1/auth/logout']) {
+    assert.match(generated, new RegExp(endpoint.replaceAll('/', '\\/')));
+  }
   assert.match(auth, /withCredentials:\s*true/);
   assert.match(auth, /undefined\s*,\s*\{\s*withCredentials:/s);
   assert.match(login, /authStore\.loginLoading/);
@@ -282,31 +310,31 @@ test('management UI clients use versioned authentication and menu endpoints', ()
   for (const ui of ['web-antd', 'web-ele', 'web-naive']) {
     const auth = readFileSync(join(root, `admin/apps/${ui}/src/api/core/auth.ts`), 'utf8');
     const menu = readFileSync(join(root, `admin/apps/${ui}/src/api/core/menu.ts`), 'utf8');
-    for (const endpoint of ['/admin/v1/auth/login', '/admin/v1/auth/refresh', '/admin/v1/auth/logout']) {
-      assert.match(auth, new RegExp(endpoint.replaceAll('/', '\\/')), `${ui} ${endpoint}`);
+    assert.match(auth, /from '@vben\/api-client'/, `${ui} shared client`);
+    for (const endpoint of ['login', 'refresh', 'logout']) {
+      assert.match(auth, new RegExp(`AUTH_ENDPOINTS\\.${endpoint}`), `${ui} ${endpoint}`);
     }
     assert.match(auth, /withCredentials:\s*true/, `${ui} refresh credentials`);
     assert.match(auth, /getCaptchaApi/, `${ui} captcha client`);
     assert.match(auth, /captchaId/, `${ui} captcha challenge id`);
-    assert.match(menu, /\/admin\/v1\/menu\/all/, `${ui} menu endpoint`);
+    assert.match(menu, /MENU_ENDPOINT/, `${ui} menu endpoint`);
   }
 });
 
 test('management UI clients expose account recovery and device-session endpoints', () => {
+  const generated = readFileSync(join(root, 'admin/packages/api-client/src/generated/admin-v1.ts'), 'utf8');
   for (const ui of ['web-antd', 'web-ele', 'web-naive']) {
     const auth = readFileSync(join(root, `admin/apps/${ui}/src/api/core/auth.ts`), 'utf8');
-    for (const endpoint of [
-      '/admin/v1/auth/register',
-      '/admin/v1/auth/password/reset/request',
-      '/admin/v1/auth/password/reset',
-      '/admin/v1/auth/sessions',
-    ]) {
-      assert.match(auth, new RegExp(endpoint.replaceAll('/', '\\/')), `${ui} ${endpoint}`);
+    for (const endpoint of ['register', 'passwordResetRequest', 'passwordReset', 'sessions']) {
+      assert.match(auth, new RegExp(`AUTH_ENDPOINTS\\.${endpoint}`), `${ui} ${endpoint}`);
     }
     for (const fn of ['registerApi', 'requestPasswordResetApi', 'resetPasswordApi', 'listSessionsApi', 'revokeSessionApi']) {
       assert.match(auth, new RegExp(`export async function ${fn}`), `${ui} ${fn}`);
     }
     assert.match(auth, /withCredentials:\s*true/);
+  }
+  for (const endpoint of ['/admin/v1/auth/register', '/admin/v1/auth/password/reset/request', '/admin/v1/auth/password/reset', '/admin/v1/auth/sessions']) {
+    assert.match(generated, new RegExp(endpoint.replaceAll('/', '\\/')));
   }
 });
 

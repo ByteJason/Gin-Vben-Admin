@@ -1,76 +1,9 @@
+import {
+  AUTH_API_PREFIX,
+  AUTH_ENDPOINTS,
+  type AuthApi,
+} from '@vben/api-client';
 import { baseRequestClient, requestClient } from '#/api/request';
-
-/** Versioned management authentication path. */
-export const AUTH_API_PREFIX = '/admin/v1/auth';
-export const AUTH_ENDPOINTS = {
-  login: '/admin/v1/auth/login',
-  logout: '/admin/v1/auth/logout',
-  passwordReset: '/admin/v1/auth/password/reset',
-  passwordResetRequest: '/admin/v1/auth/password/reset/request',
-  register: '/admin/v1/auth/register',
-  refresh: '/admin/v1/auth/refresh',
-  sessions: '/admin/v1/auth/sessions',
-} as const;
-
-export namespace AuthApi {
-  /** 登录接口参数 */
-  export interface LoginParams {
-    captcha?: string;
-    captchaId?: string;
-    password: string;
-    username: string;
-  }
-
-  export interface RegisterParams {
-    password: string;
-    username: string;
-  }
-
-  export interface PasswordResetRequestParams {
-    password?: string;
-    token?: string;
-    username?: string;
-  }
-
-  export interface SessionInfo {
-    createdAt: string;
-    deviceId: string;
-    deviceName: string;
-    expiresAt: string;
-    id: string;
-    ipAddress: string;
-    lastSeenAt: string;
-    revoked: boolean;
-    userAgent: string;
-  }
-
-  /** 登录、刷新接口返回值；refresh token 永不进入此对象 */
-  export interface LoginResult {
-    accessToken: string;
-    expiresIn: number;
-    tokenType: 'Bearer';
-  }
-
-  export type RefreshTokenResult = LoginResult;
-
-  export interface ApiEnvelope<T> {
-    code: number;
-    data: T;
-    message: string;
-    meta?: { requestId?: string };
-    traceId?: string;
-  }
-
-  /** 当前 Go domain 的 wire 兼容形态；HTTP client 归一化为 camelCase。 */
-  export interface WireTokenData {
-    accessToken?: string;
-    access_token?: string;
-    expiresIn?: number;
-    expires_in?: number;
-    tokenType?: 'Bearer' | string;
-    token_type?: 'Bearer' | string;
-  }
-}
 
 function normalizeTokenData(
   value: AuthApi.LoginResult | AuthApi.WireTokenData,

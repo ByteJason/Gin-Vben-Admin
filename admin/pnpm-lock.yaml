@@ -592,6 +592,9 @@ importers:
 
   apps/web-antd:
     dependencies:
+      '@vben/api-client':
+        specifier: workspace:*
+        version: link:../../packages/api-client
       '@vben/access':
         specifier: workspace:*
         version: link:../../packages/effects/access
@@ -655,6 +658,9 @@ importers:
 
   apps/web-ele:
     dependencies:
+      '@vben/api-client':
+        specifier: workspace:*
+        version: link:../../packages/api-client
       '@vben/access':
         specifier: workspace:*
         version: link:../../packages/effects/access
@@ -722,6 +728,9 @@ importers:
 
   apps/web-naive:
     dependencies:
+      '@vben/api-client':
+        specifier: workspace:*
+        version: link:../../packages/api-client
       '@vben/access':
         specifier: workspace:*
         version: link:../../packages/effects/access
@@ -1039,6 +1048,8 @@ importers:
       vite-plugin-lazy-import:
         specifier: 'catalog:'
         version: 1.0.7
+
+  packages/api-client: {}
 
   packages/@core/base/design:
     dependencies:

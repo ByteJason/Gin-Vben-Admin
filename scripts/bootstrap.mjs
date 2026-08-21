@@ -22,6 +22,8 @@ const required = [
   'admin',
   'server',
   'contracts/openapi/admin-v1.yaml',
+  'admin/packages/api-client/package.json',
+  'admin/packages/api-client/src/generated/admin-v1.ts',
   'contracts/openapi/client-v1.yaml',
   'server/configs/server.example.yaml',
   'server/cmd/migrate',
