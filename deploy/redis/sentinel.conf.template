@@ -1,0 +1,7 @@
+bind 0.0.0.0
+protected-mode no
+port 26379
+sentinel monitor b8master redis-primary 6379 2
+sentinel down-after-milliseconds b8master 5000
+sentinel failover-timeout b8master 10000
+sentinel parallel-syncs b8master 1

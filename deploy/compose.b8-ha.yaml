@@ -1,0 +1,127 @@
+name: gin-vben-admin-b8-ha
+
+services:
+  mysql-primary:
+    image: mysql:9.7
+    command: ["mysqld", "--server-id=1", "--log-bin=mysql-bin", "--binlog-format=ROW", "--gtid-mode=ON", "--enforce-gtid-consistency=ON", "--log-replica-updates=ON"]
+    environment: &mysql-env
+      MYSQL_DATABASE: ${B8_MYSQL_DATABASE:-gin_vben_admin}
+      MYSQL_USER: ${B8_MYSQL_USER:-app}
+      MYSQL_PASSWORD: ${B8_MYSQL_PASSWORD:-app_password}
+      MYSQL_ROOT_PASSWORD: ${B8_MYSQL_ROOT_PASSWORD:-root_password}
+    ports: ["${B8_MYSQL_PRIMARY_PORT:-13306}:3306"]
+    volumes:
+      - b8-mysql-primary:/var/lib/mysql
+      - ./mysql/primary/001-replication.sql:/docker-entrypoint-initdb.d/001-replication.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  mysql-replica:
+    image: mysql:9.7
+    command: ["mysqld", "--server-id=2", "--log-bin=mysql-bin", "--relay-log=mysql-relay-bin", "--read-only=ON", "--gtid-mode=ON", "--enforce-gtid-consistency=ON", "--log-replica-updates=ON"]
+    environment:
+      MYSQL_ROOT_PASSWORD: ${B8_MYSQL_ROOT_PASSWORD:-root_password}
+    ports: ["${B8_MYSQL_REPLICA_PORT:-13307}:3306"]
+    volumes:
+      - b8-mysql-replica:/var/lib/mysql
+      - ./mysql/replica/replica-init.sh:/usr/local/bin/replica-init.sh:ro
+      - ./mysql/replica/healthcheck.sh:/usr/local/bin/replica-healthcheck.sh:ro
+    depends_on: {mysql-primary: {condition: service_healthy}}
+    healthcheck:
+      test: ["CMD-SHELL", "sh /usr/local/bin/replica-healthcheck.sh"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    entrypoint: ["/bin/sh", "-c", "docker-entrypoint.sh mysqld --server-id=2 --log-bin=mysql-bin --relay-log=mysql-relay-bin --read-only=ON --gtid-mode=ON --enforce-gtid-consistency=ON --log-replica-updates=ON & pid=$$!; until mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent; do sleep 2; done; /usr/local/bin/replica-init.sh; wait $$pid"]
+
+  pg-primary:
+    image: postgres:18.4
+    command: ["postgres", "-c", "listen_addresses=*", "-c", "hba_file=/etc/postgresql/pg_hba.conf", "-c", "wal_level=replica", "-c", "max_wal_senders=5", "-c", "hot_standby=on"]
+    environment: &pg-env
+      POSTGRES_DB: ${B8_POSTGRES_DB:-gin_vben_admin}
+      POSTGRES_USER: ${B8_POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${B8_POSTGRES_PASSWORD:-postgres}
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports: ["${B8_POSTGRES_PRIMARY_PORT:-15432}:5432"]
+    volumes:
+      - b8-pg-primary:/var/lib/postgresql
+      - ./postgres/primary/001-replication.sql:/docker-entrypoint-initdb.d/001-replication.sql:ro
+      - ./postgres/primary/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"], interval: 5s, timeout: 5s, retries: 30}
+
+  pg-replica:
+    image: postgres:18.4
+    user: postgres
+    environment: *pg-env
+    ports: ["${B8_POSTGRES_REPLICA_PORT:-15433}:5432"]
+    volumes:
+      - b8-pg-replica:/var/lib/postgresql
+      - ./postgres/replica/replica-entrypoint.sh:/usr/local/bin/replica-entrypoint.sh:ro
+    depends_on: {pg-primary: {condition: service_healthy}}
+    entrypoint: ["/usr/local/bin/replica-entrypoint.sh"]
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"], interval: 5s, timeout: 5s, retries: 30}
+
+  redis-primary:
+    image: redis:8.10
+    command: ["redis-server", "--bind", "0.0.0.0", "--protected-mode", "no", "--appendonly", "yes"]
+    ports: ["${B8_REDIS_PRIMARY_PORT:-16370}:6379"]
+    volumes: [b8-redis-primary:/data]
+    healthcheck: {test: ["CMD", "redis-cli", "ping"], interval: 5s, timeout: 3s, retries: 30}
+
+  redis-replica:
+    image: redis:8.10
+    command: ["redis-server", "--bind", "0.0.0.0", "--protected-mode", "no", "--replicaof", "redis-primary", "6379", "--appendonly", "yes"]
+    volumes: [b8-redis-replica:/data]
+    depends_on: {redis-primary: {condition: service_healthy}}
+
+  redis-sentinel-a: &sentinel
+    image: redis:8.10
+    command: ["sh", "-c", "until redis-cli -h redis-primary -p 6379 ping >/dev/null 2>&1; do sleep 1; done; primary_ip=$$(getent hosts redis-primary | awk 'NR==1 {print $$1}'); test -n \"$$primary_ip\"; sed \"s/redis-primary/$$primary_ip/g\" /etc/redis/sentinel.conf.template > /tmp/sentinel.conf; exec redis-server /tmp/sentinel.conf --sentinel"]
+    ports: ["${B8_REDIS_SENTINEL_A_PORT:-26379}:26379"]
+    volumes: [./redis/sentinel.conf.template:/etc/redis/sentinel.conf.template:ro]
+    depends_on: {redis-primary: {condition: service_healthy}}
+  redis-sentinel-b:
+    <<: *sentinel
+    ports: ["${B8_REDIS_SENTINEL_B_PORT:-26380}:26379"]
+  redis-sentinel-c:
+    <<: *sentinel
+    ports: ["${B8_REDIS_SENTINEL_C_PORT:-26381}:26379"]
+
+  redis-cluster-a: &cluster-node
+    image: redis:8.10
+    command: ["redis-server", "--bind", "0.0.0.0", "--protected-mode", "no", "--cluster-enabled", "yes", "--cluster-config-file", "nodes.conf", "--cluster-node-timeout", "5000", "--appendonly", "yes"]
+    volumes: [b8-redis-cluster-a:/data]
+    ports: ["${B8_REDIS_CLUSTER_A_PORT:-16379}:6379"]
+    healthcheck: {test: ["CMD", "redis-cli", "ping"], interval: 5s, timeout: 3s, retries: 30}
+  redis-cluster-b: {<<: *cluster-node, ports: ["${B8_REDIS_CLUSTER_B_PORT:-16380}:6379"], volumes: [b8-redis-cluster-b:/data]}
+  redis-cluster-c: {<<: *cluster-node, ports: ["${B8_REDIS_CLUSTER_C_PORT:-16381}:6379"], volumes: [b8-redis-cluster-c:/data]}
+  redis-cluster-d: {<<: *cluster-node, ports: ["${B8_REDIS_CLUSTER_D_PORT:-16382}:6379"], volumes: [b8-redis-cluster-d:/data]}
+  redis-cluster-e: {<<: *cluster-node, ports: ["${B8_REDIS_CLUSTER_E_PORT:-16383}:6379"], volumes: [b8-redis-cluster-e:/data]}
+  redis-cluster-f: {<<: *cluster-node, ports: ["${B8_REDIS_CLUSTER_F_PORT:-16384}:6379"], volumes: [b8-redis-cluster-f:/data]}
+  redis-cluster-init:
+    image: redis:8.10
+    depends_on:
+      redis-cluster-a: {condition: service_healthy}
+      redis-cluster-b: {condition: service_healthy}
+      redis-cluster-c: {condition: service_healthy}
+      redis-cluster-d: {condition: service_healthy}
+      redis-cluster-e: {condition: service_healthy}
+      redis-cluster-f: {condition: service_healthy}
+    entrypoint: ["sh", "-c", "redis-cli --cluster create redis-cluster-a:6379 redis-cluster-b:6379 redis-cluster-c:6379 redis-cluster-d:6379 redis-cluster-e:6379 redis-cluster-f:6379 --cluster-replicas 1 --cluster-yes"]
+
+volumes:
+  b8-mysql-primary: {}
+  b8-mysql-replica: {}
+  b8-pg-primary: {}
+  b8-pg-replica: {}
+  b8-redis-primary: {}
+  b8-redis-replica: {}
+  b8-redis-cluster-a: {}
+  b8-redis-cluster-b: {}
+  b8-redis-cluster-c: {}
+  b8-redis-cluster-d: {}
+  b8-redis-cluster-e: {}
+  b8-redis-cluster-f: {}
