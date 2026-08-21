@@ -1,6 +1,6 @@
-// Package observability contains the B6 configuration contract for external
-// metrics and tracing. It deliberately does not construct exporters; that
-// runtime collection work is reserved for B8.
+// Package observability contains the configuration contract for external
+// metrics and tracing. Runtime exporters live in the platform layer so this
+// domain package remains independent of Prometheus and OTLP clients.
 package observability
 
 import (
@@ -58,7 +58,8 @@ func validateEndpoint(value, field string) error {
 	return nil
 }
 
-// CollectorCount intentionally remains zero until B8 wires actual exporters.
+// CollectorCount reports the configuration-level collector count. The running
+// platform collector exposes its own count after construction.
 func (c Config) CollectorCount() int { return 0 }
 
 func (c Config) SafeSummary() map[string]any {
