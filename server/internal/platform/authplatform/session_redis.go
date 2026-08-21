@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"example.com/gin-vben-admin/server/internal/domain/authdomain"
+	"example.com/gin-vben-admin/server/internal/domain/tenant"
 	rediscache "example.com/gin-vben-admin/server/internal/platform/cache/redis"
 )
 
@@ -21,6 +22,19 @@ func NewRedisSessionStore(cache *rediscache.Client) *RedisSessionStore {
 }
 func (s *RedisSessionStore) key(id string) (string, error) { return s.cache.Key("auth-session", id) }
 func (s *RedisSessionStore) Create(ctx context.Context, session authdomain.Session) error {
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return err
+	}
+	if session.TenantID == "" {
+		return tenant.ErrTenantRequired
+	}
+	if session.TenantID != scope.TenantID {
+		return tenant.ErrCrossTenant
+	}
+	if s == nil || s.cache == nil {
+		return authdomain.ErrDependencyUnavailable
+	}
 	key, err := s.key(session.ID)
 	if err != nil {
 		return err
@@ -32,6 +46,13 @@ func (s *RedisSessionStore) Create(ctx context.Context, session authdomain.Sessi
 	return s.cache.SetJSON(ctx, key, session, ttl)
 }
 func (s *RedisSessionStore) Get(ctx context.Context, id string) (authdomain.Session, error) {
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return authdomain.Session{}, err
+	}
+	if s == nil || s.cache == nil {
+		return authdomain.Session{}, authdomain.ErrDependencyUnavailable
+	}
 	key, err := s.key(id)
 	if err != nil {
 		return authdomain.Session{}, err
@@ -43,9 +64,15 @@ func (s *RedisSessionStore) Get(ctx context.Context, id string) (authdomain.Sess
 		}
 		return v, err
 	}
+	if v.TenantID == "" || v.TenantID != scope.TenantID {
+		return authdomain.Session{}, authdomain.ErrSessionNotFound
+	}
 	return v, nil
 }
 func (s *RedisSessionStore) Rotate(ctx context.Context, id, expectedJTI, nextJTI string, expiresAt time.Time) error {
+	if _, err := tenant.RequireContext(ctx); err != nil {
+		return err
+	}
 	lock, err := s.cache.AcquireLock(ctx, "auth-rotate-"+id, s.lockTTL)
 	if err != nil {
 		return err
@@ -66,6 +93,9 @@ func (s *RedisSessionStore) Rotate(ctx context.Context, id, expectedJTI, nextJTI
 	return s.Create(ctx, v)
 }
 func (s *RedisSessionStore) Revoke(ctx context.Context, id string) error {
+	if _, err := tenant.RequireContext(ctx); err != nil {
+		return err
+	}
 	lock, err := s.cache.AcquireLock(ctx, "auth-revoke-"+id, s.lockTTL)
 	if err != nil {
 		return err

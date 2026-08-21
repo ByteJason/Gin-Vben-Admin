@@ -11,6 +11,7 @@ import (
 	"example.com/gin-vben-admin/server/internal/domain/authdomain"
 	"example.com/gin-vben-admin/server/internal/domain/tenant"
 	"example.com/gin-vben-admin/server/internal/platform/authplatform"
+	rediscache "example.com/gin-vben-admin/server/internal/platform/cache/redis"
 	"example.com/gin-vben-admin/server/internal/platform/migration"
 	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
 )
@@ -27,6 +28,52 @@ func TestTenantIsolationAcrossDurableAuthSessions(t *testing.T) {
 		{driver: migration.DriverPostgres, dsn: requiredEnv(t, postgresDSNEnv)},
 	} {
 		t.Run(tc.driver, func(t *testing.T) { testAuthSessionTenantIsolation(t, tc.driver, tc.dsn) })
+	}
+}
+
+func TestTenantIsolationAcrossRedisAuthSessions(t *testing.T) {
+	if os.Getenv("DATA_PLATFORM_INTEGRATION") != "1" {
+		t.Skip("set DATA_PLATFORM_INTEGRATION=1 to run Redis auth session tenant isolation integration")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cache, err := rediscache.New(rediscache.Config{
+		Mode: rediscache.ModeSingle, Addr: requiredEnv(t, redisAddrEnv),
+		Namespace: fmt.Sprintf("app:v1:test-session-tenant-%d", time.Now().UnixNano()),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cache.Close() })
+	store := authplatform.NewRedisSessionStore(cache)
+	session := authdomain.Session{
+		ID: "redis-session-" + fmt.Sprint(time.Now().UnixNano()), TenantID: "tenant-a", UserID: "1",
+		RefreshJTI: "jti-a", ExpiresAt: time.Now().Add(time.Hour),
+	}
+	ctxA := tenant.WithContext(ctx, tenant.Context{TenantID: "tenant-a"})
+	ctxB := tenant.WithContext(ctx, tenant.Context{TenantID: "tenant-b"})
+	if err := store.Create(ctxA, session); err != nil {
+		t.Fatalf("create own tenant session: %v", err)
+	}
+	key, err := cache.Key("auth-session", session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cache.Delete(context.Background(), key) })
+	if _, err := store.Get(ctxB, session.ID); !errors.Is(err, authdomain.ErrSessionNotFound) {
+		t.Fatalf("cross-tenant Get error=%v, want session not found", err)
+	}
+	if _, err := store.Get(ctxA, session.ID); err != nil {
+		t.Fatalf("own-tenant Get error=%v", err)
+	}
+	if err := store.Rotate(ctxB, session.ID, "jti-a", "jti-b", time.Now().Add(time.Hour)); !errors.Is(err, authdomain.ErrSessionNotFound) {
+		t.Fatalf("cross-tenant Rotate error=%v, want session not found", err)
+	}
+	if err := store.Revoke(ctxB, session.ID); !errors.Is(err, authdomain.ErrSessionNotFound) {
+		t.Fatalf("cross-tenant Revoke error=%v, want session not found", err)
+	}
+	if err := store.Revoke(ctxA, session.ID); err != nil {
+		t.Fatalf("own-tenant Revoke error=%v", err)
 	}
 }
 
