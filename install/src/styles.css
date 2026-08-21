@@ -570,6 +570,37 @@ h1 {
   color: var(--danger);
 }
 
+.confirm-field {
+  grid-column: 1 / -1;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.confirm-field input {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  accent-color: var(--accent);
+}
+
+.apply-steps {
+  margin: 10px 0 0;
+  padding-left: 20px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.7;
+}
+
+.connection-result[data-tone="pending"] {
+  color: var(--muted);
+}
+
 .secondary-button {
   min-height: 44px;
   margin-top: 24px;
@@ -661,6 +692,10 @@ footer {
   }
 
   .primary-button {
+    grid-column: auto;
+  }
+
+  .confirm-field {
     grid-column: auto;
   }
 

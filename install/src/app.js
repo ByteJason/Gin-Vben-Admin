@@ -3,6 +3,7 @@ const capabilitiesEndpoint = '/api/system/install/v1/capabilities';
 const planEndpoint = '/api/system/install/v1/plan';
 const databaseCheckEndpoint = '/api/system/install/v1/check/database';
 const redisCheckEndpoint = '/api/system/install/v1/check/redis';
+const applyEndpoint = '/api/system/install/v1/apply';
 
 const title = document.querySelector('#status-title');
 const badge = document.querySelector('#status-badge');
@@ -34,6 +35,14 @@ const databaseResult = document.querySelector('#database-result');
 const redisForm = document.querySelector('#redis-form');
 const redisAddress = document.querySelector('#redis-address');
 const redisResult = document.querySelector('#redis-result');
+const adminForm = document.querySelector('#admin-form');
+const adminUsername = document.querySelector('#admin-username');
+const adminPassword = document.querySelector('#admin-password');
+const adminPasswordConfirm = document.querySelector('#admin-password-confirm');
+const confirmCleanup = document.querySelector('#confirm-cleanup');
+const applyButton = document.querySelector('#apply-button');
+const applyResult = document.querySelector('#apply-result');
+const applySteps = document.querySelector('#apply-steps');
 
 const uiLabels = { antd: 'Ant Design Vue', ele: 'Element Plus', naive: 'Naive UI' };
 const modeLabels = {
@@ -42,6 +51,10 @@ const modeLabels = {
   api_only: '仅 API',
   dev: '开发调试',
 };
+
+let currentPlan = null;
+let databaseCheckPassed = false;
+let redisCheckPassed = false;
 
 async function loadStatus() {
   setPending();
@@ -104,6 +117,9 @@ function renderStatus(status) {
     selectedMode.textContent = modeLabels[status.mode] || status.mode || '—';
     selectionPanel.hidden = true;
     connectionPanel.hidden = true;
+    currentPlan = null;
+    databaseCheckPassed = false;
+    redisCheckPassed = false;
     return;
   }
 
@@ -115,6 +131,10 @@ function renderStatus(status) {
   selectedMode.textContent = '尚未选择';
   selectionPanel.hidden = false;
   connectionPanel.hidden = true;
+  currentPlan = null;
+  databaseCheckPassed = false;
+  redisCheckPassed = false;
+  updateApplyButton();
 }
 
 function renderError() {
@@ -155,6 +175,10 @@ function createCapabilityMessage(value) {
 
 async function requestPlan(event) {
   event.preventDefault();
+  currentPlan = null;
+  databaseCheckPassed = false;
+  redisCheckPassed = false;
+  updateApplyButton();
   planButton.disabled = true;
   planButton.textContent = '正在检查';
   planMessage.textContent = '正在验证目录的读取、写入、创建、重命名与删除能力。';
@@ -184,6 +208,9 @@ async function requestPlan(event) {
 }
 
 function renderPlan(plan) {
+  currentPlan = plan;
+  databaseCheckPassed = false;
+  redisCheckPassed = false;
   planCleanup.textContent = yesNo(plan.canCleanup);
   planBuild.textContent = yesNo(plan.canBuild);
   planEnv.textContent = yesNo(plan.canWriteEnv);
@@ -209,6 +236,7 @@ function renderPlan(plan) {
   planMessage.dataset.tone = ready ? 'success' : 'error';
   planPanel.hidden = false;
   connectionPanel.hidden = !ready;
+  updateApplyButton();
 }
 
 function yesNo(value) {
@@ -247,17 +275,130 @@ async function requestDependencyCheck(event, endpoint, resultElement) {
       throw new Error('dependency check failed');
     }
     const result = envelope.data;
+    if (endpoint === databaseCheckEndpoint) databaseCheckPassed = Boolean(result.ok);
+    if (endpoint === redisCheckEndpoint) redisCheckPassed = Boolean(result.ok);
     resultElement.textContent = result.ok
       ? `连接成功，耗时 ${Number(result.latencyMs || 0)} ms。`
       : '连接未成功，请检查地址和账号后重试。';
     resultElement.dataset.tone = result.ok ? 'success' : 'error';
   } catch {
+    if (endpoint === databaseCheckEndpoint) databaseCheckPassed = false;
+    if (endpoint === redisCheckEndpoint) redisCheckPassed = false;
     resultElement.textContent = '连接测试未完成，请检查服务状态和输入。';
     resultElement.dataset.tone = 'error';
   } finally {
     submit.disabled = false;
     submit.textContent = endpoint === databaseCheckEndpoint ? '测试数据库连接' : '测试 Redis 连接';
-    clearSensitiveFields(form);
+    updateApplyButton();
+  }
+}
+
+function updateApplyButton() {
+  applyButton.disabled = !currentPlan || !currentPlan.canBuild || !currentPlan.canWriteEnv || !currentPlan.canCleanup || !databaseCheckPassed || !redisCheckPassed || !confirmCleanup.checked;
+}
+
+function invalidatePlanIfSelectionChanged() {
+  if (currentPlan && (currentPlan.selectedUi !== uiChoice.value || currentPlan.mode !== modeChoice.value)) {
+    currentPlan = null;
+    databaseCheckPassed = false;
+    redisCheckPassed = false;
+    planPanel.hidden = true;
+    connectionPanel.hidden = true;
+    planMessage.textContent = '选择已变更，请重新检查目录权限。';
+    planMessage.dataset.tone = 'pending';
+  }
+  updateApplyButton();
+}
+
+function dependencyFormValues() {
+  const database = Object.fromEntries(new FormData(databaseForm).entries());
+  database.port = Number(database.port);
+  if (!database.dsn) delete database.dsn;
+  database.mode = database.mode || 'single';
+
+  const redis = Object.fromEntries(new FormData(redisForm).entries());
+  redis.mode = 'single';
+  redis.db = Number(redis.db || 0);
+  redis.addr = redisAddress.value.trim();
+  return { database, redis };
+}
+
+function renderApplyResult(result) {
+  applyResult.textContent = '安装已完成。请按提示重启服务后进入管理端。';
+  applyResult.dataset.tone = 'success';
+  applySteps.replaceChildren();
+  for (const step of Array.isArray(result.steps) ? result.steps : []) {
+    const item = document.createElement('li');
+    item.textContent = `${step.id || 'step'}：${step.status || 'completed'}`;
+    applySteps.append(item);
+  }
+}
+
+function applyErrorMessage(status) {
+  if (status === 409) return '安装已完成或已有安装事务正在执行。';
+  if (status === 422) return '安装前置检查未通过，请返回检查目录和依赖。';
+  if (status === 503) return '安装服务暂不可用，请确认服务端处于源码安装模式。';
+  return '安装未完成，服务端已保留可回滚状态，请检查后重试。';
+}
+
+async function requestInstallation(event) {
+  event.preventDefault();
+  if (!currentPlan || !databaseCheckPassed || !redisCheckPassed) {
+    applyResult.textContent = '请先完成目录、数据库和 Redis 检查。';
+    applyResult.dataset.tone = 'error';
+    return;
+  }
+  if (adminPassword.value !== adminPasswordConfirm.value) {
+    applyResult.textContent = '两次输入的管理员密码不一致。';
+    applyResult.dataset.tone = 'error';
+    adminPasswordConfirm.focus();
+    return;
+  }
+
+  applyButton.disabled = true;
+  applyButton.textContent = '安装中';
+  applyResult.textContent = '服务端正在按顺序执行迁移、管理员初始化、配置写入和安装锁定。';
+  applyResult.dataset.tone = 'pending';
+  try {
+    const dependencies = dependencyFormValues();
+    const response = await fetch(applyEndpoint, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        selectedUi: uiChoice.value,
+        mode: modeChoice.value,
+        database: dependencies.database,
+        redis: dependencies.redis,
+        admin: { username: adminUsername.value.trim(), password: adminPassword.value },
+        confirmCleanup: confirmCleanup.checked,
+      }),
+    });
+    const envelope = await response.json();
+    if (!response.ok || envelope.code !== 0 || !envelope.data) {
+      applyResult.textContent = applyErrorMessage(response.status);
+      applyResult.dataset.tone = 'error';
+      return;
+    }
+    renderApplyResult(envelope.data);
+    renderStatus({
+      installed: true,
+      installerVersion: 'current',
+      selectedUi: envelope.data.selectedUi,
+      mode: envelope.data.mode,
+    });
+  } catch {
+    applyResult.textContent = '安装请求未完成，请确认服务仍在运行后重试。';
+    applyResult.dataset.tone = 'error';
+  } finally {
+    clearSensitiveFields(databaseForm);
+    clearSensitiveFields(redisForm);
+    clearSensitiveFields(adminForm);
+    if (!currentPlan || !currentPlan.installed) {
+      applyButton.disabled = false;
+      applyButton.textContent = '开始安装';
+      updateApplyButton();
+    }
   }
 }
 
@@ -273,6 +414,12 @@ retryButton.addEventListener('click', loadAll);
 planForm.addEventListener('submit', requestPlan);
 databaseForm.addEventListener('submit', (event) => requestDependencyCheck(event, databaseCheckEndpoint, databaseResult));
 redisForm.addEventListener('submit', (event) => requestDependencyCheck(event, redisCheckEndpoint, redisResult));
+adminForm.addEventListener('submit', requestInstallation);
+databaseForm.addEventListener('input', () => { databaseCheckPassed = false; updateApplyButton(); });
+redisForm.addEventListener('input', () => { redisCheckPassed = false; updateApplyButton(); });
+uiChoice.addEventListener('change', invalidatePlanIfSelectionChanged);
+modeChoice.addEventListener('change', invalidatePlanIfSelectionChanged);
+confirmCleanup.addEventListener('change', updateApplyButton);
 databaseDriver.addEventListener('change', () => {
   databasePort.value = databaseDriver.value === 'postgres' ? '5432' : '3306';
 });

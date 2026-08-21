@@ -26,6 +26,13 @@ test('installation shell is independent and exposes an accessible status region'
   assert.match(html, /value="mysql"/);
   assert.match(html, /value="postgres"/);
   assert.match(html, /id="redis-form"/);
+  assert.match(html, /id="admin-form"/);
+  assert.match(html, /id="admin-username"/);
+  assert.match(html, /id="admin-password"/);
+  assert.match(html, /id="admin-password-confirm"/);
+  assert.match(html, /id="confirm-cleanup"/);
+  assert.match(html, /id="apply-button"/);
+  assert.match(html, /id="apply-result"/);
   assert.match(html, /autocomplete="new-password"/);
   assert.match(html, /aria-current="step"/);
   assert.match(html, /href="\/install\/styles\.css"/);
@@ -35,6 +42,12 @@ test('installation shell is independent and exposes an accessible status region'
   assert.match(script, /\/api\/system\/install\/v1\/plan/);
   assert.match(script, /\/api\/system\/install\/v1\/check\/database/);
   assert.match(script, /\/api\/system\/install\/v1\/check\/redis/);
+  assert.match(script, /\/api\/system\/install\/v1\/apply/);
+  assert.match(script, /confirmCleanup/);
+  assert.match(script, /requestInstallation/);
+  assert.match(script, /applyButton\.disabled\s*=\s*.*confirmCleanup\.checked/);
+  assert.match(script, /uiChoice\.addEventListener\('change'/);
+  assert.match(script, /modeChoice\.addEventListener\('change'/);
   assert.match(script, /method:\s*'POST'/);
   assert.match(script, /selectedUi/);
   assert.match(script, /canCleanup/);

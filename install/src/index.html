@@ -182,6 +182,29 @@
               <button class="primary-button" type="submit">测试 Redis 连接</button>
               <div id="redis-result" class="connection-result" role="status" aria-live="polite"></div>
             </form>
+
+            <form id="admin-form" class="connection-form">
+              <h4>初始管理员</h4>
+              <div class="form-field">
+                <label for="admin-username">账号</label>
+                <input id="admin-username" name="username" minlength="3" maxlength="64" autocomplete="username" required />
+              </div>
+              <div class="form-field">
+                <label for="admin-password">密码（至少 12 个字符）</label>
+                <input id="admin-password" name="password" type="password" minlength="12" maxlength="128" autocomplete="new-password" required />
+              </div>
+              <div class="form-field">
+                <label for="admin-password-confirm">确认密码</label>
+                <input id="admin-password-confirm" type="password" minlength="12" maxlength="128" autocomplete="new-password" required />
+              </div>
+              <label class="confirm-field" for="confirm-cleanup">
+                <input id="confirm-cleanup" type="checkbox" required />
+                <span>我已查看预检清单，并确认按所选方式执行安装与模板整理。</span>
+              </label>
+              <button id="apply-button" class="primary-button" type="submit" disabled>开始安装</button>
+              <div id="apply-result" class="connection-result" role="status" aria-live="polite"></div>
+              <ol id="apply-steps" class="apply-steps" aria-live="polite"></ol>
+            </form>
           </section>
 
           <button id="retry-button" class="secondary-button" type="button" hidden>
