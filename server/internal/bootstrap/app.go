@@ -277,6 +277,14 @@ func (a *App) Observability() *observabilityplatform.Manager {
 	return a.observability
 }
 
+// ReloadPersistedObservability applies the database-backed observability
+// settings for the configured default tenant. Run invokes the same seam after
+// dependency reachability is confirmed; the exported method is also useful to
+// controlled restart/operations coordinators and integration tests.
+func (a *App) ReloadPersistedObservability(ctx context.Context) error {
+	return a.reloadPersistedObservability(ctx)
+}
+
 // Installation returns the credential-free installation status service.
 func (a *App) Installation() *installer.StatusService {
 	if a == nil {
