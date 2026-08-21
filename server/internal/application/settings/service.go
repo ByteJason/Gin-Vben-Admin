@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -128,6 +129,33 @@ func NewService(repo Repository, audit AuditSink, cache CacheInvalidator, defini
 
 func (s *Service) SetAuthorizer(authorizer Authorizer) { s.authorizer = authorizer }
 
+// Definitions returns a stable, read-only schema view for administration UIs.
+// Secret defaults are never exposed by this method; callers only receive the
+// type and policy metadata needed to render a form.
+func (s *Service) Definitions(ctx context.Context, actor Actor) ([]Definition, error) {
+	if err := s.authorize(ctx, actor, "*", "read"); err != nil {
+		return nil, err
+	}
+	if s == nil {
+		return nil, ErrSettingNotFound
+	}
+	keys := make([]string, 0, len(s.definitions))
+	for key := range s.definitions {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	items := make([]Definition, 0, len(keys))
+	for _, key := range keys {
+		definition := s.definitions[key]
+		if definition.Sensitive {
+			definition.Default = maskedValue
+		}
+		definition.Allowed = append([]string(nil), definition.Allowed...)
+		items = append(items, definition)
+	}
+	return items, nil
+}
+
 func (s *Service) Get(ctx context.Context, actor Actor, key string) (Setting, error) {
 	if err := s.authorize(ctx, actor, key, "read"); err != nil {
 		return Setting{}, err
@@ -144,6 +172,30 @@ func (s *Service) Get(ctx context.Context, actor Actor, key string) (Setting, er
 		return Setting{}, err
 	}
 	return s.present(record, definition), nil
+}
+
+// History returns redacted versions in storage order so an operator can
+// inspect a diff source before choosing an explicit rollback target.
+func (s *Service) History(ctx context.Context, actor Actor, key string) ([]Setting, error) {
+	if err := s.authorize(ctx, actor, key, "read"); err != nil {
+		return nil, err
+	}
+	definition, ok := s.definitions[key]
+	if !ok {
+		return nil, ErrSettingNotFound
+	}
+	if s.repo == nil {
+		return nil, errors.New("settings repository unavailable")
+	}
+	records, err := s.repo.History(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]Setting, 0, len(records))
+	for _, record := range records {
+		items = append(items, s.present(record, definition))
+	}
+	return items, nil
 }
 
 func (s *Service) Update(ctx context.Context, actor Actor, input UpdateInput) (Setting, error) {
