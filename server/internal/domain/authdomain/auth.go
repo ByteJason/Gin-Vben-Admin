@@ -60,6 +60,7 @@ type User struct {
 
 type Session struct {
 	ID             string
+	TenantID       string
 	UserID         string
 	RefreshJTI     string
 	RefreshJTIHash string

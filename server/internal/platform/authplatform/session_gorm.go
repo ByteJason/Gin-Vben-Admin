@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"example.com/gin-vben-admin/server/internal/domain/authdomain"
+	"example.com/gin-vben-admin/server/internal/domain/tenant"
 	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -29,6 +30,7 @@ func NewGORMSessionStore(db *gormdb.Store) *GORMSessionStore {
 
 type authSessionRecord struct {
 	ID               string     `gorm:"column:id;primaryKey"`
+	TenantID         string     `gorm:"column:tenant_id"`
 	UserID           uint64     `gorm:"column:user_id"`
 	RefreshTokenHash string     `gorm:"column:refresh_token_hash"`
 	FamilyID         string     `gorm:"column:family_id"`
@@ -49,6 +51,16 @@ func (s *GORMSessionStore) Create(ctx context.Context, session authdomain.Sessio
 	if err := sessionContext(ctx); err != nil {
 		return err
 	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(session.TenantID) == "" {
+		return tenant.ErrTenantRequired
+	}
+	if session.TenantID != scope.TenantID {
+		return tenant.ErrCrossTenant
+	}
 	if s == nil || s.db == nil {
 		return authdomain.ErrDependencyUnavailable
 	}
@@ -61,6 +73,7 @@ func (s *GORMSessionStore) Create(ctx context.Context, session authdomain.Sessio
 	}
 	record := authSessionRecord{
 		ID:               session.ID,
+		TenantID:         scope.TenantID,
 		UserID:           userID,
 		RefreshTokenHash: authdomain.HashRefreshJTI(session.RefreshJTI),
 		FamilyID:         session.ID,
@@ -88,6 +101,10 @@ func (s *GORMSessionStore) ListByUser(ctx context.Context, userID string) ([]aut
 	if err := sessionContext(ctx); err != nil {
 		return nil, err
 	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return nil, err
+	}
 	if s == nil || s.db == nil {
 		return nil, authdomain.ErrDependencyUnavailable
 	}
@@ -96,7 +113,7 @@ func (s *GORMSessionStore) ListByUser(ctx context.Context, userID string) ([]aut
 		return nil, authdomain.ErrDependencyUnavailable
 	}
 	var records []authSessionRecord
-	if err := s.db.Write(ctx).Where("user_id = ?", parsedID).Order("created_at DESC").Find(&records).Error; err != nil {
+	if err := s.db.Write(ctx).Where("tenant_id = ? AND user_id = ?", scope.TenantID, parsedID).Order("created_at DESC").Find(&records).Error; err != nil {
 		return nil, authdomain.ErrDependencyUnavailable
 	}
 	result := make([]authdomain.Session, 0, len(records))
@@ -115,6 +132,10 @@ func (s *GORMSessionStore) RevokeOwned(ctx context.Context, userID, sessionID st
 	if err := sessionContext(ctx); err != nil {
 		return err
 	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return err
+	}
 	if s == nil || s.db == nil {
 		return authdomain.ErrDependencyUnavailable
 	}
@@ -124,7 +145,7 @@ func (s *GORMSessionStore) RevokeOwned(ctx context.Context, userID, sessionID st
 	}
 	return s.db.WithinTransaction(ctx, func(tx *gorm.DB) error {
 		var record authSessionRecord
-		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND user_id = ?", sessionID, parsedID).Take(&record).Error
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("tenant_id = ? AND id = ? AND user_id = ?", scope.TenantID, sessionID, parsedID).Take(&record).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return authdomain.ErrSessionNotFound
 		}
@@ -135,7 +156,7 @@ func (s *GORMSessionStore) RevokeOwned(ctx context.Context, userID, sessionID st
 			return authdomain.ErrSessionRevoked
 		}
 		now := time.Now().UTC()
-		if err := tx.Model(&authSessionRecord{}).Where("id = ? AND user_id = ?", sessionID, parsedID).Updates(map[string]any{
+		if err := tx.Model(&authSessionRecord{}).Where("tenant_id = ? AND id = ? AND user_id = ?", scope.TenantID, sessionID, parsedID).Updates(map[string]any{
 			"status":       "revoked",
 			"revoked_at":   now,
 			"last_seen_at": now,
@@ -150,6 +171,10 @@ func (s *GORMSessionStore) Get(ctx context.Context, id string) (authdomain.Sessi
 	if err := sessionContext(ctx); err != nil {
 		return authdomain.Session{}, err
 	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return authdomain.Session{}, err
+	}
 	if s == nil || s.db == nil {
 		return authdomain.Session{}, authdomain.ErrDependencyUnavailable
 	}
@@ -157,7 +182,7 @@ func (s *GORMSessionStore) Get(ctx context.Context, id string) (authdomain.Sessi
 		return authdomain.Session{}, authdomain.ErrSessionNotFound
 	}
 	var record authSessionRecord
-	err := s.db.Write(ctx).Where("id = ?", id).Take(&record).Error
+	err = s.db.Write(ctx).Where("tenant_id = ? AND id = ?", scope.TenantID, id).Take(&record).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return authdomain.Session{}, authdomain.ErrSessionNotFound
 	}
@@ -171,15 +196,19 @@ func (s *GORMSessionStore) Rotate(ctx context.Context, id, expectedJTI, nextJTI 
 	if err := sessionContext(ctx); err != nil {
 		return err
 	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return err
+	}
 	if s == nil || s.db == nil {
 		return authdomain.ErrDependencyUnavailable
 	}
 	if strings.TrimSpace(id) == "" || strings.TrimSpace(expectedJTI) == "" || strings.TrimSpace(nextJTI) == "" || !expiresAt.After(time.Now()) {
 		return authdomain.ErrInvalidToken
 	}
-	err := s.db.WithinTransaction(ctx, func(tx *gorm.DB) error {
+	err = s.db.WithinTransaction(ctx, func(tx *gorm.DB) error {
 		var record authSessionRecord
-		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).Take(&record).Error
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("tenant_id = ? AND id = ?", scope.TenantID, id).Take(&record).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return authdomain.ErrSessionNotFound
 		}
@@ -197,7 +226,7 @@ func (s *GORMSessionStore) Rotate(ctx context.Context, id, expectedJTI, nextJTI 
 			"expires_at":         expiresAt,
 			"last_seen_at":       time.Now().UTC(),
 		}
-		if err := tx.Model(&authSessionRecord{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+		if err := tx.Model(&authSessionRecord{}).Where("tenant_id = ? AND id = ?", scope.TenantID, id).Updates(updates).Error; err != nil {
 			return authdomain.ErrDependencyUnavailable
 		}
 		return nil
@@ -212,12 +241,16 @@ func (s *GORMSessionStore) Revoke(ctx context.Context, id string) error {
 	if err := sessionContext(ctx); err != nil {
 		return err
 	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return err
+	}
 	if s == nil || s.db == nil {
 		return authdomain.ErrDependencyUnavailable
 	}
 	return s.db.WithinTransaction(ctx, func(tx *gorm.DB) error {
 		var record authSessionRecord
-		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).Take(&record).Error
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("tenant_id = ? AND id = ?", scope.TenantID, id).Take(&record).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return authdomain.ErrSessionNotFound
 		}
@@ -228,7 +261,7 @@ func (s *GORMSessionStore) Revoke(ctx context.Context, id string) error {
 			return authdomain.ErrSessionRevoked
 		}
 		now := time.Now().UTC()
-		if err := tx.Model(&authSessionRecord{}).Where("id = ?", id).Updates(map[string]any{
+		if err := tx.Model(&authSessionRecord{}).Where("tenant_id = ? AND id = ?", scope.TenantID, id).Updates(map[string]any{
 			"status":       "revoked",
 			"revoked_at":   now,
 			"last_seen_at": now,
@@ -243,8 +276,12 @@ func (r authSessionRecord) toDomain() (authdomain.Session, error) {
 	if r.UserID == 0 || strings.TrimSpace(r.ID) == "" {
 		return authdomain.Session{}, authdomain.ErrDependencyUnavailable
 	}
+	if strings.TrimSpace(r.TenantID) == "" {
+		return authdomain.Session{}, tenant.ErrTenantRequired
+	}
 	return authdomain.Session{
 		ID:             r.ID,
+		TenantID:       r.TenantID,
 		UserID:         strconv.FormatUint(r.UserID, 10),
 		RefreshJTIHash: r.RefreshTokenHash,
 		DeviceID:       r.DeviceID,

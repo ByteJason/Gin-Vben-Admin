@@ -7,6 +7,7 @@ import (
 
 	"example.com/gin-vben-admin/server/internal/application/auth"
 	"example.com/gin-vben-admin/server/internal/domain/authdomain"
+	"example.com/gin-vben-admin/server/internal/domain/tenant"
 	"example.com/gin-vben-admin/server/internal/platform/authplatform"
 )
 
@@ -18,8 +19,10 @@ func (j *metadataJournal) Create(_ context.Context, session authdomain.Session) 
 	j.session = session
 	return nil
 }
-func (j *metadataJournal) Rotate(context.Context, string, string, string, time.Time) error { return nil }
-func (j *metadataJournal) Revoke(context.Context, string) error                             { return nil }
+func (j *metadataJournal) Rotate(context.Context, string, string, string, time.Time) error {
+	return nil
+}
+func (j *metadataJournal) Revoke(context.Context, string) error { return nil }
 
 func TestLoginCopiesRequestMetadataToSessionAndAudit(t *testing.T) {
 	hasher := authplatform.BcryptHasher{Cost: 4}
@@ -32,14 +35,14 @@ func TestLoginCopiesRequestMetadataToSessionAndAudit(t *testing.T) {
 	svc := auth.NewService(userRepo{user: authdomain.User{ID: "u1", Identifier: "alice", PasswordHash: hash, Active: true}}, hasher, authplatform.NewJWTService([]byte("test-secret"), time.Minute, time.Hour), authplatform.NewMemorySessionStore())
 	svc.SetSessionJournal(journal)
 	svc.SetAuditSink(sink)
-	ctx := auth.WithRequestMetadata(context.Background(), auth.RequestMetadata{
+	ctx := auth.WithRequestMetadata(tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a"}), auth.RequestMetadata{
 		RequestID: "req-1", DeviceID: "device-1", DeviceName: "Safari", IPAddress: "127.0.0.1", UserAgent: "UA",
 	})
 
 	if _, err := svc.Login(ctx, "alice", "correct-password"); err != nil {
 		t.Fatal(err)
 	}
-	if journal.session.DeviceID != "device-1" || journal.session.DeviceName != "Safari" || journal.session.IPAddress != "127.0.0.1" || journal.session.UserAgent != "UA" {
+	if journal.session.TenantID != "tenant-a" || journal.session.DeviceID != "device-1" || journal.session.DeviceName != "Safari" || journal.session.IPAddress != "127.0.0.1" || journal.session.UserAgent != "UA" {
 		t.Fatalf("session metadata = %+v", journal.session)
 	}
 	if len(sink.events) != 1 || sink.events[0].RequestID != "req-1" || sink.events[0].IPAddress != "127.0.0.1" || sink.events[0].UserAgent != "UA" {

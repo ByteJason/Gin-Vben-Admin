@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"example.com/gin-vben-admin/server/internal/domain/authdomain"
+	"example.com/gin-vben-admin/server/internal/domain/tenant"
 )
 
 type Service struct {
@@ -133,8 +134,12 @@ func (s *Service) Login(ctx context.Context, identifier, password string) (authd
 		return authdomain.TokenPair{}, authdomain.ErrInvalidToken
 	}
 	metadata := RequestMetadataFromContext(ctx)
+	tenantID := ""
+	if scope, ok := tenant.FromContext(ctx); ok {
+		tenantID = scope.TenantID
+	}
 	session := authdomain.Session{
-		ID: sessionID, UserID: user.ID, RefreshJTI: claims.TokenID, ExpiresAt: claims.ExpiresAt,
+		ID: sessionID, TenantID: tenantID, UserID: user.ID, RefreshJTI: claims.TokenID, ExpiresAt: claims.ExpiresAt,
 		DeviceID: metadata.DeviceID, DeviceName: metadata.DeviceName, IPAddress: metadata.IPAddress,
 		UserAgent: metadata.UserAgent, CreatedAt: time.Now().UTC(), LastSeenAt: time.Now().UTC(),
 	}
