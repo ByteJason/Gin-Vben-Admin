@@ -21,6 +21,40 @@ func TestDefaultIsUsable(t *testing.T) {
 	if cfg.Server.ReadTimeout <= 0 || cfg.Server.WriteTimeout <= 0 || cfg.Server.IdleTimeout <= 0 || cfg.Server.ShutdownTimeout <= 0 {
 		t.Fatalf("default server timeouts must all be positive: %#v", cfg.Server)
 	}
+	if !cfg.Tenant.Enabled || cfg.Tenant.Mode != "single" || cfg.Tenant.DefaultID != "default" {
+		t.Fatalf("unexpected tenant defaults: %#v", cfg.Tenant)
+	}
+}
+
+func TestTenantConfigurationLoadsAndValidates(t *testing.T) {
+	path := writeConfigFile(t, `
+tenant:
+  enabled: true
+  mode: multi
+  default_id: platform
+  tenant_header: X-Workspace-ID
+  organization_header: X-Department-ID
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Tenant.Mode != "multi" || cfg.Tenant.DefaultID != "platform" || cfg.Tenant.TenantHeader != "X-Workspace-ID" || cfg.Tenant.OrganizationHeader != "X-Department-ID" {
+		t.Fatalf("tenant config = %#v", cfg.Tenant)
+	}
+	for name, edit := range map[string]func(*Config){
+		"unknown mode":          func(c *Config) { c.Tenant.Mode = "shared" },
+		"missing default id":    func(c *Config) { c.Tenant.DefaultID = "" },
+		"invalid tenant header": func(c *Config) { c.Tenant.TenantHeader = "X-\n-ID" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate := Default()
+			edit(&candidate)
+			if err := candidate.Validate(); err == nil {
+				t.Fatal("Validate() error = nil, want error")
+			}
+		})
+	}
 }
 
 func TestObservabilityConfigurationIsDisabledAndRedactedByDefault(t *testing.T) {

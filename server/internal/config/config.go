@@ -24,6 +24,7 @@ type Config struct {
 	Redis         RedisConfig          `mapstructure:"redis" yaml:"redis"`
 	Auth          AuthConfig           `mapstructure:"auth" yaml:"auth"`
 	Install       InstallConfig        `mapstructure:"install" yaml:"install"`
+	Tenant        TenantConfig         `mapstructure:"tenant" yaml:"tenant"`
 	Observability observability.Config `mapstructure:"observability" yaml:"observability"`
 }
 
@@ -93,6 +94,18 @@ type InstallConfig struct {
 	StateDir string `mapstructure:"state_dir" yaml:"state_dir"`
 }
 
+// TenantConfig controls the request tenant boundary. Multi-tenant mode still
+// requires an explicit tenant header; DefaultID is reserved for bootstrap and
+// single-tenant operation. Platform-admin resolution remains an authenticated
+// application concern and is never configured from a request header.
+type TenantConfig struct {
+	Enabled            bool   `mapstructure:"enabled" yaml:"enabled"`
+	Mode               string `mapstructure:"mode" yaml:"mode"`
+	DefaultID          string `mapstructure:"default_id" yaml:"default_id"`
+	TenantHeader       string `mapstructure:"tenant_header" yaml:"tenant_header"`
+	OrganizationHeader string `mapstructure:"organization_header" yaml:"organization_header"`
+}
+
 func (cfg InstallConfig) MarkerPath() string {
 	return filepath.Join(cfg.StateDir, ".installed")
 }
@@ -106,6 +119,7 @@ type Summary struct {
 	Redis         RedisSummary         `json:"redis"`
 	Auth          AuthSummary          `json:"auth"`
 	Install       InstallSummary       `json:"install"`
+	Tenant        TenantSummary        `json:"tenant"`
 	Observability observability.Config `json:"observability"`
 }
 
@@ -158,6 +172,14 @@ type InstallSummary struct {
 	StateDirectoryAbsolute bool `json:"state_directory_absolute"`
 }
 
+type TenantSummary struct {
+	Enabled            bool   `json:"enabled"`
+	Mode               string `json:"mode"`
+	DefaultID          string `json:"default_id"`
+	TenantHeader       string `json:"tenant_header"`
+	OrganizationHeader string `json:"organization_header"`
+}
+
 // Default returns a complete configuration that starts the HTTP server without
 // external infrastructure services.
 func Default() Config {
@@ -201,7 +223,14 @@ func Default() Config {
 			LockoutDuration:      15 * time.Minute,
 			RegistrationEnabled:  false,
 		},
-		Install:       InstallConfig{StateDir: filepath.FromSlash("../install")},
+		Install: InstallConfig{StateDir: filepath.FromSlash("../install")},
+		Tenant: TenantConfig{
+			Enabled:            true,
+			Mode:               "single",
+			DefaultID:          "default",
+			TenantHeader:       "X-Tenant-ID",
+			OrganizationHeader: "X-Org-ID",
+		},
 		Observability: observability.DefaultConfig(),
 	}
 }
@@ -264,6 +293,9 @@ func (cfg Config) Validate() error {
 	if err := cfg.Install.validate(); err != nil {
 		return fmt.Errorf("install: %w", err)
 	}
+	if err := cfg.Tenant.validate(); err != nil {
+		return fmt.Errorf("tenant: %w", err)
+	}
 	if err := cfg.Observability.Validate(); err != nil {
 		return fmt.Errorf("observability: %w", err)
 	}
@@ -281,6 +313,40 @@ func (cfg InstallConfig) validate() error {
 	}
 	if clean == root {
 		return errors.New("state_dir must not be a filesystem root")
+	}
+	return nil
+}
+
+func (cfg TenantConfig) validate() error {
+	if !cfg.Enabled {
+		return nil
+	}
+	if cfg.Mode != "single" && cfg.Mode != "multi" {
+		return fmt.Errorf("mode must be single or multi, got %q", cfg.Mode)
+	}
+	if err := validateTenantValue(cfg.DefaultID, "default_id"); err != nil {
+		return err
+	}
+	if err := validateTenantHeader(cfg.TenantHeader, "tenant_header"); err != nil {
+		return err
+	}
+	return validateTenantHeader(cfg.OrganizationHeader, "organization_header")
+}
+
+func validateTenantValue(value, field string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fmt.Errorf("%s is required", field)
+	}
+	if len(value) > 128 || strings.ContainsAny(value, "\r\n\t") {
+		return fmt.Errorf("%s is invalid", field)
+	}
+	return nil
+}
+
+func validateTenantHeader(value, field string) error {
+	if strings.TrimSpace(value) == "" || strings.TrimSpace(value) != value || strings.ContainsAny(value, "\r\n\t :") {
+		return fmt.Errorf("%s is invalid", field)
 	}
 	return nil
 }
@@ -447,6 +513,13 @@ func (cfg Config) SafeSummary() Summary {
 			RegistrationEnabled:  cfg.Auth.RegistrationEnabled,
 		},
 		Install: InstallSummary{StateDirectoryAbsolute: filepath.IsAbs(cfg.Install.StateDir)},
+		Tenant: TenantSummary{
+			Enabled:            cfg.Tenant.Enabled,
+			Mode:               cfg.Tenant.Mode,
+			DefaultID:          cfg.Tenant.DefaultID,
+			TenantHeader:       cfg.Tenant.TenantHeader,
+			OrganizationHeader: cfg.Tenant.OrganizationHeader,
+		},
 		Observability: func() observability.Config {
 			redacted := cfg.Observability
 			redacted.OTLPAPIKey = ""
@@ -508,6 +581,11 @@ func newViper() *viper.Viper {
 	v.SetDefault("auth.lockout_duration", cfg.Auth.LockoutDuration)
 	v.SetDefault("auth.registration_enabled", cfg.Auth.RegistrationEnabled)
 	v.SetDefault("install.state_dir", cfg.Install.StateDir)
+	v.SetDefault("tenant.enabled", cfg.Tenant.Enabled)
+	v.SetDefault("tenant.mode", cfg.Tenant.Mode)
+	v.SetDefault("tenant.default_id", cfg.Tenant.DefaultID)
+	v.SetDefault("tenant.tenant_header", cfg.Tenant.TenantHeader)
+	v.SetDefault("tenant.organization_header", cfg.Tenant.OrganizationHeader)
 	v.SetDefault("observability.metrics_enabled", cfg.Observability.MetricsEnabled)
 	v.SetDefault("observability.metrics_endpoint", cfg.Observability.MetricsEndpoint)
 	v.SetDefault("observability.tracing_enabled", cfg.Observability.TracingEnabled)
@@ -570,6 +648,11 @@ var environmentBindings = map[string]string{
 	"auth.lockout_duration":          "AUTH_LOCKOUT_DURATION",
 	"auth.registration_enabled":      "AUTH_REGISTRATION_ENABLED",
 	"install.state_dir":              "INSTALL_STATE_DIR",
+	"tenant.enabled":                 "TENANT_ENABLED",
+	"tenant.mode":                    "TENANT_MODE",
+	"tenant.default_id":              "TENANT_DEFAULT_ID",
+	"tenant.tenant_header":           "TENANT_HEADER",
+	"tenant.organization_header":     "TENANT_ORGANIZATION_HEADER",
 	"observability.metrics_enabled":  "OBSERVABILITY_METRICS_ENABLED",
 	"observability.metrics_endpoint": "OBSERVABILITY_METRICS_ENDPOINT",
 	"observability.tracing_enabled":  "OBSERVABILITY_TRACING_ENABLED",
