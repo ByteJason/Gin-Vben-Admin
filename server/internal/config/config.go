@@ -94,6 +94,10 @@ type AuthConfig struct {
 	RateLimitMaxAttempts int           `mapstructure:"rate_limit_max_attempts" yaml:"rate_limit_max_attempts"`
 	LockoutThreshold     int           `mapstructure:"lockout_threshold" yaml:"lockout_threshold"`
 	LockoutDuration      time.Duration `mapstructure:"lockout_duration" yaml:"lockout_duration"`
+	CaptchaEnabled       bool          `mapstructure:"captcha_enabled" yaml:"captcha_enabled"`
+	CaptchaRiskThreshold int           `mapstructure:"captcha_risk_threshold" yaml:"captcha_risk_threshold"`
+	CaptchaRiskWindow    time.Duration `mapstructure:"captcha_risk_window" yaml:"captcha_risk_window"`
+	CaptchaKeyPrefix     string        `mapstructure:"captcha_key_prefix" yaml:"captcha_key_prefix"`
 	RegistrationEnabled  bool          `mapstructure:"registration_enabled" yaml:"registration_enabled"`
 }
 
@@ -172,6 +176,10 @@ type AuthSummary struct {
 	RateLimitMaxAttempts int           `json:"rate_limit_max_attempts"`
 	LockoutThreshold     int           `json:"lockout_threshold"`
 	LockoutDuration      time.Duration `json:"lockout_duration"`
+	CaptchaEnabled       bool          `json:"captcha_enabled"`
+	CaptchaRiskThreshold int           `json:"captcha_risk_threshold"`
+	CaptchaRiskWindow    time.Duration `json:"captcha_risk_window"`
+	CaptchaKeyPrefix     string        `json:"captcha_key_prefix"`
 	RegistrationEnabled  bool          `json:"registration_enabled"`
 }
 
@@ -228,6 +236,10 @@ func Default() Config {
 			RateLimitMaxAttempts: 10,
 			LockoutThreshold:     5,
 			LockoutDuration:      15 * time.Minute,
+			CaptchaEnabled:       false,
+			CaptchaRiskThreshold: 3,
+			CaptchaRiskWindow:    15 * time.Minute,
+			CaptchaKeyPrefix:     "auth-captcha",
 			RegistrationEnabled:  false,
 		},
 		Install: InstallConfig{StateDir: filepath.FromSlash("../install")},
@@ -386,6 +398,12 @@ func (cfg AuthConfig) validate() error {
 	if cfg.LockoutThreshold <= 0 || cfg.LockoutDuration <= 0 {
 		return errors.New("lockout threshold and duration must be positive")
 	}
+	if cfg.CaptchaRiskThreshold <= 0 || cfg.CaptchaRiskWindow <= 0 {
+		return errors.New("captcha risk threshold and window must be positive")
+	}
+	if strings.TrimSpace(cfg.CaptchaKeyPrefix) == "" || strings.ContainsAny(cfg.CaptchaKeyPrefix, "\r\n :") {
+		return errors.New("captcha key prefix must be a safe segment")
+	}
 	if strings.TrimSpace(cfg.RefreshCookieName) == "" || strings.ContainsAny(cfg.RefreshCookieName, "\r\n;= ") {
 		return errors.New("refresh_cookie_name must be a valid cookie name")
 	}
@@ -534,6 +552,10 @@ func (cfg Config) SafeSummary() Summary {
 			RateLimitMaxAttempts: cfg.Auth.RateLimitMaxAttempts,
 			LockoutThreshold:     cfg.Auth.LockoutThreshold,
 			LockoutDuration:      cfg.Auth.LockoutDuration,
+			CaptchaEnabled:       cfg.Auth.CaptchaEnabled,
+			CaptchaRiskThreshold: cfg.Auth.CaptchaRiskThreshold,
+			CaptchaRiskWindow:    cfg.Auth.CaptchaRiskWindow,
+			CaptchaKeyPrefix:     cfg.Auth.CaptchaKeyPrefix,
 			RegistrationEnabled:  cfg.Auth.RegistrationEnabled,
 		},
 		Install: InstallSummary{StateDirectoryAbsolute: filepath.IsAbs(cfg.Install.StateDir)},
@@ -604,6 +626,10 @@ func newViper() *viper.Viper {
 	v.SetDefault("auth.rate_limit_max_attempts", cfg.Auth.RateLimitMaxAttempts)
 	v.SetDefault("auth.lockout_threshold", cfg.Auth.LockoutThreshold)
 	v.SetDefault("auth.lockout_duration", cfg.Auth.LockoutDuration)
+	v.SetDefault("auth.captcha_enabled", cfg.Auth.CaptchaEnabled)
+	v.SetDefault("auth.captcha_risk_threshold", cfg.Auth.CaptchaRiskThreshold)
+	v.SetDefault("auth.captcha_risk_window", cfg.Auth.CaptchaRiskWindow)
+	v.SetDefault("auth.captcha_key_prefix", cfg.Auth.CaptchaKeyPrefix)
 	v.SetDefault("auth.registration_enabled", cfg.Auth.RegistrationEnabled)
 	v.SetDefault("install.state_dir", cfg.Install.StateDir)
 	v.SetDefault("tenant.enabled", cfg.Tenant.Enabled)
@@ -671,6 +697,10 @@ var environmentBindings = map[string]string{
 	"auth.rate_limit_max_attempts":   "AUTH_RATE_LIMIT_MAX_ATTEMPTS",
 	"auth.lockout_threshold":         "AUTH_LOCKOUT_THRESHOLD",
 	"auth.lockout_duration":          "AUTH_LOCKOUT_DURATION",
+	"auth.captcha_enabled":           "AUTH_CAPTCHA_ENABLED",
+	"auth.captcha_risk_threshold":    "AUTH_CAPTCHA_RISK_THRESHOLD",
+	"auth.captcha_risk_window":       "AUTH_CAPTCHA_RISK_WINDOW",
+	"auth.captcha_key_prefix":        "AUTH_CAPTCHA_KEY_PREFIX",
 	"auth.registration_enabled":      "AUTH_REGISTRATION_ENABLED",
 	"install.state_dir":              "INSTALL_STATE_DIR",
 	"tenant.enabled":                 "TENANT_ENABLED",

@@ -424,3 +424,44 @@ func sameStrings(got, want []string) bool {
 	}
 	return true
 }
+
+func TestCaptchaRiskDefaultsAndEnvironmentOverrides(t *testing.T) {
+	cfg := Default()
+	if cfg.Auth.CaptchaEnabled {
+		t.Fatal("captcha must be disabled by default")
+	}
+	if cfg.Auth.CaptchaRiskThreshold != 3 || cfg.Auth.CaptchaRiskWindow != 15*time.Minute || cfg.Auth.CaptchaKeyPrefix != "auth-captcha" {
+		t.Fatalf("unexpected captcha risk defaults: %#v", cfg.Auth)
+	}
+	t.Setenv("AUTH_CAPTCHA_ENABLED", "true")
+	t.Setenv("AUTH_CAPTCHA_RISK_THRESHOLD", "4")
+	t.Setenv("AUTH_CAPTCHA_RISK_WINDOW", "9m")
+	t.Setenv("AUTH_CAPTCHA_KEY_PREFIX", "fixture-captcha")
+	loaded, err := Load("")
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !loaded.Auth.CaptchaEnabled || loaded.Auth.CaptchaRiskThreshold != 4 || loaded.Auth.CaptchaRiskWindow != 9*time.Minute || loaded.Auth.CaptchaKeyPrefix != "fixture-captcha" {
+		t.Fatalf("captcha environment overrides not applied: %#v", loaded.Auth)
+	}
+}
+
+func TestCaptchaRiskPolicyValidation(t *testing.T) {
+	cfg := Default()
+	for name, edit := range map[string]func(*AuthConfig){
+		"threshold": func(auth *AuthConfig) { auth.CaptchaRiskThreshold = 0 },
+		"window":    func(auth *AuthConfig) { auth.CaptchaRiskWindow = 0 },
+		"prefix":    func(auth *AuthConfig) { auth.CaptchaKeyPrefix = "bad prefix" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate := cfg
+			candidate.Auth = cfg.Auth
+			candidate.Auth.Enabled = true
+			candidate.Auth.JWTSecret = strings.Repeat("r", 32)
+			edit(&candidate.Auth)
+			if err := candidate.Validate(); err == nil {
+				t.Fatal("Validate() error = nil, want captcha risk policy error")
+			}
+		})
+	}
+}

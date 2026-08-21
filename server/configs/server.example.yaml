@@ -86,4 +86,8 @@ auth:
   rate_limit_max_attempts: 10
   lockout_threshold: 5
   lockout_duration: 15m
+  captcha_enabled: false
+  captcha_risk_threshold: 3
+  captcha_risk_window: 15m
+  captcha_key_prefix: auth-captcha
   registration_enabled: false

@@ -35,6 +35,7 @@ type Handler struct {
 	config   config.AuthConfig
 	limiter  appauth.RateLimiter
 	captcha  appauth.CaptchaProvider
+	risk     appauth.CaptchaRiskStore
 }
 
 // Service exposes the transport's authentication port for composing other
@@ -57,6 +58,14 @@ func NewHandler(service appauth.AuthService, cfg config.AuthConfig, limiters ...
 func (h *Handler) SetCaptchaProvider(provider appauth.CaptchaProvider) {
 	if h != nil {
 		h.captcha = provider
+	}
+}
+
+// SetCaptchaRiskStore wires the bounded failed-login counter used to trigger
+// captcha challenges without coupling HTTP handlers to Redis or memory.
+func (h *Handler) SetCaptchaRiskStore(store appauth.CaptchaRiskStore) {
+	if h != nil {
+		h.risk = store
 	}
 }
 
@@ -180,25 +189,32 @@ func (h *Handler) login(c *gin.Context) {
 	if !h.checkRateLimit(c, identifier) {
 		return
 	}
-	if h.captcha != nil {
-		if strings.TrimSpace(request.CaptchaID) == "" || strings.TrimSpace(request.Captcha) == "" {
-			response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid request")
-			return
-		}
-		if err := h.captcha.Verify(requestContext(c), request.CaptchaID, request.Captcha); err != nil {
-			switch {
-			case errors.Is(err, appauth.ErrCaptchaInvalid), errors.Is(err, appauth.ErrCaptchaExpired):
-				response.Error(c, http.StatusBadRequest, codeCaptcha, "invalid captcha")
-			default:
-				response.Error(c, http.StatusServiceUnavailable, 40001, "dependency unavailable")
-			}
-			return
-		}
+	ctx := requestContext(c)
+	riskKey := captchaRiskKey(ctx, identifier)
+	required, riskErr := h.captchaRequired(ctx, riskKey)
+	if riskErr != nil {
+		response.Error(c, http.StatusServiceUnavailable, 40001, "dependency unavailable")
+		return
 	}
-	pair, err := h.service.Login(requestContext(c), identifier, request.Password)
+	if !h.verifyCaptcha(c, ctx, request, required) {
+		return
+	}
+	pair, err := h.service.Login(ctx, identifier, request.Password)
 	if err != nil {
+		if errors.Is(err, authdomain.ErrInvalidCredentials) && h.risk != nil {
+			if riskErr := h.risk.RecordFailure(ctx, riskKey, h.config.CaptchaRiskWindow); riskErr != nil {
+				response.Error(c, http.StatusServiceUnavailable, 40001, "dependency unavailable")
+				return
+			}
+		}
 		handleAuthError(c, err, true)
 		return
+	}
+	if h.risk != nil {
+		if riskErr := h.risk.Reset(ctx, riskKey); riskErr != nil {
+			response.Error(c, http.StatusServiceUnavailable, 40001, "dependency unavailable")
+			return
+		}
 	}
 	h.setRefreshCookie(c, pair.RefreshToken, false)
 	response.OK(c, tokenData{AccessToken: pair.AccessToken, TokenType: "Bearer", ExpiresIn: pair.ExpiresIn})
@@ -308,6 +324,54 @@ func verifiedClaims(c *gin.Context) (authdomain.Claims, bool) {
 	}
 	value, ok := claims.(authdomain.Claims)
 	return value, ok && strings.TrimSpace(value.Subject) != ""
+}
+
+func (h *Handler) verifyCaptcha(c *gin.Context, ctx context.Context, request loginRequest, required bool) bool {
+	if !required {
+		return true
+	}
+	if h.captcha == nil {
+		response.Error(c, http.StatusServiceUnavailable, 40001, "dependency unavailable")
+		return false
+	}
+	if strings.TrimSpace(request.CaptchaID) == "" || strings.TrimSpace(request.Captcha) == "" {
+		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid request")
+		return false
+	}
+	if err := h.captcha.Verify(ctx, request.CaptchaID, request.Captcha); err != nil {
+		switch {
+		case errors.Is(err, appauth.ErrCaptchaInvalid), errors.Is(err, appauth.ErrCaptchaExpired):
+			response.Error(c, http.StatusBadRequest, codeCaptcha, "invalid captcha")
+		default:
+			response.Error(c, http.StatusServiceUnavailable, 40001, "dependency unavailable")
+		}
+		return false
+	}
+	return true
+}
+
+func (h *Handler) captchaRequired(ctx context.Context, key string) (bool, error) {
+	if h == nil {
+		return false, nil
+	}
+	if h.config.CaptchaEnabled {
+		return true, nil
+	}
+	// An explicitly injected provider remains enabled for backwards-compatible
+	// tests and adapters when no risk store is configured. Runtime wiring uses
+	// the config flag and risk store instead.
+	if h.risk == nil {
+		return h.captcha != nil, nil
+	}
+	return h.risk.Requires(ctx, key, h.config.CaptchaRiskThreshold, h.config.CaptchaRiskWindow)
+}
+
+func captchaRiskKey(ctx context.Context, identifier string) string {
+	metadata := appauth.RequestMetadataFromContext(ctx)
+	if strings.TrimSpace(metadata.IPAddress) == "" {
+		return strings.TrimSpace(identifier)
+	}
+	return strings.TrimSpace(identifier) + "|" + strings.TrimSpace(metadata.IPAddress)
 }
 
 func (h *Handler) issueCaptcha(c *gin.Context) {

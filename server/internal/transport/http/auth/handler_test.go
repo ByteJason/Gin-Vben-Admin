@@ -383,3 +383,92 @@ func TestCaptchaChallengeEndpointDoesNotExposeAnswer(t *testing.T) {
 		t.Fatalf("captcha challenge response status=%d body=%s", res.Code, res.Body.String())
 	}
 }
+
+type riskAuthService struct {
+	fakeAuthService
+	failures int
+	calls    int
+}
+
+func (s *riskAuthService) Login(ctx context.Context, identifier, password string) (authdomain.TokenPair, error) {
+	s.calls++
+	if s.calls <= s.failures {
+		s.loginIdentifier = identifier
+		return authdomain.TokenPair{}, authdomain.ErrInvalidCredentials
+	}
+	return s.fakeAuthService.Login(ctx, identifier, password)
+}
+
+func TestLoginActivatesCaptchaAfterRiskFailuresAndResetsOnSuccess(t *testing.T) {
+	cfg := testAuthConfig()
+	cfg.CaptchaEnabled = false
+	cfg.CaptchaRiskThreshold = 2
+	cfg.CaptchaRiskWindow = time.Minute
+	service := &riskAuthService{
+		fakeAuthService: fakeAuthService{loginPair: authdomain.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 60}},
+		failures:        2,
+	}
+	provider := appauth.NewMemoryCaptchaProvider(time.Minute)
+	risk := appauth.NewMemoryCaptchaRiskStore()
+	handler := NewHandler(service, cfg)
+	handler.SetCaptchaProvider(provider)
+	handler.SetCaptchaRiskStore(risk)
+	r := gin.New()
+	RegisterRoutes(r, handler)
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		res := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/admin/v1/auth/login", strings.NewReader(`{"identifier":"alice","password":"bad"}`))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(res, req)
+		if res.Code != http.StatusUnauthorized {
+			t.Fatalf("failed attempt %d status = %d, body=%s", attempt, res.Code, res.Body.String())
+		}
+	}
+	if service.calls != 2 {
+		t.Fatalf("service calls after failed attempts = %d, want 2", service.calls)
+	}
+
+	blocked := httptest.NewRecorder()
+	blockedReq := httptest.NewRequest(http.MethodPost, "/api/admin/v1/auth/login", strings.NewReader(`{"identifier":"alice","password":"secret"}`))
+	blockedReq.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(blocked, blockedReq)
+	if blocked.Code != http.StatusBadRequest || service.calls != 2 {
+		t.Fatalf("risk-triggered captcha status=%d calls=%d body=%s", blocked.Code, service.calls, blocked.Body.String())
+	}
+
+	challenge, err := provider.Issue(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := provider.PutAnswer(challenge.ID, "4821"); err != nil {
+		t.Fatal(err)
+	}
+	valid := httptest.NewRecorder()
+	validReq := httptest.NewRequest(http.MethodPost, "/api/admin/v1/auth/login", strings.NewReader(`{"identifier":"alice","password":"secret","captchaId":"`+challenge.ID+`","captcha":"4821"}`))
+	validReq.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(valid, validReq)
+	if valid.Code != http.StatusOK {
+		t.Fatalf("captcha-protected success status=%d body=%s", valid.Code, valid.Body.String())
+	}
+	if required, err := risk.Requires(context.Background(), "alice|192.0.2.1", cfg.CaptchaRiskThreshold, cfg.CaptchaRiskWindow); err != nil || required {
+		t.Fatalf("risk was not reset after success: required=%v err=%v", required, err)
+	}
+}
+
+func TestCaptchaEnabledFailsClosedWhenProviderIsUnavailable(t *testing.T) {
+	cfg := testAuthConfig()
+	cfg.CaptchaEnabled = true
+	service := &fakeAuthService{loginPair: authdomain.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 60}}
+	r := newAuthRouter(service, cfg)
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/v1/auth/login", strings.NewReader(`{"identifier":"alice","password":"secret"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(res, req)
+	if res.Code != http.StatusServiceUnavailable {
+		t.Fatalf("captcha-enabled without provider status=%d body=%s", res.Code, res.Body.String())
+	}
+	if service.loginIdentifier != "" {
+		t.Fatalf("login reached service without captcha provider: %q", service.loginIdentifier)
+	}
+}
