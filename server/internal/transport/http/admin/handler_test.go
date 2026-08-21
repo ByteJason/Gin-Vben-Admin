@@ -2,6 +2,9 @@ package admin
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	auditapp "example.com/gin-vben-admin/server/internal/application/audit"
@@ -11,6 +14,7 @@ import (
 	"example.com/gin-vben-admin/server/internal/domain/authdomain"
 	audithttp "example.com/gin-vben-admin/server/internal/transport/http/audit"
 	authhttp "example.com/gin-vben-admin/server/internal/transport/http/auth"
+	httpmiddleware "example.com/gin-vben-admin/server/internal/transport/http/middleware"
 	settingshttp "example.com/gin-vben-admin/server/internal/transport/http/settings"
 	"github.com/gin-gonic/gin"
 )
@@ -58,6 +62,25 @@ func TestRegisterRoutesWithIAMMountsAuxiliaryRoutesUnderAdminPrefixOnce(t *testi
 		if len(path) >= len("/api/admin/v1/api/admin/v1") && containsDuplicateAdminPrefix(path) {
 			t.Fatalf("auxiliary route duplicated admin prefix: %s", path)
 		}
+	}
+}
+
+func TestRegisterRoutesWithIAMAppliesTenantPolicyToProtectedAuxiliaryRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	authConfig := config.Default().Auth
+	authConfig.Enabled = true
+	authHandler := authhttp.NewHandler(routeAuthService{}, authConfig)
+	settingsHandler := settingshttp.NewHandler(settingsapp.NewService(settingsapp.NewMemoryRepository(), nil, nil, nil))
+	policy := httpmiddleware.TenantPolicy{Mode: "multi"}
+	RegisterRoutesWithIAM(r, authHandler, nil, AuxiliaryRoutes{Settings: settingsHandler, TenantPolicy: &policy})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/v1/settings/site.name", nil)
+	req.Header.Set("Authorization", "Bearer test")
+	resp := httptest.NewRecorder()
+	r.ServeHTTP(resp, req)
+	if resp.Code != http.StatusBadRequest || !strings.Contains(resp.Body.String(), `"code":10000`) {
+		t.Fatalf("missing tenant status=%d body=%s", resp.Code, resp.Body.String())
 	}
 }
 
