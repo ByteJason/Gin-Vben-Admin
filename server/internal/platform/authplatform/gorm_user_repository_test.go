@@ -14,6 +14,7 @@ import (
 	"unsafe"
 
 	"example.com/gin-vben-admin/server/internal/domain/authdomain"
+	"example.com/gin-vben-admin/server/internal/domain/tenant"
 	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
 	gormmysql "gorm.io/driver/mysql"
 	gormpostgres "gorm.io/driver/postgres"
@@ -37,7 +38,7 @@ func TestGORMUserRepositoryFindByIdentifier(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			store := newTestStore(t, tt.result)
 			repo := NewGORMUserRepository(store)
-			got, err := repo.FindByIdentifier(context.Background(), tt.identifier)
+			got, err := repo.FindByIdentifier(tenant.WithContext(context.Background(), tenant.Context{TenantID: "default"}), tt.identifier)
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
 					t.Fatalf("FindByIdentifier() error = %v, want %v", err, tt.wantErr)
@@ -62,13 +63,21 @@ func TestGORMUserRepositoryFindByIdentifier(t *testing.T) {
 
 func TestGORMUserRepositoryFindByIdentifierMySQLDialect(t *testing.T) {
 	store := newTestStoreWithDialect(t, queryResult{rows: [][]driver.Value{{int64(8), "bob", "hash", "disabled"}}}, "mysql")
-	got, err := NewGORMUserRepository(store).FindByIdentifier(context.Background(), "bob")
+	got, err := NewGORMUserRepository(store).FindByIdentifier(tenant.WithContext(context.Background(), tenant.Context{TenantID: "default"}), "bob")
 	if err != nil {
 		t.Fatalf("FindByIdentifier() error = %v", err)
 	}
 	want := authdomain.User{ID: "8", Identifier: "bob", PasswordHash: "hash", Active: false}
 	if got != want {
 		t.Fatalf("FindByIdentifier() = %+v, want %+v", got, want)
+	}
+}
+
+func TestGORMUserRepositoryRequiresTenantContext(t *testing.T) {
+	store := newTestStore(t, queryResult{rows: [][]driver.Value{{int64(7), "alice", "hash", "active"}}})
+	_, err := NewGORMUserRepository(store).FindByIdentifier(context.Background(), "alice")
+	if !errors.Is(err, tenant.ErrTenantContextMissing) {
+		t.Fatalf("FindByIdentifier() error = %v, want tenant context missing", err)
 	}
 }
 

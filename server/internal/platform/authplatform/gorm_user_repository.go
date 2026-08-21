@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"example.com/gin-vben-admin/server/internal/domain/authdomain"
+	"example.com/gin-vben-admin/server/internal/domain/tenant"
 	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
 	mysqldriver "github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -44,6 +45,7 @@ var _ authdomain.UserRepository = (*GORMUserRepository)(nil)
 
 type gormUserRow struct {
 	ID           uint64 `gorm:"column:id"`
+	TenantID     string `gorm:"column:tenant_id"`
 	Username     string `gorm:"column:username"`
 	PasswordHash string `gorm:"column:password_hash"`
 	Status       string `gorm:"column:status"`
@@ -58,9 +60,13 @@ func (r *GORMUserRepository) FindByIdentifier(ctx context.Context, identifier st
 	if r == nil || r.store == nil {
 		return authdomain.User{}, ErrUserLookup
 	}
+	tenantID, err := requestTenantID(ctx)
+	if err != nil {
+		return authdomain.User{}, err
+	}
 
 	var row gormUserRow
-	err := r.store.Write(ctx).Where("username = ?", identifier).First(&row).Error
+	err = r.store.Write(ctx).Where("tenant_id = ? AND username = ?", tenantID, identifier).First(&row).Error
 	if err == nil {
 		return authdomain.User{
 			ID:           strconv.FormatUint(row.ID, 10),
@@ -84,11 +90,16 @@ func (r *GORMUserRepository) CreateUser(ctx context.Context, user authdomain.Use
 	if r == nil || r.store == nil || user.Identifier == "" || user.PasswordHash == "" {
 		return ErrUserProvisioning
 	}
+	tenantID, err := requestTenantID(ctx)
+	if err != nil {
+		return err
+	}
 	status := "disabled"
 	if user.Active {
 		status = "active"
 	}
-	err := r.store.Write(ctx).Create(&gormUserRow{
+	err = r.store.Write(ctx).Create(&gormUserRow{
+		TenantID:     tenantID,
 		Username:     user.Identifier,
 		PasswordHash: user.PasswordHash,
 		Status:       status,
@@ -102,8 +113,12 @@ func (r *GORMUserRepository) UpdatePassword(ctx context.Context, identifier, pas
 	if r == nil || r.store == nil || identifier == "" || passwordHash == "" {
 		return ErrUserProvisioning
 	}
+	tenantID, err := requestTenantID(ctx)
+	if err != nil {
+		return err
+	}
 	result := r.store.Write(ctx).Model(&gormUserRow{}).
-		Where("username = ?", identifier).
+		Where("tenant_id = ? AND username = ?", tenantID, identifier).
 		Updates(map[string]any{
 			"password_hash":        passwordHash,
 			"failed_attempts":      0,
@@ -117,6 +132,14 @@ func (r *GORMUserRepository) UpdatePassword(ctx context.Context, identifier, pas
 		return authdomain.ErrInvalidCredentials
 	}
 	return nil
+}
+
+func requestTenantID(ctx context.Context) (string, error) {
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return "", err
+	}
+	return scope.TenantID, nil
 }
 
 func mapUserWriteError(err error) error {

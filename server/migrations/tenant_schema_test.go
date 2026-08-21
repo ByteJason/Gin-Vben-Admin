@@ -38,3 +38,20 @@ func TestTenantMigrationAddsTenantScopeToCoreTables(t *testing.T) {
 		}
 	}
 }
+
+func TestTenantMigrationScopesUsernameUniqueness(t *testing.T) {
+	for _, driver := range []string{"mysql", "postgres"} {
+		up, err := migrations.FS.ReadFile(driver + "/000007_tenant_username.up.sql")
+		if err != nil {
+			t.Fatalf("read %s username migration: %v", driver, err)
+		}
+		sql := strings.ToLower(string(up))
+		if !strings.Contains(sql, "tenant_id") || !strings.Contains(sql, "username") {
+			t.Fatalf("%s username migration does not scope uniqueness: %s", driver, sql)
+		}
+		down, err := migrations.FS.ReadFile(driver + "/000007_tenant_username.down.sql")
+		if err != nil || len(strings.TrimSpace(string(down))) == 0 {
+			t.Fatalf("%s username migration has no down asset: %v", driver, err)
+		}
+	}
+}

@@ -95,6 +95,7 @@ func RegisterRoutes(r gin.IRouter, handler *Handler, policies ...httpmiddleware.
 	if len(policies) > 0 {
 		policy = policies[0]
 	}
+	group.Use(httpmiddleware.TenantContext(policy))
 	group.GET("/captcha", handler.issueCaptcha)
 	group.POST("/login", handler.login)
 	group.POST("/refresh", handler.refresh)
@@ -112,8 +113,8 @@ func RegisterRoutes(r gin.IRouter, handler *Handler, policies ...httpmiddleware.
 		group.POST("/password/reset", disabled)
 	}
 	if handler.sessions != nil {
-		group.GET("/sessions", Middleware(handler.service), httpmiddleware.TenantContext(policy), handler.listSessions)
-		group.DELETE("/sessions/:id", Middleware(handler.service), httpmiddleware.TenantContext(policy), handler.revokeSession)
+		group.GET("/sessions", Middleware(handler.service), handler.listSessions)
+		group.DELETE("/sessions/:id", Middleware(handler.service), handler.revokeSession)
 	} else {
 		group.GET("/sessions", disabled)
 		group.DELETE("/sessions/:id", disabled)
