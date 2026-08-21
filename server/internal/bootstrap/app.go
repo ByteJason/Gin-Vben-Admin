@@ -18,6 +18,7 @@ import (
 	installer "example.com/gin-vben-admin/server/internal/application/installer"
 	settingsapp "example.com/gin-vben-admin/server/internal/application/settings"
 	"example.com/gin-vben-admin/server/internal/config"
+	"example.com/gin-vben-admin/server/internal/domain/tenant"
 	"example.com/gin-vben-admin/server/internal/platform/auditplatform"
 	"example.com/gin-vben-admin/server/internal/platform/authplatform"
 	rediscache "example.com/gin-vben-admin/server/internal/platform/cache/redis"
@@ -33,20 +34,21 @@ import (
 // constructed only when enabled in configuration; constructors deliberately do
 // not perform network probes. Readiness owns the live connectivity checks.
 type App struct {
-	config        config.Config
-	http          *http.Server
-	database      *gormdb.Store
-	redis         *rediscache.Client
-	auth          appauth.AuthService
-	iam           *iamapp.Service
-	settings      *settingsapp.Service
-	audit         *auditapp.Service
-	observability *observabilityplatform.Runtime
-	install       *installer.StatusService
-	apply         *installer.ApplyService
-	applyJobs     *installer.ApplyJobService
-	readiness     *platformhealth.Checker
-	closers       []io.Closer
+	config             config.Config
+	http               *http.Server
+	database           *gormdb.Store
+	redis              *rediscache.Client
+	auth               appauth.AuthService
+	iam                *iamapp.Service
+	settings           *settingsapp.Service
+	audit              *auditapp.Service
+	observability      *observabilityplatform.Manager
+	settingsRepository settingsapp.Repository
+	install            *installer.StatusService
+	apply              *installer.ApplyService
+	applyJobs          *installer.ApplyJobService
+	readiness          *platformhealth.Checker
+	closers            []io.Closer
 
 	shutdownOnce sync.Once
 	shutdownErr  error
@@ -61,7 +63,7 @@ func New(cfg config.Config) (*App, error) {
 	}
 
 	app := &App{config: cfg}
-	observability, err := observabilityplatform.NewRuntime(cfg.Observability)
+	observability, err := observabilityplatform.NewManager(cfg.Observability)
 	if err != nil {
 		return nil, fmt.Errorf("configure observability runtime: %w", err)
 	}
@@ -132,8 +134,10 @@ func New(cfg config.Config) (*App, error) {
 		app.iam.SetPermissionCache(iamplatform.NewRedisPermissionCache(app.redis), 30*time.Second)
 	}
 	if app.database != nil {
+		settingsRepository := settingsplatform.NewGORMRepository(app.database)
+		app.settingsRepository = settingsRepository
 		app.settings = settingsapp.NewService(
-			settingsplatform.NewGORMRepository(app.database),
+			settingsRepository,
 			settingsplatform.NewGORMAuditSink(app.database),
 			nil,
 			nil,
@@ -266,7 +270,7 @@ func (a *App) Audit() *auditapp.Service {
 
 // Observability returns the runtime metrics/tracing collector. It is always
 // present after New; disabled configurations expose zero collectors.
-func (a *App) Observability() *observabilityplatform.Runtime {
+func (a *App) Observability() *observabilityplatform.Manager {
 	if a == nil {
 		return nil
 	}
@@ -314,6 +318,9 @@ func (a *App) Run(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if err := a.preparePersistedObservability(ctx); err != nil {
+		return errors.Join(fmt.Errorf("load persisted observability configuration: %w", err), a.Close())
+	}
 
 	listener, err := net.Listen("tcp", a.HTTPServer().Addr)
 	if err != nil {
@@ -336,6 +343,54 @@ func (a *App) Run(ctx context.Context) error {
 	case err := <-errCh:
 		return errors.Join(err, a.Close())
 	}
+}
+
+// preparePersistedObservability reloads settings only after the database is
+// reachable. An unavailable dependency must still allow the health server to
+// start and report readiness=down; a reachable database with malformed
+// persisted settings fails closed before accepting HTTP traffic.
+func (a *App) preparePersistedObservability(ctx context.Context) error {
+	if a == nil || a.settingsRepository == nil || a.observability == nil {
+		return nil
+	}
+	if a.database != nil {
+		probeCtx := ctx
+		cancel := func() {}
+		if timeout := a.config.Database.PingTimeout; timeout > 0 {
+			probeCtx, cancel = context.WithTimeout(ctx, timeout)
+		}
+		err := a.database.Ping(probeCtx)
+		cancel()
+		if err != nil {
+			return nil
+		}
+	}
+	return a.reloadPersistedObservability(ctx)
+}
+
+func (a *App) reloadPersistedObservability(ctx context.Context) error {
+	if a == nil || a.settingsRepository == nil || a.observability == nil {
+		return nil
+	}
+	scope, err := tenant.NewContext(a.config.Tenant.DefaultID, "", true)
+	if err != nil {
+		return fmt.Errorf("configure observability tenant scope: %w", err)
+	}
+	settingsContext := tenant.WithContext(ctx, scope)
+	resolved, err := settingsapp.ResolveObservabilityConfig(
+		settingsContext,
+		a.settingsRepository,
+		a.config.Observability,
+		a.config.DynamicObservabilityAllowed,
+	)
+	if err != nil {
+		return err
+	}
+	if err := a.observability.Reload(resolved); err != nil {
+		return fmt.Errorf("reload observability runtime: %w", err)
+	}
+	a.config.Observability = resolved
+	return nil
 }
 
 // Shutdown gracefully stops HTTP and then closes dependencies. It is safe to

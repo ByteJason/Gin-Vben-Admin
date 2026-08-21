@@ -15,8 +15,11 @@ import (
 	"time"
 
 	appauth "example.com/gin-vben-admin/server/internal/application/auth"
+	settingsapp "example.com/gin-vben-admin/server/internal/application/settings"
 	"example.com/gin-vben-admin/server/internal/config"
 	"example.com/gin-vben-admin/server/internal/domain/authdomain"
+	domainobs "example.com/gin-vben-admin/server/internal/domain/observability"
+	observabilityplatform "example.com/gin-vben-admin/server/internal/platform/observability"
 )
 
 func TestNewBuildsConfiguredHTTPServerAndKeepsDependenciesOptional(t *testing.T) {
@@ -407,6 +410,35 @@ func TestRunClosesDependenciesWhenListenFails(t *testing.T) {
 	}
 	if !closed {
 		t.Fatal("Run() did not close dependencies after listen failure")
+	}
+}
+
+func TestReloadPersistedObservabilityUsesDefaultTenantSettings(t *testing.T) {
+	repository := settingsapp.NewMemoryRepository()
+	for key, value := range map[string]string{
+		"observability.metrics.enabled":  `true`,
+		"observability.metrics.endpoint": `"http://127.0.0.1:8080/metrics"`,
+	} {
+		if _, err := repository.Append(context.Background(), settingsapp.StoredSetting{Key: key, RawValue: []byte(value)}); err != nil {
+			t.Fatalf("Append(%q) error = %v", key, err)
+		}
+	}
+	cfg := config.Default()
+	manager, err := observabilityplatform.NewManager(domainobs.DefaultConfig())
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+	app := &App{config: cfg, observability: manager, settingsRepository: repository}
+
+	if err := app.reloadPersistedObservability(context.Background()); err != nil {
+		t.Fatalf("reloadPersistedObservability() error = %v", err)
+	}
+	if got := manager.CollectorCount(); got != 1 {
+		t.Fatalf("CollectorCount() = %d, want 1", got)
+	}
+	if !app.Config().Observability.MetricsEnabled || app.Config().Observability.MetricsEndpoint != "http://127.0.0.1:8080/metrics" {
+		t.Fatalf("effective observability config = %#v", app.Config().Observability.SafeSummary())
 	}
 }
 
