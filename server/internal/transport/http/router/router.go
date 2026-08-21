@@ -1,6 +1,8 @@
 package router
 
 import (
+	"io/fs"
+
 	"github.com/gin-gonic/gin"
 
 	"example.com/gin-vben-admin/server/internal/transport/http/admin"
@@ -10,6 +12,7 @@ import (
 	iamhttp "example.com/gin-vben-admin/server/internal/transport/http/iam"
 	installhttp "example.com/gin-vben-admin/server/internal/transport/http/install"
 	"example.com/gin-vben-admin/server/internal/transport/http/middleware"
+	"example.com/gin-vben-admin/server/internal/transport/http/staticui"
 )
 
 // NewRouter builds the public HTTP seam without binding to a port or external services.
@@ -35,9 +38,12 @@ func NewRouterWithAuth(readinessChecker health.ReadinessChecker, authHandler *au
 // NewRouterWithComponents is the explicit composition seam for runtime HTTP
 // capabilities. Compatibility constructors delegate here without inventing
 // infrastructure dependencies.
-func NewRouterWithComponents(readinessChecker health.ReadinessChecker, authHandler *authhttp.Handler, iamHandler *iamhttp.Handler, installHandler *installhttp.Handler) *gin.Engine {
+func NewRouterWithComponents(readinessChecker health.ReadinessChecker, authHandler *authhttp.Handler, iamHandler *iamhttp.Handler, installHandler *installhttp.Handler, staticAssets ...fs.FS) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery(), middleware.RequestID(), middleware.SecurityHeaders())
+	if len(staticAssets) > 0 {
+		staticui.RegisterInstallerRoutes(r, staticAssets[0])
+	}
 	health.RegisterRoutes(r, readinessChecker)
 	installhttp.RegisterRoutes(r, installHandler)
 	admin.RegisterRoutesWithIAM(r, authHandler, iamHandler)

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"testing/fstest"
 )
 
 func TestPublicHTTPSeam(t *testing.T) {
@@ -77,5 +78,28 @@ func TestResponseEnvelopeCarriesRequestMetadata(t *testing.T) {
 	}
 	if body.TraceID != "REQ-envelope-1" || body.Meta.RequestID != "REQ-envelope-1" {
 		t.Fatalf("request metadata not propagated: %+v", body)
+	}
+}
+
+func TestRouterMountsInstallerBundleWithoutCatchingAPIRoutes(t *testing.T) {
+	assets := fstest.MapFS{
+		"install/index.html": &fstest.MapFile{Data: []byte("<h1>installer</h1>")},
+	}
+	router := NewRouterWithComponents(nil, nil, nil, nil, assets)
+
+	for _, item := range []struct {
+		path   string
+		status int
+	}{
+		{path: "/install", status: http.StatusOK},
+		{path: "/api/admin/v1/ping", status: http.StatusOK},
+		{path: "/api/client/v1/ping", status: http.StatusOK},
+	} {
+		request := httptest.NewRequest(http.MethodGet, item.path, nil)
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		if response.Code != item.status {
+			t.Fatalf("GET %s status = %d, want %d; body=%s", item.path, response.Code, item.status, response.Body.String())
+		}
 	}
 }

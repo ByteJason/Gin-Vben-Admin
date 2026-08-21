@@ -94,6 +94,13 @@ func TestNewBuildsConfiguredHTTPServerAndKeepsDependenciesOptional(t *testing.T)
 	if capabilitiesBody.Code != 0 || capabilitiesBody.Data.Platform.OS == "" || capabilitiesBody.Data.Platform.Arch == "" || len(capabilitiesBody.Data.Tools) != 4 {
 		t.Fatalf("installation capabilities body = %#v", capabilitiesBody)
 	}
+
+	request = httptest.NewRequest(http.MethodGet, "/install", nil)
+	response = httptest.NewRecorder()
+	app.HTTPServer().Handler.ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("ordinary build installation page = %d, want 404", response.Code)
+	}
 }
 
 func TestNewWiresInstallerPlanAgainstStateDirectoryParent(t *testing.T) {

@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	"io/fs"
 	"net/http"
 
 	appauth "example.com/gin-vben-admin/server/internal/application/auth"
@@ -8,6 +9,7 @@ import (
 	installer "example.com/gin-vben-admin/server/internal/application/installer"
 	"example.com/gin-vben-admin/server/internal/config"
 	"example.com/gin-vben-admin/server/internal/platform/installplatform"
+	"example.com/gin-vben-admin/server/internal/platform/webassets"
 	authhttp "example.com/gin-vben-admin/server/internal/transport/http/auth"
 	"example.com/gin-vben-admin/server/internal/transport/http/health"
 	iamhttp "example.com/gin-vben-admin/server/internal/transport/http/iam"
@@ -46,9 +48,13 @@ func newHTTPServerWithPlan(cfg config.Config, readiness health.ReadinessChecker,
 	if installStatus != nil {
 		installHandler = installhttp.NewHandlerWithComponents(installStatus, installplatform.NewSystemCapabilityProbe(), installPlan, dependencyChecks)
 	}
+	var staticAssets []fs.FS
+	if assets, available := webassets.Static(); available {
+		staticAssets = append(staticAssets, assets)
+	}
 	return &http.Server{
 		Addr:              cfg.Server.Addr,
-		Handler:           router.NewRouterWithComponents(readiness, authHandler, iamHandler, installHandler),
+		Handler:           router.NewRouterWithComponents(readiness, authHandler, iamHandler, installHandler, staticAssets...),
 		ReadTimeout:       cfg.Server.ReadTimeout,
 		ReadHeaderTimeout: cfg.Server.ReadTimeout,
 		WriteTimeout:      cfg.Server.WriteTimeout,
