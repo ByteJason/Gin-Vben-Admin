@@ -459,7 +459,7 @@ async function requestInstallation(event) {
       renderJobProgress(result);
       result = await pollInstallation(result.id);
       if (result.state === 'failed') {
-        lastFailedJobId = result.canRetry ? result.id : null;
+        lastFailedJobId = result.canRetry || result.canRollback ? result.id : null;
         applyResult.textContent = result.canRetry
           ? '安装未完成，已自动回滚本次副作用。请重新输入凭据后重试。'
           : '安装未完成，请检查实例状态后再继续。';

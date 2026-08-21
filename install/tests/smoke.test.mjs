@@ -54,6 +54,7 @@ test('installation shell is independent and exposes an accessible status region'
   assert.match(script, /重新尝试安装/);
   assert.match(script, /currentStep/);
   assert.match(script, /canRollback/);
+  assert.match(script, /lastFailedJobId\s*=\s*result\.canRetry\s*\|\|\s*result\.canRollback/);
   assert.match(script, /currentPlan\s*=\s*\{\s*\.\.\.currentPlan,\s*installed:\s*true\s*\}/);
   assert.match(script, /confirmCleanup/);
   assert.match(script, /requestInstallation/);
