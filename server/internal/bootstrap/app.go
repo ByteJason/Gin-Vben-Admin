@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -34,6 +35,7 @@ type App struct {
 	auth      appauth.AuthService
 	iam       *iamapp.Service
 	install   *installer.StatusService
+	apply     *installer.ApplyService
 	readiness *platformhealth.Checker
 	closers   []io.Closer
 
@@ -125,12 +127,35 @@ func New(cfg config.Config) (*App, error) {
 		recovery = candidate
 	}
 	var installPlan installer.PlanProvider
+	var applyService *installer.ApplyService
 	if workspaceRoot, err := installWorkspaceRoot(cfg.Install.StateDir); err == nil {
 		if inspector, inspectorErr := installplatform.NewFileSystemInspector(workspaceRoot); inspectorErr == nil {
 			installPlan = installer.NewPlanService(inspector)
+			if _, scriptErr := os.Stat(filepath.Join(workspaceRoot, "scripts", "build.mjs")); scriptErr == nil {
+				envStore := installplatform.NewAtomicEnvStore(
+					filepath.Join(workspaceRoot, ".env"),
+					filepath.Join(cfg.Install.StateDir, ".env-backup"),
+				)
+				applyService = installer.NewApplyService(
+					installplatform.NewFileMarkerStore(cfg.Install.MarkerPath()),
+					installPlan,
+					installplatform.NewSystemDependencyProbe(),
+					installplatform.NewSystemSchemaInstaller(),
+					installplatform.NewAssetInstaller(
+						workspaceRoot,
+						filepath.Join(cfg.Install.StateDir, ".install-backup"),
+						installplatform.NewSystemAssetBuilder(workspaceRoot),
+						nil,
+					),
+					installplatform.NewSystemIdentityInstaller(),
+					installplatform.NewEnvironmentInstaller(envStore, cfg.Install.StateDir, nil),
+					nil,
+				)
+			}
 		}
 	}
-	app.http = newHTTPServerWithPlan(cfg, app.readiness, app.auth, limiter, app.iam, recovery, app.install, installPlan, installplatform.NewSystemDependencyProbe())
+	app.apply = applyService
+	app.http = newHTTPServerWithPlan(cfg, app.readiness, app.auth, limiter, app.iam, recovery, app.install, installPlan, installplatform.NewSystemDependencyProbe(), applyService)
 	return app, nil
 }
 
@@ -201,6 +226,14 @@ func (a *App) Installation() *installer.StatusService {
 		return nil
 	}
 	return a.install
+}
+
+// InstallationApply returns the configured first-install transaction service.
+func (a *App) InstallationApply() *installer.ApplyService {
+	if a == nil {
+		return nil
+	}
+	return a.apply
 }
 
 // Readiness returns the checker injected into the HTTP health routes.

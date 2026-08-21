@@ -150,6 +150,7 @@ __debug_bin*
 /install/.installed.lock
 /install/.install-state/
 /install/.install-backup/
+/install/.env-backup/
 /install/.dist-staging-*/
 /install/dist/
 /server/internal/platform/webassets/.dist-staging-*/

@@ -145,6 +145,35 @@ func TestNewWiresInstallerPlanAgainstStateDirectoryParent(t *testing.T) {
 	}
 }
 
+func TestNewWiresApplyServiceForSourceWorkspace(t *testing.T) {
+	root := t.TempDir()
+	for _, relative := range []string{"install", "admin/apps/web-antd", "admin/apps/web-ele", "admin/apps/web-naive", "scripts"} {
+		if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(relative)), 0o755); err != nil {
+			t.Fatalf("MkdirAll(%q) error = %v", relative, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "scripts", "build.mjs"), []byte("// fixture"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.Install.StateDir = filepath.Join(root, "install")
+	cfg.Server.Addr = "127.0.0.1:0"
+
+	app, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer app.Close()
+
+	request := httptest.NewRequest(http.MethodPost, "/api/system/install/v1/apply", bytes.NewBufferString(`{"selectedUi":"antd"}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	app.HTTPServer().Handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("apply status = %d, want 400 from configured service; body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestDependencyOptionsMapEverySupportedTopology(t *testing.T) {
 	db := config.DatabaseConfig{
 		Enabled:         true,

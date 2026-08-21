@@ -31,7 +31,7 @@ func newHTTPServer(cfg config.Config, readiness health.ReadinessChecker, authSer
 	return newHTTPServerWithPlan(cfg, readiness, authService, limiter, iamService, recovery, installStatus, nil, nil)
 }
 
-func newHTTPServerWithPlan(cfg config.Config, readiness health.ReadinessChecker, authService appauth.AuthService, limiter appauth.RateLimiter, iamService *iamapp.Service, recovery appauth.AccountRecoveryService, installStatus *installer.StatusService, installPlan installer.PlanProvider, dependencyChecks installhttp.DependencyCheckProvider) *http.Server {
+func newHTTPServerWithPlan(cfg config.Config, readiness health.ReadinessChecker, authService appauth.AuthService, limiter appauth.RateLimiter, iamService *iamapp.Service, recovery appauth.AccountRecoveryService, installStatus *installer.StatusService, installPlan installer.PlanProvider, dependencyChecks installhttp.DependencyCheckProvider, applyServices ...*installer.ApplyService) *http.Server {
 	var authHandler *authhttp.Handler
 	if authService != nil {
 		authHandler = authhttp.NewHandler(authService, cfg.Auth, limiter)
@@ -45,8 +45,12 @@ func newHTTPServerWithPlan(cfg config.Config, readiness health.ReadinessChecker,
 		iamHandler = iamhttp.NewHandler(iamService, authService)
 	}
 	var installHandler *installhttp.Handler
+	var applyService *installer.ApplyService
+	if len(applyServices) > 0 {
+		applyService = applyServices[0]
+	}
 	if installStatus != nil {
-		installHandler = installhttp.NewHandlerWithComponents(installStatus, installplatform.NewSystemCapabilityProbe(), installPlan, dependencyChecks)
+		installHandler = installhttp.NewHandlerWithApply(installStatus, installplatform.NewSystemCapabilityProbe(), installPlan, dependencyChecks, applyService)
 	}
 	var staticAssets []fs.FS
 	if assets, available := webassets.Static(); available {
