@@ -170,5 +170,7 @@ docker-compose.override.yml
 **/blob-report/
 **/cypress/screenshots/
 **/cypress/videos/
+**/__pycache__/
+*.py[cod]
 junit*.xml
 *.lcov
