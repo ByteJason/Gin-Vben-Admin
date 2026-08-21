@@ -1,7 +1,21 @@
 #!/usr/bin/env node
 
-import { accessSync, constants } from 'node:fs';
-import { delimiter, dirname, join, resolve } from 'node:path';
+import { createHash } from 'node:crypto';
+import {
+  accessSync,
+  constants,
+  mkdirSync,
+  readFileSync,
+} from 'node:fs';
+import {
+  delimiter,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+} from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const MODES = new Set(['embedded', 'standalone', 'api_only', 'dev']);
@@ -14,7 +28,7 @@ function fail(message, exitCode = 2) {
 }
 
 function parseArgs(argv) {
-  const options = { check: false, mode: '', ui: '' };
+  const options = { check: false, mode: '', output: '', ui: '' };
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -22,7 +36,7 @@ function parseArgs(argv) {
       options.check = true;
       continue;
     }
-    if (argument === '--mode' || argument === '--ui') {
+    if (argument === '--mode' || argument === '--output' || argument === '--ui') {
       const value = argv[index + 1];
       if (!value || value.startsWith('--')) {
         fail(`missing value for ${argument}`);
@@ -48,11 +62,58 @@ function parseArgs(argv) {
   if (options.ui === 'all' && options.mode !== 'embedded') {
     fail('ui all is only valid for embedded mode');
   }
-  if (!options.check) {
-    fail('this build entry currently requires --check');
+  if (!options.check && options.mode !== 'api_only') {
+    fail(`build execution is not available yet for mode: ${options.mode}`);
   }
 
   return options;
+}
+
+function boundedApiOutput(value) {
+  const outputRoot = join(root, 'server', 'bin');
+  const defaultName = process.platform === 'win32' ? 'server-api.exe' : 'server-api';
+  const output = resolve(root, value || join('server', 'bin', defaultName));
+  const child = relative(outputRoot, output);
+  if (!child || child.startsWith('..') || isAbsolute(child)) {
+    fail('output must be a file below server/bin');
+  }
+  return output;
+}
+
+function runApiOnlyBuild(outputValue) {
+  const output = boundedApiOutput(outputValue);
+  const runtimeRoot = join(root, '.runtime');
+  const goCache = join(runtimeRoot, 'go-cache');
+  const goTmp = join(runtimeRoot, 'go-tmp');
+  mkdirSync(dirname(output), { recursive: true });
+  mkdirSync(goCache, { recursive: true });
+  mkdirSync(goTmp, { recursive: true });
+
+  const outputFromServer = relative(join(root, 'server'), output);
+  const result = spawnSync(
+    'go',
+    ['-C', 'server', 'build', '-trimpath', '-o', outputFromServer, './cmd/api'],
+    {
+      cwd: root,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        GOCACHE: process.env.GOCACHE || goCache,
+        GOTMPDIR: process.env.GOTMPDIR || goTmp,
+      },
+      shell: false,
+    },
+  );
+  if (result.status !== 0) {
+    process.stderr.write(result.stdout || '');
+    process.stderr.write(result.stderr || '');
+    fail(`go build failed with status ${result.status ?? 'unknown'}`, 1);
+  }
+
+  const digest = createHash('sha256').update(readFileSync(output)).digest('hex');
+  process.stdout.write(`BUILD_ARTIFACT=${relative(root, output)}\n`);
+  process.stdout.write(`BUILD_SHA256=${digest}\n`);
+  process.stdout.write('BUILD_OK\n');
 }
 
 function requirePath(relativePath) {
@@ -110,4 +171,8 @@ validate(options);
 process.stdout.write(`BUILD_MODE=${options.mode}\n`);
 process.stdout.write(`BUILD_UI=${options.ui}\n`);
 process.stdout.write(`BUILD_PLATFORM=${process.platform}\n`);
-process.stdout.write('BUILD_CHECK_OK\n');
+if (options.check) {
+  process.stdout.write('BUILD_CHECK_OK\n');
+} else {
+  runApiOnlyBuild(options.output);
+}
