@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
@@ -15,13 +15,28 @@ function run(...args) {
 }
 
 test('build orchestrator validates all delivery modes without side effects', () => {
+  const assetManifest = join(
+    root,
+    'server',
+    'internal',
+    'platform',
+    'webassets',
+    'dist',
+    'asset-manifest.json',
+  );
+  const before = existsSync(assetManifest)
+    ? readFileSync(assetManifest, 'utf8')
+    : null;
   for (const mode of ['embedded', 'standalone', 'api_only', 'dev']) {
     const result = run('--mode', mode, '--ui', 'antd', '--check');
     assert.equal(result.status, 0, `${mode}: ${result.stdout}${result.stderr}`);
     assert.match(result.stdout, new RegExp(`BUILD_MODE=${mode}`));
     assert.match(result.stdout, /BUILD_CHECK_OK/);
   }
-  assert.equal(existsSync(join(root, 'server', 'internal', 'platform', 'webassets', 'dist')), false);
+  const after = existsSync(assetManifest)
+    ? readFileSync(assetManifest, 'utf8')
+    : null;
+  assert.equal(after, before);
 });
 
 test('build orchestrator rejects unknown modes and UI names', () => {

@@ -152,6 +152,8 @@ __debug_bin*
 /install/.install-backup/
 /install/.dist-staging-*/
 /install/dist/
+/server/internal/platform/webassets/.dist-staging-*/
+/server/internal/platform/webassets/.dist-backup-*/
 
 # Local Docker overrides and volumes
 compose.override.yaml

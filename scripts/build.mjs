@@ -79,7 +79,7 @@ function parseArgs(argv) {
   if (options.output && options.mode !== 'api_only') {
     fail('--output is only valid for api_only mode');
   }
-  if (!options.check && !['api_only', 'standalone'].includes(options.mode)) {
+  if (!options.check && !['api_only', 'embedded', 'standalone'].includes(options.mode)) {
     fail(`build execution is not available yet for mode: ${options.mode}`);
   }
 
@@ -185,7 +185,7 @@ function fileManifest(directory) {
   return files;
 }
 
-function publishDirectory(staging, output, backup) {
+function beginDirectorySwap(staging, output, backup) {
   rmSync(backup, { force: true, recursive: true });
   let previousMoved = false;
   try {
@@ -194,12 +194,37 @@ function publishDirectory(staging, output, backup) {
       previousMoved = true;
     }
     renameSync(staging, output);
-    rmSync(backup, { force: true, recursive: true });
   } catch (error) {
     if (!existsSync(output) && previousMoved && existsSync(backup)) {
       renameSync(backup, output);
     }
     throw error;
+  }
+  return previousMoved;
+}
+
+function rollbackDirectorySwap(output, backup, previousMoved) {
+  rmSync(output, { force: true, recursive: true });
+  if (previousMoved && existsSync(backup)) {
+    renameSync(backup, output);
+  } else {
+    rmSync(backup, { force: true, recursive: true });
+  }
+}
+
+function publishDirectory(staging, output, backup) {
+  beginDirectorySwap(staging, output, backup);
+  rmSync(backup, { force: true, recursive: true });
+}
+
+function selectedUis(ui) {
+  return ui === 'all' ? ['antd', 'ele', 'naive'] : [ui];
+}
+
+function buildFrontends(ui) {
+  runCommand(process.execPath, ['install/scripts/build.mjs']);
+  for (const selected of selectedUis(ui)) {
+    runCommand('pnpm', ['--dir', 'admin', 'run', `build:${selected}`]);
   }
 }
 
@@ -214,13 +239,12 @@ function runStandaloneBuild(ui) {
   mkdirSync(staging, { recursive: true });
 
   try {
-    runCommand(process.execPath, ['install/scripts/build.mjs']);
-    runCommand('pnpm', ['--dir', 'admin', 'run', `build:${ui}`]);
+    buildFrontends(ui);
 
     const uiDist = join(root, 'admin', 'apps', `web-${ui}`, 'dist');
     const installDist = join(root, 'install', 'dist');
     if (!statSync(uiDist).isDirectory() || !statSync(installDist).isDirectory()) {
-      fail('frontend build did not produce the expected dist directories', 1);
+      throw buildError('frontend build did not produce the expected dist directories');
     }
     cpSync(uiDist, join(staging, 'html'), { recursive: true });
     cpSync(installDist, join(staging, 'html', 'install'), { recursive: true });
@@ -245,6 +269,87 @@ function runStandaloneBuild(ui) {
   }
 
   process.stdout.write(`BUILD_ARTIFACT=${portablePath(relative(root, output))}\n`);
+  process.stdout.write('BUILD_MANIFEST=artifact-manifest.json\n');
+  process.stdout.write('BUILD_OK\n');
+}
+
+function runEmbeddedBuild(ui) {
+  const buildRoot = join(root, '.runtime', 'build');
+  const artifactOutput = join(buildRoot, 'embedded');
+  const artifactStaging = join(buildRoot, `.embedded-staging-${process.pid}`);
+  const artifactBackup = join(buildRoot, `.embedded-backup-${process.pid}`);
+  const assetRoot = join(root, 'server', 'internal', 'platform', 'webassets');
+  const assetOutput = join(assetRoot, 'dist');
+  const assetStaging = join(assetRoot, `.dist-staging-${process.pid}`);
+  const assetBackup = join(assetRoot, `.dist-backup-${process.pid}`);
+  const binaryName = process.platform === 'win32' ? 'server-api.exe' : 'server-api';
+  let assetsPublished = false;
+  let previousAssetsMoved = false;
+
+  rmSync(artifactStaging, { force: true, recursive: true });
+  rmSync(assetStaging, { force: true, recursive: true });
+  mkdirSync(artifactStaging, { recursive: true });
+  mkdirSync(assetStaging, { recursive: true });
+
+  try {
+    buildFrontends(ui);
+    const installDist = join(root, 'install', 'dist');
+    if (!statSync(installDist).isDirectory()) {
+      throw buildError('installer build did not produce its dist directory');
+    }
+    cpSync(installDist, join(assetStaging, 'install'), { recursive: true });
+
+    for (const selected of selectedUis(ui)) {
+      const uiDist = join(root, 'admin', 'apps', `web-${selected}`, 'dist');
+      if (!statSync(uiDist).isDirectory()) {
+        throw buildError(`management UI build did not produce dist: ${selected}`);
+      }
+      cpSync(uiDist, join(assetStaging, 'admin', selected), { recursive: true });
+    }
+
+    const assetManifest = {
+      schema: 1,
+      mode: 'embedded',
+      ui,
+      files: fileManifest(assetStaging),
+    };
+    writeFileSync(
+      join(assetStaging, 'asset-manifest.json'),
+      `${JSON.stringify(assetManifest, null, 2)}\n`,
+      { mode: 0o644 },
+    );
+
+    previousAssetsMoved = beginDirectorySwap(assetStaging, assetOutput, assetBackup);
+    assetsPublished = true;
+    runGoBuild(join(artifactStaging, binaryName), ['embed']);
+    cpSync(
+      join(assetOutput, 'asset-manifest.json'),
+      join(artifactStaging, 'asset-manifest.json'),
+    );
+    const artifactManifest = {
+      schema: 1,
+      mode: 'embedded',
+      ui,
+      files: fileManifest(artifactStaging),
+    };
+    writeFileSync(
+      join(artifactStaging, 'artifact-manifest.json'),
+      `${JSON.stringify(artifactManifest, null, 2)}\n`,
+      { mode: 0o644 },
+    );
+    publishDirectory(artifactStaging, artifactOutput, artifactBackup);
+    rmSync(assetBackup, { force: true, recursive: true });
+  } catch (error) {
+    rmSync(artifactStaging, { force: true, recursive: true });
+    rmSync(assetStaging, { force: true, recursive: true });
+    if (assetsPublished) {
+      rollbackDirectorySwap(assetOutput, assetBackup, previousAssetsMoved);
+    }
+    throw error;
+  }
+
+  process.stdout.write(`BUILD_ARTIFACT=${portablePath(relative(root, artifactOutput))}\n`);
+  process.stdout.write(`BUILD_ASSETS=${portablePath(relative(root, assetOutput))}\n`);
   process.stdout.write('BUILD_MANIFEST=artifact-manifest.json\n');
   process.stdout.write('BUILD_OK\n');
 }
@@ -289,10 +394,7 @@ function validate(options) {
       fail('required command is not executable: pnpm', 1);
     }
 
-    const selectedUis = options.ui === 'all'
-      ? ['antd', 'ele', 'naive']
-      : [options.ui];
-    for (const ui of selectedUis) {
+    for (const ui of selectedUis(options.ui)) {
       requirePath(`admin/apps/web-${ui}/package.json`);
     }
   }
@@ -310,6 +412,8 @@ try {
   } else {
     if (options.mode === 'api_only') {
       runApiOnlyBuild(options.output);
+    } else if (options.mode === 'embedded') {
+      runEmbeddedBuild(options.ui);
     } else {
       runStandaloneBuild(options.ui);
     }

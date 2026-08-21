@@ -28,6 +28,8 @@ test('installation shell is independent and exposes an accessible status region'
   assert.match(html, /id="redis-form"/);
   assert.match(html, /autocomplete="new-password"/);
   assert.match(html, /aria-current="step"/);
+  assert.match(html, /href="\/install\/styles\.css"/);
+  assert.match(html, /src="\/install\/app\.js"/);
   assert.match(script, /\/api\/system\/install\/v1\/status/);
   assert.match(script, /\/api\/system\/install\/v1\/capabilities/);
   assert.match(script, /\/api\/system\/install\/v1\/plan/);
