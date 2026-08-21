@@ -44,6 +44,7 @@ func TestEnvironmentInstallerPublishesAndRollsBackPrivateRootEnv(t *testing.T) {
 		`APP_UI_ACTIVE="naive"`, `APP_UI_MODE="embedded"`, `DATABASE_DRIVER="postgres"`,
 		`DATABASE_DSN="postgres://app-user:database-secret@127.0.0.1:5432/app?sslmode=disable"`,
 		`REDIS_PASSWORD="redis-secret"`, `AUTH_ENABLED="true"`, `INSTALL_STATE_DIR="../install"`,
+		`AUTH_ACCESS_TTL="30m"`,
 	} {
 		if !strings.Contains(string(contents), required) {
 			t.Fatalf(".env missing required setting %q", required)

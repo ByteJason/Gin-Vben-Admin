@@ -26,6 +26,13 @@ func TestDefaultIsUsable(t *testing.T) {
 	}
 }
 
+func TestDefaultAuthTokenTTLsMatchV010Contract(t *testing.T) {
+	cfg := Default()
+	if cfg.Auth.AccessTTL != 30*time.Minute || cfg.Auth.RefreshTTL != 7*24*time.Hour {
+		t.Fatalf("default auth TTLs = access:%s refresh:%s, want 30m/168h", cfg.Auth.AccessTTL, cfg.Auth.RefreshTTL)
+	}
+}
+
 func TestTenantConfigurationLoadsAndValidates(t *testing.T) {
 	path := writeConfigFile(t, `
 tenant:

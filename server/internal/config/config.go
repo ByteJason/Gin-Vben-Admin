@@ -220,7 +220,7 @@ func Default() Config {
 		Auth: AuthConfig{
 			Issuer:               "gin-vben-admin",
 			Audience:             "admin",
-			AccessTTL:            15 * time.Minute,
+			AccessTTL:            30 * time.Minute,
 			RefreshTTL:           7 * 24 * time.Hour,
 			RefreshCookieName:    "refresh_token",
 			BcryptCost:           12,

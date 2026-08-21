@@ -77,7 +77,7 @@ auth:
   jwt_secret: ""
   issuer: gin-vben-admin
   audience: admin
-  access_ttl: 15m
+  access_ttl: 30m
   refresh_ttl: 168h
   refresh_cookie_name: refresh_token
   secure_cookie: false

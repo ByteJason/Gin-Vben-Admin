@@ -68,7 +68,7 @@ func (s *EnvironmentInstaller) Publish(ctx context.Context, request installer.Ap
 	values := map[string]string{
 		"APP_UI_ACTIVE":                request.SelectedUI,
 		"APP_UI_MODE":                  request.Mode,
-		"AUTH_ACCESS_TTL":              "15m",
+		"AUTH_ACCESS_TTL":              "30m",
 		"AUTH_AUDIENCE":                "admin",
 		"AUTH_BCRYPT_COST":             "12",
 		"AUTH_ENABLED":                 "true",
