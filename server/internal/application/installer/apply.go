@@ -3,6 +3,7 @@ package installer
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +16,8 @@ var (
 	ErrApplyBusy        = errors.New("installation is already running")
 	ErrInvalidApply     = errors.New("installation request is invalid")
 	ErrPreflightFailed  = errors.New("installation preflight failed")
+	ErrApplyFailed      = errors.New("installation apply failed")
+	ErrApplyRollback    = errors.New("installation rollback failed")
 )
 
 type AdminAccount struct {
@@ -70,6 +73,7 @@ type EnvironmentReceipt struct {
 type ApplyMarkerStore interface {
 	Load(context.Context) (installstate.Marker, bool, error)
 	Create(context.Context, installstate.Marker) error
+	Remove(context.Context, installstate.Marker) error
 }
 
 type ApplyDependencyChecker interface {
@@ -83,14 +87,17 @@ type SchemaInstaller interface {
 
 type AssetInstaller interface {
 	Prepare(context.Context, Plan) (AssetReceipt, error)
+	Rollback(context.Context, AssetReceipt) error
 }
 
 type IdentityInstaller interface {
 	Initialize(context.Context, DatabaseConnection, AdminAccount) (IdentityReceipt, error)
+	Rollback(context.Context, IdentityReceipt) error
 }
 
 type EnvironmentInstaller interface {
 	Publish(context.Context, ApplyRequest, AssetReceipt) (EnvironmentReceipt, error)
+	Rollback(context.Context, EnvironmentReceipt) error
 }
 
 type ApplyService struct {
@@ -163,15 +170,23 @@ func (s *ApplyService) Apply(ctx context.Context, request ApplyRequest) (ApplyRe
 	steps = appendCompleted(steps, "schema")
 	assetReceipt, err := s.assets.Prepare(ctx, plan)
 	if err != nil || !validDigest(assetReceipt.ArtifactHash) || !validDigest(assetReceipt.ManifestHash) {
-		return ApplyResult{}, errors.New("prepare installation assets")
+		var rollbackErr error
+		if assetReceipt != (AssetReceipt{}) {
+			rollbackErr = s.rollback(ctx, nil, nil, &assetReceipt)
+		}
+		return ApplyResult{}, applyFailure("assets", rollbackErr)
 	}
 	steps = appendCompleted(steps, "assets")
-	if _, err := s.identity.Initialize(ctx, request.Database, request.Admin); err != nil {
-		return ApplyResult{}, errors.New("initialize administrator")
+	identityReceipt, err := s.identity.Initialize(ctx, request.Database, request.Admin)
+	if err != nil {
+		rollbackErr := s.rollback(ctx, nil, receiptPointer(identityReceipt), &assetReceipt)
+		return ApplyResult{}, applyFailure("identity", rollbackErr)
 	}
 	steps = appendCompleted(steps, "identity")
-	if _, err := s.environment.Publish(ctx, request, assetReceipt); err != nil {
-		return ApplyResult{}, errors.New("publish installation configuration")
+	environmentReceipt, err := s.environment.Publish(ctx, request, assetReceipt)
+	if err != nil {
+		rollbackErr := s.rollback(ctx, receiptPointer(environmentReceipt), &identityReceipt, &assetReceipt)
+		return ApplyResult{}, applyFailure("environment", rollbackErr)
 	}
 	steps = appendCompleted(steps, "environment")
 
@@ -186,13 +201,58 @@ func (s *ApplyService) Apply(ctx context.Context, request ApplyRequest) (ApplyRe
 		ManifestHash:     assetReceipt.ManifestHash,
 	}
 	if err := marker.Validate(); err != nil {
-		return ApplyResult{}, errors.New("validate installation marker")
+		rollbackErr := s.rollback(ctx, &environmentReceipt, &identityReceipt, &assetReceipt)
+		return ApplyResult{}, applyFailure("marker", rollbackErr)
 	}
 	if err := s.markers.Create(ctx, marker); err != nil {
-		return ApplyResult{}, errors.New("create installation lock")
+		rollbackErr := errors.Join(s.rollbackMarker(marker), s.rollback(ctx, &environmentReceipt, &identityReceipt, &assetReceipt))
+		return ApplyResult{}, applyFailure("lock", rollbackErr)
 	}
 	steps = appendCompleted(steps, "lock")
 	return ApplyResult{State: StateInstalled, SelectedUI: ui, Mode: mode, InstalledAt: installedAt, Steps: steps}, nil
+}
+
+func (s *ApplyService) rollbackMarker(marker installstate.Marker) error {
+	rollbackCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return s.markers.Remove(rollbackCtx, marker)
+}
+
+func (s *ApplyService) rollback(_ context.Context, environment *EnvironmentReceipt, identity *IdentityReceipt, assets *AssetReceipt) error {
+	rollbackCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var rollbackErrors []error
+	if environment != nil && *environment != (EnvironmentReceipt{}) {
+		if err := s.environment.Rollback(rollbackCtx, *environment); err != nil {
+			rollbackErrors = append(rollbackErrors, ErrApplyRollback)
+		}
+	}
+	if identity != nil && *identity != (IdentityReceipt{}) {
+		if err := s.identity.Rollback(rollbackCtx, *identity); err != nil {
+			rollbackErrors = append(rollbackErrors, ErrApplyRollback)
+		}
+	}
+	if assets != nil && *assets != (AssetReceipt{}) {
+		if err := s.assets.Rollback(rollbackCtx, *assets); err != nil {
+			rollbackErrors = append(rollbackErrors, ErrApplyRollback)
+		}
+	}
+	return errors.Join(rollbackErrors...)
+}
+
+func applyFailure(stage string, rollbackErr error) error {
+	if rollbackErr != nil {
+		return fmt.Errorf("%w at %s: %w", ErrApplyFailed, stage, ErrApplyRollback)
+	}
+	return fmt.Errorf("%w at %s", ErrApplyFailed, stage)
+}
+
+func receiptPointer[T comparable](receipt T) *T {
+	var zero T
+	if receipt == zero {
+		return nil
+	}
+	return &receipt
 }
 
 func validateApplyRequest(request ApplyRequest) (installstate.UI, installstate.Mode, error) {

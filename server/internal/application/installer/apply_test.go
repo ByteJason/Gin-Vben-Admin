@@ -2,6 +2,7 @@ package installer
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -58,9 +59,49 @@ func TestApplyServiceCompletesInstallationInSafeOrder(t *testing.T) {
 	}
 }
 
+func TestApplyServiceRollsBackCompletedSideEffectsInReverseOrder(t *testing.T) {
+	t.Parallel()
+
+	calls := make([]string, 0, 12)
+	markers := &applyMarkerStub{calls: &calls, createErr: errors.New("marker fixture failure")}
+	planner := &applyPlanStub{calls: &calls, plan: Plan{
+		SelectedUI: installstate.UIAntd, Mode: installstate.ModeEmbedded,
+		CanCleanup: true, CanBuild: true, CanWriteEnv: true,
+	}}
+	service := NewApplyService(
+		markers,
+		planner,
+		&applyDependencyStub{calls: &calls},
+		&applySchemaStub{calls: &calls},
+		&applyAssetStub{calls: &calls, receipt: AssetReceipt{ArtifactHash: strings.Repeat("a", 64), ManifestHash: strings.Repeat("b", 64)}},
+		&applyIdentityStub{calls: &calls},
+		&applyEnvironmentStub{calls: &calls},
+		func() time.Time { return time.Date(2026, time.August, 21, 14, 0, 0, 0, time.UTC) },
+	)
+
+	_, err := service.Apply(context.Background(), validApplyRequest())
+	if !errors.Is(err, ErrApplyFailed) {
+		t.Fatalf("Apply() error = %v, want ErrApplyFailed", err)
+	}
+	wantSuffix := []string{"marker.create", "marker.rollback", "environment.rollback", "identity.rollback", "assets.rollback"}
+	if len(calls) < len(wantSuffix) || !reflect.DeepEqual(calls[len(calls)-len(wantSuffix):], wantSuffix) {
+		t.Fatalf("call suffix = %#v, want %#v; all=%#v", calls, wantSuffix, calls)
+	}
+}
+
+func validApplyRequest() ApplyRequest {
+	return ApplyRequest{
+		SelectedUI: "antd", Mode: "embedded", ConfirmCleanup: true,
+		Database: DatabaseConnection{Driver: "mysql", Mode: "single", DSN: "user:secret@tcp(db:3306)/app"},
+		Redis:    RedisConnection{Mode: "single", Addr: "redis:6379"},
+		Admin:    AdminAccount{Username: "admin", Password: "initial-password-123"},
+	}
+}
+
 type applyMarkerStub struct {
-	calls   *[]string
-	created installstate.Marker
+	calls     *[]string
+	created   installstate.Marker
+	createErr error
 }
 
 func (s *applyMarkerStub) Load(context.Context) (installstate.Marker, bool, error) {
@@ -71,6 +112,11 @@ func (s *applyMarkerStub) Load(context.Context) (installstate.Marker, bool, erro
 func (s *applyMarkerStub) Create(_ context.Context, marker installstate.Marker) error {
 	*s.calls = append(*s.calls, "marker.create")
 	s.created = marker
+	return s.createErr
+}
+
+func (s *applyMarkerStub) Remove(context.Context, installstate.Marker) error {
+	*s.calls = append(*s.calls, "marker.rollback")
 	return nil
 }
 
@@ -113,6 +159,11 @@ func (s *applyAssetStub) Prepare(context.Context, Plan) (AssetReceipt, error) {
 	return s.receipt, nil
 }
 
+func (s *applyAssetStub) Rollback(context.Context, AssetReceipt) error {
+	*s.calls = append(*s.calls, "assets.rollback")
+	return nil
+}
+
 type applyIdentityStub struct{ calls *[]string }
 
 func (s *applyIdentityStub) Initialize(context.Context, DatabaseConnection, AdminAccount) (IdentityReceipt, error) {
@@ -120,9 +171,19 @@ func (s *applyIdentityStub) Initialize(context.Context, DatabaseConnection, Admi
 	return IdentityReceipt{Reference: "installation-1"}, nil
 }
 
+func (s *applyIdentityStub) Rollback(context.Context, IdentityReceipt) error {
+	*s.calls = append(*s.calls, "identity.rollback")
+	return nil
+}
+
 type applyEnvironmentStub struct{ calls *[]string }
 
 func (s *applyEnvironmentStub) Publish(context.Context, ApplyRequest, AssetReceipt) (EnvironmentReceipt, error) {
 	*s.calls = append(*s.calls, "environment.publish")
 	return EnvironmentReceipt{Digest: strings.Repeat("c", 64)}, nil
+}
+
+func (s *applyEnvironmentStub) Rollback(context.Context, EnvironmentReceipt) error {
+	*s.calls = append(*s.calls, "environment.rollback")
+	return nil
 }
