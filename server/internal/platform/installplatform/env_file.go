@@ -7,34 +7,45 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
-	"unicode"
 )
 
 var (
-	ErrEnvironmentExists = errors.New("environment file already exists")
-	ErrEnvironmentBusy   = errors.New("environment file is being written")
+	ErrEnvironmentExists  = errors.New("environment file already exists")
+	ErrEnvironmentBusy    = errors.New("environment file is being written")
+	ErrEnvironmentChanged = errors.New("environment file changed after installation write")
 )
+
+const maxEnvironmentBytes = 1 << 20
 
 // EnvWriteReceipt is a credential-free summary of a published environment
 // file. It is safe to persist in an installation transaction manifest.
 type EnvWriteReceipt struct {
-	Digest   string
-	Replaced bool
+	Digest         string
+	PreviousDigest string
+	Replaced       bool
+	targetPath     string
+	backupPath     string
 }
 
 // AtomicEnvStore publishes the root environment file without exposing its
 // values through return types or logs.
 type AtomicEnvStore struct {
-	path string
+	path      string
+	backupDir string
 }
 
-func NewAtomicEnvStore(path string) *AtomicEnvStore {
-	return &AtomicEnvStore{path: filepath.Clean(path)}
+func NewAtomicEnvStore(path string, backupDir ...string) *AtomicEnvStore {
+	store := &AtomicEnvStore{path: filepath.Clean(path)}
+	if len(backupDir) > 0 {
+		store.backupDir = filepath.Clean(backupDir[0])
+	}
+	return store
 }
 
 // Write creates a private dotenv file using an fsync + atomic rename sequence.
@@ -51,12 +62,6 @@ func (s *AtomicEnvStore) Write(ctx context.Context, values map[string]string) (E
 	if err != nil {
 		return EnvWriteReceipt{}, err
 	}
-	if _, err := os.Lstat(s.path); err == nil {
-		return EnvWriteReceipt{}, ErrEnvironmentExists
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return EnvWriteReceipt{}, fmt.Errorf("inspect environment file: %w", err)
-	}
-
 	dir := filepath.Dir(s.path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return EnvWriteReceipt{}, fmt.Errorf("create environment directory: %w", err)
@@ -75,15 +80,118 @@ func (s *AtomicEnvStore) Write(ctx context.Context, values map[string]string) (E
 	}
 	defer os.Remove(lockPath)
 
-	if _, err := os.Lstat(s.path); err == nil {
+	previous, exists, err := readRegularFile(s.path, maxEnvironmentBytes)
+	if err != nil {
+		return EnvWriteReceipt{}, fmt.Errorf("inspect environment file: %w", err)
+	}
+	if exists && (s.backupDir == "" || s.backupDir == ".") {
 		return EnvWriteReceipt{}, ErrEnvironmentExists
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return EnvWriteReceipt{}, fmt.Errorf("recheck environment file: %w", err)
 	}
 
-	temp, err := os.CreateTemp(dir, filepath.Base(s.path)+".tmp-*")
+	var backupPath, previousDigest string
+	if exists {
+		backupPath, previousDigest, err = createPrivateBackup(s.backupDir, previous)
+		if err != nil {
+			return EnvWriteReceipt{}, err
+		}
+	}
+	if err := contextError(ctx); err != nil {
+		return EnvWriteReceipt{}, err
+	}
+	if err := publishPrivateFile(s.path, contents); err != nil {
+		return EnvWriteReceipt{}, err
+	}
+	digest := sha256.Sum256(contents)
+	return EnvWriteReceipt{
+		Digest:         hex.EncodeToString(digest[:]),
+		PreviousDigest: previousDigest,
+		Replaced:       exists,
+		targetPath:     s.path,
+		backupPath:     backupPath,
+	}, nil
+}
+
+// Rollback restores the pre-installation file, or removes a file created by
+// this transaction. A digest mismatch prevents overwriting later user edits.
+func (s *AtomicEnvStore) Rollback(ctx context.Context, receipt EnvWriteReceipt) error {
+	if err := contextError(ctx); err != nil {
+		return err
+	}
+	if s == nil || receipt.targetPath != s.path || receipt.Digest == "" {
+		return errors.New("environment rollback receipt is invalid")
+	}
+
+	lockPath := s.path + ".install.lock"
+	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		return ErrEnvironmentBusy
+	}
 	if err != nil {
-		return EnvWriteReceipt{}, fmt.Errorf("create temporary environment file: %w", err)
+		return fmt.Errorf("acquire environment rollback lock: %w", err)
+	}
+	if err := lock.Close(); err != nil {
+		_ = os.Remove(lockPath)
+		return fmt.Errorf("close environment rollback lock: %w", err)
+	}
+	defer os.Remove(lockPath)
+
+	current, exists, err := readRegularFile(s.path, maxEnvironmentBytes)
+	if err != nil || !exists || digestBytes(current) != receipt.Digest {
+		return ErrEnvironmentChanged
+	}
+	if err := contextError(ctx); err != nil {
+		return err
+	}
+	if !receipt.Replaced {
+		if err := os.Remove(s.path); err != nil {
+			return fmt.Errorf("remove installed environment file: %w", err)
+		}
+		return syncDirectory(filepath.Dir(s.path))
+	}
+
+	backup, exists, err := readRegularFile(receipt.backupPath, maxEnvironmentBytes)
+	if err != nil || !exists || digestBytes(backup) != receipt.PreviousDigest {
+		return errors.New("environment backup is unavailable")
+	}
+	if err := publishPrivateFile(s.path, backup); err != nil {
+		return fmt.Errorf("restore environment file: %w", err)
+	}
+	if err := os.Remove(receipt.backupPath); err != nil {
+		return fmt.Errorf("remove environment backup: %w", err)
+	}
+	return syncDirectory(filepath.Dir(receipt.backupPath))
+}
+
+func createPrivateBackup(dir string, contents []byte) (string, string, error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", "", fmt.Errorf("create environment backup directory: %w", err)
+	}
+	file, err := os.CreateTemp(dir, ".env.previous-*")
+	if err != nil {
+		return "", "", fmt.Errorf("create environment backup: %w", err)
+	}
+	path := file.Name()
+	remove := true
+	defer func() {
+		if remove {
+			_ = os.Remove(path)
+		}
+	}()
+	if err := writeAndSync(file, contents); err != nil {
+		return "", "", fmt.Errorf("write environment backup: %w", err)
+	}
+	if err := syncDirectory(dir); err != nil {
+		return "", "", fmt.Errorf("sync environment backup directory: %w", err)
+	}
+	remove = false
+	return path, digestBytes(contents), nil
+}
+
+func publishPrivateFile(path string, contents []byte) error {
+	dir := filepath.Dir(path)
+	temp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temporary environment file: %w", err)
 	}
 	tempPath := temp.Name()
 	removeTemp := true
@@ -92,39 +200,79 @@ func (s *AtomicEnvStore) Write(ctx context.Context, values map[string]string) (E
 			_ = os.Remove(tempPath)
 		}
 	}()
-	if err := temp.Chmod(0o600); err != nil {
-		_ = temp.Close()
-		return EnvWriteReceipt{}, fmt.Errorf("set environment file permissions: %w", err)
+	if err := writeAndSync(temp, contents); err != nil {
+		return fmt.Errorf("write temporary environment file: %w", err)
 	}
-	writer := bufio.NewWriter(temp)
-	if _, err := writer.Write(contents); err != nil {
-		_ = temp.Close()
-		return EnvWriteReceipt{}, fmt.Errorf("write environment file: %w", err)
-	}
-	if err := writer.Flush(); err != nil {
-		_ = temp.Close()
-		return EnvWriteReceipt{}, fmt.Errorf("flush environment file: %w", err)
-	}
-	if err := temp.Sync(); err != nil {
-		_ = temp.Close()
-		return EnvWriteReceipt{}, fmt.Errorf("sync environment file: %w", err)
-	}
-	if err := temp.Close(); err != nil {
-		return EnvWriteReceipt{}, fmt.Errorf("close environment file: %w", err)
-	}
-	if err := contextError(ctx); err != nil {
-		return EnvWriteReceipt{}, err
-	}
-	if err := os.Rename(tempPath, s.path); err != nil {
-		return EnvWriteReceipt{}, fmt.Errorf("publish environment file: %w", err)
+	if err := os.Rename(tempPath, path); err != nil {
+		return fmt.Errorf("publish environment file: %w", err)
 	}
 	removeTemp = false
 	if err := syncDirectory(dir); err != nil {
-		return EnvWriteReceipt{}, fmt.Errorf("sync environment directory: %w", err)
+		return fmt.Errorf("sync environment directory: %w", err)
 	}
+	return nil
+}
 
+func writeAndSync(file *os.File, contents []byte) error {
+	if err := file.Chmod(0o600); err != nil {
+		_ = file.Close()
+		return err
+	}
+	writer := bufio.NewWriter(file)
+	if _, err := writer.Write(contents); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := writer.Flush(); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		return err
+	}
+	return file.Close()
+}
+
+func readRegularFile(path string, limit int64) ([]byte, bool, error) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, false, errors.New("path is not a regular file")
+	}
+	if info.Size() > limit {
+		return nil, false, errors.New("file exceeds the supported size")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, false, err
+	}
+	defer file.Close()
+	openedInfo, err := file.Stat()
+	if err != nil {
+		return nil, false, err
+	}
+	if !openedInfo.Mode().IsRegular() || !os.SameFile(info, openedInfo) {
+		return nil, false, errors.New("file changed while it was opened")
+	}
+	contents, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		return nil, false, err
+	}
+	if int64(len(contents)) > limit {
+		return nil, false, errors.New("file exceeds the supported size")
+	}
+	return contents, true, nil
+}
+
+func digestBytes(contents []byte) string {
 	digest := sha256.Sum256(contents)
-	return EnvWriteReceipt{Digest: hex.EncodeToString(digest[:])}, nil
+	return hex.EncodeToString(digest[:])
 }
 
 func renderEnvironment(values map[string]string) ([]byte, error) {
@@ -157,8 +305,9 @@ func validEnvironmentKey(key string) bool {
 	if key == "" || key[0] < 'A' || key[0] > 'Z' {
 		return false
 	}
-	for _, character := range key {
-		if character == '_' || unicode.IsDigit(character) || (character >= 'A' && character <= 'Z') {
+	for index := 0; index < len(key); index++ {
+		character := key[index]
+		if character == '_' || (character >= '0' && character <= '9') || (character >= 'A' && character <= 'Z') {
 			continue
 		}
 		return false

@@ -65,3 +65,47 @@ func TestAtomicEnvStoreWritesDeterministicPrivateConfiguration(t *testing.T) {
 		t.Fatalf("temporary files remain after write: %v", matches)
 	}
 }
+
+func TestAtomicEnvStoreBacksUpReplacementAndRollsBack(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	path := filepath.Join(root, ".env")
+	backupDir := filepath.Join(root, "install", ".install-backup", "transaction-1")
+	original := []byte("SERVER_ADDR=\"127.0.0.1:8080\"\n")
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatalf("WriteFile(original) error = %v", err)
+	}
+
+	store := installplatform.NewAtomicEnvStore(path, backupDir)
+	receipt, err := store.Write(context.Background(), map[string]string{
+		"SERVER_ADDR": "0.0.0.0:8080",
+	})
+	if err != nil {
+		t.Fatalf("Write() replacement error = %v", err)
+	}
+	if !receipt.Replaced {
+		t.Fatal("receipt Replaced = false, want true")
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) == string(original) {
+		t.Fatalf("replacement was not published: contents=%q error=%v", got, err)
+	}
+
+	if err := store.Rollback(context.Background(), receipt); err != nil {
+		t.Fatalf("Rollback() error = %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(restored) error = %v", err)
+	}
+	if string(got) != string(original) {
+		t.Fatalf("restored contents = %q, want %q", got, original)
+	}
+	entries, err := os.ReadDir(backupDir)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("ReadDir(backup) error = %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("backup artifacts remain after rollback: %v", entries)
+	}
+}
