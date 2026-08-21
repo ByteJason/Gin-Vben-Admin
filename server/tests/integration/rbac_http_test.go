@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"example.com/gin-vben-admin/server/internal/bootstrap"
 	"example.com/gin-vben-admin/server/internal/config"
 	domain "example.com/gin-vben-admin/server/internal/domain/iam"
+	"example.com/gin-vben-admin/server/internal/domain/tenant"
 	"example.com/gin-vben-admin/server/internal/platform/authplatform"
 	"example.com/gin-vben-admin/server/internal/platform/cache/redis"
 	"example.com/gin-vben-admin/server/internal/platform/iamplatform"
@@ -51,6 +53,10 @@ func testRBACHTTP(t *testing.T, driver, dsn, redisAddr string) {
 	}
 	cfg := config.Default()
 	cfg.Server.Addr = "127.0.0.1:0"
+	cfg.Install.StateDir = t.TempDir()
+	if err := os.WriteFile(filepath.Join(cfg.Install.StateDir, ".installed"), []byte(`{"schema_version":1,"installer_version":"test","installed_at":"2026-01-01T00:00:00Z","selected_ui":"antd","mode":"api_only","artifact_hash":"0000000000000000000000000000000000000000000000000000000000000000","manifest_hash":"0000000000000000000000000000000000000000000000000000000000000000"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	cfg.Database.Enabled = true
 	cfg.Database.Driver = driver
 	cfg.Database.Mode = "single"
@@ -93,13 +99,14 @@ func testRBACHTTP(t *testing.T, driver, dsn, redisAddr string) {
 		t.Fatal(err)
 	}
 	persistence := iamplatform.NewGORMStore(app.Database())
-	if err := persistence.SaveRole(ctx, iamRole(roleID)); err != nil {
+	scopeCtx := tenant.WithContext(ctx, tenant.Context{TenantID: "default"})
+	if err := persistence.SaveRole(scopeCtx, iamRole(roleID)); err != nil {
 		t.Fatal(err)
 	}
-	if err := persistence.SaveUser(ctx, iamUser(userID, username, roleID)); err != nil {
+	if err := persistence.SaveUser(scopeCtx, iamUser(userID, username, roleID)); err != nil {
 		t.Fatal(err)
 	}
-	if err := persistence.SavePolicy(ctx, iamPolicy(roleID)); err != nil {
+	if err := persistence.SavePolicy(scopeCtx, iamPolicy(roleID)); err != nil {
 		t.Fatal(err)
 	}
 

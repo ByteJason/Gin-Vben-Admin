@@ -10,6 +10,7 @@ import (
 	"time"
 
 	domain "example.com/gin-vben-admin/server/internal/domain/iam"
+	"example.com/gin-vben-admin/server/internal/domain/tenant"
 )
 
 var (
@@ -311,6 +312,7 @@ func (s *Service) Authorize(ctx context.Context, subject domain.Subject, request
 	if s == nil || s.Authorizer == nil {
 		return false, domain.ErrAccessDenied
 	}
+	subject = subjectWithTenant(ctx, subject)
 	return s.Authorizer.Authorize(ctx, subject, request)
 }
 
@@ -318,7 +320,18 @@ func (s *Service) ResolveDataScope(ctx context.Context, subject domain.Subject, 
 	if s == nil || s.Scopes == nil {
 		return domain.DataScope{}, domain.ErrDataScopeNotFound
 	}
+	subject = subjectWithTenant(ctx, subject)
 	return s.Scopes.Resolve(ctx, subject, resource)
+}
+
+func subjectWithTenant(ctx context.Context, subject domain.Subject) domain.Subject {
+	if strings.TrimSpace(subject.Domain) != "" {
+		return subject
+	}
+	if scope, err := tenant.RequireContext(ctx); err == nil {
+		subject.Domain = scope.TenantID
+	}
+	return subject
 }
 
 func (s *Service) ListUsers(ctx context.Context) ([]domain.User, error) {

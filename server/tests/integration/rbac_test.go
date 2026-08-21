@@ -9,6 +9,7 @@ import (
 
 	iamapp "example.com/gin-vben-admin/server/internal/application/iam"
 	domain "example.com/gin-vben-admin/server/internal/domain/iam"
+	"example.com/gin-vben-admin/server/internal/domain/tenant"
 	"example.com/gin-vben-admin/server/internal/platform/iamplatform"
 	"example.com/gin-vben-admin/server/internal/platform/migration"
 	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
@@ -47,6 +48,7 @@ func testRBACPersistence(t *testing.T, driver, dsn string) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	persistence := iamplatform.NewGORMStore(store)
+	scopeCtx := tenant.WithContext(ctx, tenant.Context{TenantID: "default"})
 
 	suffix := fmt.Sprintf("%s_%d", driver, time.Now().UnixNano())
 	username := "it_rbac_" + suffix
@@ -71,26 +73,26 @@ func testRBACPersistence(t *testing.T, driver, dsn string) {
 		t.Fatal(err)
 	}
 	user := domain.User{ID: fmt.Sprint(userID), Username: username, Active: true, RoleIDs: []string{roleID}}
-	if err := persistence.SaveRole(ctx, domain.Role{ID: roleID, Name: "Integration Reader", Active: true, DataScope: domain.ScopeOrg}); err != nil {
+	if err := persistence.SaveRole(scopeCtx, domain.Role{ID: roleID, Name: "Integration Reader", Active: true, DataScope: domain.ScopeOrg}); err != nil {
 		t.Fatal(err)
 	}
-	if err := persistence.SaveUser(ctx, user); err != nil {
+	if err := persistence.SaveUser(scopeCtx, user); err != nil {
 		t.Fatal(err)
 	}
-	if err := persistence.SavePolicy(ctx, domain.Policy{RoleID: roleID, Method: "GET", Path: "/api/admin/v1/iam/users", Effect: domain.EffectAllow}); err != nil {
+	if err := persistence.SavePolicy(scopeCtx, domain.Policy{RoleID: roleID, Method: "GET", Path: "/api/admin/v1/iam/users", Effect: domain.EffectAllow}); err != nil {
 		t.Fatal(err)
 	}
-	if err := persistence.SaveDataScope(ctx, domain.DataScope{RoleID: roleID, Resource: "users", Scope: domain.ScopeOrg, IDs: []string{"org-a"}}); err != nil {
+	if err := persistence.SaveDataScope(scopeCtx, domain.DataScope{RoleID: roleID, Resource: "users", Scope: domain.ScopeOrg, IDs: []string{"org-a"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := persistence.SaveMenu(ctx, domain.Menu{ID: menuID, Name: "Users", Path: "/users", Visible: true, Active: true}); err != nil {
+	if err := persistence.SaveMenu(scopeCtx, domain.Menu{ID: menuID, Name: "Users", Path: "/users", Visible: true, Active: true}); err != nil {
 		t.Fatal(err)
 	}
-	if err := persistence.SavePermission(ctx, domain.Permission{ID: permissionID, Name: "List users", Method: "GET", Path: "/api/admin/v1/iam/users", Active: true}); err != nil {
+	if err := persistence.SavePermission(scopeCtx, domain.Permission{ID: permissionID, Name: "List users", Method: "GET", Path: "/api/admin/v1/iam/users", Active: true}); err != nil {
 		t.Fatal(err)
 	}
 
-	loaded, err := persistence.FindUser(ctx, fmt.Sprint(userID))
+	loaded, err := persistence.FindUser(scopeCtx, fmt.Sprint(userID))
 	if err != nil || len(loaded.RoleIDs) != 1 || loaded.RoleIDs[0] != roleID {
 		t.Fatalf("loaded user=%+v err=%v", loaded, err)
 	}
@@ -103,12 +105,12 @@ func testRBACPersistence(t *testing.T, driver, dsn string) {
 	service.DataScopes = persistence
 	service.Authorizer = domain.NewAuthorizer(persistence)
 	service.Scopes = domain.NewMemoryDataScopeResolver(persistence)
-	ok, err := service.Authorize(ctx, domain.Subject{UserID: fmt.Sprint(userID), RoleIDs: []string{roleID}}, domain.Request{Method: "GET", Path: "/api/admin/v1/iam/users"})
+	ok, err := service.Authorize(scopeCtx, domain.Subject{UserID: fmt.Sprint(userID), RoleIDs: []string{roleID}}, domain.Request{Method: "GET", Path: "/api/admin/v1/iam/users"})
 	if err != nil || !ok {
 		t.Fatalf("persistent authorization ok=%v err=%v", ok, err)
 	}
-	scope, err := service.ResolveDataScope(ctx, domain.Subject{UserID: fmt.Sprint(userID), RoleIDs: []string{roleID}}, "users")
-	if err != nil || scope.Scope != domain.ScopeOrg || len(scope.IDs) != 1 {
-		t.Fatalf("persistent scope=%+v err=%v", scope, err)
+	dataScope, err := service.ResolveDataScope(scopeCtx, domain.Subject{UserID: fmt.Sprint(userID), RoleIDs: []string{roleID}}, "users")
+	if err != nil || dataScope.Scope != domain.ScopeOrg || len(dataScope.IDs) != 1 {
+		t.Fatalf("persistent scope=%+v err=%v", dataScope, err)
 	}
 }

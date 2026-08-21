@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	domain "example.com/gin-vben-admin/server/internal/domain/iam"
+	"example.com/gin-vben-admin/server/internal/domain/tenant"
 )
 
 func TestGORMStoreNilDependencyReturnsStableErrors(t *testing.T) {
@@ -22,6 +23,13 @@ func TestGORMStoreRejectsNonNumericUserIDs(t *testing.T) {
 	store := NewGORMStore(nil)
 	if _, err := store.FindUser(context.Background(), "user-1"); !errors.Is(err, ErrInvalidNumericID) {
 		t.Fatalf("FindUser error=%v", err)
+	}
+}
+
+func TestIAMPersistenceRequiresTenantContext(t *testing.T) {
+	_, err := tenantID(context.Background())
+	if !errors.Is(err, tenant.ErrTenantContextMissing) {
+		t.Fatalf("tenantID() error=%v, want tenant context missing", err)
 	}
 }
 

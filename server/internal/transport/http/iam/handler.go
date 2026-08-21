@@ -108,7 +108,7 @@ func (h *Handler) authorizedUser(c *gin.Context) (domain.User, bool) {
 		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid tenant context")
 		return domain.User{}, false
 	}
-	allowed, err := h.service.Authorize(c.Request.Context(), domain.Subject{UserID: user.ID, RoleIDs: user.RoleIDs}, domain.Request{
+	allowed, err := h.service.Authorize(c.Request.Context(), domain.Subject{UserID: user.ID, RoleIDs: user.RoleIDs, Domain: scope.TenantID}, domain.Request{
 		Domain: scope.TenantID,
 		Method: c.Request.Method,
 		Path:   c.FullPath(),
