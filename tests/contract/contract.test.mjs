@@ -162,6 +162,24 @@ test('installation contract exposes one credential-write-only apply operation', 
   assert.match(install, /10008/);
 });
 
+test('installation contract exposes an explicit confirmed rollback operation', () => {
+  const install = readFileSync(join(root, 'contracts/openapi/install-v1.yaml'), 'utf8');
+  const errors = readFileSync(join(root, 'contracts/errors/error-codes.yaml'), 'utf8');
+  const path = '/api/system/install/v1/rollback/{id}:';
+  assert.match(install, new RegExp(`\\n  ${path.replaceAll('/', '\\/')}`));
+  const sectionStart = install.indexOf(`  ${path}`);
+  const nextSection = install.indexOf('\n  /', sectionStart + 4);
+  const section = install.slice(sectionStart, nextSection === -1 ? undefined : nextSection);
+  assert.match(section, /post:/);
+  assert.match(section, /RollbackRequest/);
+  for (const status of ['200', '400', '404', '409', '503']) {
+    assert.match(section, new RegExp(`'${status}':`), `rollback ${status}`);
+  }
+  assert.match(install, /confirmRollback/);
+  assert.match(install, /RollbackResult/);
+  assert.match(errors, /code: 10009[\s\S]*?key: installation_rollback_unavailable[\s\S]*?http_status: 409/);
+});
+
 test('installation workspace smoke and runtime artifacts stay cross-platform', () => {
   const smoke = runNode('install/tests/smoke.test.mjs');
   assert.equal(smoke.status, 0, smoke.stdout + smoke.stderr);

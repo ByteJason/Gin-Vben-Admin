@@ -41,6 +41,10 @@ codes:
     key: installation_required
     http_status: 423
     retryable: false
+  - code: 10009
+    key: installation_rollback_unavailable
+    http_status: 409
+    retryable: false
   - code: 40001
     key: dependency_unavailable
     http_status: 503

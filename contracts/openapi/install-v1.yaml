@@ -266,6 +266,56 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/InstallServiceUnavailableEnvelope'
+  /api/system/install/v1/rollback/{id}:
+    post:
+      tags: [Installation]
+      operationId: rollbackInstallation
+      summary: 显式确认并回滚失败的安装事务
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 80
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RollbackRequest'
+      responses:
+        '200':
+          description: 回滚完成
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RollbackResultEnvelope'
+        '400':
+          description: 缺少显式回滚确认或请求无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplyErrorEnvelope'
+        '404':
+          description: 安装任务不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplyErrorEnvelope'
+        '409':
+          description: 回滚不可用或已有安装事务运行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplyErrorEnvelope'
+        '503':
+          description: 安装服务未接通
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstallServiceUnavailableEnvelope'
 components:
   headers:
     RequestId:
@@ -632,7 +682,7 @@ components:
           $ref: '#/components/schemas/ResponseMeta'
     ApplyJob:
       type: object
-      required: [id, state, selectedUi, mode, currentStep, progress, steps, canRetry, lastUpdated]
+      required: [id, state, selectedUi, mode, currentStep, progress, steps, canRetry, canRollback, lastUpdated]
       properties:
         id:
           type: string
@@ -664,9 +714,57 @@ components:
           type: string
         canRetry:
           type: boolean
+        canRollback:
+          type: boolean
         lastUpdated:
           type: string
           format: date-time
+    RollbackRequest:
+      type: object
+      required: [confirmRollback]
+      additionalProperties: false
+      properties:
+        confirmRollback:
+          type: boolean
+          const: true
+          description: 必须由操作者明确确认回滚
+    RollbackResult:
+      type: object
+      required: [jobId, state, currentStep, rolledBack, canRetry, lastUpdated]
+      additionalProperties: false
+      properties:
+        jobId:
+          type: string
+        state:
+          type: string
+          enum: [failed]
+        currentStep:
+          type: string
+          const: rolled_back
+        rolledBack:
+          type: boolean
+          const: true
+        canRetry:
+          type: boolean
+        lastUpdated:
+          type: string
+          format: date-time
+    RollbackResultEnvelope:
+      type: object
+      required: [code, message, data, traceId, meta]
+      properties:
+        code:
+          type: integer
+          const: 0
+        message:
+          type: string
+          const: success
+        data:
+          $ref: '#/components/schemas/RollbackResult'
+        traceId:
+          type: string
+        meta:
+          $ref: '#/components/schemas/ResponseMeta'
     ApplyResult:
       type: object
       required: [state, selectedUi, mode, installedAt, steps]
@@ -703,7 +801,7 @@ components:
       properties:
         code:
           type: integer
-          enum: [10000, 10001, 10006, 10007, 10008, 30000, 50000]
+          enum: [10000, 10001, 10006, 10007, 10008, 10009, 30000, 50000]
         message:
           type: string
         data:

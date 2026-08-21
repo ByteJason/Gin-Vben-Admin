@@ -400,6 +400,31 @@ func TestInstallationProgressAndRetryEndpointsUseJobProvider(t *testing.T) {
 	}
 }
 
+func TestInstallationRollbackEndpointRequiresConfirmationAndUsesProvider(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	provider := &rollbackProviderStub{result: installer.RollbackResult{
+		JobID: "install-job-1", State: installer.JobFailed, CurrentStep: "rolled_back", CanRetry: true, RolledBack: true,
+	}}
+	router := gin.New()
+	RegisterRoutes(router, NewHandlerWithApplyAndJobs(statusProviderStub{}, nil, nil, nil, nil, provider))
+
+	missing := httptest.NewRecorder()
+	missingRequest := httptest.NewRequest(http.MethodPost, "/api/system/install/v1/rollback/install-job-1", bytes.NewBufferString(`{"confirmRollback":false}`))
+	missingRequest.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(missing, missingRequest)
+	if missing.Code != http.StatusBadRequest || provider.calls != 0 {
+		t.Fatalf("unconfirmed rollback = %d %s; calls=%d", missing.Code, missing.Body.String(), provider.calls)
+	}
+
+	confirmed := httptest.NewRecorder()
+	confirmedRequest := httptest.NewRequest(http.MethodPost, "/api/system/install/v1/rollback/install-job-1", bytes.NewBufferString(`{"confirmRollback":true}`))
+	confirmedRequest.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(confirmed, confirmedRequest)
+	if confirmed.Code != http.StatusOK || provider.id != "install-job-1" || !provider.confirmed {
+		t.Fatalf("confirmed rollback = %d %s; id=%q confirmed=%v", confirmed.Code, confirmed.Body.String(), provider.id, provider.confirmed)
+	}
+}
+
 type statusProviderStub struct {
 	status installer.Status
 	err    error
@@ -450,6 +475,32 @@ type jobProviderStub struct {
 	err     error
 	request installer.ApplyRequest
 	retryID string
+}
+
+type rollbackProviderStub struct {
+	result    installer.RollbackResult
+	id        string
+	confirmed bool
+	calls     int
+}
+
+func (s *rollbackProviderStub) Start(_ context.Context, request installer.ApplyRequest) (installer.ApplyJob, error) {
+	return installer.ApplyJob{}, nil
+}
+
+func (s *rollbackProviderStub) Progress(context.Context, string) (installer.ApplyJob, error) {
+	return installer.ApplyJob{}, nil
+}
+
+func (s *rollbackProviderStub) Retry(context.Context, string, installer.ApplyRequest) (installer.ApplyJob, error) {
+	return installer.ApplyJob{}, nil
+}
+
+func (s *rollbackProviderStub) Rollback(_ context.Context, id string, confirmed bool) (installer.RollbackResult, error) {
+	s.calls++
+	s.id = id
+	s.confirmed = confirmed
+	return s.result, nil
 }
 
 func (s *jobProviderStub) Start(_ context.Context, request installer.ApplyRequest) (installer.ApplyJob, error) {

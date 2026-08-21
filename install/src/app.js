@@ -6,6 +6,7 @@ const redisCheckEndpoint = '/api/system/install/v1/check/redis';
 const applyEndpoint = '/api/system/install/v1/apply';
 const progressEndpoint = '/api/system/install/v1/progress';
 const retryEndpoint = '/api/system/install/v1/retry';
+const rollbackEndpoint = '/api/system/install/v1/rollback';
 
 const title = document.querySelector('#status-title');
 const badge = document.querySelector('#status-badge');
@@ -44,6 +45,7 @@ const adminPasswordConfirm = document.querySelector('#admin-password-confirm');
 const confirmCleanup = document.querySelector('#confirm-cleanup');
 const applyButton = document.querySelector('#apply-button');
 const applyResult = document.querySelector('#apply-result');
+const rollbackButton = document.querySelector('#rollback-button');
 const applyProgress = document.querySelector('#apply-progress');
 const applySteps = document.querySelector('#apply-steps');
 
@@ -117,12 +119,14 @@ function setPending() {
   message.setAttribute('aria-live', 'polite');
   details.hidden = true;
   retryButton.hidden = true;
+  rollbackButton.hidden = true;
 }
 
 function renderStatus(status) {
   installerVersion.textContent = status.installerVersion || '—';
   details.hidden = false;
   retryButton.hidden = true;
+  rollbackButton.hidden = true;
   message.setAttribute('aria-live', 'polite');
 
   if (status.installed) {
@@ -138,6 +142,7 @@ function renderStatus(status) {
     databaseCheckPassed = false;
     redisCheckPassed = false;
     lastFailedJobId = null;
+    rollbackButton.hidden = true;
     return;
   }
 
@@ -153,6 +158,7 @@ function renderStatus(status) {
   databaseCheckPassed = false;
   redisCheckPassed = false;
   lastFailedJobId = null;
+  rollbackButton.hidden = true;
   updateApplyButton();
 }
 
@@ -365,6 +371,7 @@ function renderJobProgress(job) {
   applyProgress.textContent = `${progress}%`;
   applyResult.textContent = `${step}（${progress}%）`;
   applyResult.dataset.tone = job.state === 'failed' ? 'error' : job.state === 'completed' ? 'success' : 'pending';
+  rollbackButton.hidden = !(job.state === 'failed' && job.canRollback);
   applySteps.replaceChildren();
   for (const completed of Array.isArray(job.steps) ? job.steps : []) {
     const item = document.createElement('li');
@@ -482,6 +489,37 @@ async function requestInstallation(event) {
   }
 }
 
+async function requestRollback() {
+  if (!lastFailedJobId) return;
+  rollbackButton.disabled = true;
+  rollbackButton.textContent = '正在回滚';
+  applyResult.textContent = '正在按安装清单恢复本次失败事务。';
+  applyResult.dataset.tone = 'pending';
+  try {
+    const response = await fetch(`${rollbackEndpoint}/${encodeURIComponent(lastFailedJobId)}`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmRollback: true }),
+    });
+    const envelope = await response.json();
+    if (!response.ok || envelope.code !== 0 || !envelope.data) {
+      throw new Error('rollback request failed');
+    }
+    renderJobProgress(envelope.data);
+    applyResult.textContent = '本次失败事务已回滚，可以重新输入配置后重试。';
+    applyResult.dataset.tone = 'success';
+    rollbackButton.hidden = true;
+    lastFailedJobId = envelope.data.canRetry ? envelope.data.jobId : null;
+  } catch {
+    applyResult.textContent = '回滚未完成，请保留当前安装目录并使用离线恢复流程。';
+    applyResult.dataset.tone = 'error';
+  } finally {
+    rollbackButton.disabled = false;
+    rollbackButton.textContent = '回滚本次失败的安装';
+  }
+}
+
 function clearInstallSecrets() {
   clearSensitiveFields(databaseForm);
   clearSensitiveFields(redisForm);
@@ -501,6 +539,7 @@ planForm.addEventListener('submit', requestPlan);
 databaseForm.addEventListener('submit', (event) => requestDependencyCheck(event, databaseCheckEndpoint, databaseResult));
 redisForm.addEventListener('submit', (event) => requestDependencyCheck(event, redisCheckEndpoint, redisResult));
 adminForm.addEventListener('submit', requestInstallation);
+rollbackButton.addEventListener('click', requestRollback);
 databaseForm.addEventListener('input', () => { databaseCheckPassed = false; updateApplyButton(); });
 redisForm.addEventListener('input', () => { redisCheckPassed = false; updateApplyButton(); });
 uiChoice.addEventListener('change', invalidatePlanIfSelectionChanged);

@@ -203,6 +203,9 @@
               </label>
               <button id="apply-button" class="primary-button" type="submit" disabled>开始安装</button>
               <div id="apply-result" class="connection-result" role="status" aria-live="polite"></div>
+              <button id="rollback-button" class="secondary-button" type="button" hidden>
+                回滚本次失败的安装
+              </button>
               <label class="progress-label" for="apply-progress">安装进度</label>
               <progress id="apply-progress" max="100" value="0">0%</progress>
               <ol id="apply-steps" class="apply-steps" aria-live="polite"></ol>

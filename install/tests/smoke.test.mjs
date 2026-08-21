@@ -33,6 +33,7 @@ test('installation shell is independent and exposes an accessible status region'
   assert.match(html, /id="confirm-cleanup"/);
   assert.match(html, /id="apply-button"/);
   assert.match(html, /id="apply-result"/);
+  assert.match(html, /id="rollback-button"/);
   assert.match(html, /id="apply-progress"/);
   assert.match(html, /autocomplete="new-password"/);
   assert.match(html, /aria-current="step"/);
@@ -46,10 +47,13 @@ test('installation shell is independent and exposes an accessible status region'
   assert.match(script, /\/api\/system\/install\/v1\/apply/);
   assert.match(script, /\/api\/system\/install\/v1\/progress/);
   assert.match(script, /\/api\/system\/install\/v1\/retry/);
+  assert.match(script, /\/api\/system\/install\/v1\/rollback/);
   assert.match(script, /pollInstallation/);
   assert.match(script, /lastFailedJobId/);
+  assert.match(script, /requestRollback/);
   assert.match(script, /重新尝试安装/);
   assert.match(script, /currentStep/);
+  assert.match(script, /canRollback/);
   assert.match(script, /currentPlan\s*=\s*\{\s*\.\.\.currentPlan,\s*installed:\s*true\s*\}/);
   assert.match(script, /confirmCleanup/);
   assert.match(script, /requestInstallation/);

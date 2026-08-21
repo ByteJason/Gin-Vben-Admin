@@ -89,6 +89,35 @@ func TestApplyServiceRollsBackCompletedSideEffectsInReverseOrder(t *testing.T) {
 	}
 }
 
+func TestApplyServiceKeepsFailedCompensationForExplicitRollback(t *testing.T) {
+	t.Parallel()
+
+	environment := &applyEnvironmentStub{calls: new([]string), rollbackErr: errors.New("temporary environment rollback failure")}
+	service := NewApplyService(
+		&applyMarkerStub{calls: new([]string), createErr: errors.New("marker fixture failure")},
+		&applyPlanStub{calls: new([]string), plan: Plan{SelectedUI: installstate.UIAntd, Mode: installstate.ModeEmbedded, CanCleanup: true, CanBuild: true, CanWriteEnv: true}},
+		&applyDependencyStub{calls: new([]string)},
+		&applySchemaStub{calls: new([]string)},
+		&applyAssetStub{calls: new([]string), receipt: AssetReceipt{ArtifactHash: strings.Repeat("a", 64), ManifestHash: strings.Repeat("b", 64)}},
+		&applyIdentityStub{calls: new([]string)},
+		environment,
+		time.Now,
+	)
+	if _, err := service.Apply(context.Background(), validApplyRequest()); !errors.Is(err, ErrApplyRollback) {
+		t.Fatalf("Apply() error = %v, want rollback sentinel", err)
+	}
+	if !service.CanRollback() {
+		t.Fatal("CanRollback() = false, want pending compensation")
+	}
+	environment.rollbackErr = nil
+	if err := service.Rollback(context.Background()); err != nil {
+		t.Fatalf("Rollback() error = %v", err)
+	}
+	if service.CanRollback() {
+		t.Fatal("CanRollback() = true after explicit rollback")
+	}
+}
+
 func validApplyRequest() ApplyRequest {
 	return ApplyRequest{
 		SelectedUI: "antd", Mode: "embedded", ConfirmCleanup: true,
@@ -176,7 +205,10 @@ func (s *applyIdentityStub) Rollback(context.Context, IdentityReceipt) error {
 	return nil
 }
 
-type applyEnvironmentStub struct{ calls *[]string }
+type applyEnvironmentStub struct {
+	calls       *[]string
+	rollbackErr error
+}
 
 func (s *applyEnvironmentStub) Publish(context.Context, ApplyRequest, AssetReceipt) (EnvironmentReceipt, error) {
 	*s.calls = append(*s.calls, "environment.publish")
@@ -185,5 +217,5 @@ func (s *applyEnvironmentStub) Publish(context.Context, ApplyRequest, AssetRecei
 
 func (s *applyEnvironmentStub) Rollback(context.Context, EnvironmentReceipt) error {
 	*s.calls = append(*s.calls, "environment.rollback")
-	return nil
+	return s.rollbackErr
 }

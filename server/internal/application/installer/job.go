@@ -12,8 +12,10 @@ import (
 )
 
 var (
-	ErrJobNotFound      = errors.New("installation job not found")
-	ErrJobServiceClosed = errors.New("installation job service is closed")
+	ErrJobNotFound                  = errors.New("installation job not found")
+	ErrJobServiceClosed             = errors.New("installation job service is closed")
+	ErrRollbackUnavailable          = errors.New("installation rollback is unavailable")
+	ErrRollbackConfirmationRequired = errors.New("installation rollback confirmation is required")
 )
 
 type JobState string
@@ -36,11 +38,36 @@ type ApplyJob struct {
 	ErrorCode   int               `json:"errorCode,omitempty"`
 	ErrorKey    string            `json:"errorKey,omitempty"`
 	CanRetry    bool              `json:"canRetry"`
+	CanRollback bool              `json:"canRollback"`
 	LastUpdated time.Time         `json:"lastUpdated"`
+}
+
+// RollbackResult is the credential-free result of an explicit recovery
+// request for a failed installation transaction. It deliberately does not
+// expose a database DSN, file path, or transaction receipt.
+type RollbackResult struct {
+	JobID       string    `json:"jobId"`
+	State       JobState  `json:"state"`
+	CurrentStep string    `json:"currentStep"`
+	RolledBack  bool      `json:"rolledBack"`
+	CanRetry    bool      `json:"canRetry"`
+	LastUpdated time.Time `json:"lastUpdated"`
+}
+
+type RollbackRequest struct {
+	ConfirmRollback bool `json:"confirmRollback"`
 }
 
 type ProgressApplyRunner interface {
 	ApplyWithProgress(context.Context, ApplyRequest, func(string)) (ApplyResult, error)
+}
+
+type RollbackRunner interface {
+	Rollback(context.Context) error
+}
+
+type RollbackAvailability interface {
+	CanRollback() bool
 }
 
 // ApplyJobService keeps credential-bearing requests only in the active
@@ -52,10 +79,11 @@ type ApplyJobService struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	mu     sync.Mutex
-	jobs   map[string]ApplyJob
-	active string
-	closed bool
+	mu               sync.Mutex
+	jobs             map[string]ApplyJob
+	active           string
+	closed           bool
+	rollbackInFlight bool
 }
 
 func NewApplyJobService(runner ProgressApplyRunner) *ApplyJobService {
@@ -88,6 +116,10 @@ func (s *ApplyJobService) Start(ctx context.Context, request ApplyRequest) (Appl
 		return ApplyJob{}, ErrJobServiceClosed
 	}
 	if active, ok := s.jobs[s.active]; ok && active.State == JobRunning {
+		s.mu.Unlock()
+		return ApplyJob{}, ErrApplyBusy
+	}
+	if s.rollbackInFlight {
 		s.mu.Unlock()
 		return ApplyJob{}, ErrApplyBusy
 	}
@@ -186,6 +218,13 @@ func (s *ApplyJobService) run(id string, request ApplyRequest) {
 	if err != nil {
 		job.State = JobFailed
 		job.ErrorCode, job.ErrorKey, job.CanRetry = publicJobError(err)
+		job.CanRollback = false
+		if _, ok := s.runner.(RollbackRunner); ok && errors.Is(err, ErrApplyRollback) {
+			job.CanRollback = true
+			if availability, ok := s.runner.(RollbackAvailability); ok {
+				job.CanRollback = availability.CanRollback()
+			}
+		}
 		if s.closed {
 			job.CanRetry = false
 		}
@@ -209,10 +248,66 @@ func (s *ApplyJobService) run(id string, request ApplyRequest) {
 	job.ErrorCode = 0
 	job.ErrorKey = ""
 	job.CanRetry = false
+	job.CanRollback = false
 	s.jobs[id] = job
 	if s.active == id {
 		s.active = ""
 	}
+}
+
+// Rollback explicitly compensates a failed job. The caller must provide an
+// affirmative confirmation; no credentials or infrastructure details are
+// accepted by this operation.
+func (s *ApplyJobService) Rollback(ctx context.Context, id string, confirmed bool) (RollbackResult, error) {
+	if s == nil {
+		return RollbackResult{}, ErrJobNotFound
+	}
+	if !confirmed {
+		return RollbackResult{}, ErrRollbackConfirmationRequired
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return RollbackResult{}, err
+	}
+	runner, ok := s.runner.(RollbackRunner)
+	if !ok {
+		return RollbackResult{}, ErrRollbackUnavailable
+	}
+	s.mu.Lock()
+	job, exists := s.jobs[id]
+	if !exists {
+		s.mu.Unlock()
+		return RollbackResult{}, ErrJobNotFound
+	}
+	if job.State != JobFailed || !job.CanRollback {
+		s.mu.Unlock()
+		return RollbackResult{}, ErrRollbackUnavailable
+	}
+	if s.rollbackInFlight {
+		s.mu.Unlock()
+		return RollbackResult{}, ErrApplyBusy
+	}
+	s.rollbackInFlight = true
+	s.mu.Unlock()
+
+	err := runner.Rollback(ctx)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rollbackInFlight = false
+	if err != nil {
+		return RollbackResult{}, ErrRollbackUnavailable
+	}
+	job.CanRollback = false
+	job.CanRetry = true
+	job.CurrentStep = "rolled_back"
+	job.LastUpdated = s.now().UTC()
+	s.jobs[id] = job
+	return RollbackResult{
+		JobID: id, State: job.State, CurrentStep: job.CurrentStep,
+		RolledBack: true, CanRetry: job.CanRetry, LastUpdated: job.LastUpdated,
+	}, nil
 }
 
 func (s *ApplyJobService) updateProgress(id, step string) {

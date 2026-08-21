@@ -101,6 +101,36 @@ func TestApplyJobCloseCancelsActiveRunner(t *testing.T) {
 	}
 }
 
+func TestApplyJobExplicitRollbackRequiresFailedRollbackableJob(t *testing.T) {
+	runner := &rollbackJobRunnerStub{}
+	service := NewApplyJobService(runner)
+	job, err := service.Start(context.Background(), validApplyRequest())
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	failed := waitForJob(t, service, job.ID, JobFailed)
+	if !failed.CanRollback {
+		t.Fatalf("failed job = %#v, want CanRollback", failed)
+	}
+	if _, err := service.Rollback(context.Background(), job.ID, false); !errors.Is(err, ErrRollbackConfirmationRequired) {
+		t.Fatalf("unconfirmed Rollback() error = %v, want confirmation error", err)
+	}
+	result, err := service.Rollback(context.Background(), job.ID, true)
+	if err != nil {
+		t.Fatalf("Rollback() error = %v", err)
+	}
+	if !result.RolledBack || result.JobID != job.ID || result.CurrentStep != "rolled_back" || runner.rollbackCalls != 1 {
+		t.Fatalf("rollback result = %#v; calls=%d", result, runner.rollbackCalls)
+	}
+	progress, err := service.Progress(context.Background(), job.ID)
+	if err != nil {
+		t.Fatalf("Progress() after rollback error = %v", err)
+	}
+	if progress.CanRollback {
+		t.Fatalf("progress after rollback = %#v, want CanRollback=false", progress)
+	}
+}
+
 func waitForJob(t *testing.T, service *ApplyJobService, id string, state JobState) ApplyJob {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -121,6 +151,23 @@ func waitForJob(t *testing.T, service *ApplyJobService, id string, state JobStat
 type jobRunnerStub struct {
 	mu  sync.Mutex
 	run func(context.Context, ApplyRequest, func(string)) (ApplyResult, error)
+}
+
+type rollbackJobRunnerStub struct {
+	rollbackCalls int
+}
+
+func (s *rollbackJobRunnerStub) ApplyWithProgress(context.Context, ApplyRequest, func(string)) (ApplyResult, error) {
+	return ApplyResult{}, errors.Join(ErrApplyFailed, ErrApplyRollback)
+}
+
+func (s *rollbackJobRunnerStub) Rollback(context.Context) error {
+	s.rollbackCalls++
+	return nil
+}
+
+func (s *rollbackJobRunnerStub) CanRollback() bool {
+	return true
 }
 
 func (s *jobRunnerStub) ApplyWithProgress(ctx context.Context, request ApplyRequest, report func(string)) (ApplyResult, error) {

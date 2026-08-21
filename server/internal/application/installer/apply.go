@@ -52,7 +52,9 @@ type ApplyResult struct {
 }
 
 type SchemaReceipt struct {
-	Version uint
+	Version         uint
+	PreviousVersion uint
+	AppliedSteps    uint
 }
 
 type AssetReceipt struct {
@@ -110,6 +112,14 @@ type ApplyService struct {
 	environment  EnvironmentInstaller
 	now          func() time.Time
 	mutex        sync.Mutex
+	pending      *pendingRollback
+}
+
+type pendingRollback struct {
+	assets      *AssetReceipt
+	identity    *IdentityReceipt
+	environment *EnvironmentReceipt
+	marker      *installstate.Marker
 }
 
 func NewApplyService(markers ApplyMarkerStore, plans PlanProvider, dependencies ApplyDependencyChecker, schemas SchemaInstaller, assets AssetInstaller, identity IdentityInstaller, environment EnvironmentInstaller, now func() time.Time) *ApplyService {
@@ -187,22 +197,39 @@ func (s *ApplyService) apply(ctx context.Context, request ApplyRequest, report f
 	if err != nil || !validDigest(assetReceipt.ArtifactHash) || !validDigest(assetReceipt.ManifestHash) {
 		var rollbackErr error
 		if assetReceipt != (AssetReceipt{}) {
+			s.pending = &pendingRollback{assets: &assetReceipt}
 			rollbackErr = s.rollback(ctx, nil, nil, &assetReceipt)
+			if rollbackErr == nil {
+				s.pending = nil
+			}
 		}
 		return ApplyResult{}, applyFailure("assets", rollbackErr)
 	}
 	steps = appendCompleted(steps, "assets")
 	reportApplyStep(report, "assets")
+	s.pending = &pendingRollback{assets: &assetReceipt}
 	identityReceipt, err := s.identity.Initialize(ctx, request.Database, request.Admin)
+	if identityReceipt != (IdentityReceipt{}) {
+		s.pending.identity = &identityReceipt
+	}
 	if err != nil {
 		rollbackErr := s.rollback(ctx, nil, receiptPointer(identityReceipt), &assetReceipt)
+		if rollbackErr == nil {
+			s.pending = nil
+		}
 		return ApplyResult{}, applyFailure("identity", rollbackErr)
 	}
 	steps = appendCompleted(steps, "identity")
 	reportApplyStep(report, "identity")
 	environmentReceipt, err := s.environment.Publish(ctx, request, assetReceipt)
+	if environmentReceipt != (EnvironmentReceipt{}) {
+		s.pending.environment = &environmentReceipt
+	}
 	if err != nil {
 		rollbackErr := s.rollback(ctx, receiptPointer(environmentReceipt), &identityReceipt, &assetReceipt)
+		if rollbackErr == nil {
+			s.pending = nil
+		}
 		return ApplyResult{}, applyFailure("environment", rollbackErr)
 	}
 	steps = appendCompleted(steps, "environment")
@@ -220,15 +247,69 @@ func (s *ApplyService) apply(ctx context.Context, request ApplyRequest, report f
 	}
 	if err := marker.Validate(); err != nil {
 		rollbackErr := s.rollback(ctx, &environmentReceipt, &identityReceipt, &assetReceipt)
+		if rollbackErr == nil {
+			s.pending = nil
+		}
 		return ApplyResult{}, applyFailure("marker", rollbackErr)
 	}
+	s.pending.marker = &marker
 	if err := s.markers.Create(ctx, marker); err != nil {
 		rollbackErr := errors.Join(s.rollbackMarker(marker), s.rollback(ctx, &environmentReceipt, &identityReceipt, &assetReceipt))
+		if rollbackErr == nil {
+			s.pending = nil
+		}
 		return ApplyResult{}, applyFailure("lock", rollbackErr)
 	}
 	steps = appendCompleted(steps, "lock")
 	reportApplyStep(report, "lock")
+	s.pending = nil
 	return ApplyResult{State: StateInstalled, SelectedUI: ui, Mode: mode, InstalledAt: installedAt, Steps: steps}, nil
+}
+
+// CanRollback reports whether a failed transaction left compensatable
+// non-credential side effects. It is intentionally separate from marker
+// status: a completed installation is never rolled back through this API.
+func (s *ApplyService) CanRollback() bool {
+	if s == nil {
+		return false
+	}
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	return s.pending != nil
+}
+
+// Rollback compensates the last failed transaction after the caller has
+// explicitly confirmed the operation at the HTTP boundary. Database schema
+// migrations remain under the explicit migration runbook; this method only
+// restores the receipts owned by the installer transaction.
+func (s *ApplyService) Rollback(ctx context.Context) error {
+	if s == nil {
+		return ErrRollbackUnavailable
+	}
+	if !s.mutex.TryLock() {
+		return ErrApplyBusy
+	}
+	defer s.mutex.Unlock()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.pending == nil {
+		return ErrRollbackUnavailable
+	}
+	pending := *s.pending
+	if err := s.rollback(ctx, pending.environment, pending.identity, pending.assets); err != nil {
+		return ErrRollbackUnavailable
+	}
+	if pending.marker != nil {
+		if err := s.rollbackMarker(*pending.marker); err != nil {
+			return ErrRollbackUnavailable
+		}
+	}
+	s.pending = nil
+	return nil
 }
 
 func reportApplyStep(report func(string), step string) {

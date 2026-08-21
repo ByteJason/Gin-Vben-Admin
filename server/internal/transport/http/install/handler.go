@@ -40,6 +40,13 @@ type JobProvider interface {
 	Retry(context.Context, string, installer.ApplyRequest) (installer.ApplyJob, error)
 }
 
+// RollbackProvider is deliberately separate from JobProvider so existing
+// integrations can keep the progress/retry seam while opting into explicit
+// recovery only when they can prove a transaction receipt.
+type RollbackProvider interface {
+	Rollback(context.Context, string, bool) (installer.RollbackResult, error)
+}
+
 type Handler struct {
 	status       StatusProvider
 	capabilities CapabilityProvider
@@ -47,6 +54,7 @@ type Handler struct {
 	dependencies DependencyCheckProvider
 	apply        ApplyProvider
 	jobs         JobProvider
+	rollback     RollbackProvider
 }
 
 func NewHandler(status StatusProvider, capabilities ...CapabilityProvider) *Handler {
@@ -70,7 +78,11 @@ func NewHandlerWithApply(status StatusProvider, capabilities CapabilityProvider,
 }
 
 func NewHandlerWithApplyAndJobs(status StatusProvider, capabilities CapabilityProvider, plan PlanProvider, dependencies DependencyCheckProvider, apply ApplyProvider, jobs JobProvider) *Handler {
-	return &Handler{status: status, capabilities: capabilities, plan: plan, dependencies: dependencies, apply: apply, jobs: jobs}
+	var rollback RollbackProvider
+	if candidate, ok := jobs.(RollbackProvider); ok {
+		rollback = candidate
+	}
+	return &Handler{status: status, capabilities: capabilities, plan: plan, dependencies: dependencies, apply: apply, jobs: jobs, rollback: rollback}
 }
 
 func RegisterRoutes(router gin.IRouter, handler *Handler) {
@@ -213,9 +225,37 @@ func RegisterRoutes(router gin.IRouter, handler *Handler) {
 		}
 		response.Write(c, http.StatusAccepted, 0, "accepted", job)
 	})
+	group.POST("/rollback/:id", func(c *gin.Context) {
+		if handler == nil || handler.rollback == nil {
+			response.Error(c, http.StatusServiceUnavailable, 40001, "installation service unavailable")
+			return
+		}
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 8<<10)
+		var request installer.RollbackRequest
+		if !decodeRollbackRequest(c, &request) {
+			response.Error(c, http.StatusBadRequest, 10000, "invalid rollback request")
+			return
+		}
+		if !request.ConfirmRollback {
+			response.Error(c, http.StatusBadRequest, 10000, "rollback confirmation is required")
+			return
+		}
+		result, err := handler.rollback.Rollback(c.Request.Context(), c.Param("id"), request.ConfirmRollback)
+		if err != nil {
+			writeRollbackError(c, err)
+			return
+		}
+		response.OK(c, result)
+	})
 }
 
 func decodeApplyRequest(c *gin.Context, request *installer.ApplyRequest) bool {
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	return decoder.Decode(request) == nil && jsonDocumentEnded(decoder)
+}
+
+func decodeRollbackRequest(c *gin.Context, request *installer.RollbackRequest) bool {
 	decoder := json.NewDecoder(c.Request.Body)
 	decoder.DisallowUnknownFields()
 	return decoder.Decode(request) == nil && jsonDocumentEnded(decoder)
@@ -253,5 +293,20 @@ func writeJobError(c *gin.Context, err error) {
 		response.Error(c, http.StatusConflict, 10006, "installation already completed")
 	default:
 		response.Error(c, http.StatusInternalServerError, 50000, "installation job unavailable")
+	}
+}
+
+func writeRollbackError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, installer.ErrJobNotFound):
+		response.Error(c, http.StatusNotFound, 30000, "installation job not found")
+	case errors.Is(err, installer.ErrRollbackConfirmationRequired):
+		response.Error(c, http.StatusBadRequest, 10000, "rollback confirmation is required")
+	case errors.Is(err, installer.ErrRollbackUnavailable):
+		response.Error(c, http.StatusConflict, 10009, "installation rollback is unavailable")
+	case errors.Is(err, installer.ErrApplyBusy):
+		response.Error(c, http.StatusConflict, 10007, "installation already running")
+	default:
+		response.Error(c, http.StatusInternalServerError, 50000, "installation rollback failed")
 	}
 }
