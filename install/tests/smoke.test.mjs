@@ -45,7 +45,10 @@ test('installation shell is independent and exposes an accessible status region'
   assert.match(script, /\/api\/system\/install\/v1\/check\/redis/);
   assert.match(script, /\/api\/system\/install\/v1\/apply/);
   assert.match(script, /\/api\/system\/install\/v1\/progress/);
+  assert.match(script, /\/api\/system\/install\/v1\/retry/);
   assert.match(script, /pollInstallation/);
+  assert.match(script, /lastFailedJobId/);
+  assert.match(script, /重新尝试安装/);
   assert.match(script, /currentStep/);
   assert.match(script, /currentPlan\s*=\s*\{\s*\.\.\.currentPlan,\s*installed:\s*true\s*\}/);
   assert.match(script, /confirmCleanup/);

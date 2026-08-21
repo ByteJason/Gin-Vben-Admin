@@ -5,6 +5,7 @@ const databaseCheckEndpoint = '/api/system/install/v1/check/database';
 const redisCheckEndpoint = '/api/system/install/v1/check/redis';
 const applyEndpoint = '/api/system/install/v1/apply';
 const progressEndpoint = '/api/system/install/v1/progress';
+const retryEndpoint = '/api/system/install/v1/retry';
 
 const title = document.querySelector('#status-title');
 const badge = document.querySelector('#status-badge');
@@ -70,6 +71,7 @@ const stepLabels = {
 let currentPlan = null;
 let databaseCheckPassed = false;
 let redisCheckPassed = false;
+let lastFailedJobId = null;
 
 async function loadStatus() {
   setPending();
@@ -135,6 +137,7 @@ function renderStatus(status) {
     currentPlan = null;
     databaseCheckPassed = false;
     redisCheckPassed = false;
+    lastFailedJobId = null;
     return;
   }
 
@@ -149,6 +152,7 @@ function renderStatus(status) {
   currentPlan = null;
   databaseCheckPassed = false;
   redisCheckPassed = false;
+  lastFailedJobId = null;
   updateApplyButton();
 }
 
@@ -193,6 +197,7 @@ async function requestPlan(event) {
   currentPlan = null;
   databaseCheckPassed = false;
   redisCheckPassed = false;
+  lastFailedJobId = null;
   updateApplyButton();
   planButton.disabled = true;
   planButton.textContent = '正在检查';
@@ -226,6 +231,7 @@ function renderPlan(plan) {
   currentPlan = plan;
   databaseCheckPassed = false;
   redisCheckPassed = false;
+  lastFailedJobId = null;
   planCleanup.textContent = yesNo(plan.canCleanup);
   planBuild.textContent = yesNo(plan.canBuild);
   planEnv.textContent = yesNo(plan.canWriteEnv);
@@ -317,6 +323,7 @@ function invalidatePlanIfSelectionChanged() {
     currentPlan = null;
     databaseCheckPassed = false;
     redisCheckPassed = false;
+    lastFailedJobId = null;
     planPanel.hidden = true;
     connectionPanel.hidden = true;
     planMessage.textContent = '选择已变更，请重新检查目录权限。';
@@ -417,7 +424,10 @@ async function requestInstallation(event) {
   applyResult.dataset.tone = 'pending';
   try {
     const dependencies = dependencyFormValues();
-    const response = await fetch(applyEndpoint, {
+    const targetEndpoint = lastFailedJobId
+      ? `${retryEndpoint}/${encodeURIComponent(lastFailedJobId)}`
+      : applyEndpoint;
+    const response = await fetch(targetEndpoint, {
       method: 'POST',
       credentials: 'same-origin',
       headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
@@ -442,6 +452,7 @@ async function requestInstallation(event) {
       renderJobProgress(result);
       result = await pollInstallation(result.id);
       if (result.state === 'failed') {
+        lastFailedJobId = result.canRetry ? result.id : null;
         applyResult.textContent = result.canRetry
           ? '安装未完成，已自动回滚本次副作用。请重新输入凭据后重试。'
           : '安装未完成，请检查实例状态后再继续。';
@@ -449,6 +460,7 @@ async function requestInstallation(event) {
         return;
       }
     }
+    lastFailedJobId = null;
     renderApplyResult(result);
     renderStatus({
       installed: true,
@@ -464,7 +476,7 @@ async function requestInstallation(event) {
     clearInstallSecrets();
     if (!currentPlan || !currentPlan.installed) {
       applyButton.disabled = false;
-      applyButton.textContent = '开始安装';
+      applyButton.textContent = lastFailedJobId ? '重新尝试安装' : '开始安装';
       updateApplyButton();
     }
   }
