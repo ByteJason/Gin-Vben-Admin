@@ -306,6 +306,20 @@ test('web-antd auth seam uses the versioned API and sends the refresh cookie', (
   assert.match(login, /login-error|login-success|role=["']alert["']/);
 });
 
+test('all management UIs expose equivalent login loading and result states', () => {
+  for (const ui of ['web-antd', 'web-ele', 'web-naive']) {
+    const login = readFileSync(
+      join(root, `admin/apps/${ui}/src/views/_core/authentication/login.vue`),
+      'utf8',
+    );
+    assert.match(login, /loginLoading/, `${ui} loading state`);
+    assert.match(login, /data-testid="login-error"/, `${ui} error target`);
+    assert.match(login, /role="alert"/, `${ui} error announcement`);
+    assert.match(login, /data-testid="login-success"/, `${ui} success target`);
+    assert.match(login, /role="status"/, `${ui} success announcement`);
+  }
+});
+
 test('management UI clients use versioned authentication and menu endpoints', () => {
   for (const ui of ['web-antd', 'web-ele', 'web-naive']) {
     const auth = readFileSync(join(root, `admin/apps/${ui}/src/api/core/auth.ts`), 'utf8');
