@@ -240,6 +240,22 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '503':
           $ref: '#/components/responses/AuthServiceUnavailable'
+  /api/admin/v1/iam/me:
+    get:
+      tags: [IAM]
+      operationId: getCurrentAdminUser
+      summary: 查询当前管理端用户资料
+      security: [{BearerAuth: []}]
+      responses:
+        '200':
+          description: 当前用户资料
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentUserEnvelope'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
   /api/admin/v1/iam/users:
     get:
       tags: [IAM]
@@ -451,6 +467,13 @@ components:
           properties:
             data:
               $ref: '#/components/schemas/CaptchaChallenge'
+    CurrentUserEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/CurrentUser'
     CaptchaChallenge:
       type: object
       additionalProperties: false
@@ -563,6 +586,20 @@ components:
         roleIds:
           type: array
           items: { type: string }
+    CurrentUser:
+      type: object
+      additionalProperties: false
+      required: [userId, username, realName, avatar, roles, homePath, desc]
+      properties:
+        userId: { type: string, minLength: 1 }
+        username: { type: string, minLength: 1 }
+        realName: { type: string }
+        avatar: { type: string }
+        roles:
+          type: array
+          items: { type: string }
+        homePath: { type: string }
+        desc: { type: string }
     IAMUserRequest:
       allOf:
         - $ref: '#/components/schemas/IAMUser'

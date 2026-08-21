@@ -268,6 +268,7 @@ test('authentication session contract is bearer-protected and hides token materi
 test('RBAC management contract exposes guarded collections and denial code', () => {
   const admin = readFileSync(join(root, 'contracts/openapi/admin-v1.yaml'), 'utf8');
   for (const path of [
+    '/api/admin/v1/iam/me:',
     '/api/admin/v1/iam/users:',
     '/api/admin/v1/iam/roles:',
     '/api/admin/v1/iam/menus:',
@@ -332,6 +333,18 @@ test('management UI clients use versioned authentication and menu endpoints', ()
     assert.match(auth, /getCaptchaApi/, `${ui} captcha client`);
     assert.match(auth, /captchaId/, `${ui} captcha challenge id`);
     assert.match(menu, /MENU_ENDPOINT/, `${ui} menu endpoint`);
+  }
+});
+
+test('management UI clients use the versioned current-user endpoint', () => {
+  const admin = readFileSync(join(root, 'contracts/openapi/admin-v1.yaml'), 'utf8');
+  const generated = readFileSync(join(root, 'admin/packages/api-client/src/generated/admin-v1.ts'), 'utf8');
+  assert.match(admin, /\/api\/admin\/v1\/iam\/me:/);
+  assert.match(generated, /CURRENT_USER_ENDPOINT/);
+  for (const ui of ['web-antd', 'web-ele', 'web-naive']) {
+    const user = readFileSync(join(root, `admin/apps/${ui}/src/api/core/user.ts`), 'utf8');
+    assert.match(user, /CURRENT_USER_ENDPOINT/, `${ui} current-user client`);
+    assert.doesNotMatch(user, /['"]\/user\/info['"]/, `${ui} stale user endpoint`);
   }
 });
 

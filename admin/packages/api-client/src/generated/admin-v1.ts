@@ -1,5 +1,5 @@
 // Generated from contracts/openapi/admin-v1.yaml; DO NOT EDIT.
-// CONTRACT_SHA256=4742916af041af8b61905172e1490536b22e0726d1a02f77f0c3a6f7732a9615
+// CONTRACT_SHA256=29daef75033219b8d700aeae983893c569a06bd5c8c449971456e454bd43dfb5
 
 export const ADMIN_API_PREFIX = '/admin/v1' as const;
 
@@ -14,6 +14,7 @@ export const ADMIN_ENDPOINTS = {
   resetAdminPassword: '/admin/v1/auth/password/reset',
   listAdminAuthSessions: '/admin/v1/auth/sessions',
   revokeAdminAuthSession: '/admin/v1/auth/sessions/{id}',
+  getCurrentAdminUser: '/admin/v1/iam/me',
   listIAMUsers: '/admin/v1/iam/users',
   createIAMUser: '/admin/v1/iam/users',
   listIAMRoles: '/admin/v1/iam/roles',
@@ -40,6 +41,7 @@ export const AUTH_ENDPOINTS = {
 } as const;
 
 export const MENU_ENDPOINT = ADMIN_ENDPOINTS.listVisibleMenus;
+export const CURRENT_USER_ENDPOINT = ADMIN_ENDPOINTS.getCurrentAdminUser;
 
 export namespace AuthApi {
   export interface LoginParams {

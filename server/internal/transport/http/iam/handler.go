@@ -41,6 +41,7 @@ func RegisterRoutes(r gin.IRouter, handler *Handler) {
 		return
 	}
 	group.Use(authhttp.Middleware(handler.auth))
+	group.GET("/me", handler.currentUser)
 	group.GET("/users", handler.listUsers)
 	group.POST("/users", handler.createUser)
 	group.GET("/roles", handler.listRoles)
@@ -57,7 +58,7 @@ func RegisterRoutes(r gin.IRouter, handler *Handler) {
 }
 
 func registerDisabled(group *gin.RouterGroup) {
-	for _, path := range []string{"/users", "/roles", "/menus", "/permissions", "/policies", "/data-scopes"} {
+	for _, path := range []string{"/me", "/users", "/roles", "/menus", "/permissions", "/policies", "/data-scopes"} {
 		group.GET(path, disabled)
 		group.POST(path, disabled)
 	}
@@ -68,15 +69,20 @@ func disabled(c *gin.Context) {
 }
 
 func (h *Handler) guard(c *gin.Context) bool {
+	_, allowed := h.authorizedUser(c)
+	return allowed
+}
+
+func (h *Handler) authorizedUser(c *gin.Context) (domain.User, bool) {
 	if h == nil || h.service == nil || h.service.Users == nil {
 		response.Error(c, http.StatusServiceUnavailable, codeUnavailable, "dependency unavailable")
-		return false
+		return domain.User{}, false
 	}
 	value, exists := c.Get("auth_claims")
 	claims, ok := value.(authdomain.Claims)
 	if !exists || !ok || strings.TrimSpace(claims.Subject) == "" {
 		response.Error(c, http.StatusUnauthorized, 20000, "unauthenticated")
-		return false
+		return domain.User{}, false
 	}
 	user, err := h.service.Users.FindUser(c.Request.Context(), claims.Subject)
 	if err != nil {
@@ -85,11 +91,11 @@ func (h *Handler) guard(c *gin.Context) bool {
 		} else {
 			response.Error(c, http.StatusForbidden, codeForbidden, "forbidden")
 		}
-		return false
+		return domain.User{}, false
 	}
 	if !user.Active {
 		response.Error(c, http.StatusForbidden, codeForbidden, "forbidden")
-		return false
+		return domain.User{}, false
 	}
 	allowed, err := h.service.Authorize(c.Request.Context(), domain.Subject{UserID: user.ID, RoleIDs: user.RoleIDs}, domain.Request{
 		Domain: c.GetHeader("X-Tenant-ID"),
@@ -102,9 +108,9 @@ func (h *Handler) guard(c *gin.Context) bool {
 		} else {
 			response.Error(c, http.StatusInternalServerError, codeInternalError, "internal error")
 		}
-		return false
+		return domain.User{}, false
 	}
-	return true
+	return user, true
 }
 
 type userRequest struct {
@@ -121,6 +127,27 @@ type userResponse struct {
 	DisplayName string   `json:"displayName"`
 	Active      bool     `json:"active"`
 	RoleIDs     []string `json:"roleIds"`
+}
+
+type currentUserResponse struct {
+	UserID   string   `json:"userId"`
+	Username string   `json:"username"`
+	RealName string   `json:"realName"`
+	Avatar   string   `json:"avatar"`
+	Roles    []string `json:"roles"`
+	HomePath string   `json:"homePath"`
+	Desc     string   `json:"desc"`
+}
+
+func (h *Handler) currentUser(c *gin.Context) {
+	user, allowed := h.authorizedUser(c)
+	if !allowed {
+		return
+	}
+	response.OK(c, currentUserResponse{
+		UserID: user.ID, Username: user.Username, RealName: user.DisplayName,
+		Roles: append([]string(nil), user.RoleIDs...), HomePath: "/analytics",
+	})
 }
 
 func (h *Handler) listUsers(c *gin.Context) {

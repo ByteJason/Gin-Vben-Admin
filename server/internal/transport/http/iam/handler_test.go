@@ -45,6 +45,43 @@ func TestIAMRoutesRequireBearer(t *testing.T) {
 	}
 }
 
+func TestIAMCurrentUserReturnsVersionedProfile(t *testing.T) {
+	store := iamapp.NewMemoryStore()
+	if err := store.SaveUser(context.Background(), domain.User{
+		ID: "u1", Username: "alice", DisplayName: "Alice", Active: true, RoleIDs: []string{"r-admin"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SavePolicy(context.Background(), domain.Policy{
+		Subject: "u1", Method: http.MethodGet, Path: "/api/admin/v1/iam/me", Effect: domain.EffectAllow,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	r := newIAMTestRouter(store, authdomain.Claims{Subject: "u1", Type: authdomain.AccessToken, ExpiresAt: time.Now().Add(time.Minute)})
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/v1/iam/me", nil)
+	req.Header.Set("Authorization", "Bearer test")
+	resp := httptest.NewRecorder()
+	r.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	var envelope struct {
+		Code int `json:"code"`
+		Data struct {
+			UserID   string   `json:"userId"`
+			Username string   `json:"username"`
+			RealName string   `json:"realName"`
+			Roles    []string `json:"roles"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Code != 0 || envelope.Data.UserID != "u1" || envelope.Data.Username != "alice" || envelope.Data.RealName != "Alice" || len(envelope.Data.Roles) != 1 || envelope.Data.Roles[0] != "r-admin" {
+		t.Fatalf("profile envelope=%s", resp.Body.String())
+	}
+}
+
 func TestIAMUserListUsesRolePolicyAndDefaultDeny(t *testing.T) {
 	store := iamapp.NewMemoryStore()
 	if err := store.SaveUser(context.Background(), domain.User{ID: "u1", Username: "alice", Active: true, RoleIDs: []string{"r-reader"}}); err != nil {
