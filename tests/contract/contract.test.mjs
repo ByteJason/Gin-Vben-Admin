@@ -122,9 +122,12 @@ test('installation contract exposes one credential-write-only apply operation', 
   const section = install.slice(sectionStart, nextSection === -1 ? undefined : nextSection);
   assert.match(section, /post:/);
   assert.match(section, /ApplyRequest/);
-  for (const status of ['200', '400', '409', '422', '500', '503']) {
+  for (const status of ['200', '202', '400', '409', '422', '500', '503']) {
     assert.match(section, new RegExp(`'${status}':`), `apply ${status}`);
   }
+  assert.match(install, /\/api\/system\/install\/v1\/progress\/{id}:/);
+  assert.match(install, /\/api\/system\/install\/v1\/retry\/{id}:/);
+  assert.match(install, /ApplyJob/);
   assert.match(install, /AdminAccount/);
   assert.match(install, /confirmCleanup/);
   assert.match(install, /password:[\s\S]*?writeOnly: true/);

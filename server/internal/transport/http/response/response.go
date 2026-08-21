@@ -6,10 +6,16 @@ import "github.com/gin-gonic/gin"
 // The request ID is copied into both traceId and meta.requestId so callers
 // can correlate a response without knowing which transport produced it.
 func OK(c *gin.Context, payload any) {
+	Write(c, 200, 0, "success", payload)
+}
+
+// Write emits the shared envelope with an explicit HTTP status. It is used by
+// asynchronous operations that return 202 while preserving the same contract.
+func Write(c *gin.Context, status int, code int, message string, payload any) {
 	requestID := requestID(c)
-	c.JSON(200, gin.H{
-		"code":    0,
-		"message": "success",
+	c.JSON(status, gin.H{
+		"code":    code,
+		"message": message,
 		"data":    payload,
 		"traceId": requestID,
 		"meta":    gin.H{"requestId": requestID},

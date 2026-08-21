@@ -34,12 +34,19 @@ type ApplyProvider interface {
 	Apply(context.Context, installer.ApplyRequest) (installer.ApplyResult, error)
 }
 
+type JobProvider interface {
+	Start(context.Context, installer.ApplyRequest) (installer.ApplyJob, error)
+	Progress(context.Context, string) (installer.ApplyJob, error)
+	Retry(context.Context, string, installer.ApplyRequest) (installer.ApplyJob, error)
+}
+
 type Handler struct {
 	status       StatusProvider
 	capabilities CapabilityProvider
 	plan         PlanProvider
 	dependencies DependencyCheckProvider
 	apply        ApplyProvider
+	jobs         JobProvider
 }
 
 func NewHandler(status StatusProvider, capabilities ...CapabilityProvider) *Handler {
@@ -60,6 +67,10 @@ func NewHandlerWithComponents(status StatusProvider, capabilities CapabilityProv
 
 func NewHandlerWithApply(status StatusProvider, capabilities CapabilityProvider, plan PlanProvider, dependencies DependencyCheckProvider, apply ApplyProvider) *Handler {
 	return &Handler{status: status, capabilities: capabilities, plan: plan, dependencies: dependencies, apply: apply}
+}
+
+func NewHandlerWithApplyAndJobs(status StatusProvider, capabilities CapabilityProvider, plan PlanProvider, dependencies DependencyCheckProvider, apply ApplyProvider, jobs JobProvider) *Handler {
+	return &Handler{status: status, capabilities: capabilities, plan: plan, dependencies: dependencies, apply: apply, jobs: jobs}
 }
 
 func RegisterRoutes(router gin.IRouter, handler *Handler) {
@@ -146,16 +157,23 @@ func RegisterRoutes(router gin.IRouter, handler *Handler) {
 		response.OK(c, result)
 	})
 	group.POST("/apply", func(c *gin.Context) {
-		if handler == nil || handler.apply == nil {
+		if handler == nil || (handler.apply == nil && handler.jobs == nil) {
 			response.Error(c, http.StatusServiceUnavailable, 40001, "installation service unavailable")
 			return
 		}
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 64<<10)
 		var request installer.ApplyRequest
-		decoder := json.NewDecoder(c.Request.Body)
-		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&request); err != nil || !jsonDocumentEnded(decoder) {
+		if !decodeApplyRequest(c, &request) {
 			response.Error(c, http.StatusBadRequest, 10000, "invalid installation request")
+			return
+		}
+		if handler.jobs != nil {
+			job, err := handler.jobs.Start(c.Request.Context(), request)
+			if err != nil {
+				writeJobError(c, err)
+				return
+			}
+			response.Write(c, http.StatusAccepted, 0, "accepted", job)
 			return
 		}
 		result, err := handler.apply.Apply(c.Request.Context(), request)
@@ -165,6 +183,42 @@ func RegisterRoutes(router gin.IRouter, handler *Handler) {
 		}
 		response.OK(c, result)
 	})
+	group.GET("/progress/:id", func(c *gin.Context) {
+		if handler == nil || handler.jobs == nil {
+			response.Error(c, http.StatusServiceUnavailable, 40001, "installation service unavailable")
+			return
+		}
+		job, err := handler.jobs.Progress(c.Request.Context(), c.Param("id"))
+		if err != nil {
+			writeJobError(c, err)
+			return
+		}
+		response.OK(c, job)
+	})
+	group.POST("/retry/:id", func(c *gin.Context) {
+		if handler == nil || handler.jobs == nil {
+			response.Error(c, http.StatusServiceUnavailable, 40001, "installation service unavailable")
+			return
+		}
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 64<<10)
+		var request installer.ApplyRequest
+		if !decodeApplyRequest(c, &request) {
+			response.Error(c, http.StatusBadRequest, 10000, "invalid installation request")
+			return
+		}
+		job, err := handler.jobs.Retry(c.Request.Context(), c.Param("id"), request)
+		if err != nil {
+			writeJobError(c, err)
+			return
+		}
+		response.Write(c, http.StatusAccepted, 0, "accepted", job)
+	})
+}
+
+func decodeApplyRequest(c *gin.Context, request *installer.ApplyRequest) bool {
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	return decoder.Decode(request) == nil && jsonDocumentEnded(decoder)
 }
 
 func jsonDocumentEnded(decoder *json.Decoder) bool {
@@ -184,5 +238,20 @@ func writeApplyError(c *gin.Context, err error) {
 		response.Error(c, http.StatusUnprocessableEntity, 10001, "installation preflight failed")
 	default:
 		response.Error(c, http.StatusInternalServerError, 50000, "installation failed")
+	}
+}
+
+func writeJobError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, installer.ErrApplyBusy):
+		response.Error(c, http.StatusConflict, 10007, "installation already running")
+	case errors.Is(err, installer.ErrInvalidApply):
+		response.Error(c, http.StatusBadRequest, 10000, "invalid installation request")
+	case errors.Is(err, installer.ErrJobNotFound):
+		response.Error(c, http.StatusNotFound, 30000, "installation job not found")
+	case errors.Is(err, installer.ErrAlreadyInstalled):
+		response.Error(c, http.StatusConflict, 10006, "installation already completed")
+	default:
+		response.Error(c, http.StatusInternalServerError, 50000, "installation job unavailable")
 	}
 }

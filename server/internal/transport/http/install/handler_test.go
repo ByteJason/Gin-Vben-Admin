@@ -357,6 +357,49 @@ func TestApplyEndpointRejectsUnknownFieldsBeforeCallingService(t *testing.T) {
 	}
 }
 
+func TestAsyncApplyEndpointReturnsCredentialFreeJob(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	jobProvider := &jobProviderStub{job: installer.ApplyJob{ID: "install-job-1", State: installer.JobRunning, CurrentStep: "queued"}}
+	router := gin.New()
+	RegisterRoutes(router, NewHandlerWithApplyAndJobs(statusProviderStub{}, nil, nil, nil, nil, jobProvider))
+	body := `{"selectedUi":"antd","mode":"embedded","confirmCleanup":true,"database":{"driver":"mysql","mode":"single","dsn":"user:secret@tcp(db:3306)/app"},"redis":{"mode":"single","addr":"redis:6379"},"admin":{"username":"admin","password":"administrator-secret"}}`
+	request := httptest.NewRequest(http.MethodPost, "/api/system/install/v1/apply", bytes.NewBufferString(body))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", response.Code, response.Body.String())
+	}
+	if strings.Contains(strings.ToLower(response.Body.String()), "secret") || strings.Contains(strings.ToLower(response.Body.String()), "password") {
+		t.Fatalf("async apply response leaked credentials: %s", response.Body.String())
+	}
+	if jobProvider.request.Admin.Password != "administrator-secret" {
+		t.Fatalf("job provider did not receive admin credential")
+	}
+}
+
+func TestInstallationProgressAndRetryEndpointsUseJobProvider(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	jobProvider := &jobProviderStub{job: installer.ApplyJob{ID: "install-job-1", State: installer.JobFailed, CanRetry: true, ErrorCode: 50000}}
+	router := gin.New()
+	RegisterRoutes(router, NewHandlerWithApplyAndJobs(statusProviderStub{}, nil, nil, nil, nil, jobProvider))
+
+	progress := httptest.NewRecorder()
+	router.ServeHTTP(progress, httptest.NewRequest(http.MethodGet, "/api/system/install/v1/progress/install-job-1", nil))
+	if progress.Code != http.StatusOK || !strings.Contains(progress.Body.String(), `"state":"failed"`) {
+		t.Fatalf("progress response = %d %s", progress.Code, progress.Body.String())
+	}
+
+	body := `{"selectedUi":"antd","mode":"embedded","confirmCleanup":true,"database":{"driver":"mysql","mode":"single","dsn":"user:secret@tcp(db:3306)/app"},"redis":{"mode":"single","addr":"redis:6379"},"admin":{"username":"admin","password":"administrator-secret"}}`
+	retry := httptest.NewRecorder()
+	retryRequest := httptest.NewRequest(http.MethodPost, "/api/system/install/v1/retry/install-job-1", bytes.NewBufferString(body))
+	retryRequest.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(retry, retryRequest)
+	if retry.Code != http.StatusAccepted || jobProvider.retryID != "install-job-1" {
+		t.Fatalf("retry response = %d %s; id=%q", retry.Code, retry.Body.String(), jobProvider.retryID)
+	}
+}
+
 type statusProviderStub struct {
 	status installer.Status
 	err    error
@@ -400,6 +443,28 @@ type applyProviderStub struct {
 	err     error
 	request installer.ApplyRequest
 	calls   int
+}
+
+type jobProviderStub struct {
+	job     installer.ApplyJob
+	err     error
+	request installer.ApplyRequest
+	retryID string
+}
+
+func (s *jobProviderStub) Start(_ context.Context, request installer.ApplyRequest) (installer.ApplyJob, error) {
+	s.request = request
+	return s.job, s.err
+}
+
+func (s *jobProviderStub) Progress(context.Context, string) (installer.ApplyJob, error) {
+	return s.job, s.err
+}
+
+func (s *jobProviderStub) Retry(_ context.Context, id string, request installer.ApplyRequest) (installer.ApplyJob, error) {
+	s.retryID = id
+	s.request = request
+	return s.job, s.err
 }
 
 func (s *applyProviderStub) Apply(_ context.Context, request installer.ApplyRequest) (installer.ApplyResult, error) {

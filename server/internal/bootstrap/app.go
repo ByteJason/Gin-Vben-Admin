@@ -36,6 +36,7 @@ type App struct {
 	iam       *iamapp.Service
 	install   *installer.StatusService
 	apply     *installer.ApplyService
+	applyJobs *installer.ApplyJobService
 	readiness *platformhealth.Checker
 	closers   []io.Closer
 
@@ -155,7 +156,11 @@ func New(cfg config.Config) (*App, error) {
 		}
 	}
 	app.apply = applyService
-	app.http = newHTTPServerWithPlan(cfg, app.readiness, app.auth, limiter, app.iam, recovery, app.install, installPlan, installplatform.NewSystemDependencyProbe(), applyService)
+	if applyService != nil {
+		app.applyJobs = installer.NewApplyJobService(applyService)
+		app.closers = append(app.closers, app.applyJobs)
+	}
+	app.http = newHTTPServerWithPlan(cfg, app.readiness, app.auth, limiter, app.iam, recovery, app.install, installPlan, installplatform.NewSystemDependencyProbe(), applyService, app.applyJobs)
 	return app, nil
 }
 
@@ -234,6 +239,14 @@ func (a *App) InstallationApply() *installer.ApplyService {
 		return nil
 	}
 	return a.apply
+}
+
+// InstallationJobs returns the asynchronous first-install coordinator.
+func (a *App) InstallationJobs() *installer.ApplyJobService {
+	if a == nil {
+		return nil
+	}
+	return a.applyJobs
 }
 
 // Readiness returns the checker injected into the HTTP health routes.

@@ -145,6 +145,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApplyResultEnvelope'
+        '202':
+          description: 安装事务已进入后台执行
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplyJobEnvelope'
         '400':
           description: 安装请求无效
           content:
@@ -165,6 +174,88 @@ paths:
                 $ref: '#/components/schemas/ApplyErrorEnvelope'
         '500':
           description: 安装事务失败且已执行补偿
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplyErrorEnvelope'
+        '503':
+          description: 安装服务未接通
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstallServiceUnavailableEnvelope'
+  /api/system/install/v1/progress/{id}:
+    get:
+      tags: [Installation]
+      operationId: getInstallationProgress
+      summary: 查询后台安装事务进度
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 80
+      responses:
+        '200':
+          description: 安装进度
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplyJobEnvelope'
+        '404':
+          description: 安装任务不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplyErrorEnvelope'
+        '503':
+          description: 安装服务未接通
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstallServiceUnavailableEnvelope'
+  /api/system/install/v1/retry/{id}:
+    post:
+      tags: [Installation]
+      operationId: retryInstallation
+      summary: 使用新凭据重试失败的安装事务
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 80
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApplyRequest'
+      responses:
+        '202':
+          description: 重试任务已进入后台执行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplyJobEnvelope'
+        '400':
+          description: 重试请求无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplyErrorEnvelope'
+        '404':
+          description: 安装任务不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplyErrorEnvelope'
+        '409':
+          description: 安装已完成或已有任务运行
           content:
             application/json:
               schema:
@@ -523,6 +614,59 @@ components:
           type: string
         meta:
           $ref: '#/components/schemas/ResponseMeta'
+    ApplyJobEnvelope:
+      type: object
+      required: [code, message, data, traceId, meta]
+      properties:
+        code:
+          type: integer
+          const: 0
+        message:
+          type: string
+          enum: [accepted, success]
+        data:
+          $ref: '#/components/schemas/ApplyJob'
+        traceId:
+          type: string
+        meta:
+          $ref: '#/components/schemas/ResponseMeta'
+    ApplyJob:
+      type: object
+      required: [id, state, selectedUi, mode, currentStep, progress, steps, canRetry, lastUpdated]
+      properties:
+        id:
+          type: string
+        state:
+          type: string
+          enum: [running, completed, failed]
+        selectedUi:
+          type: string
+          enum: [antd, ele, naive]
+        mode:
+          type: string
+          enum: [embedded, standalone, api_only, dev]
+        currentStep:
+          type: string
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/ApplyStep'
+        installedAt:
+          type: string
+          format: date-time
+        errorCode:
+          type: integer
+        errorKey:
+          type: string
+        canRetry:
+          type: boolean
+        lastUpdated:
+          type: string
+          format: date-time
     ApplyResult:
       type: object
       required: [state, selectedUi, mode, installedAt, steps]
@@ -559,7 +703,7 @@ components:
       properties:
         code:
           type: integer
-          enum: [10000, 10001, 10006, 10007, 10008, 50000]
+          enum: [10000, 10001, 10006, 10007, 10008, 30000, 50000]
         message:
           type: string
         data:
