@@ -497,7 +497,7 @@ test('dev orchestrator exposes a cross-platform check mode', () => {
 test('public surface documents config topologies and explicit migrations', () => {
   const readme = readFileSync(join(root, 'README.md'), 'utf8');
   const example = readFileSync(join(root, 'server/configs/server.example.yaml'), 'utf8');
-  assert.match(readme, /0\.6\.0-dev/);
+  assert.match(readme, /0\.9\.0-rc/);
   assert.match(readme, /cmd\/migrate/);
   assert.match(readme, /migrate status/);
   for (const mode of ['single', 'read_write', 'cluster_endpoint']) assert.match(example, new RegExp(mode));

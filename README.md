@@ -2,7 +2,7 @@
 
 基于 Go、Gin、Vue 3 与 Vue Vben Admin 的企业级后台管理基础平台。
 
-当前版本：`0.6.0-dev`
+当前版本：`0.9.0-rc`
 
 ## 项目链接
 
@@ -196,6 +196,8 @@ docker compose -f deploy/compose.dev.yaml down
 - 管理端接口契约位于 `contracts/openapi/`。
 - 本地配置、日志、数据库卷和构建产物按 `.gitignore` 规则处理。
 
+候选版本运行手册见 [`docs/release/0.9.0-rc-runbook.md`](docs/release/0.9.0-rc-runbook.md)。贡献、安全、变更和第三方归属文件分别见 [`CONTRIBUTING.md`](CONTRIBUTING.md)、[`SECURITY.md`](SECURITY.md)、[`CHANGELOG.md`](CHANGELOG.md) 和 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
+
 ## 验证
 
 ```text
@@ -204,6 +206,18 @@ pnpm --dir admin run test:smoke
 pnpm --dir admin run check:type
 go -C server test ./...
 node ./scripts/verify.mjs --scope basic
+```
+
+可选本地观测组件：
+
+```text
+docker compose -f deploy/compose.dev.yaml -f deploy/compose.observability.yaml --profile observability up -d
+```
+
+发布包校验：
+
+```text
+node scripts/release/package.mjs --check
 ```
 
 ## 贡献指南
