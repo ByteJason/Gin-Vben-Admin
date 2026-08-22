@@ -344,6 +344,51 @@ func TestIAMUserDeleteSoftDeletesAndIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestIAMUserBatchStatusReturnsPerItemResultsWithoutCrossTenantLeak(t *testing.T) {
+	store := iamapp.NewMemoryStore()
+	admin := domain.User{ID: "admin", Username: "admin", TenantID: "default", Active: true}
+	target := domain.User{ID: "target", Username: "alice", TenantID: "default", Active: true, PasswordHash: "secret-hash", RoleIDs: []string{"r-reader"}}
+	otherTenant := domain.User{ID: "other", Username: "bob", TenantID: "tenant-b", Active: true}
+	for _, user := range []domain.User{admin, target, otherTenant} {
+		if err := store.SaveUser(context.Background(), user); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.SavePolicy(context.Background(), domain.Policy{Subject: "admin", Method: http.MethodPost, Path: "/api/admin/v1/iam/users/batch-status", Effect: domain.EffectAllow}); err != nil {
+		t.Fatal(err)
+	}
+	r := newIAMTestRouter(store, authdomain.Claims{Subject: "admin", Type: authdomain.AccessToken, ExpiresAt: time.Now().Add(time.Minute)})
+	body := `{"items":[{"id":"target","active":false},{"id":"missing","active":false},{"id":"other","active":false},{"id":"target","active":true}]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/v1/iam/users/batch-status", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test")
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	r.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("batch status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	var envelope struct {
+		Code int `json:"code"`
+		Data struct {
+			Results []struct {
+				ID     string `json:"id"`
+				Status string `json:"status"`
+				Code   int    `json:"code"`
+			} `json:"results"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Code != 0 || len(envelope.Data.Results) != 4 || envelope.Data.Results[0].Status != "disabled" || envelope.Data.Results[0].Code != 0 || envelope.Data.Results[1].Status != "not_found" || envelope.Data.Results[1].Code != 10001 || envelope.Data.Results[2].Status != "not_found" || envelope.Data.Results[2].Code != 10001 || envelope.Data.Results[3].Status != "invalid" || envelope.Data.Results[3].Code != 10000 {
+		t.Fatalf("batch envelope=%s", resp.Body.String())
+	}
+	stored, err := store.FindUser(context.Background(), target.ID)
+	if err != nil || stored.Active || stored.PasswordHash != target.PasswordHash || len(stored.RoleIDs) != 1 {
+		t.Fatalf("stored batch target=%+v err=%v", stored, err)
+	}
+}
+
 type testPasswordHasher struct{}
 
 func (testPasswordHasher) Hash(password string) (string, error) { return "hash:" + password, nil }

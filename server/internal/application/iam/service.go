@@ -19,9 +19,19 @@ var (
 	ErrRepositoryMissing     = errors.New("iam repository capability is unavailable")
 	ErrInvalidUserQuery      = domain.ErrInvalidUserQuery
 	ErrInvalidUser           = domain.ErrInvalidUser
+	ErrInvalidUserBatch      = errors.New("invalid user status batch")
 	ErrUserConflict          = domain.ErrUserConflict
 	ErrPasswordHasherMissing = errors.New("iam password hasher is unavailable")
 )
+
+// maxUserBatchStatusItems bounds the number of status mutations accepted by
+// one request. Keeping the bound in the application seam makes the same rule
+// apply to memory fixtures and durable adapters.
+const maxUserBatchStatusItems = 100
+
+// MaxUserBatchStatusItems is exported for clients that need to mirror the
+// contract without depending on the private implementation constant.
+const MaxUserBatchStatusItems = maxUserBatchStatusItems
 
 // PasswordHasher is the narrow credential boundary used by the IAM write
 // seam. Plaintext passwords are accepted only for the duration of the
@@ -49,6 +59,26 @@ type UserUpdateInput struct {
 	Phone    *string
 	OrgID    *string
 	Active   *bool
+}
+
+// UserStatusChangeInput is the transport-neutral input for one status change.
+// It deliberately contains no profile, credential, or relationship fields.
+type UserStatusChangeInput struct {
+	ID     string
+	Active bool
+}
+
+type UserBatchStatusInput struct {
+	Items []UserStatusChangeInput
+}
+
+// UserStatusResult preserves input order and carries a typed per-item error.
+// A successful result contains the updated user; HTTP mappers intentionally
+// project only its public status fields.
+type UserStatusResult struct {
+	ID   string
+	User domain.User
+	Err  error
 }
 
 func validManagementPassword(password string) bool {
@@ -164,6 +194,62 @@ func (s *MemoryStore) SoftDeleteUser(ctx context.Context, id string) (domain.Use
 	user.Active = false
 	s.users[id] = cloneUser(user)
 	return cloneUser(user), nil
+}
+
+// UpdateUserStatus changes only the active flag and retains every other user
+// field. It is the single-item fallback for repositories without a bulk port.
+func (s *MemoryStore) UpdateUserStatus(ctx context.Context, change domain.UserStatusChange) (domain.User, error) {
+	if err := check(ctx); err != nil {
+		return domain.User{}, err
+	}
+	id := strings.TrimSpace(change.ID)
+	if id == "" {
+		return domain.User{}, ErrInvalidID
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user, ok := s.users[id]
+	if !ok {
+		return domain.User{}, domain.ErrResourceNotFound
+	}
+	user.Active = change.Active
+	s.users[id] = cloneUser(user)
+	return cloneUser(user), nil
+}
+
+// UpdateUserStatuses applies a validated set of status changes under one
+// memory lock. Missing rows are omitted from the returned map so the
+// application seam can report not_found without revealing cross-scope rows.
+func (s *MemoryStore) UpdateUserStatuses(ctx context.Context, changes []domain.UserStatusChange) (map[string]domain.User, error) {
+	if err := check(ctx); err != nil {
+		return nil, err
+	}
+	normalized := make([]domain.UserStatusChange, len(changes))
+	seen := make(map[string]struct{}, len(changes))
+	for i, change := range changes {
+		change.ID = strings.TrimSpace(change.ID)
+		if change.ID == "" {
+			return nil, ErrInvalidID
+		}
+		if _, exists := seen[change.ID]; exists {
+			return nil, ErrInvalidUser
+		}
+		seen[change.ID] = struct{}{}
+		normalized[i] = change
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	updated := make(map[string]domain.User, len(normalized))
+	for _, change := range normalized {
+		user, ok := s.users[change.ID]
+		if !ok {
+			continue
+		}
+		user.Active = change.Active
+		s.users[change.ID] = cloneUser(user)
+		updated[change.ID] = cloneUser(user)
+	}
+	return updated, nil
 }
 
 func hasUserIdentifierConflict(users map[string]domain.User, candidate domain.User, excludeID string) bool {
@@ -403,6 +489,12 @@ type userUpdater interface {
 }
 type userSoftDeleter interface {
 	SoftDeleteUser(context.Context, string) (domain.User, error)
+}
+type userStatusUpdater interface {
+	UpdateUserStatus(context.Context, domain.UserStatusChange) (domain.User, error)
+}
+type userBatchStatusUpdater interface {
+	UpdateUserStatuses(context.Context, []domain.UserStatusChange) (map[string]domain.User, error)
 }
 type roleSaver interface {
 	SaveRole(context.Context, domain.Role) error
@@ -743,6 +835,156 @@ func (s *Service) DeleteUser(ctx context.Context, id string) (domain.User, error
 		return domain.User{}, err
 	}
 	return deleted, nil
+}
+
+// BatchUpdateUserStatus applies bounded, tenant-scoped active-state changes.
+// Validation and scope checks happen before any repository mutation; each
+// item then receives an independent result so one missing or duplicate ID does
+// not hide successful changes for other IDs.
+func (s *Service) BatchUpdateUserStatus(ctx context.Context, input UserBatchStatusInput) ([]UserStatusResult, error) {
+	if s == nil || s.Users == nil {
+		return nil, ErrRepositoryMissing
+	}
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(input.Items) == 0 || len(input.Items) > maxUserBatchStatusItems {
+		return nil, ErrInvalidUserBatch
+	}
+
+	results := make([]UserStatusResult, len(input.Items))
+	changes := make([]domain.UserStatusChange, 0, len(input.Items))
+	changeIndexes := make(map[string]int, len(input.Items))
+	seen := make(map[string]struct{}, len(input.Items))
+	for index, item := range input.Items {
+		id := strings.TrimSpace(item.ID)
+		results[index].ID = id
+		if id == "" {
+			results[index].Err = ErrInvalidUser
+			continue
+		}
+		if _, duplicate := seen[id]; duplicate {
+			results[index].Err = ErrInvalidUser
+			continue
+		}
+		seen[id] = struct{}{}
+		user, findErr := s.Users.FindUser(ctx, id)
+		if findErr != nil {
+			switch {
+			case errors.Is(findErr, domain.ErrResourceNotFound):
+				results[index].Err = domain.ErrResourceNotFound
+			case errors.Is(findErr, ErrInvalidID), errors.Is(findErr, domain.ErrInvalidUser):
+				results[index].Err = ErrInvalidUser
+			default:
+				// Repository failures are retained on the item. This keeps the
+				// response shape stable while allowing the handler to expose the
+				// generic error code without leaking row existence.
+				results[index].Err = findErr
+			}
+			continue
+		}
+		if scopeErr := checkUserScope(scope, user); scopeErr != nil {
+			// A caller must not learn whether an ID belongs to another tenant
+			// or organization. Both scope failures use the not_found result.
+			if errors.Is(scopeErr, tenant.ErrCrossTenant) || errors.Is(scopeErr, tenant.ErrOrganizationDenied) {
+				results[index].Err = domain.ErrResourceNotFound
+			} else {
+				results[index].Err = scopeErr
+			}
+			continue
+		}
+		changes = append(changes, domain.UserStatusChange{ID: id, Active: item.Active})
+		changeIndexes[id] = index
+	}
+
+	if len(changes) == 0 {
+		return results, nil
+	}
+
+	updated := make(map[string]domain.User, len(changes))
+	if repo, ok := s.Users.(userBatchStatusUpdater); ok {
+		var bulkErr error
+		updated, bulkErr = repo.UpdateUserStatuses(ctx, changes)
+		if bulkErr != nil {
+			for _, index := range changeIndexes {
+				results[index].Err = bulkErr
+			}
+			return results, nil
+		}
+	} else {
+		for _, change := range changes {
+			var user domain.User
+			if repo, ok := s.Users.(userStatusUpdater); ok {
+				user, err = repo.UpdateUserStatus(ctx, change)
+			} else {
+				// Preserve compatibility with older repositories that expose only
+				// the profile update/save ports.
+				existing, findErr := s.Users.FindUser(ctx, change.ID)
+				if findErr != nil {
+					err = findErr
+				} else {
+					existing.Active = change.Active
+					if updater, updaterOK := s.Users.(userUpdater); updaterOK {
+						user, err = updater.UpdateUser(ctx, existing)
+					} else if saver, saverOK := s.Users.(userSaver); saverOK {
+						err = saver.SaveUser(ctx, existing)
+						user = existing
+					} else {
+						err = ErrRepositoryMissing
+					}
+				}
+			}
+			if err != nil {
+				results[changeIndexes[change.ID]].Err = batchItemError(err)
+				continue
+			}
+			if user.ID == "" {
+				user.ID = change.ID
+			}
+			user.Active = change.Active
+			updated[change.ID] = user
+		}
+	}
+
+	mutated := false
+	for id, index := range changeIndexes {
+		user, ok := updated[id]
+		if !ok {
+			if results[index].Err == nil {
+				results[index].Err = domain.ErrResourceNotFound
+			}
+			continue
+		}
+		user.Active = input.Items[index].Active
+		results[index].User = user
+		results[index].Err = nil
+		mutated = true
+	}
+	if mutated {
+		if invalidateErr := s.invalidate(ctx); invalidateErr != nil {
+			return nil, invalidateErr
+		}
+	}
+	return results, nil
+}
+
+func batchItemError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, domain.ErrResourceNotFound) || errors.Is(err, tenant.ErrCrossTenant) || errors.Is(err, tenant.ErrOrganizationDenied) {
+		return domain.ErrResourceNotFound
+	}
+	if errors.Is(err, ErrInvalidID) || errors.Is(err, domain.ErrInvalidUser) {
+		return ErrInvalidUser
+	}
+	return err
 }
 
 func checkUserScope(scope tenant.Context, user domain.User) error {

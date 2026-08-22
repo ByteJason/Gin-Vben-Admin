@@ -53,6 +53,7 @@ func RegisterRoutes(r gin.IRouter, handler *Handler, policies ...httpmiddleware.
 	group.Use(authhttp.Middleware(handler.auth), httpmiddleware.TenantContext(policy))
 	group.GET("/me", handler.currentUser)
 	group.GET("/users", handler.listUsers)
+	group.POST("/users/batch-status", handler.batchUpdateUserStatus)
 	group.GET("/users/:id", handler.getUser)
 	group.POST("/users", handler.createUser)
 	group.PATCH("/users/:id", handler.updateUser)
@@ -71,7 +72,7 @@ func RegisterRoutes(r gin.IRouter, handler *Handler, policies ...httpmiddleware.
 }
 
 func registerDisabled(group *gin.RouterGroup) {
-	for _, path := range []string{"/me", "/users", "/users/:id", "/roles", "/menus", "/permissions", "/policies", "/data-scopes"} {
+	for _, path := range []string{"/me", "/users", "/users/batch-status", "/users/:id", "/roles", "/menus", "/permissions", "/policies", "/data-scopes"} {
 		group.GET(path, disabled)
 		group.POST(path, disabled)
 		group.PATCH(path, disabled)
@@ -152,6 +153,25 @@ type userUpdateRequest struct {
 	Phone    *string `json:"phone"`
 	OrgID    *string `json:"orgId"`
 	Active   *bool   `json:"active"`
+}
+
+type userBatchStatusItemRequest struct {
+	ID     string `json:"id"`
+	Active *bool  `json:"active"`
+}
+
+type userBatchStatusRequest struct {
+	Items []userBatchStatusItemRequest `json:"items"`
+}
+
+type userBatchStatusItemResponse struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+	Code   int    `json:"code"`
+}
+
+type userBatchStatusResponse struct {
+	Results []userBatchStatusItemResponse `json:"results"`
 }
 
 type userResponse struct {
@@ -325,6 +345,58 @@ func (h *Handler) deleteUser(c *gin.Context) {
 		return
 	}
 	response.OK(c, nil)
+}
+
+func (h *Handler) batchUpdateUserStatus(c *gin.Context) {
+	if !h.guard(c) {
+		return
+	}
+	var req userBatchStatusRequest
+	if err := c.ShouldBindJSON(&req); err != nil || len(req.Items) == 0 || len(req.Items) > iamapp.MaxUserBatchStatusItems {
+		writeServiceError(c, iamapp.ErrInvalidUserBatch)
+		return
+	}
+	items := make([]iamapp.UserStatusChangeInput, len(req.Items))
+	for index, item := range req.Items {
+		if item.Active == nil {
+			// `active` is required by the wire contract. Rejecting the malformed
+			// envelope before mutation avoids guessing a desired state.
+			response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid request")
+			return
+		}
+		items[index] = iamapp.UserStatusChangeInput{ID: item.ID, Active: *item.Active}
+	}
+	results, err := h.service.BatchUpdateUserStatus(c.Request.Context(), iamapp.UserBatchStatusInput{Items: items})
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	out := userBatchStatusResponse{Results: make([]userBatchStatusItemResponse, 0, len(results))}
+	for _, result := range results {
+		item := userBatchStatusItemResponse{ID: result.ID}
+		switch {
+		case result.Err == nil:
+			item.Status = userStatus(result.User.Active)
+			item.Code = 0
+		case errors.Is(result.Err, domain.ErrResourceNotFound):
+			item.Status = "not_found"
+			item.Code = codeNotFound
+		case errors.Is(result.Err, tenant.ErrCrossTenant), errors.Is(result.Err, tenant.ErrOrganizationDenied):
+			item.Status = "forbidden"
+			item.Code = codeForbidden
+		case errors.Is(result.Err, iamapp.ErrInvalidUser), errors.Is(result.Err, iamapp.ErrInvalidUserBatch), errors.Is(result.Err, iamapp.ErrInvalidID):
+			item.Status = "invalid"
+			item.Code = codeBadRequest
+		case errors.Is(result.Err, iamapp.ErrRepositoryMissing), errors.Is(result.Err, authdomain.ErrDependencyUnavailable):
+			item.Status = "error"
+			item.Code = codeUnavailable
+		default:
+			item.Status = "error"
+			item.Code = codeInternalError
+		}
+		out.Results = append(out.Results, item)
+	}
+	response.OK(c, out)
 }
 
 type roleRequest struct {
@@ -557,7 +629,7 @@ func writeServiceError(c *gin.Context, err error) {
 		response.Error(c, http.StatusServiceUnavailable, codeUnavailable, "dependency unavailable")
 		return
 	}
-	if errors.Is(err, iamapp.ErrInvalidID) || errors.Is(err, iamapp.ErrInvalidUserQuery) || errors.Is(err, iamapp.ErrInvalidUser) || errors.Is(err, domain.ErrInvalidPolicy) {
+	if errors.Is(err, iamapp.ErrInvalidID) || errors.Is(err, iamapp.ErrInvalidUserQuery) || errors.Is(err, iamapp.ErrInvalidUser) || errors.Is(err, iamapp.ErrInvalidUserBatch) || errors.Is(err, domain.ErrInvalidPolicy) {
 		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid request")
 		return
 	}

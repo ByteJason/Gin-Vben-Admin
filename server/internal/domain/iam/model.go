@@ -55,6 +55,13 @@ type User struct {
 	RoleIDs           []string
 }
 
+// UserStatusChange is the persistence-neutral unit used by the bounded batch
+// status seam. It contains no credential, profile, or relationship fields.
+type UserStatusChange struct {
+	ID     string
+	Active bool
+}
+
 // NormalizeProfile applies the shared username/email/phone invariants before
 // a management write reaches a repository. The original display casing is
 // retained while normalized values are used for tenant-local uniqueness.

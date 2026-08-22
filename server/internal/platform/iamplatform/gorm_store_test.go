@@ -106,3 +106,14 @@ func TestGORMStoreSoftDeleteValidatesIDAndDependency(t *testing.T) {
 		t.Fatalf("SoftDeleteUser(unavailable) error = %v, want ErrStoreUnavailable", err)
 	}
 }
+
+func TestGORMStoreBatchStatusValidatesBeforeUnavailableDependency(t *testing.T) {
+	store := NewGORMStore(nil)
+	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "default"})
+	if _, err := store.UpdateUserStatuses(ctx, []domain.UserStatusChange{{ID: "not-numeric", Active: false}}); !errors.Is(err, domain.ErrInvalidUser) {
+		t.Fatalf("UpdateUserStatuses(non-numeric) error = %v, want ErrInvalidUser", err)
+	}
+	if _, err := store.UpdateUserStatuses(ctx, []domain.UserStatusChange{{ID: "7", Active: false}}); !errors.Is(err, ErrStoreUnavailable) {
+		t.Fatalf("UpdateUserStatuses(unavailable) error = %v, want ErrStoreUnavailable", err)
+	}
+}

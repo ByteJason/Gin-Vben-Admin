@@ -229,3 +229,41 @@ func TestServiceDeleteUserSoftDeletesWithinScopeAndIsIdempotent(t *testing.T) {
 		t.Fatalf("cross-tenant DeleteUser() error = %v", err)
 	}
 }
+
+func TestServiceBatchUpdateUserStatusReturnsScopedPerItemResults(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a", Organization: "org-a"})
+	users := []domain.User{
+		{ID: "u-active", Username: "alice", TenantID: "tenant-a", OrgID: "org-a", Active: true, PasswordHash: "hash-a", RoleIDs: []string{"role-a"}},
+		{ID: "u-disabled", Username: "bob", TenantID: "tenant-a", OrgID: "org-a", Active: false, PasswordHash: "hash-b", RoleIDs: []string{"role-b"}},
+		{ID: "u-other-tenant", Username: "carol", TenantID: "tenant-b", OrgID: "org-a", Active: true, PasswordHash: "hash-c"},
+	}
+	for _, user := range users {
+		if err := store.SaveUser(ctx, user); err != nil {
+			t.Fatal(err)
+		}
+	}
+	results, err := NewService(store).BatchUpdateUserStatus(ctx, UserBatchStatusInput{Items: []UserStatusChangeInput{
+		{ID: "u-active", Active: false},
+		{ID: "u-disabled", Active: true},
+		{ID: "missing", Active: false},
+		{ID: "u-other-tenant", Active: false},
+		{ID: "u-active", Active: true},
+	}})
+	if err != nil {
+		t.Fatalf("BatchUpdateUserStatus() error = %v", err)
+	}
+	if len(results) != 5 || results[0].Err != nil || results[0].User.Active || results[1].Err != nil || !results[1].User.Active {
+		t.Fatalf("status results = %+v", results)
+	}
+	if !errors.Is(results[2].Err, domain.ErrResourceNotFound) || !errors.Is(results[3].Err, domain.ErrResourceNotFound) || !errors.Is(results[4].Err, ErrInvalidUser) {
+		t.Fatalf("per-item errors = %+v", results)
+	}
+	stored, err := store.FindUser(ctx, "u-active")
+	if err != nil || stored.Active || stored.PasswordHash != "hash-a" || len(stored.RoleIDs) != 1 {
+		t.Fatalf("stored active target = %+v err=%v", stored, err)
+	}
+	if _, err := NewService(store).BatchUpdateUserStatus(ctx, UserBatchStatusInput{Items: make([]UserStatusChangeInput, 101)}); !errors.Is(err, ErrInvalidUserBatch) {
+		t.Fatalf("oversized batch error = %v, want ErrInvalidUserBatch", err)
+	}
+}

@@ -248,6 +248,117 @@ func (s *GORMStore) SoftDeleteUser(ctx context.Context, id string) (domain.User,
 	return row.toDomain(roles), nil
 }
 
+// UpdateUserStatus is the single-item adapter used by the application
+// fallback seam. The bulk implementation keeps the SQL behavior identical
+// for one and many requested changes.
+func (s *GORMStore) UpdateUserStatus(ctx context.Context, change domain.UserStatusChange) (domain.User, error) {
+	updated, err := s.UpdateUserStatuses(ctx, []domain.UserStatusChange{change})
+	if err != nil {
+		return domain.User{}, err
+	}
+	id := strings.TrimSpace(change.ID)
+	user, ok := updated[id]
+	if !ok {
+		return domain.User{}, domain.ErrResourceNotFound
+	}
+	return user, nil
+}
+
+// UpdateUserStatuses changes only users.status in one primary transaction.
+// Tenant and organization predicates are applied to every row; absent or
+// out-of-organization rows are omitted so callers receive a stable not_found
+// result without an existence oracle. Credentials, profile columns, and role
+// relations are never part of this mutation.
+func (s *GORMStore) UpdateUserStatuses(ctx context.Context, changes []domain.UserStatusChange) (map[string]domain.User, error) {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
+	normalized := make([]domain.UserStatusChange, len(changes))
+	seen := make(map[string]struct{}, len(changes))
+	for index, change := range changes {
+		id := strings.TrimSpace(change.ID)
+		if id == "" {
+			return nil, domain.ErrInvalidUser
+		}
+		if _, exists := seen[id]; exists {
+			return nil, domain.ErrInvalidUser
+		}
+		if _, err := numericID(id); err != nil {
+			return nil, domain.ErrInvalidUser
+		}
+		seen[id] = struct{}{}
+		normalized[index] = domain.UserStatusChange{ID: id, Active: change.Active}
+	}
+	if len(normalized) == 0 {
+		return map[string]domain.User{}, nil
+	}
+	if s == nil || s.db == nil {
+		return nil, ErrStoreUnavailable
+	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	updated := make(map[string]domain.User, len(normalized))
+	err = s.db.WithinTransaction(ctx, func(tx *gorm.DB) error {
+		for _, change := range normalized {
+			numeric, parseErr := numericID(change.ID)
+			if parseErr != nil {
+				return domain.ErrInvalidUser
+			}
+			var row userRow
+			query := tx.Table("users").Where("tenant_id = ? AND id = ?", scope.TenantID, numeric)
+			queryResult := query.Take(&row)
+			if queryResult.Error != nil {
+				if errors.Is(queryResult.Error, gorm.ErrRecordNotFound) {
+					continue
+				}
+				return ErrStoreUnavailable
+			}
+			if !scope.PlatformAdmin && scope.Organization != "" && stringValue(row.OrgID) != scope.Organization {
+				continue
+			}
+			desired := statusValue(change.Active)
+			if row.Status != desired {
+				result := tx.Table("users").Where("tenant_id = ? AND id = ?", scope.TenantID, numeric).Updates(map[string]any{"status": desired})
+				if result.Error != nil {
+					return ErrStoreUnavailable
+				}
+				if result.RowsAffected == 0 {
+					return domain.ErrResourceNotFound
+				}
+				row.Status = desired
+			}
+			updated[change.ID] = row.toDomain(nil)
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, domain.ErrInvalidUser) || errors.Is(err, domain.ErrResourceNotFound) || errors.Is(err, tenant.ErrOrganizationDenied) || errors.Is(err, tenant.ErrCrossTenant) {
+			return nil, err
+		}
+		return nil, ErrStoreUnavailable
+	}
+	// The status transaction intentionally avoids relation writes. Enriching
+	// successful rows from the read-side relation table preserves the response
+	// shape for callers without changing the mutation boundary.
+	for id, user := range updated {
+		numeric, parseErr := numericID(id)
+		if parseErr != nil {
+			continue
+		}
+		roles, roleErr := s.roleIDs(ctx, scope.TenantID, numeric)
+		if roleErr != nil {
+			return nil, roleErr
+		}
+		user.RoleIDs = roles
+		updated[id] = user
+	}
+	return updated, nil
+}
+
 func (s *GORMStore) ListUsers(ctx context.Context) ([]domain.User, error) {
 	if s == nil || s.db == nil {
 		return nil, ErrStoreUnavailable
