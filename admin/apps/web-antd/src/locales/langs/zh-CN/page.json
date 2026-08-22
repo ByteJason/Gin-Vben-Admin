@@ -74,6 +74,25 @@
     "lastLoginAt": "最近登录",
     "pageSize": "每页",
     "previous": "上一页",
-    "next": "下一页"
+    "next": "下一页",
+    "create": "新增用户",
+    "edit": "编辑用户",
+    "save": "保存",
+    "cancel": "取消",
+    "required": "请填写必填字段。",
+    "passwordLength": "初始凭据长度需为 8–128 字节。",
+    "invalidEmail": "请输入有效的邮箱地址。",
+    "invalidPhone": "请输入 E.164 格式手机号。",
+    "loadFormError": "用户详情加载失败，请重试。",
+    "saveError": "用户保存失败，请检查权限或冲突。",
+    "created": "用户已创建。",
+    "updated": "用户已更新。",
+    "saving": "正在保存…",
+    "initialPassword": "初始凭据",
+    "phone": "手机号",
+    "nickname": "昵称",
+    "activeHelp": "停用后用户不能登录。",
+    "actions": "操作",
+    "form": "用户资料表单"
   }
 }

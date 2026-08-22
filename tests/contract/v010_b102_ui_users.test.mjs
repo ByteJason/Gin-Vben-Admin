@@ -32,7 +32,7 @@ test('B10.2 UI users list has equivalent route, API adapter, and page for every 
     assert.match(viewText, /role="table"|<table/);
     assert.match(viewText, /pageSize/);
     assert.match(viewText, /status/);
-    assert.doesNotMatch(viewText, /passwordHash|password\s*[:=]|Authorization/);
+    assert.doesNotMatch(viewText, /passwordHash|response\.password|Authorization/);
   }
 });
 

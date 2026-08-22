@@ -74,6 +74,25 @@
     "lastLoginAt": "Last login",
     "pageSize": "Rows per page",
     "previous": "Previous",
-    "next": "Next"
+    "next": "Next",
+    "create": "Create user",
+    "edit": "Edit user",
+    "save": "Save",
+    "cancel": "Cancel",
+    "required": "Please fill in the required fields.",
+    "passwordLength": "The initial credential must be 8–128 bytes.",
+    "invalidEmail": "Enter a valid email address.",
+    "invalidPhone": "Enter an E.164 phone number.",
+    "loadFormError": "User details could not be loaded. Try again.",
+    "saveError": "User could not be saved. Check permissions or conflicts.",
+    "created": "User created.",
+    "updated": "User updated.",
+    "saving": "Saving…",
+    "initialPassword": "Initial credential",
+    "phone": "Phone",
+    "nickname": "Nickname",
+    "activeHelp": "Disabled users cannot sign in.",
+    "actions": "Actions",
+    "form": "User profile form"
   }
 }

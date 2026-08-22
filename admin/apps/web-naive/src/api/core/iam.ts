@@ -46,6 +46,32 @@ export interface IAMRole {
   userIds?: string[];
 }
 
+export interface IAMUserCreateInput {
+  active?: boolean;
+  avatar?: string;
+  email?: string;
+  nickname?: string;
+  orgId?: string;
+  password: string;
+  phone?: string;
+  username: string;
+}
+
+export interface IAMUserUpdateInput {
+  active?: boolean;
+  avatar?: string;
+  email?: string;
+  nickname?: string;
+  orgId?: string;
+  phone?: string;
+  username?: string;
+}
+
+const userPath = (id: string) =>
+  ADMIN_ENDPOINTS.getIAMUser.replace('{id}', encodeURIComponent(id));
+const updateUserPath = (id: string) =>
+  ADMIN_ENDPOINTS.updateIAMUser.replace('{id}', encodeURIComponent(id));
+
 export async function listIAMUsersApi(params: IAMUserListParams = {}) {
   return requestClient.get<IAMUserPage>(ADMIN_ENDPOINTS.listIAMUsers, {
     params: {
@@ -62,4 +88,19 @@ export async function listIAMUsersApi(params: IAMUserListParams = {}) {
 
 export async function listIAMRolesApi() {
   return requestClient.get<IAMRole[]>(ADMIN_ENDPOINTS.listIAMRoles);
+}
+
+export async function getIAMUserApi(id: string) {
+  return requestClient.get<IAMUser>(userPath(id));
+}
+
+export async function createIAMUserApi(input: IAMUserCreateInput) {
+  return requestClient.post<IAMUser>(ADMIN_ENDPOINTS.createIAMUser, input);
+}
+
+export async function updateIAMUserApi(id: string, input: IAMUserUpdateInput) {
+  return requestClient.request<IAMUser>(updateUserPath(id), {
+    data: input,
+    method: 'PATCH',
+  });
 }
