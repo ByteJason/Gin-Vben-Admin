@@ -88,6 +88,9 @@ func (q *MemoryQueue) Enqueue(_ context.Context, task Task) (Task, error) {
 }
 
 func (q *MemoryQueue) Get(_ context.Context, id string) (Task, error) {
+	if q == nil {
+		return Task{}, ErrTaskNotFound
+	}
 	q.mu.RLock()
 	defer q.mu.RUnlock()
 	task, ok := q.tasks[id]
@@ -98,6 +101,9 @@ func (q *MemoryQueue) Get(_ context.Context, id string) (Task, error) {
 }
 
 func (q *MemoryQueue) Fail(_ context.Context, id string, cause error) error {
+	if q == nil {
+		return ErrTaskNotFound
+	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	task, ok := q.tasks[id]
@@ -129,13 +135,16 @@ func (q *MemoryQueue) Cancel(_ context.Context, id string) error {
 }
 
 func (q *MemoryQueue) transition(id string, status Status) error {
+	if q == nil {
+		return ErrTaskNotFound
+	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	task, ok := q.tasks[id]
 	if !ok {
 		return ErrTaskNotFound
 	}
-	if task.Status == StatusDeadLetter {
+	if task.Status == StatusDeadLetter || task.Status == StatusCancelled || task.Status == StatusSucceeded {
 		return ErrTaskConflict
 	}
 	task.Status = status
