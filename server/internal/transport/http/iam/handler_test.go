@@ -52,6 +52,37 @@ func TestIAMRoutesRequireBearer(t *testing.T) {
 	}
 }
 
+func TestIAMComponentRegistryIsGuardedAndReturnsAllowlist(t *testing.T) {
+	store := iamapp.NewMemoryStore()
+	if err := store.SaveUser(context.Background(), domain.User{ID: "u1", Username: "alice", Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SavePolicy(context.Background(), domain.Policy{Subject: "u1", Method: http.MethodGet, Path: "/api/admin/v1/iam/components", Effect: domain.EffectAllow}); err != nil {
+		t.Fatal(err)
+	}
+	r := newIAMTestRouter(store, authdomain.Claims{Subject: "u1", Type: authdomain.AccessToken, ExpiresAt: time.Now().Add(time.Minute)})
+	request := httptest.NewRequest(http.MethodGet, "/api/admin/v1/iam/components", nil)
+	request.Header.Set("Authorization", "Bearer test")
+	response := httptest.NewRecorder()
+	r.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var envelope struct {
+		Code int `json:"code"`
+		Data []struct {
+			Component string `json:"component"`
+			Kind      string `json:"kind"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Code != 0 || len(envelope.Data) == 0 || envelope.Data[0].Component == "" || envelope.Data[0].Kind == "" {
+		t.Fatalf("envelope=%s", response.Body.String())
+	}
+}
+
 func TestIAMCurrentUserReturnsVersionedProfile(t *testing.T) {
 	store := iamapp.NewMemoryStore()
 	if err := store.SaveUser(context.Background(), domain.User{

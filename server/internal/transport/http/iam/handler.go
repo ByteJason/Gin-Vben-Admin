@@ -72,6 +72,7 @@ func RegisterRoutes(r gin.IRouter, handler *Handler, policies ...httpmiddleware.
 	group.PUT("/roles/:id/permissions", handler.replaceRolePermissions)
 	group.PUT("/roles/:id/data-scopes", handler.replaceRoleDataScopes)
 	group.GET("/menus", handler.listMenus)
+	group.GET("/components", handler.listComponents)
 	group.GET("/permissions", handler.listPermissions)
 	group.GET("/policies", handler.listPolicies)
 	group.POST("/policies", handler.createPolicy)
@@ -83,7 +84,7 @@ func RegisterRoutes(r gin.IRouter, handler *Handler, policies ...httpmiddleware.
 }
 
 func registerDisabled(group *gin.RouterGroup) {
-	for _, path := range []string{"/me", "/users", "/users/batch-status", "/users/:id/reset-password", "/users/:id/login-events", "/users/:id", "/roles", "/roles/:id/users", "/roles/:id/permissions", "/roles/:id/data-scopes", "/menus", "/permissions", "/policies", "/data-scopes"} {
+	for _, path := range []string{"/me", "/users", "/users/batch-status", "/users/:id/reset-password", "/users/:id/login-events", "/users/:id", "/roles", "/roles/:id/users", "/roles/:id/permissions", "/roles/:id/data-scopes", "/menus", "/components", "/permissions", "/policies", "/data-scopes"} {
 		group.GET(path, disabled)
 		group.POST(path, disabled)
 		group.PATCH(path, disabled)
@@ -649,6 +650,18 @@ func (h *Handler) listMenus(c *gin.Context) {
 		out = append(out, menuResponse{ID: menu.ID, ParentID: menu.ParentID, Name: menu.Name, Path: menu.Path, Visible: menu.Visible, Active: menu.Active})
 	}
 	response.OK(c, out)
+}
+
+func (h *Handler) listComponents(c *gin.Context) {
+	if !h.guard(c) {
+		return
+	}
+	components, err := h.service.ListComponents(c.Request.Context())
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	response.OK(c, components)
 }
 
 type permissionResponse struct {

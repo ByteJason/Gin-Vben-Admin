@@ -798,6 +798,7 @@ type Service struct {
 	Permissions    domain.PermissionRepository
 	Policies       domain.PolicyStore
 	DataScopes     domain.DataScopeStore
+	Components     ComponentRegistry
 	Authorizer     domain.Authorizer
 	Scopes         domain.DataScopeResolver
 	passwordHasher PasswordHasher
@@ -873,9 +874,34 @@ func NewServiceWithRepositories(users domain.UserRepository, roles domain.RoleRe
 		Permissions: permissions,
 		Policies:    policies,
 		DataScopes:  scopes,
+		Components:  NewStaticComponentRegistry(),
 		Authorizer:  domain.NewAuthorizer(policies),
 		Scopes:      domain.NewMemoryDataScopeResolver(scopes),
 	}
+}
+
+// ListComponents returns the immutable component allowlist used by menu
+// editors and backend route conversion.
+func (s *Service) ListComponents(ctx context.Context) ([]Component, error) {
+	if s == nil || s.Components == nil {
+		return nil, ErrRepositoryMissing
+	}
+	return s.Components.List(ctx)
+}
+
+// ValidateComponent rejects arbitrary module paths before a menu reaches a
+// persistence adapter.
+func (s *Service) ValidateComponent(value string) error {
+	if s == nil || s.Components == nil {
+		return ErrRepositoryMissing
+	}
+	if registry, ok := s.Components.(interface{ Validate(string) error }); ok {
+		return registry.Validate(value)
+	}
+	if _, ok := s.Components.Resolve(value); !ok {
+		return ErrComponentNotRegistered
+	}
+	return nil
 }
 
 // SetPermissionCache wraps the current authorizer with a versioned decision

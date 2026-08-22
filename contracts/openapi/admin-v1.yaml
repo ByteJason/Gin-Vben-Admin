@@ -496,6 +496,29 @@ paths:
         '200': { $ref: '#/components/responses/CollectionResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /api/admin/v1/iam/components:
+    get:
+      tags: [IAM]
+      operationId: listIAMComponents
+      summary: 查询菜单组件注册表
+      description: 返回服务端允许菜单引用的有限组件白名单；客户端不得提交任意模块路径。
+      security: [{BearerAuth: []}]
+      responses:
+        '200':
+          description: 组件注册表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/IAMComponent' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
   /api/admin/v1/menu/all:
     get:
       tags: [IAM]
@@ -1181,6 +1204,15 @@ components:
         path: { type: string }
         visible: { type: boolean }
         active: { type: boolean }
+    IAMComponent:
+      type: object
+      additionalProperties: false
+      required: [id, component, label, kind]
+      properties:
+        id: { type: string, minLength: 1, maxLength: 128 }
+        component: { type: string, minLength: 1, maxLength: 255 }
+        label: { type: string, minLength: 1, maxLength: 191 }
+        kind: { type: string, enum: [layout, page] }
     IAMPermission:
       type: object
       required: [id, name, method, path, active]

@@ -1,5 +1,5 @@
 // Generated from contracts/openapi/admin-v1.yaml; DO NOT EDIT.
-// CONTRACT_SHA256=6dc11069f30e2ecd30f5a8bf7ef3231819dc5a63807096173e2f1ba7b8cb79ef
+// CONTRACT_SHA256=2fb630a49f5d3991468557a3a3cb23953c96af8bee37ed6983d41be66d12428d
 
 export const ADMIN_API_PREFIX = '/admin/v1' as const;
 
@@ -25,6 +25,7 @@ export const ADMIN_ENDPOINTS = {
   listIAMRoles: '/admin/v1/iam/roles',
   createIAMRole: '/admin/v1/iam/roles',
   listIAMMenus: '/admin/v1/iam/menus',
+  listIAMComponents: '/admin/v1/iam/components',
   listVisibleMenus: '/admin/v1/menu/all',
   listIAMPermissions: '/admin/v1/iam/permissions',
   listIAMPolicies: '/admin/v1/iam/policies',
