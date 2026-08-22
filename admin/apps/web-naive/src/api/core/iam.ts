@@ -76,6 +76,17 @@ export interface IAMPermission {
   path: string;
 }
 
+export type IAMPolicyEffect = 'allow' | 'deny';
+
+export interface IAMPolicy {
+  domain?: string;
+  effect: IAMPolicyEffect;
+  method: string;
+  path: string;
+  roleId?: string;
+  subject?: string;
+}
+
 export interface IAMUserCreateInput {
   active?: boolean;
   avatar?: string;
@@ -217,6 +228,10 @@ export async function listIAMMenusApi() {
 
 export async function listIAMPermissionsApi() {
   return requestClient.get<IAMPermission[]>(ADMIN_ENDPOINTS.listIAMPermissions);
+}
+
+export async function listIAMPoliciesApi() {
+  return requestClient.get<IAMPolicy[]>(ADMIN_ENDPOINTS.listIAMPolicies);
 }
 
 export async function replaceIAMRoleUsersApi(

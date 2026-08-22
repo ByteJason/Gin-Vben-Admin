@@ -200,6 +200,20 @@
     "permissionPath": "路径",
     "permissionActive": "状态",
     "permissionActiveYes": "启用",
-    "permissionActiveNo": "停用"
+    "permissionActiveNo": "停用",
+    "policies": "策略绑定",
+    "policiesDescription": "在当前租户范围查看策略绑定；策略写入、数据范围和角色权限关系编辑在后续切片交付。",
+    "policiesLoading": "正在加载策略",
+    "policiesLoadError": "策略列表加载失败，请重试。",
+    "policiesEmpty": "暂无策略。",
+    "policiesTable": "策略绑定列表",
+    "policySubject": "主体",
+    "policyRole": "角色",
+    "policyDomain": "域",
+    "policyMethod": "方法",
+    "policyPath": "路径",
+    "policyEffect": "效果",
+    "policyAllow": "允许",
+    "policyDeny": "拒绝"
   }
 }

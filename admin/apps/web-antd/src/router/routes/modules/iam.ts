@@ -48,6 +48,15 @@ const routes: RouteRecordRaw[] = [
         name: 'IAMPermissions',
         path: 'permissions',
       },
+      {
+        component: () => import('#/views/iam/policies/index.vue'),
+        meta: {
+          icon: 'lucide:shield-alert',
+          title: $t('page.iam.policies'),
+        },
+        name: 'IAMPolicies',
+        path: 'policies',
+      },
     ],
   },
 ];

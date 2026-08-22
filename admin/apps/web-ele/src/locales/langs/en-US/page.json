@@ -200,6 +200,20 @@
     "permissionPath": "Path",
     "permissionActive": "Status",
     "permissionActiveYes": "Active",
-    "permissionActiveNo": "Inactive"
+    "permissionActiveNo": "Inactive",
+    "policies": "Policy bindings",
+    "policiesDescription": "View policy bindings within the current tenant. Policy writes, data scopes, and role-permission editing ship in later slices.",
+    "policiesLoading": "Loading policies",
+    "policiesLoadError": "Policies could not be loaded. Try again.",
+    "policiesEmpty": "No policies found.",
+    "policiesTable": "Policy bindings",
+    "policySubject": "Subject",
+    "policyRole": "Role",
+    "policyDomain": "Domain",
+    "policyMethod": "Method",
+    "policyPath": "Path",
+    "policyEffect": "Effect",
+    "policyAllow": "Allow",
+    "policyDeny": "Deny"
   }
 }
