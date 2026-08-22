@@ -93,6 +93,8 @@ const userPath = (id: string) =>
   ADMIN_ENDPOINTS.getIAMUser.replace('{id}', encodeURIComponent(id));
 const updateUserPath = (id: string) =>
   ADMIN_ENDPOINTS.updateIAMUser.replace('{id}', encodeURIComponent(id));
+const deleteUserPath = (id: string) =>
+  ADMIN_ENDPOINTS.deleteIAMUser.replace('{id}', encodeURIComponent(id));
 
 export async function listIAMUsersApi(params: IAMUserListParams = {}) {
   return requestClient.get<IAMUserPage>(ADMIN_ENDPOINTS.listIAMUsers, {
@@ -134,4 +136,8 @@ export async function updateIAMUserApi(id: string, input: IAMUserUpdateInput) {
     data: input,
     method: 'PATCH',
   });
+}
+
+export async function deleteIAMUserApi(id: string) {
+  return requestClient.delete<void>(deleteUserPath(id));
 }

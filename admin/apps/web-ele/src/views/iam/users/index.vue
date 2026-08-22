@@ -14,6 +14,7 @@ import type {
 import {
   batchUpdateIAMUserStatusApi,
   createIAMUserApi,
+  deleteIAMUserApi,
   getIAMUserApi,
   listIAMRolesApi,
   listIAMUsersApi,
@@ -247,6 +248,25 @@ async function submitUserForm() {
     await focusFormError();
   } finally {
     formLoading.value = false;
+  }
+}
+
+async function deleteUser(user: IAMUser) {
+  if (actionLoading.value || formLoading.value) return;
+  if (!window.confirm(String($t('page.iam.confirmDelete')))) return;
+  actionLoading.value = true;
+  actionError.value = '';
+  actionMessage.value = '';
+  try {
+    await deleteIAMUserApi(user.id);
+    actionMessage.value = String($t('page.iam.deleted'));
+    await loadUsers();
+    await focusActionFeedback();
+  } catch {
+    actionError.value = String($t('page.iam.deleteError'));
+    await focusActionError();
+  } finally {
+    actionLoading.value = false;
   }
 }
 
@@ -555,9 +575,18 @@ onMounted(async () => {
                 <button
                   class="link-button"
                   type="button"
+                  :disabled="loading || actionLoading || formLoading"
                   @click="openEdit(user)"
                 >
                   {{ $t('page.iam.edit') }}
+                </button>
+                <button
+                  class="link-button danger"
+                  type="button"
+                  :disabled="loading || actionLoading || formLoading"
+                  @click="deleteUser(user)"
+                >
+                  {{ $t('page.iam.delete') }}
                 </button>
               </td>
             </tr>
@@ -882,6 +911,10 @@ button.primary {
   border-color: transparent;
   background: transparent;
   color: hsl(var(--primary));
+}
+
+.link-button.danger {
+  color: hsl(var(--destructive));
 }
 
 .icon-button {

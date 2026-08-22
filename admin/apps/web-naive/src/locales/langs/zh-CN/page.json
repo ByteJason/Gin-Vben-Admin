@@ -104,6 +104,10 @@
     "batchUpdated": "所选用户状态已更新。",
     "batchPartial": "部分用户状态未更新，请检查后重试。",
     "batchError": "批量状态更新失败，请重试。",
+    "delete": "软删除",
+    "confirmDelete": "确认将该用户停用并保留其资料？",
+    "deleted": "用户已停用。",
+    "deleteError": "用户停用失败，请重试。",
     "form": "用户资料表单"
   }
 }

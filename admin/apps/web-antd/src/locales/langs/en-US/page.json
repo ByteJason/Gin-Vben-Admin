@@ -104,6 +104,10 @@
     "batchUpdated": "Selected user statuses updated.",
     "batchPartial": "Some user statuses were not updated. Review and retry.",
     "batchError": "Batch status update failed. Try again.",
+    "delete": "Soft-delete",
+    "confirmDelete": "Disable this user while keeping the profile?",
+    "deleted": "User disabled.",
+    "deleteError": "User could not be disabled. Try again.",
     "form": "User profile form"
   }
 }
