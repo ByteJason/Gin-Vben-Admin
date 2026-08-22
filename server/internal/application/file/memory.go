@@ -17,6 +17,17 @@ type MemoryStore struct {
 	BaseURL string
 }
 
+func (s *MemoryStore) Get(_ context.Context, key string) (Object, error) {
+	s.mu.RLock()
+	object, ok := s.objects[key]
+	s.mu.RUnlock()
+	if !ok {
+		return Object{}, ErrFileNotFound
+	}
+	object.Data = append([]byte(nil), object.Data...)
+	return object, nil
+}
+
 func NewMemoryStore(baseURL string) *MemoryStore {
 	return &MemoryStore{objects: make(map[string]Object), BaseURL: baseURL}
 }

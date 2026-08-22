@@ -1,5 +1,5 @@
 // Generated from contracts/openapi/admin-v1.yaml; DO NOT EDIT.
-// CONTRACT_SHA256=50c4e58cca351f0f42b9affdc5d88ac98f928fce07fe91217851e4c847ecb5b2
+// CONTRACT_SHA256=3d6e17ff282781f7b36b7580ce5ea5d641a177a32d1735c5f9e11f2acd995bdc
 
 export const ADMIN_API_PREFIX = '/admin/v1' as const;
 
@@ -50,6 +50,14 @@ export const ADMIN_ENDPOINTS = {
   queryAuditEvents: '/admin/v1/audit/events',
   exportAuditEvents: '/admin/v1/audit/events/export',
   auditRetentionDryRun: '/admin/v1/audit/retention/dry-run',
+  listFiles: '/admin/v1/files',
+  uploadFile: '/admin/v1/files/upload',
+  getFile: '/admin/v1/files/{id}',
+  deleteFile: '/admin/v1/files/{id}',
+  downloadFile: '/admin/v1/files/{id}/download',
+  previewFile: '/admin/v1/files/{id}/preview',
+  signFileURL: '/admin/v1/files/{id}/signed-url',
+  fileCleanupDryRun: '/admin/v1/files/cleanup/dry-run',
 } as const;
 
 export const AUTH_API_PREFIX = '/admin/v1/auth' as const;

@@ -15,6 +15,7 @@ import (
 
 	auditapp "example.com/gin-vben-admin/server/internal/application/audit"
 	appauth "example.com/gin-vben-admin/server/internal/application/auth"
+	fileapp "example.com/gin-vben-admin/server/internal/application/file"
 	iamapp "example.com/gin-vben-admin/server/internal/application/iam"
 	installer "example.com/gin-vben-admin/server/internal/application/installer"
 	appnotification "example.com/gin-vben-admin/server/internal/application/notification"
@@ -45,6 +46,7 @@ type App struct {
 	iam                *iamapp.Service
 	settings           *settingsapp.Service
 	audit              *auditapp.Service
+	files              *fileapp.Service
 	observability      *observabilityplatform.Manager
 	settingsRepository settingsapp.Repository
 	install            *installer.StatusService
@@ -76,6 +78,17 @@ func New(cfg config.Config) (*App, error) {
 	cleanupOnError := func(cause error) (*App, error) {
 		_ = closeResources(app.closers)
 		return nil, cause
+	}
+	if cfg.File.Enabled {
+		store, fileErr := fileapp.NewLocalStore(cfg.File.Root, cfg.File.BaseURL)
+		if fileErr != nil {
+			return cleanupOnError(fmt.Errorf("configure local file provider: %w", fileErr))
+		}
+		maxBytes := cfg.File.MaxBytes
+		if maxBytes <= 0 {
+			maxBytes = 100 << 20
+		}
+		app.files = fileapp.NewService(store, fileapp.Config{MaxBytes: maxBytes, AllowedMIMEs: cfg.File.AllowedMIMEs})
 	}
 
 	dependencies := make([]platformhealth.Dependency, 0, 2)
@@ -218,7 +231,7 @@ func New(cfg config.Config) (*App, error) {
 		captchaProvider = authplatform.NewRedisCaptchaProvider(app.redis, cfg.Auth.CaptchaKeyPrefix, cfg.Auth.CaptchaChallengeTTL)
 		captchaRisk = authplatform.NewRedisCaptchaRiskStore(app.redis, cfg.Auth.CaptchaKeyPrefix)
 	}
-	app.http = newHTTPServerWithPlanAndCaptcha(cfg, app.readiness, app.auth, limiter, app.iam, recovery, app.install, installPlan, installplatform.NewSystemDependencyProbe(), applyService, app.applyJobs, app.settings, app.audit, captchaProvider, captchaRisk, app.observability)
+	app.http = newHTTPServerWithPlanAndCaptchaAndFiles(cfg, app.readiness, app.auth, limiter, app.iam, recovery, app.install, installPlan, installplatform.NewSystemDependencyProbe(), applyService, app.applyJobs, app.settings, app.audit, captchaProvider, captchaRisk, app.files, app.observability)
 	return app, nil
 }
 
@@ -297,6 +310,14 @@ func (a *App) Audit() *auditapp.Service {
 		return nil
 	}
 	return a.audit
+}
+
+// Files returns the local file-center application service when enabled.
+func (a *App) Files() *fileapp.Service {
+	if a == nil {
+		return nil
+	}
+	return a.files
 }
 
 // Observability returns the runtime metrics/tracing collector. It is always

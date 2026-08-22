@@ -6,6 +6,7 @@ import (
 
 	auditapp "example.com/gin-vben-admin/server/internal/application/audit"
 	appauth "example.com/gin-vben-admin/server/internal/application/auth"
+	fileapp "example.com/gin-vben-admin/server/internal/application/file"
 	iamapp "example.com/gin-vben-admin/server/internal/application/iam"
 	installer "example.com/gin-vben-admin/server/internal/application/installer"
 	settingsapp "example.com/gin-vben-admin/server/internal/application/settings"
@@ -15,6 +16,7 @@ import (
 	adminhttp "example.com/gin-vben-admin/server/internal/transport/http/admin"
 	audithttp "example.com/gin-vben-admin/server/internal/transport/http/audit"
 	authhttp "example.com/gin-vben-admin/server/internal/transport/http/auth"
+	filehttp "example.com/gin-vben-admin/server/internal/transport/http/file"
 	"example.com/gin-vben-admin/server/internal/transport/http/health"
 	iamhttp "example.com/gin-vben-admin/server/internal/transport/http/iam"
 	installhttp "example.com/gin-vben-admin/server/internal/transport/http/install"
@@ -42,6 +44,10 @@ func newHTTPServerWithPlan(cfg config.Config, readiness health.ReadinessChecker,
 }
 
 func newHTTPServerWithPlanAndCaptcha(cfg config.Config, readiness health.ReadinessChecker, authService appauth.AuthService, limiter appauth.RateLimiter, iamService *iamapp.Service, recovery appauth.AccountRecoveryService, installStatus *installer.StatusService, installPlan installer.PlanProvider, dependencyChecks installhttp.DependencyCheckProvider, applyService *installer.ApplyService, jobService *installer.ApplyJobService, settingsService *settingsapp.Service, auditService *auditapp.Service, captchaProvider appauth.CaptchaProvider, captchaRisk appauth.CaptchaRiskStore, observations ...httpmiddleware.ObservabilityRuntime) *http.Server {
+	return newHTTPServerWithPlanAndCaptchaAndFiles(cfg, readiness, authService, limiter, iamService, recovery, installStatus, installPlan, dependencyChecks, applyService, jobService, settingsService, auditService, captchaProvider, captchaRisk, localFileService(cfg), observations...)
+}
+
+func newHTTPServerWithPlanAndCaptchaAndFiles(cfg config.Config, readiness health.ReadinessChecker, authService appauth.AuthService, limiter appauth.RateLimiter, iamService *iamapp.Service, recovery appauth.AccountRecoveryService, installStatus *installer.StatusService, installPlan installer.PlanProvider, dependencyChecks installhttp.DependencyCheckProvider, applyService *installer.ApplyService, jobService *installer.ApplyJobService, settingsService *settingsapp.Service, auditService *auditapp.Service, captchaProvider appauth.CaptchaProvider, captchaRisk appauth.CaptchaRiskStore, fileService *fileapp.Service, observations ...httpmiddleware.ObservabilityRuntime) *http.Server {
 	var authHandler *authhttp.Handler
 	if authService != nil {
 		authHandler = authhttp.NewHandler(authService, cfg.Auth, limiter)
@@ -66,6 +72,9 @@ func newHTTPServerWithPlanAndCaptcha(cfg config.Config, readiness health.Readine
 	}
 	if auditService != nil {
 		auxiliary.Audit = audithttp.NewHandler(auditService)
+	}
+	if fileService != nil {
+		auxiliary.Files = filehttp.NewHandler(fileService)
 	}
 	tenantPolicy := httpmiddleware.TenantPolicy{
 		Mode:               cfg.Tenant.Mode,
@@ -93,6 +102,21 @@ func newHTTPServerWithPlanAndCaptcha(cfg config.Config, readiness health.Readine
 		WriteTimeout:      cfg.Server.WriteTimeout,
 		IdleTimeout:       cfg.Server.IdleTimeout,
 	}
+}
+
+func localFileService(cfg config.Config) *fileapp.Service {
+	if !cfg.File.Enabled {
+		return nil
+	}
+	store, err := fileapp.NewLocalStore(cfg.File.Root, cfg.File.BaseURL)
+	if err != nil {
+		return nil
+	}
+	maxBytes := cfg.File.MaxBytes
+	if maxBytes <= 0 {
+		maxBytes = 100 << 20
+	}
+	return fileapp.NewService(store, fileapp.Config{MaxBytes: maxBytes, AllowedMIMEs: cfg.File.AllowedMIMEs})
 }
 
 func firstStaticAsset(assets []fs.FS) fs.FS {

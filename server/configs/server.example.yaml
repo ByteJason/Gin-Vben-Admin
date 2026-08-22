@@ -103,3 +103,10 @@ mail:
   password: ""
   from: "no-reply@example.test"
   start_tls: false
+
+file:
+  enabled: true
+  root: ../.runtime/files
+  base_url: ""
+  max_bytes: 104857600
+  allowed_mimes: []

@@ -5,6 +5,7 @@ import (
 
 	audithttp "example.com/gin-vben-admin/server/internal/transport/http/audit"
 	authhttp "example.com/gin-vben-admin/server/internal/transport/http/auth"
+	filehttp "example.com/gin-vben-admin/server/internal/transport/http/file"
 	iamhttp "example.com/gin-vben-admin/server/internal/transport/http/iam"
 	httpmiddleware "example.com/gin-vben-admin/server/internal/transport/http/middleware"
 	"example.com/gin-vben-admin/server/internal/transport/http/response"
@@ -17,6 +18,7 @@ import (
 type AuxiliaryRoutes struct {
 	Settings     *settingshttp.Handler
 	Audit        *audithttp.Handler
+	Files        *filehttp.Handler
 	TenantPolicy *httpmiddleware.TenantPolicy
 }
 
@@ -47,8 +49,10 @@ func RegisterRoutesWithIAM(r gin.IRouter, authHandler *authhttp.Handler, iamHand
 		protected := r.Group("/api/admin/v1", authhttp.Middleware(authHandler.Service()), httpmiddleware.TenantContext(policy))
 		settingshttp.RegisterRoutesOn(protected, capabilities.Settings)
 		audithttp.RegisterRoutesOn(protected, capabilities.Audit)
+		filehttp.RegisterRoutesOn(protected, capabilities.Files)
 		return
 	}
 	settingshttp.RegisterRoutes(r, capabilities.Settings)
 	audithttp.RegisterRoutes(r, capabilities.Audit)
+	filehttp.RegisterRoutes(r, capabilities.Files)
 }

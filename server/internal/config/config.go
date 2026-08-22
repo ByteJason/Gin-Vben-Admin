@@ -24,6 +24,7 @@ type Config struct {
 	Redis         RedisConfig          `mapstructure:"redis" yaml:"redis"`
 	Auth          AuthConfig           `mapstructure:"auth" yaml:"auth"`
 	Mail          MailConfig           `mapstructure:"mail" yaml:"mail"`
+	File          FileConfig           `mapstructure:"file" yaml:"file"`
 	Install       InstallConfig        `mapstructure:"install" yaml:"install"`
 	Tenant        TenantConfig         `mapstructure:"tenant" yaml:"tenant"`
 	Observability observability.Config `mapstructure:"observability" yaml:"observability"`
@@ -116,6 +117,16 @@ type MailConfig struct {
 	StartTLS bool   `mapstructure:"start_tls" yaml:"start_tls"`
 }
 
+// FileConfig controls the local 0.10 object provider. Remote providers remain
+// application-level interfaces and are intentionally not selected here.
+type FileConfig struct {
+	Enabled      bool     `mapstructure:"enabled" yaml:"enabled"`
+	Root         string   `mapstructure:"root" yaml:"root"`
+	BaseURL      string   `mapstructure:"base_url" yaml:"base_url"`
+	MaxBytes     int64    `mapstructure:"max_bytes" yaml:"max_bytes"`
+	AllowedMIMEs []string `mapstructure:"allowed_mimes" yaml:"allowed_mimes"`
+}
+
 type InstallConfig struct {
 	StateDir string `mapstructure:"state_dir" yaml:"state_dir"`
 }
@@ -145,6 +156,7 @@ type Summary struct {
 	Redis         RedisSummary         `json:"redis"`
 	Auth          AuthSummary          `json:"auth"`
 	Mail          MailSummary          `json:"mail"`
+	File          FileSummary          `json:"file"`
 	Install       InstallSummary       `json:"install"`
 	Tenant        TenantSummary        `json:"tenant"`
 	Observability observability.Config `json:"observability"`
@@ -208,6 +220,13 @@ type MailSummary struct {
 	StartTLS bool   `json:"start_tls"`
 }
 
+type FileSummary struct {
+	Enabled  bool   `json:"enabled"`
+	RootSet  bool   `json:"root_set"`
+	BaseURL  string `json:"base_url"`
+	MaxBytes int64  `json:"max_bytes"`
+}
+
 type InstallSummary struct {
 	StateDirectoryAbsolute bool `json:"state_directory_absolute"`
 }
@@ -268,7 +287,12 @@ func Default() Config {
 			CaptchaKeyPrefix:     "auth-captcha",
 			RegistrationEnabled:  false,
 		},
-		Mail:    MailConfig{Port: 1025},
+		Mail: MailConfig{Port: 1025},
+		File: FileConfig{
+			Enabled:  true,
+			Root:     filepath.FromSlash("../.runtime/files"),
+			MaxBytes: 100 << 20,
+		},
 		Install: InstallConfig{StateDir: filepath.FromSlash("../install")},
 		Tenant: TenantConfig{
 			Enabled:            true,
@@ -351,6 +375,9 @@ func (cfg Config) Validate() error {
 	if err := cfg.Mail.validate(); err != nil {
 		return fmt.Errorf("mail: %w", err)
 	}
+	if err := cfg.File.validate(); err != nil {
+		return fmt.Errorf("file: %w", err)
+	}
 	if err := cfg.Install.validate(); err != nil {
 		return fmt.Errorf("install: %w", err)
 	}
@@ -359,6 +386,27 @@ func (cfg Config) Validate() error {
 	}
 	if err := cfg.Observability.Validate(); err != nil {
 		return fmt.Errorf("observability: %w", err)
+	}
+	return nil
+}
+
+func (cfg FileConfig) validate() error {
+	if !cfg.Enabled {
+		return nil
+	}
+	if strings.TrimSpace(cfg.Root) == "" {
+		return errors.New("root is required when file provider is enabled")
+	}
+	if cfg.MaxBytes <= 0 || cfg.MaxBytes > 1<<30 {
+		return errors.New("max_bytes must be between 1 and 1073741824")
+	}
+	for _, mime := range cfg.AllowedMIMEs {
+		if strings.TrimSpace(mime) == "" || strings.ContainsAny(mime, "\r\n") {
+			return errors.New("allowed_mimes must contain non-empty single-line values")
+		}
+	}
+	if strings.ContainsAny(cfg.BaseURL, "\r\n") {
+		return errors.New("base_url must be single-line")
 	}
 	return nil
 }
@@ -614,6 +662,12 @@ func (cfg Config) SafeSummary() Summary {
 			Port:     cfg.Mail.Port,
 			From:     cfg.Mail.From,
 			StartTLS: cfg.Mail.StartTLS,
+		},
+		File: FileSummary{
+			Enabled:  cfg.File.Enabled,
+			RootSet:  strings.TrimSpace(cfg.File.Root) != "",
+			BaseURL:  cfg.File.BaseURL,
+			MaxBytes: cfg.File.MaxBytes,
 		},
 		Install: InstallSummary{StateDirectoryAbsolute: filepath.IsAbs(cfg.Install.StateDir)},
 		Tenant: TenantSummary{

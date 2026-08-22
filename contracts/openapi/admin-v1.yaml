@@ -989,6 +989,124 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
+  /api/admin/v1/files:
+    get:
+      tags: [Files]
+      operationId: listFiles
+      summary: 分页查询当前租户文件元数据
+      security: [{BearerAuth: []}]
+      parameters:
+        - { name: ownerId, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+      responses:
+        '200': { $ref: '#/components/responses/FilePageResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
+  /api/admin/v1/files/upload:
+    post:
+      tags: [Files]
+      operationId: uploadFile
+      summary: 上传文件到本地 provider
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { $ref: '#/components/schemas/FileUploadRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/FileResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '413': { $ref: '#/components/responses/FileTooLarge' }
+        '415': { $ref: '#/components/responses/FileMIMERejected' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/admin/v1/files/{id}:
+    get:
+      tags: [Files]
+      operationId: getFile
+      summary: 查询文件元数据
+      security: [{BearerAuth: []}]
+      parameters:
+        - { $ref: '#/components/parameters/FileId' }
+      responses:
+        '200': { $ref: '#/components/responses/FileResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Files]
+      operationId: deleteFile
+      summary: 删除当前租户文件
+      security: [{BearerAuth: []}]
+      parameters:
+        - { $ref: '#/components/parameters/FileId' }
+      responses:
+        '200': { $ref: '#/components/responses/EmptySuccessResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/admin/v1/files/{id}/download:
+    get:
+      tags: [Files]
+      operationId: downloadFile
+      summary: 下载文件
+      security: [{BearerAuth: []}]
+      parameters:
+        - { $ref: '#/components/parameters/FileId' }
+      responses:
+        '200': { $ref: '#/components/responses/FileBinaryResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/admin/v1/files/{id}/preview:
+    get:
+      tags: [Files]
+      operationId: previewFile
+      summary: 内联预览文件
+      security: [{BearerAuth: []}]
+      parameters:
+        - { $ref: '#/components/parameters/FileId' }
+      responses:
+        '200': { $ref: '#/components/responses/FileBinaryResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/admin/v1/files/{id}/signed-url:
+    post:
+      tags: [Files]
+      operationId: signFileURL
+      summary: 创建短期文件签名 URL
+      security: [{BearerAuth: []}]
+      parameters:
+        - { $ref: '#/components/parameters/FileId' }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FileSignedURLRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/FileSignedURLResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/admin/v1/files/cleanup/dry-run:
+    get:
+      tags: [Files]
+      operationId: fileCleanupDryRun
+      summary: 预览本地文件清理范围
+      security: [{BearerAuth: []}]
+      parameters:
+        - { name: ageSeconds, in: query, schema: { type: integer, minimum: 1, default: 15552000 } }
+      responses:
+        '200': { $ref: '#/components/responses/FileCleanupDryRunResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
 components:
   securitySchemes:
     BearerAuth:
@@ -1019,6 +1137,14 @@ components:
         minLength: 1
     SettingKey:
       name: key
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+    FileId:
+      name: id
       in: path
       required: true
       schema:
@@ -1732,6 +1858,66 @@ components:
               - type: object
                 properties:
                   data: { $ref: '#/components/schemas/AuditRetentionDryRun' }
+    FilePageResponse:
+      description: 文件元数据分页
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/SuccessEnvelope'
+              - type: object
+                properties:
+                  data: { $ref: '#/components/schemas/FilePage' }
+    FileResponse:
+      description: 文件元数据
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/SuccessEnvelope'
+              - type: object
+                properties:
+                  data: { $ref: '#/components/schemas/FileObject' }
+    EmptySuccessResponse:
+      description: 操作成功
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/EmptySuccessEnvelope' }
+    FileBinaryResponse:
+      description: 文件二进制内容
+      content:
+        application/octet-stream:
+          schema: { type: string, format: binary }
+    FileSignedURLResponse:
+      description: 短期签名 URL
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/SuccessEnvelope'
+              - type: object
+                properties:
+                  data: { $ref: '#/components/schemas/FileSignedURL' }
+    FileCleanupDryRunResponse:
+      description: 文件清理预览
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/SuccessEnvelope'
+              - type: object
+                properties:
+                  data: { $ref: '#/components/schemas/FileCleanupDryRun' }
+    FileTooLarge:
+      description: 文件超过单文件大小限制
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    FileMIMERejected:
+      description: 文件 MIME 类型不允许
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
     IAMUserConflict:
       description: 用户名或邮箱在当前租户内已存在
       headers:
