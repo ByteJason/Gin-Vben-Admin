@@ -315,12 +315,77 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/IAMUserRequest' }
+            schema: { $ref: '#/components/schemas/IAMUserCreateRequest' }
       responses:
-        '200': { $ref: '#/components/responses/SuccessResponse' }
+        '200':
+          description: 用户创建成功；密码永不回显
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/IAMUser' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/IAMUserConflict' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
+  /api/admin/v1/iam/users/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    get:
+      tags: [IAM]
+      operationId: getIAMUser
+      summary: 查询单个管理用户
+      security: [{BearerAuth: []}]
+      responses:
+        '200':
+          description: 用户详情查询成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/IAMUser' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
+    patch:
+      tags: [IAM]
+      operationId: updateIAMUser
+      summary: 更新管理用户资料与状态
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IAMUserUpdateRequest' }
+      responses:
+        '200':
+          description: 用户更新成功；密码永不回显
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/IAMUser' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/IAMUserConflict' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
   /api/admin/v1/iam/roles:
     get:
       tags: [IAM]
@@ -785,9 +850,33 @@ components:
           items: { type: string }
         homePath: { type: string }
         desc: { type: string }
+    IAMUserCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [username, password]
+      properties:
+        username: { type: string, minLength: 1, maxLength: 191 }
+        nickname: { type: string, maxLength: 191 }
+        avatar: { type: string, maxLength: 512 }
+        email: { type: string, format: email }
+        phone: { type: string, pattern: '^\\+[1-9][0-9]{7,14}$' }
+        orgId: { type: string, maxLength: 128 }
+        active: { type: boolean, default: true }
+        password: { type: string, minLength: 8, maxLength: 128, writeOnly: true }
+    IAMUserUpdateRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        username: { type: string, minLength: 1, maxLength: 191 }
+        nickname: { type: string, maxLength: 191 }
+        avatar: { type: string, maxLength: 512 }
+        email: { type: string, format: email }
+        phone: { type: string, pattern: '^\\+[1-9][0-9]{7,14}$' }
+        orgId: { type: string, maxLength: 128 }
+        active: { type: boolean }
     IAMUserRequest:
       allOf:
-        - $ref: '#/components/schemas/IAMUser'
+        - $ref: '#/components/schemas/IAMUserCreateRequest'
     IAMRole:
       type: object
       required: [id, name, active, dataScope]
@@ -995,6 +1084,20 @@ components:
               - type: object
                 properties:
                   data: { $ref: '#/components/schemas/AuditPage' }
+    IAMUserConflict:
+      description: 用户名或邮箱在当前租户内已存在
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ErrorEnvelope'
+              - type: object
+                properties:
+                  code:
+                    const: 10011
     SettingConflict:
       description: 设置版本已变化，需要重新读取后再写入
       headers:

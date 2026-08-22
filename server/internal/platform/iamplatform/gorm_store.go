@@ -14,6 +14,8 @@ import (
 	domain "example.com/gin-vben-admin/server/internal/domain/iam"
 	"example.com/gin-vben-admin/server/internal/domain/tenant"
 	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
+	mysqldriver "github.com/go-sql-driver/mysql"
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 )
 
@@ -114,6 +116,92 @@ func (s *GORMStore) SaveUser(ctx context.Context, user domain.User) error {
 		}
 	}
 	return nil
+}
+
+// CreateUser inserts a profile and its already-hashed credential on the
+// primary endpoint. Tenant-local unique indexes remain the race authority;
+// driver details are collapsed to the stable domain conflict sentinel.
+func (s *GORMStore) CreateUser(ctx context.Context, user domain.User) (domain.User, error) {
+	if strings.TrimSpace(user.PasswordHash) == "" {
+		return domain.User{}, domain.ErrInvalidUser
+	}
+	if s == nil || s.db == nil {
+		return domain.User{}, ErrStoreUnavailable
+	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return domain.User{}, err
+	}
+	if user.TenantID != "" && user.TenantID != scope.TenantID && !scope.PlatformAdmin {
+		return domain.User{}, tenant.ErrCrossTenant
+	}
+	if !scope.PlatformAdmin && scope.Organization != "" && user.OrgID != scope.Organization {
+		return domain.User{}, tenant.ErrOrganizationDenied
+	}
+	user.TenantID = scope.TenantID
+	user, err = user.NormalizeProfile()
+	if err != nil {
+		return domain.User{}, err
+	}
+	values, err := profileUpdateValues(user)
+	if err != nil {
+		return domain.User{}, mapUserProfileError(err)
+	}
+	values["tenant_id"] = scope.TenantID
+	values["org_id"] = nullableString(user.OrgID)
+	values["password_hash"] = user.PasswordHash
+	values["status"] = statusValue(user.Active)
+	result := s.write(ctx).Table("users").Create(values)
+	if err := mapUserWriteError(result.Error); err != nil {
+		return domain.User{}, err
+	}
+	var row userRow
+	if err := s.write(ctx).Table("users").Where("tenant_id = ? AND username_normalized = ?", scope.TenantID, user.UsernameNormalized).Take(&row).Error; err != nil {
+		return domain.User{}, ErrStoreUnavailable
+	}
+	return row.toDomain(nil), nil
+}
+
+// UpdateUser replaces only the profile/status fields selected by the
+// application service. Passwords and role relations are intentionally outside
+// this slice and remain untouched.
+func (s *GORMStore) UpdateUser(ctx context.Context, user domain.User) (domain.User, error) {
+	numericID, err := numericID(user.ID)
+	if err != nil {
+		return domain.User{}, err
+	}
+	if s == nil || s.db == nil {
+		return domain.User{}, ErrStoreUnavailable
+	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return domain.User{}, err
+	}
+	if user.TenantID != "" && user.TenantID != scope.TenantID && !scope.PlatformAdmin {
+		return domain.User{}, tenant.ErrCrossTenant
+	}
+	if !scope.PlatformAdmin && scope.Organization != "" && user.OrgID != scope.Organization {
+		return domain.User{}, tenant.ErrOrganizationDenied
+	}
+	user.TenantID = scope.TenantID
+	user, err = user.NormalizeProfile()
+	if err != nil {
+		return domain.User{}, err
+	}
+	values, err := profileUpdateValues(user)
+	if err != nil {
+		return domain.User{}, mapUserProfileError(err)
+	}
+	values["org_id"] = nullableString(user.OrgID)
+	values["status"] = statusValue(user.Active)
+	result := s.write(ctx).Table("users").Where("tenant_id = ? AND id = ?", scope.TenantID, numericID).Updates(values)
+	if err := mapUserWriteError(result.Error); err != nil {
+		return domain.User{}, err
+	}
+	if result.RowsAffected == 0 {
+		return domain.User{}, domain.ErrResourceNotFound
+	}
+	return s.FindUser(ctx, user.ID)
 }
 
 func (s *GORMStore) ListUsers(ctx context.Context) ([]domain.User, error) {
@@ -540,6 +628,7 @@ type userRow struct {
 	Nickname           *string    `gorm:"column:nickname"`
 	Avatar             *string    `gorm:"column:avatar"`
 	Phone              *string    `gorm:"column:phone"`
+	PasswordHash       string     `gorm:"column:password_hash"`
 	Status             string     `gorm:"column:status"`
 	LastLoginIP        *string    `gorm:"column:last_login_ip"`
 	LastLoginAt        *time.Time `gorm:"column:last_login_at"`
@@ -562,6 +651,7 @@ func (row userRow) toDomain(roleIDs []string) domain.User {
 		Nickname:           nickname,
 		Avatar:             stringValue(row.Avatar),
 		Phone:              stringValue(row.Phone),
+		PasswordHash:       row.PasswordHash,
 		LastLoginIP:        stringValue(row.LastLoginIP),
 		LastLoginAt:        timeValue(row.LastLoginAt),
 		PasswordChangedAt:  timeValue(row.PasswordChangedAt),
@@ -588,6 +678,7 @@ func profileUpdateValues(user domain.User) (map[string]any, error) {
 		"nickname":            nullableString(firstNonEmpty(user.Nickname, user.DisplayName)),
 		"avatar":              nullableString(user.Avatar),
 		"phone":               nullableString(phone),
+		"org_id":              nullableString(user.OrgID),
 	}
 	if email := strings.TrimSpace(user.Email); email != "" {
 		normalizedEmail, kind, normalizeErr := authdomain.NormalizeIdentifier(email)
@@ -601,6 +692,34 @@ func profileUpdateValues(user domain.User) (map[string]any, error) {
 		values["email_normalized"] = nil
 	}
 	return values, nil
+}
+
+func mapUserProfileError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, authdomain.ErrInvalidIdentifier) || errors.Is(err, authdomain.ErrInvalidPhone) {
+		return domain.ErrInvalidUser
+	}
+	return err
+}
+
+func mapUserWriteError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var mysqlErr *mysqldriver.MySQLError
+	if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
+		return domain.ErrUserConflict
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return domain.ErrUserConflict
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	return ErrStoreUnavailable
 }
 
 func firstNonEmpty(values ...string) string {
@@ -670,6 +789,8 @@ var (
 	_ interface {
 		FindUser(context.Context, string) (domain.User, error)
 		SaveUser(context.Context, domain.User) error
+		CreateUser(context.Context, domain.User) (domain.User, error)
+		UpdateUser(context.Context, domain.User) (domain.User, error)
 		ListUsers(context.Context) ([]domain.User, error)
 		ListUsersPage(context.Context, domain.UserListQuery) (domain.UserPage, error)
 	} = (*GORMStore)(nil)

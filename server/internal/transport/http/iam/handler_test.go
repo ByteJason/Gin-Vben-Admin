@@ -247,3 +247,67 @@ func TestIAMPolicyAndDataScopeCollections(t *testing.T) {
 		}
 	}
 }
+
+func TestIAMUserDetailCreateAndUpdateHidePasswordAndMapConflict(t *testing.T) {
+	store := iamapp.NewMemoryStore()
+	service := iamapp.NewService(store)
+	service.SetPasswordHasher(testPasswordHasher{})
+	_ = store.SaveUser(context.Background(), domain.User{ID: "admin", Username: "admin", TenantID: "default", Active: true})
+	for _, policy := range []domain.Policy{
+		{Subject: "admin", Method: http.MethodPost, Path: "/api/admin/v1/iam/users", Effect: domain.EffectAllow},
+		{Subject: "admin", Method: http.MethodGet, Path: "/api/admin/v1/iam/users/:id", Effect: domain.EffectAllow},
+		{Subject: "admin", Method: http.MethodPatch, Path: "/api/admin/v1/iam/users/:id", Effect: domain.EffectAllow},
+	} {
+		if err := store.SavePolicy(context.Background(), policy); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := gin.New()
+	RegisterRoutes(r, NewHandler(service, authStub{claims: authdomain.Claims{Subject: "admin", Type: authdomain.AccessToken, ExpiresAt: time.Now().Add(time.Minute)}}))
+
+	create := httptest.NewRequest(http.MethodPost, "/api/admin/v1/iam/users", strings.NewReader(`{"username":"alice","password":"correct-password","email":"alice@example.test"}`))
+	create.Header.Set("Authorization", "Bearer test")
+	create.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	r.ServeHTTP(resp, create)
+	if resp.Code != http.StatusOK || strings.Contains(resp.Body.String(), "passwordHash") || strings.Contains(resp.Body.String(), "correct-password") {
+		t.Fatalf("create status/body = %d/%s", resp.Code, resp.Body.String())
+	}
+	var created struct {
+		Code int                           `json:"code"`
+		Data struct{ ID, Username string } `json:"data"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &created); err != nil || created.Code != 0 || created.Data.ID == "" || created.Data.Username != "alice" {
+		t.Fatalf("created envelope = %s err=%v", resp.Body.String(), err)
+	}
+
+	get := httptest.NewRequest(http.MethodGet, "/api/admin/v1/iam/users/"+created.Data.ID, nil)
+	get.Header.Set("Authorization", "Bearer test")
+	resp = httptest.NewRecorder()
+	r.ServeHTTP(resp, get)
+	if resp.Code != http.StatusOK || strings.Contains(resp.Body.String(), "passwordHash") {
+		t.Fatalf("get status/body = %d/%s", resp.Code, resp.Body.String())
+	}
+
+	patch := httptest.NewRequest(http.MethodPatch, "/api/admin/v1/iam/users/"+created.Data.ID, strings.NewReader(`{"nickname":"Alice A"}`))
+	patch.Header.Set("Authorization", "Bearer test")
+	patch.Header.Set("Content-Type", "application/json")
+	resp = httptest.NewRecorder()
+	r.ServeHTTP(resp, patch)
+	if resp.Code != http.StatusOK || !strings.Contains(resp.Body.String(), "Alice A") {
+		t.Fatalf("patch status/body = %d/%s", resp.Code, resp.Body.String())
+	}
+
+	duplicate := httptest.NewRequest(http.MethodPost, "/api/admin/v1/iam/users", strings.NewReader(`{"username":"ALICE","password":"another-password"}`))
+	duplicate.Header.Set("Authorization", "Bearer test")
+	duplicate.Header.Set("Content-Type", "application/json")
+	resp = httptest.NewRecorder()
+	r.ServeHTTP(resp, duplicate)
+	if resp.Code != http.StatusConflict || !strings.Contains(resp.Body.String(), `"code":10011`) {
+		t.Fatalf("duplicate status/body = %d/%s", resp.Code, resp.Body.String())
+	}
+}
+
+type testPasswordHasher struct{}
+
+func (testPasswordHasher) Hash(password string) (string, error) { return "hash:" + password, nil }

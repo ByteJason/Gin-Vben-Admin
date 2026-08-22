@@ -147,6 +147,7 @@ func New(cfg config.Config) (*App, error) {
 		app.auth = authService
 		persistentIAM := iamplatform.NewGORMStore(app.database)
 		app.iam = iamapp.NewServiceWithRepositories(persistentIAM, persistentIAM, persistentIAM, persistentIAM, persistentIAM, persistentIAM)
+		app.iam.SetPasswordHasher(hasher)
 		app.iam.SetPermissionCache(iamplatform.NewRedisPermissionCache(app.redis), 30*time.Second)
 	}
 	if app.database != nil {

@@ -7,6 +7,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
+
+	"example.com/gin-vben-admin/server/internal/domain/authdomain"
 )
 
 var (
@@ -16,6 +19,8 @@ var (
 	ErrDataScopeNotFound = errors.New("data scope not found")
 	ErrResourceNotFound  = errors.New("resource not found")
 	ErrInvalidUserQuery  = errors.New("invalid user list query")
+	ErrInvalidUser       = errors.New("invalid user profile")
+	ErrUserConflict      = errors.New("user profile conflicts with an existing account")
 )
 
 type Effect string
@@ -39,12 +44,66 @@ type User struct {
 	UsernameNormalized        string
 	Email, EmailNormalized    string
 	Nickname, Avatar, Phone   string
-	LastLoginIP               string
-	LastLoginAt               time.Time
-	PasswordChangedAt         time.Time
-	TenantID, OrgID           string
-	Active                    bool
-	RoleIDs                   []string
+	// PasswordHash is an application/persistence field only. HTTP response
+	// mappers deliberately never copy it into userResponse.
+	PasswordHash      string `json:"-"`
+	LastLoginIP       string
+	LastLoginAt       time.Time
+	PasswordChangedAt time.Time
+	TenantID, OrgID   string
+	Active            bool
+	RoleIDs           []string
+}
+
+// NormalizeProfile applies the shared username/email/phone invariants before
+// a management write reaches a repository. The original display casing is
+// retained while normalized values are used for tenant-local uniqueness.
+func (u User) NormalizeProfile() (User, error) {
+	u.Username = strings.TrimSpace(u.Username)
+	normalizedUsername, kind, err := authdomain.NormalizeIdentifier(u.Username)
+	if err != nil || kind != authdomain.IdentifierUsername {
+		return User{}, ErrInvalidUser
+	}
+	u.UsernameNormalized = normalizedUsername
+	u.Nickname = strings.TrimSpace(u.Nickname)
+	u.DisplayName = strings.TrimSpace(u.DisplayName)
+	if u.DisplayName == "" {
+		u.DisplayName = firstNonEmpty(u.Nickname, u.Username)
+	}
+	u.Avatar = strings.TrimSpace(u.Avatar)
+	if utf8.RuneCountInString(u.Nickname) > 191 || len([]byte(u.Avatar)) > 512 {
+		return User{}, ErrInvalidUser
+	}
+	u.TenantID = strings.TrimSpace(u.TenantID)
+	u.OrgID = strings.TrimSpace(u.OrgID)
+	u.Email = strings.TrimSpace(u.Email)
+	if u.Email != "" {
+		normalizedEmail, emailKind, emailErr := authdomain.NormalizeIdentifier(u.Email)
+		if emailErr != nil || emailKind != authdomain.IdentifierEmail {
+			return User{}, ErrInvalidUser
+		}
+		u.EmailNormalized = normalizedEmail
+	} else {
+		u.EmailNormalized = ""
+	}
+	phone, phoneErr := authdomain.NormalizePhone(u.Phone)
+	if phoneErr != nil {
+		return User{}, ErrInvalidUser
+	}
+	u.Phone = phone
+	if len(u.OrgID) > 128 || len(u.TenantID) > 128 {
+		return User{}, ErrInvalidUser
+	}
+	return u, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 // UserListQuery is the bounded read-side contract for the management user

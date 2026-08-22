@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -14,10 +15,46 @@ import (
 )
 
 var (
-	ErrInvalidID         = errors.New("id is required")
-	ErrRepositoryMissing = errors.New("iam repository capability is unavailable")
-	ErrInvalidUserQuery  = domain.ErrInvalidUserQuery
+	ErrInvalidID             = errors.New("id is required")
+	ErrRepositoryMissing     = errors.New("iam repository capability is unavailable")
+	ErrInvalidUserQuery      = domain.ErrInvalidUserQuery
+	ErrInvalidUser           = domain.ErrInvalidUser
+	ErrUserConflict          = domain.ErrUserConflict
+	ErrPasswordHasherMissing = errors.New("iam password hasher is unavailable")
 )
+
+// PasswordHasher is the narrow credential boundary used by the IAM write
+// seam. Plaintext passwords are accepted only for the duration of the
+// application call and repositories receive PasswordHash exclusively.
+type PasswordHasher interface {
+	Hash(string) (string, error)
+}
+
+type UserCreateInput struct {
+	Username string
+	Nickname string
+	Avatar   string
+	Email    string
+	Phone    string
+	OrgID    string
+	Active   *bool
+	Password string
+}
+
+type UserUpdateInput struct {
+	Username *string
+	Nickname *string
+	Avatar   *string
+	Email    *string
+	Phone    *string
+	OrgID    *string
+	Active   *bool
+}
+
+func validManagementPassword(password string) bool {
+	length := len([]byte(password))
+	return length >= 8 && length <= 128
+}
 
 // MemoryStore is a local adapter used by unit tests and the initial bootstrap.
 // Its methods intentionally implement the same repository seams used by the
@@ -25,6 +62,7 @@ var (
 type MemoryStore struct {
 	mu          sync.RWMutex
 	users       map[string]domain.User
+	nextUserID  uint64
 	roles       map[string]domain.Role
 	menus       map[string]domain.Menu
 	permissions map[string]domain.Permission
@@ -59,6 +97,77 @@ func (s *MemoryStore) FindUser(ctx context.Context, id string) (domain.User, err
 
 func (s *MemoryStore) SaveUser(ctx context.Context, user domain.User) error {
 	return s.save(ctx, user.ID, func() { s.users[user.ID] = cloneUser(user) })
+}
+
+// CreateUser implements the write-side repository seam used by the bounded
+// management slice. It keeps uniqueness tenant-local, matching the durable
+// database constraints, while retaining the legacy SaveUser fixture API.
+func (s *MemoryStore) CreateUser(ctx context.Context, user domain.User) (domain.User, error) {
+	if err := check(ctx); err != nil {
+		return domain.User{}, err
+	}
+	if strings.TrimSpace(user.Username) == "" || strings.TrimSpace(user.PasswordHash) == "" {
+		return domain.User{}, domain.ErrInvalidUser
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if user.ID == "" {
+		s.nextUserID++
+		user.ID = "memory-user-" + strconv.FormatUint(s.nextUserID, 10)
+	}
+	if _, exists := s.users[user.ID]; exists {
+		return domain.User{}, domain.ErrUserConflict
+	}
+	if hasUserIdentifierConflict(s.users, user, "") {
+		return domain.User{}, domain.ErrUserConflict
+	}
+	s.users[user.ID] = cloneUser(user)
+	return cloneUser(user), nil
+}
+
+func (s *MemoryStore) UpdateUser(ctx context.Context, user domain.User) (domain.User, error) {
+	if err := check(ctx); err != nil {
+		return domain.User{}, err
+	}
+	if strings.TrimSpace(user.ID) == "" {
+		return domain.User{}, ErrInvalidID
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.users[user.ID]; !exists {
+		return domain.User{}, domain.ErrResourceNotFound
+	}
+	if hasUserIdentifierConflict(s.users, user, user.ID) {
+		return domain.User{}, domain.ErrUserConflict
+	}
+	s.users[user.ID] = cloneUser(user)
+	return cloneUser(user), nil
+}
+
+func hasUserIdentifierConflict(users map[string]domain.User, candidate domain.User, excludeID string) bool {
+	for id, existing := range users {
+		if id == excludeID || (existing.TenantID != "" && existing.TenantID != candidate.TenantID) {
+			continue
+		}
+		candidateUsername := normalizedOrLower(candidate.UsernameNormalized, candidate.Username)
+		existingUsername := normalizedOrLower(existing.UsernameNormalized, existing.Username)
+		candidateEmail := normalizedOrLower(candidate.EmailNormalized, candidate.Email)
+		existingEmail := normalizedOrLower(existing.EmailNormalized, existing.Email)
+		if candidateUsername != "" && candidateUsername == existingUsername {
+			return true
+		}
+		if candidateEmail != "" && candidateEmail == existingEmail {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizedOrLower(normalized, raw string) string {
+	if strings.TrimSpace(normalized) != "" {
+		return strings.ToLower(strings.TrimSpace(normalized))
+	}
+	return strings.ToLower(strings.TrimSpace(raw))
 }
 
 func (s *MemoryStore) ListUsers(ctx context.Context) ([]domain.User, error) {
@@ -237,15 +346,16 @@ func cloneRole(role domain.Role) domain.Role {
 }
 
 type Service struct {
-	Users       domain.UserRepository
-	Roles       domain.RoleRepository
-	Menus       domain.MenuRepository
-	Permissions domain.PermissionRepository
-	Policies    domain.PolicyStore
-	DataScopes  domain.DataScopeStore
-	Authorizer  domain.Authorizer
-	Scopes      domain.DataScopeResolver
-	cache       DecisionCache
+	Users          domain.UserRepository
+	Roles          domain.RoleRepository
+	Menus          domain.MenuRepository
+	Permissions    domain.PermissionRepository
+	Policies       domain.PolicyStore
+	DataScopes     domain.DataScopeStore
+	Authorizer     domain.Authorizer
+	Scopes         domain.DataScopeResolver
+	passwordHasher PasswordHasher
+	cache          DecisionCache
 }
 
 type userLister interface {
@@ -262,6 +372,12 @@ type permissionLister interface {
 }
 type userSaver interface {
 	SaveUser(context.Context, domain.User) error
+}
+type userCreator interface {
+	CreateUser(context.Context, domain.User) (domain.User, error)
+}
+type userUpdater interface {
+	UpdateUser(context.Context, domain.User) (domain.User, error)
 }
 type roleSaver interface {
 	SaveRole(context.Context, domain.Role) error
@@ -303,6 +419,15 @@ func (s *Service) SetPermissionCache(cache DecisionCache, ttl time.Duration) {
 	}
 	s.cache = cache
 	s.Authorizer = NewCachedAuthorizer(s.Authorizer, cache, ttl)
+}
+
+// SetPasswordHasher wires the same bcrypt implementation used by auth. It is
+// intentionally explicit so a service without a credential dependency stays
+// read-only rather than inventing a weak fallback hash.
+func (s *Service) SetPasswordHasher(hasher PasswordHasher) {
+	if s != nil {
+		s.passwordHasher = hasher
+	}
 }
 
 func (s *Service) invalidate(ctx context.Context) error {
@@ -381,6 +506,181 @@ func (s *Service) ListUsersPage(ctx context.Context, query domain.UserListQuery)
 	}
 	filtered := filterUsers(users, normalized, scope)
 	return paginateUsers(filtered, normalized), nil
+}
+
+func (s *Service) GetUser(ctx context.Context, id string) (domain.User, error) {
+	if s == nil || s.Users == nil {
+		return domain.User{}, ErrRepositoryMissing
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return domain.User{}, ErrInvalidID
+	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return domain.User{}, err
+	}
+	user, err := s.Users.FindUser(ctx, id)
+	if err != nil {
+		return domain.User{}, err
+	}
+	if err := checkUserScope(scope, user); err != nil {
+		return domain.User{}, err
+	}
+	if user.TenantID == "" {
+		// Legacy in-memory fixtures predate mandatory tenant fields. Resolve
+		// their response to the validated request scope without weakening the
+		// persistent adapter predicate.
+		user.TenantID = scope.TenantID
+	}
+	return user, nil
+}
+
+func (s *Service) CreateUser(ctx context.Context, input UserCreateInput) (domain.User, error) {
+	if s == nil || s.Users == nil {
+		return domain.User{}, ErrRepositoryMissing
+	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return domain.User{}, err
+	}
+	if !validManagementPassword(input.Password) || s.passwordHasher == nil {
+		if s.passwordHasher == nil && validManagementPassword(input.Password) {
+			return domain.User{}, ErrPasswordHasherMissing
+		}
+		return domain.User{}, ErrInvalidUser
+	}
+	orgID := strings.TrimSpace(input.OrgID)
+	if !scope.PlatformAdmin && scope.Organization != "" {
+		if orgID != "" && orgID != scope.Organization {
+			return domain.User{}, tenant.ErrOrganizationDenied
+		}
+		orgID = scope.Organization
+	}
+	active := true
+	if input.Active != nil {
+		active = *input.Active
+	}
+	user := domain.User{
+		Username: input.Username, Nickname: input.Nickname, Avatar: input.Avatar,
+		Email: input.Email, Phone: input.Phone, TenantID: scope.TenantID,
+		OrgID: orgID, Active: active,
+	}
+	user, err = user.NormalizeProfile()
+	if err != nil {
+		return domain.User{}, ErrInvalidUser
+	}
+	hash, err := s.passwordHasher.Hash(input.Password)
+	if err != nil || strings.TrimSpace(hash) == "" {
+		return domain.User{}, ErrPasswordHasherMissing
+	}
+	user.PasswordHash = hash
+	created, err := s.createUser(ctx, user)
+	if err != nil {
+		return domain.User{}, err
+	}
+	if created.TenantID == "" {
+		created.TenantID = scope.TenantID
+	}
+	if err := s.invalidate(ctx); err != nil {
+		return domain.User{}, err
+	}
+	return created, nil
+}
+
+func (s *Service) createUser(ctx context.Context, user domain.User) (domain.User, error) {
+	if repo, ok := s.Users.(userCreator); ok {
+		return repo.CreateUser(ctx, user)
+	}
+	if repo, ok := s.Users.(userSaver); ok {
+		if err := repo.SaveUser(ctx, user); err != nil {
+			return domain.User{}, err
+		}
+		return user, nil
+	}
+	return domain.User{}, ErrRepositoryMissing
+}
+
+func (s *Service) UpdateUser(ctx context.Context, id string, input UserUpdateInput) (domain.User, error) {
+	if s == nil || s.Users == nil {
+		return domain.User{}, ErrRepositoryMissing
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return domain.User{}, ErrInvalidID
+	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return domain.User{}, err
+	}
+	existing, err := s.Users.FindUser(ctx, id)
+	if err != nil {
+		return domain.User{}, err
+	}
+	if err := checkUserScope(scope, existing); err != nil {
+		return domain.User{}, err
+	}
+	updated := existing
+	if input.Username != nil {
+		updated.Username = *input.Username
+	}
+	if input.Nickname != nil {
+		updated.Nickname = *input.Nickname
+	}
+	if input.Avatar != nil {
+		updated.Avatar = *input.Avatar
+	}
+	if input.Email != nil {
+		updated.Email = *input.Email
+	}
+	if input.Phone != nil {
+		updated.Phone = *input.Phone
+	}
+	if input.OrgID != nil {
+		updated.OrgID = strings.TrimSpace(*input.OrgID)
+	}
+	if input.Active != nil {
+		updated.Active = *input.Active
+	}
+	if updated.TenantID == "" {
+		updated.TenantID = scope.TenantID
+	}
+	if !scope.PlatformAdmin && scope.Organization != "" && updated.OrgID != scope.Organization {
+		return domain.User{}, tenant.ErrOrganizationDenied
+	}
+	updated, err = updated.NormalizeProfile()
+	if err != nil {
+		return domain.User{}, ErrInvalidUser
+	}
+	// PasswordHash is copied from the existing record and never accepted from
+	// the PATCH transport input.
+	if repo, ok := s.Users.(userUpdater); ok {
+		updated, err = repo.UpdateUser(ctx, updated)
+	} else if repo, ok := s.Users.(userSaver); ok {
+		err = repo.SaveUser(ctx, updated)
+	} else {
+		return domain.User{}, ErrRepositoryMissing
+	}
+	if err != nil {
+		return domain.User{}, err
+	}
+	if err := s.invalidate(ctx); err != nil {
+		return domain.User{}, err
+	}
+	return updated, nil
+}
+
+func checkUserScope(scope tenant.Context, user domain.User) error {
+	if scope.PlatformAdmin {
+		return nil
+	}
+	if user.TenantID != "" && user.TenantID != scope.TenantID {
+		return tenant.ErrCrossTenant
+	}
+	if scope.Organization != "" && user.OrgID != scope.Organization {
+		return tenant.ErrOrganizationDenied
+	}
+	return nil
 }
 
 func filterUsers(users []domain.User, query domain.UserListQuery, scope tenant.Context) []domain.User {

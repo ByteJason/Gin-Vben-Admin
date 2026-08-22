@@ -84,3 +84,14 @@ var _ interface {
 	SaveDataScope(context.Context, domain.DataScope) error
 	ListDataScopes(context.Context) ([]domain.DataScope, error)
 } = (*GORMStore)(nil)
+
+func TestGORMStoreUserWriteValidationRunsBeforeUnavailableDependency(t *testing.T) {
+	store := NewGORMStore(nil)
+	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "default"})
+	if _, err := store.CreateUser(ctx, domain.User{Username: "alice"}); !errors.Is(err, domain.ErrInvalidUser) {
+		t.Fatalf("CreateUser() error = %v, want ErrInvalidUser", err)
+	}
+	if _, err := store.UpdateUser(ctx, domain.User{ID: "not-numeric", Username: "alice"}); !errors.Is(err, ErrInvalidNumericID) {
+		t.Fatalf("UpdateUser() error = %v, want ErrInvalidNumericID", err)
+	}
+}

@@ -22,6 +22,8 @@ import (
 const (
 	basePath          = "/api/admin/v1/iam"
 	codeBadRequest    = 10000
+	codeNotFound      = 10001
+	codeUserConflict  = 10011
 	codeForbidden     = 30000
 	codeUnavailable   = 40001
 	codeInternalError = 50000
@@ -51,7 +53,9 @@ func RegisterRoutes(r gin.IRouter, handler *Handler, policies ...httpmiddleware.
 	group.Use(authhttp.Middleware(handler.auth), httpmiddleware.TenantContext(policy))
 	group.GET("/me", handler.currentUser)
 	group.GET("/users", handler.listUsers)
+	group.GET("/users/:id", handler.getUser)
 	group.POST("/users", handler.createUser)
+	group.PATCH("/users/:id", handler.updateUser)
 	group.GET("/roles", handler.listRoles)
 	group.POST("/roles", handler.createRole)
 	group.GET("/menus", handler.listMenus)
@@ -66,9 +70,10 @@ func RegisterRoutes(r gin.IRouter, handler *Handler, policies ...httpmiddleware.
 }
 
 func registerDisabled(group *gin.RouterGroup) {
-	for _, path := range []string{"/me", "/users", "/roles", "/menus", "/permissions", "/policies", "/data-scopes"} {
+	for _, path := range []string{"/me", "/users", "/users/:id", "/roles", "/menus", "/permissions", "/policies", "/data-scopes"} {
 		group.GET(path, disabled)
 		group.POST(path, disabled)
+		group.PATCH(path, disabled)
 	}
 }
 
@@ -126,12 +131,25 @@ func (h *Handler) authorizedUser(c *gin.Context) (domain.User, bool) {
 	return user, true
 }
 
-type userRequest struct {
-	ID          string   `json:"id"`
-	Username    string   `json:"username"`
-	DisplayName string   `json:"displayName"`
-	Active      *bool    `json:"active"`
-	RoleIDs     []string `json:"roleIds"`
+type userCreateRequest struct {
+	Username string `json:"username"`
+	Nickname string `json:"nickname"`
+	Avatar   string `json:"avatar"`
+	Email    string `json:"email"`
+	Phone    string `json:"phone"`
+	OrgID    string `json:"orgId"`
+	Active   *bool  `json:"active"`
+	Password string `json:"password"`
+}
+
+type userUpdateRequest struct {
+	Username *string `json:"username"`
+	Nickname *string `json:"nickname"`
+	Avatar   *string `json:"avatar"`
+	Email    *string `json:"email"`
+	Phone    *string `json:"phone"`
+	OrgID    *string `json:"orgId"`
+	Active   *bool   `json:"active"`
 }
 
 type userResponse struct {
@@ -201,6 +219,18 @@ func (h *Handler) listUsers(c *gin.Context) {
 	response.OK(c, out)
 }
 
+func (h *Handler) getUser(c *gin.Context) {
+	if !h.guard(c) {
+		return
+	}
+	user, err := h.service.GetUser(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	response.OK(c, responseFromUser(user))
+}
+
 func parseUserListQuery(c *gin.Context) (domain.UserListQuery, error) {
 	query := domain.UserListQuery{Keyword: c.Query("keyword"), Status: c.Query("status"), RoleID: c.Query("roleId"), OrgID: c.Query("orgId"), Sort: c.Query("sort")}
 	var err error
@@ -248,20 +278,40 @@ func (h *Handler) createUser(c *gin.Context) {
 	if !h.guard(c) {
 		return
 	}
-	var req userRequest
-	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.ID) == "" || strings.TrimSpace(req.Username) == "" {
+	var req userCreateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
 		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid request")
 		return
 	}
-	active := true
-	if req.Active != nil {
-		active = *req.Active
-	}
-	if err := h.service.SaveUser(c.Request.Context(), domain.User{ID: strings.TrimSpace(req.ID), Username: strings.TrimSpace(req.Username), DisplayName: req.DisplayName, Active: active, RoleIDs: req.RoleIDs}); err != nil {
+	user, err := h.service.CreateUser(c.Request.Context(), iamapp.UserCreateInput{
+		Username: req.Username, Nickname: req.Nickname, Avatar: req.Avatar, Email: req.Email,
+		Phone: req.Phone, OrgID: req.OrgID, Active: req.Active, Password: req.Password,
+	})
+	if err != nil {
 		writeServiceError(c, err)
 		return
 	}
-	response.OK(c, responseFromUser(domain.User{ID: req.ID, Username: req.Username, DisplayName: req.DisplayName, Active: active, RoleIDs: req.RoleIDs}))
+	response.OK(c, responseFromUser(user))
+}
+
+func (h *Handler) updateUser(c *gin.Context) {
+	if !h.guard(c) {
+		return
+	}
+	var req userUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid request")
+		return
+	}
+	user, err := h.service.UpdateUser(c.Request.Context(), c.Param("id"), iamapp.UserUpdateInput{
+		Username: req.Username, Nickname: req.Nickname, Avatar: req.Avatar, Email: req.Email,
+		Phone: req.Phone, OrgID: req.OrgID, Active: req.Active,
+	})
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	response.OK(c, responseFromUser(user))
 }
 
 type roleRequest struct {
@@ -478,11 +528,23 @@ func (h *Handler) createDataScope(c *gin.Context) {
 }
 
 func writeServiceError(c *gin.Context, err error) {
+	if errors.Is(err, domain.ErrUserConflict) {
+		response.Error(c, http.StatusConflict, codeUserConflict, "user already exists")
+		return
+	}
+	if errors.Is(err, domain.ErrResourceNotFound) {
+		response.Error(c, http.StatusNotFound, codeNotFound, "resource not found")
+		return
+	}
 	if errors.Is(err, iamapp.ErrRepositoryMissing) || errors.Is(err, authdomain.ErrDependencyUnavailable) {
 		response.Error(c, http.StatusServiceUnavailable, codeUnavailable, "dependency unavailable")
 		return
 	}
-	if errors.Is(err, iamapp.ErrInvalidID) || errors.Is(err, iamapp.ErrInvalidUserQuery) || errors.Is(err, domain.ErrInvalidPolicy) {
+	if errors.Is(err, iamapp.ErrPasswordHasherMissing) {
+		response.Error(c, http.StatusServiceUnavailable, codeUnavailable, "dependency unavailable")
+		return
+	}
+	if errors.Is(err, iamapp.ErrInvalidID) || errors.Is(err, iamapp.ErrInvalidUserQuery) || errors.Is(err, iamapp.ErrInvalidUser) || errors.Is(err, domain.ErrInvalidPolicy) {
 		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid request")
 		return
 	}

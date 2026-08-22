@@ -3,6 +3,7 @@ package iam
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -125,5 +126,70 @@ func TestUserListQueryDefaultsAndRejectsUnknownSortOrStatus(t *testing.T) {
 func TestServiceListUsersPageRequiresTenantContextForLegacyRepository(t *testing.T) {
 	if _, err := NewService(NewMemoryStore()).ListUsersPage(context.Background(), domain.UserListQuery{}); !errors.Is(err, tenant.ErrTenantContextMissing) {
 		t.Fatalf("missing tenant error = %v, want tenant context missing", err)
+	}
+}
+
+type recordingPasswordHasher struct {
+	password string
+}
+
+func (h *recordingPasswordHasher) Hash(password string) (string, error) {
+	h.password = password
+	return "hashed:" + password, nil
+}
+
+func TestServiceCreateUserHashesPasswordAndAppliesTenantOrganizationScope(t *testing.T) {
+	store := NewMemoryStore()
+	service := NewService(store)
+	hasher := &recordingPasswordHasher{}
+	service.SetPasswordHasher(hasher)
+	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a", Organization: "org-a"})
+
+	created, err := service.CreateUser(ctx, UserCreateInput{
+		Username: " Alice ", Email: " Alice@Example.TEST ", Nickname: "Alice A", Password: "correct-password",
+	})
+	if err != nil {
+		t.Fatalf("CreateUser() error = %v", err)
+	}
+	if created.ID == "" || created.UsernameNormalized != "alice" || created.EmailNormalized != "alice@example.test" || created.TenantID != "tenant-a" || created.OrgID != "org-a" || created.PasswordHash != "hashed:correct-password" {
+		t.Fatalf("created user = %+v", created)
+	}
+	if hasher.password != "correct-password" {
+		t.Fatalf("hasher input = %q", hasher.password)
+	}
+	if strings.Contains(created.PasswordHash, "correct-password") == false {
+		// The fixture hash is intentionally observable in this unit test; the
+		// HTTP response contract still omits PasswordHash.
+		t.Fatal("fixture hash was not returned by the recording hasher")
+	}
+	if _, err := service.CreateUser(ctx, UserCreateInput{Username: "ALICE", Password: "another-password"}); !errors.Is(err, ErrUserConflict) {
+		t.Fatalf("duplicate username error = %v, want ErrUserConflict", err)
+	}
+}
+
+func TestServiceGetAndUpdateUserEnforceOrganizationAndPreservePassword(t *testing.T) {
+	store := NewMemoryStore()
+	service := NewService(store)
+	hasher := &recordingPasswordHasher{}
+	service.SetPasswordHasher(hasher)
+	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a", Organization: "org-a"})
+	created, err := service.CreateUser(ctx, UserCreateInput{Username: "alice", Password: "correct-password"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := "Alice Updated"
+	updated, err := service.UpdateUser(ctx, created.ID, UserUpdateInput{Nickname: &name})
+	if err != nil {
+		t.Fatalf("UpdateUser() error = %v", err)
+	}
+	if updated.Nickname != name || updated.PasswordHash != "hashed:correct-password" || updated.TenantID != "tenant-a" || updated.OrgID != "org-a" {
+		t.Fatalf("updated user = %+v", updated)
+	}
+	if _, err := service.GetUser(tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a", Organization: "org-b"}), created.ID); !errors.Is(err, tenant.ErrOrganizationDenied) {
+		t.Fatalf("cross-organization GetUser error = %v", err)
+	}
+	org := "org-b"
+	if _, err := service.UpdateUser(ctx, created.ID, UserUpdateInput{OrgID: &org}); !errors.Is(err, tenant.ErrOrganizationDenied) {
+		t.Fatalf("cross-organization UpdateUser error = %v", err)
 	}
 }
