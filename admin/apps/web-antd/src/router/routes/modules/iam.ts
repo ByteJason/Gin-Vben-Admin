@@ -21,6 +21,15 @@ const routes: RouteRecordRaw[] = [
         name: 'IAMUsers',
         path: 'users',
       },
+      {
+        component: () => import('#/views/iam/roles/index.vue'),
+        meta: {
+          icon: 'lucide:shield-check',
+          title: $t('page.iam.roles'),
+        },
+        name: 'IAMRoles',
+        path: 'roles',
+      },
     ],
   },
 ];

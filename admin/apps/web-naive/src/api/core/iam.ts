@@ -38,9 +38,11 @@ export interface IAMUserListParams {
   status?: IAMUserStatus;
 }
 
+export type IAMRoleDataScope = 'all' | 'own' | 'org' | 'custom';
+
 export interface IAMRole {
   active: boolean;
-  dataScope?: string;
+  dataScope?: IAMRoleDataScope;
   id: string;
   name: string;
   userIds?: string[];
@@ -48,6 +50,13 @@ export interface IAMRole {
 
 export interface IAMRoleUsersReplaceInput {
   userIds: string[];
+}
+
+export interface IAMRoleCreateInput {
+  active?: boolean;
+  dataScope?: IAMRoleDataScope;
+  id: string;
+  name: string;
 }
 
 export interface IAMUserCreateInput {
@@ -165,6 +174,24 @@ export async function batchUpdateIAMUserStatusApi(
 
 export async function listIAMRolesApi() {
   return requestClient.get<IAMRole[]>(ADMIN_ENDPOINTS.listIAMRoles);
+}
+
+export async function createIAMRoleApi(input: IAMRoleCreateInput) {
+  const id = input.id.trim();
+  const name = input.name.trim();
+  if (!id || !name) {
+    throw new Error('role id and name are required');
+  }
+  const dataScope = input.dataScope ?? 'own';
+  if (!['all', 'own', 'org', 'custom'].includes(dataScope)) {
+    throw new Error('role data scope is invalid');
+  }
+  return requestClient.post<IAMRole>(ADMIN_ENDPOINTS.createIAMRole, {
+    id,
+    name,
+    active: input.active ?? true,
+    dataScope,
+  });
 }
 
 export async function replaceIAMRoleUsersApi(
