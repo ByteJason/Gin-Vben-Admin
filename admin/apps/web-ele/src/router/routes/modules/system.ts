@@ -30,6 +30,15 @@ const routes: RouteRecordRaw[] = [
         name: 'SystemSettings',
         path: 'settings',
       },
+      {
+        component: () => import('#/views/system/audit/index.vue'),
+        meta: {
+          icon: 'lucide:scroll-text',
+          title: $t('page.audit.title'),
+        },
+        name: 'SystemAudit',
+        path: 'audit',
+      },
     ],
   },
 ];
