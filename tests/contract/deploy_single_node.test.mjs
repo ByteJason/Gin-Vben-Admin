@@ -15,6 +15,9 @@ test('single-node deployment fixture has a self-contained compose entrypoint', (
   assert.match(compose, /condition: service_healthy/);
   assert.match(compose, /deploy\/server\.Dockerfile/);
   assert.match(compose, /deploy\/admin\.Dockerfile/);
+  const migrate = compose.slice(compose.indexOf('  migrate:'), compose.indexOf('\n  server:'));
+  assert.match(migrate, /entrypoint:\s*\["\/migrate"\]/);
+  assert.match(migrate, /command:\s*\["up"\]/);
   assert.doesNotMatch(compose, /postgres|sentinel|cluster|prometheus|grafana|mailpit/i);
 });
 

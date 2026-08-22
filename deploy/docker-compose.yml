@@ -38,7 +38,8 @@ services:
     build:
       context: ..
       dockerfile: deploy/server.Dockerfile
-    command: ["/migrate", "up"]
+    entrypoint: ["/migrate"]
+    command: ["up"]
     environment:
       SERVER_ADDR: ":8080"
       DATABASE_ENABLED: "true"
