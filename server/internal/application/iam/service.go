@@ -22,6 +22,7 @@ var (
 	ErrInvalidUserBatch                = errors.New("invalid user status batch")
 	ErrInvalidRoleAssignment           = errors.New("invalid role assignment")
 	ErrInvalidRolePermissionAssignment = errors.New("invalid role permission assignment")
+	ErrInvalidRoleDataScopeAssignment  = errors.New("invalid role data scope assignment")
 	ErrUserConflict                    = domain.ErrUserConflict
 	ErrPasswordHasherMissing           = errors.New("iam password hasher is unavailable")
 )
@@ -47,6 +48,18 @@ const maxRolePermissionBindings = 200
 // button permission relations. The same limit is enforced by HTTP, memory,
 // and durable adapters.
 const MaxRolePermissionBindings = maxRolePermissionBindings
+
+const maxRoleDataScopeBindings = domain.MaxRoleDataScopeBindings
+
+// MaxRoleDataScopeBindings bounds one atomic replacement of a role's data
+// scope resources. The same limit is enforced by HTTP, memory and durable
+// adapters.
+const MaxRoleDataScopeBindings = maxRoleDataScopeBindings
+
+const maxRoleDataScopeIDs = domain.MaxRoleDataScopeIDs
+
+// MaxRoleDataScopeIDs bounds custom IDs inside one resource binding.
+const MaxRoleDataScopeIDs = maxRoleDataScopeIDs
 
 // PasswordHasher is the narrow credential boundary used by the IAM write
 // seam. Plaintext passwords are accepted only for the duration of the
@@ -92,6 +105,16 @@ type RoleUsersInput struct {
 // relations. An empty list intentionally clears the role in the current scope.
 type RolePermissionsInput struct {
 	PermissionIDs []string
+}
+
+// RoleDataScopeBinding keeps the application API aligned with the domain
+// binding while allowing transport and adapters to share one value type.
+type RoleDataScopeBinding = domain.RoleDataScopeBinding
+
+// RoleDataScopesInput atomically replaces all role data-scope bindings in the
+// caller's tenant/organization scope. An empty list clears that scope.
+type RoleDataScopesInput struct {
+	Scopes []RoleDataScopeBinding
 }
 
 // UserStatusChangeInput is the transport-neutral input for one status change.
@@ -500,6 +523,53 @@ func (s *MemoryStore) AssignRolePermissions(ctx context.Context, roleID string, 
 	return cloneRole(role), nil
 }
 
+// AssignRoleDataScopes atomically replaces only one role's data-scope rows in
+// the caller's tenant/organization scope. User rows and other organization
+// rows remain untouched.
+func (s *MemoryStore) AssignRoleDataScopes(ctx context.Context, roleID string, bindings []RoleDataScopeBinding) (domain.Role, error) {
+	if err := check(ctx); err != nil {
+		return domain.Role{}, err
+	}
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" {
+		return domain.Role{}, ErrInvalidID
+	}
+	normalized, err := normalizeRoleDataScopes(bindings)
+	if err != nil {
+		return domain.Role{}, err
+	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return domain.Role{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	role, ok := s.roles[roleID]
+	if !ok {
+		return domain.Role{}, domain.ErrResourceNotFound
+	}
+	if err := checkRoleScope(scope, role); err != nil {
+		return domain.Role{}, err
+	}
+	retained := make([]domain.DataScope, 0, len(s.scopes)+len(normalized))
+	for _, existing := range s.scopes {
+		if existing.RoleID == roleID && existing.Domain == scope.TenantID && existing.OrgID == scope.Organization {
+			continue
+		}
+		retained = append(retained, cloneDataScope(existing))
+	}
+	for _, binding := range normalized {
+		retained = append(retained, domain.DataScope{
+			RoleID: roleID, Domain: scope.TenantID, OrgID: scope.Organization,
+			Resource: binding.Resource, Scope: binding.Scope, IDs: append([]string(nil), binding.IDs...),
+		})
+	}
+	s.scopes = retained
+	role.DataScope = roleDataScopeSummary(normalized)
+	s.roles[roleID] = cloneRole(role)
+	return cloneRole(role), nil
+}
+
 func (s *MemoryStore) ListRoles(ctx context.Context) ([]domain.Role, error) {
 	if err := check(ctx); err != nil {
 		return nil, err
@@ -583,10 +653,10 @@ func (s *MemoryStore) SaveDataScope(ctx context.Context, scope domain.DataScope)
 	if err := check(ctx); err != nil {
 		return err
 	}
-	if strings.TrimSpace(scope.Resource) == "" || scope.Scope == "" || (strings.TrimSpace(scope.Subject) == "" && strings.TrimSpace(scope.RoleID) == "") {
-		return domain.ErrDataScopeNotFound
+	if err := domain.ValidateDataScope(scope); err != nil {
+		return err
 	}
-	scope.IDs = append([]string(nil), scope.IDs...)
+	scope = cloneDataScope(scope)
 	s.mu.Lock()
 	s.scopes = append(s.scopes, scope)
 	s.mu.Unlock()
@@ -601,12 +671,18 @@ func (s *MemoryStore) ListDataScopes(ctx context.Context) ([]domain.DataScope, e
 	if err := check(ctx); err != nil {
 		return nil, err
 	}
+	requestScope, scoped := tenant.FromContext(ctx)
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]domain.DataScope, 0, len(s.scopes))
 	for _, scope := range s.scopes {
-		scope.IDs = append([]string(nil), scope.IDs...)
-		out = append(out, scope)
+		if scoped && scope.Domain != requestScope.TenantID {
+			continue
+		}
+		if scoped && !requestScope.PlatformAdmin && requestScope.Organization != "" && scope.OrgID != "" && scope.OrgID != requestScope.Organization {
+			continue
+		}
+		out = append(out, cloneDataScope(scope))
 	}
 	return out, nil
 }
@@ -640,6 +716,11 @@ func cloneRole(role domain.Role) domain.Role {
 	role.UserIDs = append([]string(nil), role.UserIDs...)
 	role.PermissionIDs = append([]string(nil), role.PermissionIDs...)
 	return role
+}
+
+func cloneDataScope(scope domain.DataScope) domain.DataScope {
+	scope.IDs = append([]string(nil), scope.IDs...)
+	return scope
 }
 
 func withoutString(values []string, target string) []string {
@@ -692,6 +773,24 @@ func normalizeRolePermissionIDs(permissionIDs []string) ([]string, error) {
 	return normalized, nil
 }
 
+func normalizeRoleDataScopes(bindings []RoleDataScopeBinding) ([]RoleDataScopeBinding, error) {
+	normalized, err := domain.NormalizeRoleDataScopeBindings(bindings)
+	if err != nil {
+		return nil, ErrInvalidRoleDataScopeAssignment
+	}
+	return normalized, nil
+}
+
+func roleDataScopeSummary(bindings []RoleDataScopeBinding) domain.Scope {
+	if len(bindings) == 0 {
+		return domain.ScopeOwn
+	}
+	if len(bindings) == 1 {
+		return bindings[0].Scope
+	}
+	return domain.ScopeCustom
+}
+
 type Service struct {
 	Users          domain.UserRepository
 	Roles          domain.RoleRepository
@@ -740,6 +839,9 @@ type roleUserAssigner interface {
 }
 type rolePermissionAssigner interface {
 	AssignRolePermissions(context.Context, string, []string) (domain.Role, error)
+}
+type roleDataScopeAssigner interface {
+	AssignRoleDataScopes(context.Context, string, []RoleDataScopeBinding) (domain.Role, error)
 }
 type userPasswordUpdater interface {
 	UpdateUserPassword(context.Context, string, string, time.Time) (domain.User, error)
@@ -1582,6 +1684,58 @@ func (s *Service) ReplaceRolePermissions(ctx context.Context, roleID string, inp
 		updated = role
 	}
 	updated.PermissionIDs = append([]string(nil), normalized...)
+	if err := s.invalidate(ctx); err != nil {
+		return domain.Role{}, err
+	}
+	return updated, nil
+}
+
+// ReplaceRoleDataScopes validates every resource binding inside the caller's
+// tenant/org scope, then delegates one atomic replacement. Empty input clears
+// only the current organization slice and never touches user bindings.
+func (s *Service) ReplaceRoleDataScopes(ctx context.Context, roleID string, input RoleDataScopesInput) (domain.Role, error) {
+	if s == nil || s.Roles == nil {
+		return domain.Role{}, ErrRepositoryMissing
+	}
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" {
+		return domain.Role{}, ErrInvalidID
+	}
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return domain.Role{}, err
+		}
+	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return domain.Role{}, err
+	}
+	normalized, err := normalizeRoleDataScopes(input.Scopes)
+	if err != nil {
+		return domain.Role{}, err
+	}
+	role, err := s.Roles.FindRole(ctx, roleID)
+	if err != nil {
+		return domain.Role{}, err
+	}
+	if err := checkRoleScope(scope, role); err != nil {
+		return domain.Role{}, err
+	}
+	var updated domain.Role
+	if repo, ok := s.Roles.(roleDataScopeAssigner); ok {
+		updated, err = repo.AssignRoleDataScopes(ctx, roleID, normalized)
+	} else if repo, ok := s.DataScopes.(roleDataScopeAssigner); ok {
+		updated, err = repo.AssignRoleDataScopes(ctx, roleID, normalized)
+	} else {
+		return domain.Role{}, ErrRepositoryMissing
+	}
+	if err != nil {
+		return domain.Role{}, err
+	}
+	if updated.ID == "" {
+		updated = role
+	}
+	updated.DataScope = roleDataScopeSummary(normalized)
 	if err := s.invalidate(ctx); err != nil {
 		return domain.Role{}, err
 	}

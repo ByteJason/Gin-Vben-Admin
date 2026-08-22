@@ -1,5 +1,5 @@
 // Generated from contracts/openapi/admin-v1.yaml; DO NOT EDIT.
-// CONTRACT_SHA256=b3ab4fb23dc4c2244436c1f059fa351bd8975b3adc235a80e233923b46d118d9
+// CONTRACT_SHA256=6dc11069f30e2ecd30f5a8bf7ef3231819dc5a63807096173e2f1ba7b8cb79ef
 
 export const ADMIN_API_PREFIX = '/admin/v1' as const;
 
@@ -34,6 +34,7 @@ export const ADMIN_ENDPOINTS = {
   resetIAMUserPassword: '/admin/v1/iam/users/{id}/reset-password',
   replaceIAMRoleUsers: '/admin/v1/iam/roles/{id}/users',
   replaceIAMRolePermissions: '/admin/v1/iam/roles/{id}/permissions',
+  replaceIAMRoleDataScopes: '/admin/v1/iam/roles/{id}/data-scopes',
   listSettingDefinitions: '/admin/v1/settings',
   getSetting: '/admin/v1/settings/{key}',
   updateSetting: '/admin/v1/settings/{key}',

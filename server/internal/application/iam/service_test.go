@@ -3,6 +3,7 @@ package iam
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -397,6 +398,98 @@ func TestServiceReplaceRolePermissionsRejectsOversizedPayload(t *testing.T) {
 	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a"})
 	if _, err := service.ReplaceRolePermissions(ctx, "role-editor", RolePermissionsInput{PermissionIDs: make([]string, MaxRolePermissionBindings+1)}); !errors.Is(err, ErrInvalidRolePermissionAssignment) {
 		t.Fatalf("oversized permission error = %v", err)
+	}
+}
+
+func TestServiceReplaceRoleDataScopesAtomicallyReplacesRoleRows(t *testing.T) {
+	store := NewMemoryStore()
+	roles := []domain.Role{
+		{ID: "role-editor", Name: "Editor", TenantID: "tenant-a", OrgID: "org-a", Active: true},
+		{ID: "role-other", Name: "Other", TenantID: "tenant-a", OrgID: "org-b", Active: true},
+	}
+	for _, role := range roles {
+		if err := store.SaveRole(context.Background(), role); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, scope := range []domain.DataScope{
+		{RoleID: "role-editor", Domain: "tenant-a", OrgID: "org-a", Resource: "old", Scope: domain.ScopeOwn, IDs: []string{"old-1"}},
+		{RoleID: "role-other", Domain: "tenant-a", OrgID: "org-b", Resource: "other", Scope: domain.ScopeOrg, IDs: []string{"org-b"}},
+		{Subject: "user-direct", Domain: "tenant-a", OrgID: "org-a", Resource: "direct", Scope: domain.ScopeOwn, IDs: []string{"user-1"}},
+	} {
+		if err := store.SaveDataScope(context.Background(), scope); err != nil {
+			t.Fatal(err)
+		}
+	}
+	service := NewService(store)
+	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a", Organization: "org-a"})
+	updated, err := service.ReplaceRoleDataScopes(ctx, "role-editor", RoleDataScopesInput{Scopes: []RoleDataScopeBinding{
+		{Resource: "orders", Scope: domain.ScopeCustom, IDs: []string{"order-1", " order-2 "}},
+		{Resource: "teams", Scope: domain.ScopeOrg, IDs: []string{"org-a"}},
+	}})
+	if err != nil {
+		t.Fatalf("ReplaceRoleDataScopes() error = %v", err)
+	}
+	if updated.DataScope != domain.ScopeCustom {
+		t.Fatalf("role data scope summary = %q", updated.DataScope)
+	}
+	scopes, err := store.ListDataScopes(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	roleResources := map[string]domain.DataScope{}
+	for _, scope := range scopes {
+		if scope.RoleID == "role-editor" {
+			roleResources[scope.Resource] = scope
+		}
+	}
+	if len(roleResources) != 2 || roleResources["orders"].IDs[1] != "order-2" || roleResources["old"].Resource != "" {
+		t.Fatalf("role scope replacement = %+v", roleResources)
+	}
+	if len(roleResources["teams"].IDs) != 1 || roleResources["teams"].OrgID != "org-a" {
+		t.Fatalf("org scope relation = %+v", roleResources["teams"])
+	}
+	var preservedDirect, preservedOther bool
+	for _, scope := range scopes {
+		preservedDirect = preservedDirect || scope.Subject == "user-direct"
+		preservedOther = preservedOther || scope.RoleID == "role-other"
+	}
+	if !preservedDirect || !preservedOther {
+		t.Fatalf("unrelated data scopes were changed: %+v", scopes)
+	}
+	if _, err := service.ReplaceRoleDataScopes(ctx, "role-editor", RoleDataScopesInput{Scopes: []RoleDataScopeBinding{{Resource: "orders", Scope: domain.ScopeCustom, IDs: []string{"order-1", "order-1"}}}}); !errors.Is(err, ErrInvalidRoleDataScopeAssignment) {
+		t.Fatalf("duplicate ID error = %v", err)
+	}
+	if _, err := service.ReplaceRoleDataScopes(ctx, "role-editor", RoleDataScopesInput{Scopes: []RoleDataScopeBinding{{Resource: "orders", Scope: domain.ScopeOwn}, {Resource: "orders", Scope: domain.ScopeOrg}}}); !errors.Is(err, ErrInvalidRoleDataScopeAssignment) {
+		t.Fatalf("duplicate resource error = %v", err)
+	}
+	if _, err := service.ReplaceRoleDataScopes(tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-b"}), "role-editor", RoleDataScopesInput{}); !errors.Is(err, tenant.ErrCrossTenant) {
+		t.Fatalf("cross-tenant error = %v", err)
+	}
+	cleared, err := service.ReplaceRoleDataScopes(ctx, "role-editor", RoleDataScopesInput{})
+	if err != nil || cleared.DataScope != domain.ScopeOwn {
+		t.Fatalf("clear data scopes = %+v err=%v", cleared, err)
+	}
+	scopes, _ = store.ListDataScopes(context.Background())
+	for _, scope := range scopes {
+		if scope.RoleID == "role-editor" && scope.OrgID == "org-a" {
+			t.Fatalf("role data scope was not cleared: %+v", scope)
+		}
+	}
+}
+
+func TestServiceReplaceRoleDataScopesRejectsOversizedPayload(t *testing.T) {
+	store := NewMemoryStore()
+	if err := store.SaveRole(context.Background(), domain.Role{ID: "role-editor", TenantID: "tenant-a", Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	bindings := make([]RoleDataScopeBinding, MaxRoleDataScopeBindings+1)
+	for index := range bindings {
+		bindings[index] = RoleDataScopeBinding{Resource: "resource-" + strconv.Itoa(index), Scope: domain.ScopeOwn}
+	}
+	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a"})
+	if _, err := NewService(store).ReplaceRoleDataScopes(ctx, "role-editor", RoleDataScopesInput{Scopes: bindings}); !errors.Is(err, ErrInvalidRoleDataScopeAssignment) {
+		t.Fatalf("oversized data scope error = %v", err)
 	}
 }
 

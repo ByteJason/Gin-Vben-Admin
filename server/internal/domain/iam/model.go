@@ -16,6 +16,7 @@ var (
 	ErrAccessDenied      = errors.New("access denied")
 	ErrInvalidSubject    = errors.New("subject is required")
 	ErrInvalidPolicy     = errors.New("policy is invalid")
+	ErrInvalidDataScope  = errors.New("data scope is invalid")
 	ErrDataScopeNotFound = errors.New("data scope not found")
 	ErrResourceNotFound  = errors.New("resource not found")
 	ErrInvalidUserQuery  = errors.New("invalid user list query")
@@ -214,8 +215,24 @@ type Policy struct {
 
 type DataScope struct {
 	Subject, RoleID, Domain, Resource string
+	OrgID                             string
 	Scope                             Scope
 	IDs                               []string
+}
+
+// MaxRoleDataScopeBindings and MaxRoleDataScopeIDs are persistence-neutral
+// bounds shared by application and durable IAM adapters.
+const (
+	MaxRoleDataScopeBindings = 50
+	MaxRoleDataScopeIDs      = 200
+)
+
+// RoleDataScopeBinding is one resource-to-scope relation in a replacement
+// request. IDs are used by custom scopes and are copied before persistence.
+type RoleDataScopeBinding struct {
+	Resource string
+	Scope    Scope
+	IDs      []string
 }
 
 type Subject struct {
@@ -298,14 +315,75 @@ func (m *MemoryPolicyStore) AddPolicy(p Policy) error {
 }
 
 func (m *MemoryPolicyStore) AddDataScope(s DataScope) error {
-	if strings.TrimSpace(s.Resource) == "" || s.Scope == "" || (strings.TrimSpace(s.Subject) == "" && strings.TrimSpace(s.RoleID) == "") {
-		return ErrDataScopeNotFound
+	if err := ValidateDataScope(s); err != nil {
+		return err
 	}
 	s.IDs = append([]string(nil), s.IDs...)
 	m.mu.Lock()
 	m.scopes = append(m.scopes, s)
 	m.mu.Unlock()
 	return nil
+}
+
+// ValidateDataScope checks the persistence-neutral identity, resource and
+// scope fields. Cardinality and tenant/org replacement limits belong to the
+// application writer so every adapter can share the same bounded contract.
+func ValidateDataScope(s DataScope) error {
+	if strings.TrimSpace(s.Resource) == "" || strings.TrimSpace(s.Resource) != s.Resource || len(s.Resource) > 191 {
+		return ErrInvalidDataScope
+	}
+	if strings.TrimSpace(s.Subject) == "" && strings.TrimSpace(s.RoleID) == "" {
+		return ErrInvalidDataScope
+	}
+	switch s.Scope {
+	case ScopeAll, ScopeOwn, ScopeOrg, ScopeCustom:
+		return nil
+	default:
+		return ErrInvalidDataScope
+	}
+}
+
+// NormalizeRoleDataScopeBindings trims and bounds one role replacement before
+// any adapter mutation. It returns copies so callers cannot mutate stored IDs.
+func NormalizeRoleDataScopeBindings(bindings []RoleDataScopeBinding) ([]RoleDataScopeBinding, error) {
+	if len(bindings) > MaxRoleDataScopeBindings {
+		return nil, ErrInvalidDataScope
+	}
+	normalized := make([]RoleDataScopeBinding, 0, len(bindings))
+	seenResources := make(map[string]struct{}, len(bindings))
+	for _, binding := range bindings {
+		resource := strings.TrimSpace(binding.Resource)
+		if resource == "" || len(resource) > 191 {
+			return nil, ErrInvalidDataScope
+		}
+		if _, exists := seenResources[resource]; exists {
+			return nil, ErrInvalidDataScope
+		}
+		seenResources[resource] = struct{}{}
+		switch binding.Scope {
+		case ScopeAll, ScopeOwn, ScopeOrg, ScopeCustom:
+		default:
+			return nil, ErrInvalidDataScope
+		}
+		if len(binding.IDs) > MaxRoleDataScopeIDs {
+			return nil, ErrInvalidDataScope
+		}
+		ids := make([]string, 0, len(binding.IDs))
+		seenIDs := make(map[string]struct{}, len(binding.IDs))
+		for _, rawID := range binding.IDs {
+			id := strings.TrimSpace(rawID)
+			if id == "" || len(id) > 128 {
+				return nil, ErrInvalidDataScope
+			}
+			if _, exists := seenIDs[id]; exists {
+				return nil, ErrInvalidDataScope
+			}
+			seenIDs[id] = struct{}{}
+			ids = append(ids, id)
+		}
+		normalized = append(normalized, RoleDataScopeBinding{Resource: resource, Scope: binding.Scope, IDs: ids})
+	}
+	return normalized, nil
 }
 
 func ValidatePolicy(p Policy) error {

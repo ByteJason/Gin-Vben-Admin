@@ -557,6 +557,69 @@ func TestIAMRolePermissionAssignmentReplacesPoliciesAndReturnsIDs(t *testing.T) 
 	}
 }
 
+func TestIAMRoleDataScopeAssignmentReplacesScopedRows(t *testing.T) {
+	store := iamapp.NewMemoryStore()
+	admin := domain.User{ID: "admin", Username: "admin", TenantID: "default", OrgID: "org-a", Active: true}
+	role := domain.Role{ID: "role-editor", Name: "Editor", TenantID: "default", OrgID: "org-a", Active: true}
+	for _, save := range []func() error{
+		func() error { return store.SaveUser(context.Background(), admin) },
+		func() error { return store.SaveRole(context.Background(), role) },
+		func() error {
+			return store.SavePolicy(context.Background(), domain.Policy{Subject: "admin", Method: http.MethodPut, Path: "/api/admin/v1/iam/roles/:id/data-scopes", Effect: domain.EffectAllow})
+		},
+		func() error {
+			return store.SaveDataScope(context.Background(), domain.DataScope{RoleID: role.ID, Domain: "default", OrgID: "org-a", Resource: "old", Scope: domain.ScopeOwn})
+		},
+	} {
+		if err := save(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := newIAMTestRouter(store, authdomain.Claims{Subject: admin.ID, Type: authdomain.AccessToken, ExpiresAt: time.Now().Add(time.Minute)})
+	req := httptest.NewRequest(http.MethodPut, "/api/admin/v1/iam/roles/role-editor/data-scopes", strings.NewReader(`{"scopes":[{"resource":"orders","scope":"custom","ids":["order-1"]},{"resource":"teams","scope":"org","ids":["org-a"]}]}`))
+	req.Header.Set("Authorization", "Bearer test")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Org-ID", "org-a")
+	resp := httptest.NewRecorder()
+	r.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK || !strings.Contains(resp.Body.String(), `"code":0`) || strings.Contains(resp.Body.String(), "password") {
+		t.Fatalf("data scope assignment status/body = %d/%s", resp.Code, resp.Body.String())
+	}
+	var envelope struct {
+		Code int `json:"code"`
+		Data struct {
+			ID        string       `json:"id"`
+			DataScope domain.Scope `json:"dataScope"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &envelope); err != nil || envelope.Code != 0 || envelope.Data.ID != role.ID || envelope.Data.DataScope != domain.ScopeCustom {
+		t.Fatalf("data scope envelope = %s err=%v", resp.Body.String(), err)
+	}
+	scopes, err := store.ListDataScopes(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	resources := map[string]bool{}
+	for _, scope := range scopes {
+		if scope.RoleID == role.ID {
+			resources[scope.Resource] = true
+		}
+	}
+	if len(resources) != 2 || resources["old"] {
+		t.Fatalf("data scopes after replacement = %+v", resources)
+	}
+
+	bad := httptest.NewRequest(http.MethodPut, "/api/admin/v1/iam/roles/role-editor/data-scopes", strings.NewReader(`{"scopes":[{"resource":"orders","scope":"unknown","ids":[]}]}`))
+	bad.Header.Set("Authorization", "Bearer test")
+	bad.Header.Set("Content-Type", "application/json")
+	bad.Header.Set("X-Org-ID", "org-a")
+	resp = httptest.NewRecorder()
+	r.ServeHTTP(resp, bad)
+	if resp.Code != http.StatusBadRequest || !strings.Contains(resp.Body.String(), `"code":10000`) {
+		t.Fatalf("invalid data scope status/body = %d/%s", resp.Code, resp.Body.String())
+	}
+}
+
 func hasRoleID(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {

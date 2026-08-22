@@ -656,6 +656,39 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
+  /api/admin/v1/iam/roles/{id}/data-scopes:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1, maxLength: 128 }
+    put:
+      tags: [IAM]
+      operationId: replaceIAMRoleDataScopes
+      summary: 替换角色数据范围
+      description: 在当前租户和组织范围内原子替换角色数据范围关系，最多 50 个资源绑定；每个自定义范围最多 200 个限定 ID。
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IAMRoleDataScopesReplaceRequest' }
+      responses:
+        '200':
+          description: 角色数据范围替换成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/IAMRole' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
   /api/admin/v1/settings:
     get:
       tags: [Settings]
@@ -1118,6 +1151,26 @@ components:
           type: array
           maxItems: 200
           items: { type: string, minLength: 1, maxLength: 128 }
+    IAMRoleDataScopeBinding:
+      type: object
+      additionalProperties: false
+      required: [resource, scope, ids]
+      properties:
+        resource: { type: string, minLength: 1, maxLength: 191 }
+        scope: { type: string, enum: [all, own, org, custom] }
+        ids:
+          type: array
+          maxItems: 200
+          items: { type: string, minLength: 1, maxLength: 128 }
+    IAMRoleDataScopesReplaceRequest:
+      type: object
+      additionalProperties: false
+      required: [scopes]
+      properties:
+        scopes:
+          type: array
+          maxItems: 50
+          items: { $ref: '#/components/schemas/IAMRoleDataScopeBinding' }
     IAMMenu:
       type: object
       required: [id, name, path, visible, active]

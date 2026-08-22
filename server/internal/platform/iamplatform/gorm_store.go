@@ -748,6 +748,88 @@ func (s *GORMStore) AssignRolePermissions(ctx context.Context, roleID string, pe
 	return updated, nil
 }
 
+// AssignRoleDataScopes replaces one role's data-scope rows in a primary
+// transaction. The tenant/org predicate is carried by both delete and
+// insert paths so a scoped administrator cannot alter another organization.
+func (s *GORMStore) AssignRoleDataScopes(ctx context.Context, roleID string, bindings []domain.RoleDataScopeBinding) (domain.Role, error) {
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" {
+		return domain.Role{}, domain.ErrInvalidDataScope
+	}
+	normalized, err := domain.NormalizeRoleDataScopeBindings(bindings)
+	if err != nil {
+		return domain.Role{}, err
+	}
+	if s == nil || s.db == nil {
+		return domain.Role{}, ErrStoreUnavailable
+	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return domain.Role{}, err
+	}
+	var updated domain.Role
+	err = s.db.WithinTransaction(ctx, func(tx *gorm.DB) error {
+		var roleRowValue roleRow
+		roleQuery := tx.Table("roles").Where("tenant_id = ? AND id = ?", scope.TenantID, roleID)
+		if result := roleQuery.Take(&roleRowValue); result.Error != nil {
+			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+				return domain.ErrResourceNotFound
+			}
+			return ErrStoreUnavailable
+		}
+		if !scope.PlatformAdmin && scope.Organization != "" && stringValue(roleRowValue.OrgID) != "" && stringValue(roleRowValue.OrgID) != scope.Organization {
+			return tenant.ErrOrganizationDenied
+		}
+		deleteSQL := "DELETE FROM iam_data_scopes WHERE tenant_id = ? AND role_id = ?"
+		deleteArgs := []any{scope.TenantID, roleID}
+		if scope.Organization == "" {
+			deleteSQL += " AND org_id IS NULL"
+		} else {
+			deleteSQL += " AND org_id = ?"
+			deleteArgs = append(deleteArgs, scope.Organization)
+		}
+		if result := tx.Exec(deleteSQL, deleteArgs...); result.Error != nil {
+			return ErrStoreUnavailable
+		}
+		for _, binding := range normalized {
+			if err := domain.ValidateDataScope(domain.DataScope{RoleID: roleID, Domain: scope.TenantID, Resource: binding.Resource, Scope: binding.Scope, IDs: binding.IDs}); err != nil {
+				return err
+			}
+			ids, marshalErr := json.Marshal(binding.IDs)
+			if marshalErr != nil {
+				return marshalErr
+			}
+			values := map[string]any{
+				"tenant_id": scope.TenantID, "role_id": roleID, "domain": scope.TenantID,
+				"resource": binding.Resource, "scope": binding.Scope, "ids": ids,
+				"org_id": nullableString(scope.Organization),
+			}
+			if result := tx.Table("iam_data_scopes").Create(values); result.Error != nil {
+				return ErrStoreUnavailable
+			}
+		}
+		roleScope := domain.ScopeOwn
+		if len(normalized) == 1 {
+			roleScope = normalized[0].Scope
+		} else if len(normalized) > 1 {
+			roleScope = domain.ScopeCustom
+		}
+		if result := tx.Table("roles").Where("tenant_id = ? AND id = ?", scope.TenantID, roleID).Updates(map[string]any{"data_scope": roleScope}); result.Error != nil {
+			return ErrStoreUnavailable
+		}
+		updated = roleRowValue.toDomain(nil)
+		updated.DataScope = roleScope
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, domain.ErrResourceNotFound) || errors.Is(err, domain.ErrInvalidDataScope) || errors.Is(err, tenant.ErrOrganizationDenied) || errors.Is(err, tenant.ErrCrossTenant) {
+			return domain.Role{}, err
+		}
+		return domain.Role{}, ErrStoreUnavailable
+	}
+	return updated, nil
+}
+
 func (s *GORMStore) ListRoles(ctx context.Context) ([]domain.Role, error) {
 	if s == nil || s.db == nil {
 		return nil, ErrStoreUnavailable
@@ -913,8 +995,8 @@ func (s *GORMStore) SaveDataScope(ctx context.Context, scope domain.DataScope) e
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(scope.Resource) == "" || scope.Scope == "" || (strings.TrimSpace(scope.Subject) == "" && strings.TrimSpace(scope.RoleID) == "") {
-		return domain.ErrDataScopeNotFound
+	if err := domain.ValidateDataScope(scope); err != nil {
+		return err
 	}
 	ids, err := json.Marshal(scope.IDs)
 	if err != nil {
@@ -929,7 +1011,7 @@ func (s *GORMStore) SaveDataScope(ctx context.Context, scope domain.DataScope) e
 	}
 	result := s.write(ctx).Table("iam_data_scopes").Create(map[string]any{
 		"tenant_id": tenantID, "user_id": userID, "role_id": nullableString(scope.RoleID), "domain": scope.Domain,
-		"resource": scope.Resource, "scope": scope.Scope, "ids": ids,
+		"resource": scope.Resource, "scope": scope.Scope, "ids": ids, "org_id": nullableString(scope.OrgID),
 	})
 	if result.Error != nil {
 		return ErrStoreUnavailable
@@ -941,17 +1023,21 @@ func (s *GORMStore) ListDataScopes(ctx context.Context) ([]domain.DataScope, err
 	if s == nil || s.db == nil {
 		return nil, ErrStoreUnavailable
 	}
-	tenantID, err := tenantID(ctx)
+	scope, err := tenant.RequireContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 	var rows []scopeRow
-	if err := s.read(ctx).Table("iam_data_scopes").Where("tenant_id = ?", tenantID).Order("id ASC").Find(&rows).Error; err != nil {
+	query := s.read(ctx).Table("iam_data_scopes").Where("tenant_id = ?", scope.TenantID)
+	if !scope.PlatformAdmin && scope.Organization != "" {
+		query = query.Where("org_id = ? OR org_id IS NULL", scope.Organization)
+	}
+	if err := query.Order("id ASC").Find(&rows).Error; err != nil {
 		return nil, ErrStoreUnavailable
 	}
 	out := make([]domain.DataScope, 0, len(rows))
 	for _, row := range rows {
-		scope := domain.DataScope{RoleID: row.RoleID.String, Domain: row.Domain, Resource: row.Resource, Scope: domain.Scope(row.Scope)}
+		scope := domain.DataScope{RoleID: row.RoleID.String, Domain: row.Domain, OrgID: row.OrgID.String, Resource: row.Resource, Scope: domain.Scope(row.Scope)}
 		if row.UserID.Valid {
 			scope.Subject = strconv.FormatInt(row.UserID.Int64, 10)
 		}
@@ -1235,6 +1321,7 @@ type policyRow struct {
 type scopeRow struct {
 	UserID   sql.NullInt64  `gorm:"column:user_id"`
 	RoleID   sql.NullString `gorm:"column:role_id"`
+	OrgID    sql.NullString `gorm:"column:org_id"`
 	Domain   string
 	Resource string
 	Scope    string

@@ -70,6 +70,7 @@ func RegisterRoutes(r gin.IRouter, handler *Handler, policies ...httpmiddleware.
 	group.POST("/roles", handler.createRole)
 	group.PUT("/roles/:id/users", handler.replaceRoleUsers)
 	group.PUT("/roles/:id/permissions", handler.replaceRolePermissions)
+	group.PUT("/roles/:id/data-scopes", handler.replaceRoleDataScopes)
 	group.GET("/menus", handler.listMenus)
 	group.GET("/permissions", handler.listPermissions)
 	group.GET("/policies", handler.listPolicies)
@@ -82,7 +83,7 @@ func RegisterRoutes(r gin.IRouter, handler *Handler, policies ...httpmiddleware.
 }
 
 func registerDisabled(group *gin.RouterGroup) {
-	for _, path := range []string{"/me", "/users", "/users/batch-status", "/users/:id/reset-password", "/users/:id/login-events", "/users/:id", "/roles", "/roles/:id/users", "/roles/:id/permissions", "/menus", "/permissions", "/policies", "/data-scopes"} {
+	for _, path := range []string{"/me", "/users", "/users/batch-status", "/users/:id/reset-password", "/users/:id/login-events", "/users/:id", "/roles", "/roles/:id/users", "/roles/:id/permissions", "/roles/:id/data-scopes", "/menus", "/permissions", "/policies", "/data-scopes"} {
 		group.GET(path, disabled)
 		group.POST(path, disabled)
 		group.PATCH(path, disabled)
@@ -594,6 +595,37 @@ func (h *Handler) replaceRolePermissions(c *gin.Context) {
 	response.OK(c, roleResponse{ID: role.ID, Name: role.Name, Active: role.Active, DataScope: role.DataScope, UserIDs: append([]string(nil), role.UserIDs...), PermissionIDs: append([]string(nil), role.PermissionIDs...)})
 }
 
+type roleDataScopeBindingRequest struct {
+	Resource string       `json:"resource"`
+	Scope    domain.Scope `json:"scope"`
+	IDs      []string     `json:"ids"`
+}
+
+type roleDataScopesRequest struct {
+	Scopes *[]roleDataScopeBindingRequest `json:"scopes"`
+}
+
+func (h *Handler) replaceRoleDataScopes(c *gin.Context) {
+	if !h.guard(c) {
+		return
+	}
+	var req roleDataScopesRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.Scopes == nil || len(*req.Scopes) > iamapp.MaxRoleDataScopeBindings {
+		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid request")
+		return
+	}
+	bindings := make([]iamapp.RoleDataScopeBinding, 0, len(*req.Scopes))
+	for _, binding := range *req.Scopes {
+		bindings = append(bindings, iamapp.RoleDataScopeBinding{Resource: binding.Resource, Scope: binding.Scope, IDs: append([]string(nil), binding.IDs...)})
+	}
+	role, err := h.service.ReplaceRoleDataScopes(c.Request.Context(), c.Param("id"), iamapp.RoleDataScopesInput{Scopes: bindings})
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	response.OK(c, roleResponse{ID: role.ID, Name: role.Name, Active: role.Active, DataScope: role.DataScope, UserIDs: append([]string(nil), role.UserIDs...), PermissionIDs: append([]string(nil), role.PermissionIDs...)})
+}
+
 type menuResponse struct {
 	ID       string `json:"id"`
 	ParentID string `json:"parentId"`
@@ -769,7 +801,7 @@ func writeServiceError(c *gin.Context, err error) {
 		response.Error(c, http.StatusServiceUnavailable, codeUnavailable, "dependency unavailable")
 		return
 	}
-	if errors.Is(err, iamapp.ErrInvalidID) || errors.Is(err, iamapp.ErrInvalidUserQuery) || errors.Is(err, iamapp.ErrInvalidUser) || errors.Is(err, iamapp.ErrInvalidUserBatch) || errors.Is(err, iamapp.ErrInvalidRoleAssignment) || errors.Is(err, iamapp.ErrInvalidRolePermissionAssignment) || errors.Is(err, domain.ErrInvalidPolicy) || errors.Is(err, auditapp.ErrInvalidFilter) {
+	if errors.Is(err, iamapp.ErrInvalidID) || errors.Is(err, iamapp.ErrInvalidUserQuery) || errors.Is(err, iamapp.ErrInvalidUser) || errors.Is(err, iamapp.ErrInvalidUserBatch) || errors.Is(err, iamapp.ErrInvalidRoleAssignment) || errors.Is(err, iamapp.ErrInvalidRolePermissionAssignment) || errors.Is(err, iamapp.ErrInvalidRoleDataScopeAssignment) || errors.Is(err, domain.ErrInvalidPolicy) || errors.Is(err, domain.ErrInvalidDataScope) || errors.Is(err, auditapp.ErrInvalidFilter) {
 		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid request")
 		return
 	}

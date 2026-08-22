@@ -87,7 +87,19 @@ var _ interface {
 
 var _ interface {
 	AssignRoleUsers(context.Context, string, []string) (domain.Role, error)
+	AssignRoleDataScopes(context.Context, string, []domain.RoleDataScopeBinding) (domain.Role, error)
 } = (*GORMStore)(nil)
+
+func TestGORMStoreDataScopeReplacementValidatesBeforeUnavailableDependency(t *testing.T) {
+	store := NewGORMStore(nil)
+	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "default"})
+	if _, err := store.AssignRoleDataScopes(ctx, "role", []domain.RoleDataScopeBinding{{Resource: "", Scope: domain.ScopeOwn}}); !errors.Is(err, domain.ErrInvalidDataScope) {
+		t.Fatalf("invalid data scope error = %v", err)
+	}
+	if _, err := store.AssignRoleDataScopes(ctx, "role", []domain.RoleDataScopeBinding{{Resource: "orders", Scope: domain.ScopeOwn}}); !errors.Is(err, ErrStoreUnavailable) {
+		t.Fatalf("unavailable data scope error = %v", err)
+	}
+}
 
 func TestGORMStoreUserWriteValidationRunsBeforeUnavailableDependency(t *testing.T) {
 	store := NewGORMStore(nil)
