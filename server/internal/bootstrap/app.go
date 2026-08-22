@@ -19,6 +19,7 @@ import (
 	dictionaryapp "example.com/gin-vben-admin/server/internal/application/dictionary"
 	fileapp "example.com/gin-vben-admin/server/internal/application/file"
 	iamapp "example.com/gin-vben-admin/server/internal/application/iam"
+	importsapp "example.com/gin-vben-admin/server/internal/application/imports"
 	installer "example.com/gin-vben-admin/server/internal/application/installer"
 	"example.com/gin-vben-admin/server/internal/application/jobs"
 	mailapp "example.com/gin-vben-admin/server/internal/application/mail"
@@ -34,6 +35,7 @@ import (
 	dictionaryplatform "example.com/gin-vben-admin/server/internal/platform/dictionary"
 	platformhealth "example.com/gin-vben-admin/server/internal/platform/health"
 	"example.com/gin-vben-admin/server/internal/platform/iamplatform"
+	importsplatform "example.com/gin-vben-admin/server/internal/platform/imports"
 	"example.com/gin-vben-admin/server/internal/platform/installplatform"
 	jobplatform "example.com/gin-vben-admin/server/internal/platform/jobs"
 	mailplatform "example.com/gin-vben-admin/server/internal/platform/mail"
@@ -64,6 +66,7 @@ type App struct {
 	taskQueue          jobs.Queue
 	taskWorker         *jobs.Worker
 	taskScheduler      *tasksapp.Scheduler
+	importExport       *importsapp.Service
 	monitor            *monitorapp.Service
 	observability      *observabilityplatform.Manager
 	settingsRepository settingsapp.Repository
@@ -258,6 +261,16 @@ func New(cfg config.Config) (*App, error) {
 	app.taskWorker = jobs.NewWorker(app.taskQueue, jobs.WorkerOptions{Concurrency: 1})
 	app.taskRuns = tasksapp.NewRunService(app.tasks, taskRunRepository, app.taskQueue)
 	app.taskScheduler = tasksapp.NewScheduler(app.tasks, app.taskRuns)
+	var importRepository importsapp.Repository
+	if app.database != nil {
+		importRepository = importsplatform.NewGORMRepository(app.database)
+	}
+	app.importExport = importsapp.NewService(importsapp.Config{Queue: app.taskQueue, Repository: importRepository, Limits: importsapp.DefaultLimits()})
+	// Only the two compiled-in IMPORT-100 handlers are registered. Unknown
+	// task types remain rejected by the worker registry.
+	if err := app.importExport.RegisterWorker(app.taskWorker); err != nil {
+		return cleanupOnError(errors.New("configure import/export worker"))
+	}
 
 	app.readiness = platformhealth.NewChecker(readinessTimeout(cfg), dependencies...)
 	var limiter appauth.RateLimiter
@@ -307,7 +320,7 @@ func New(cfg config.Config) (*App, error) {
 		captchaProvider = authplatform.NewRedisCaptchaProvider(app.redis, cfg.Auth.CaptchaKeyPrefix, cfg.Auth.CaptchaChallengeTTL)
 		captchaRisk = authplatform.NewRedisCaptchaRiskStore(app.redis, cfg.Auth.CaptchaKeyPrefix)
 	}
-	app.http = newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasksAndRuns(cfg, app.readiness, app.auth, limiter, app.iam, recovery, app.install, installPlan, installplatform.NewSystemDependencyProbe(), applyService, app.applyJobs, app.settings, app.audit, captchaProvider, captchaRisk, app.files, app.mail, app.monitor, app.dictionary, app.tasks, app.taskRuns, app.observability)
+	app.http = newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasksAndRunsAndImportExport(cfg, app.readiness, app.auth, limiter, app.iam, recovery, app.install, installPlan, installplatform.NewSystemDependencyProbe(), applyService, app.applyJobs, app.settings, app.audit, captchaProvider, captchaRisk, app.files, app.mail, app.monitor, app.dictionary, app.tasks, app.taskRuns, app.importExport, app.observability)
 	return app, nil
 }
 
@@ -443,6 +456,14 @@ func (a *App) TaskScheduler() *tasksapp.Scheduler {
 		return nil
 	}
 	return a.taskScheduler
+}
+
+// ImportExport returns the bounded asynchronous import/export service.
+func (a *App) ImportExport() *importsapp.Service {
+	if a == nil {
+		return nil
+	}
+	return a.importExport
 }
 
 // Observability returns the runtime metrics/tracing collector. It is always

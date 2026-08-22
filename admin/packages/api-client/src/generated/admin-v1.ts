@@ -1,5 +1,5 @@
 // Generated from contracts/openapi/admin-v1.yaml; DO NOT EDIT.
-// CONTRACT_SHA256=c14a97a82631afcbdce7733206863a603bb911c89c69ba9e515e62a334f5c7ae
+// CONTRACT_SHA256=9bf7fa88e5e37c141ae2a12173711473667fa3de0f1204449f2f170d56950b02
 
 export const ADMIN_API_PREFIX = '/admin/v1' as const;
 
@@ -76,6 +76,16 @@ export const ADMIN_ENDPOINTS = {
   listTaskRunLogs: '/admin/v1/tasks/{id}/runs/{runId}/logs',
   cancelTaskRun: '/admin/v1/tasks/{id}/runs/{runId}/cancel',
   retryTaskRun: '/admin/v1/tasks/{id}/runs/{runId}/retry',
+  downloadImportTemplate: '/admin/v1/import-export/templates/{format}',
+  previewImport: '/admin/v1/import-export/imports/preview',
+  commitImport: '/admin/v1/import-export/imports/commit',
+  startExport: '/admin/v1/import-export/exports',
+  listImportExportJobs: '/admin/v1/import-export/jobs',
+  getImportExportJob: '/admin/v1/import-export/jobs/{id}',
+  listImportErrors: '/admin/v1/import-export/jobs/{id}/errors',
+  downloadExport: '/admin/v1/import-export/jobs/{id}/download',
+  cancelImportExportJob: '/admin/v1/import-export/jobs/{id}/cancel',
+  retryImportExportJob: '/admin/v1/import-export/jobs/{id}/retry',
   listSMTPAccounts: '/admin/v1/mail/accounts',
   createSMTPAccount: '/admin/v1/mail/accounts',
   updateSMTPAccount: '/admin/v1/mail/accounts/{id}',

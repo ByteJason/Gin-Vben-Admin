@@ -1402,6 +1402,132 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
 
+  /api/admin/v1/import-export/templates/{format}:
+    get:
+      tags: [ImportExport]
+      operationId: downloadImportTemplate
+      summary: 下载 CSV/XLSX 导入模板
+      security: [{BearerAuth: []}]
+      parameters:
+        - { name: format, in: path, required: true, schema: { type: string, enum: [csv, xlsx] } }
+      responses:
+        '200': { description: 模板文件, content: { text/csv: {}, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet: {} } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/admin/v1/import-export/imports/preview:
+    post:
+      tags: [ImportExport]
+      operationId: previewImport
+      summary: 预览并校验导入文件
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+                format: { type: string, enum: [csv, xlsx] }
+                columns: { type: string }
+                required: { type: string }
+                allowlist: { type: string }
+                types: { type: string }
+      responses:
+        '200': { description: 预览结果, content: { application/json: { schema: { $ref: '#/components/schemas/ImportPreview' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '413': { description: 文件或行数超限 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/admin/v1/import-export/imports/commit:
+    post:
+      tags: [ImportExport]
+      operationId: commitImport
+      summary: 提交异步导入作业
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ImportCommitRequest' } } }
+      responses:
+        '202': { description: 作业已排队, content: { application/json: { schema: { $ref: '#/components/schemas/ImportExportJob' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/admin/v1/import-export/exports:
+    post:
+      tags: [ImportExport]
+      operationId: startExport
+      summary: 创建分页异步导出作业
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ExportRequest' } } }
+      responses:
+        '202': { description: 作业已排队, content: { application/json: { schema: { $ref: '#/components/schemas/ImportExportJob' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/admin/v1/import-export/jobs:
+    get:
+      tags: [ImportExport]
+      operationId: listImportExportJobs
+      summary: 查询导入导出作业
+      security: [{BearerAuth: []}]
+      parameters:
+        - { name: kind, in: query, required: false, schema: { type: string, enum: [import, export] } }
+      responses:
+        '200': { description: 作业列表, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/ImportExportJob' } }, total: { type: integer } } } } } }
+  /api/admin/v1/import-export/jobs/{id}:
+    get:
+      tags: [ImportExport]
+      operationId: getImportExportJob
+      summary: 查询单个导入导出作业
+      security: [{BearerAuth: []}]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: 作业, content: { application/json: { schema: { $ref: '#/components/schemas/ImportExportJob' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/admin/v1/import-export/jobs/{id}/errors:
+    get:
+      tags: [ImportExport]
+      operationId: listImportErrors
+      summary: 查询或下载脱敏错误行
+      security: [{BearerAuth: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: format, in: query, required: false, schema: { type: string, enum: [json, csv], default: json } }
+      responses:
+        '200': { description: 错误行, content: { application/json: {}, text/csv: {} } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/admin/v1/import-export/jobs/{id}/download:
+    get:
+      tags: [ImportExport]
+      operationId: downloadExport
+      summary: 下载未过期导出文件
+      security: [{BearerAuth: []}]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: 导出文件, content: { text/csv: {} } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/admin/v1/import-export/jobs/{id}/cancel:
+    post:
+      tags: [ImportExport]
+      operationId: cancelImportExportJob
+      summary: 取消导入导出作业
+      security: [{BearerAuth: []}]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: 已取消, content: { application/json: { schema: { $ref: '#/components/schemas/ImportExportJob' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/admin/v1/import-export/jobs/{id}/retry:
+    post:
+      tags: [ImportExport]
+      operationId: retryImportExportJob
+      summary: 重试失败导入导出作业
+      security: [{BearerAuth: []}]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: 已重新排队, content: { application/json: { schema: { $ref: '#/components/schemas/ImportExportJob' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+
   /api/admin/v1/mail/accounts:
     get:
       tags: [Admin]
@@ -1756,6 +1882,67 @@ components:
         message: { type: string }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+    ImportRowError:
+      type: object
+      required: [row, code, messageKey]
+      properties:
+        row: { type: integer, minimum: 1 }
+        column: { type: string }
+        code: { type: string }
+        messageKey: { type: string }
+    ImportPreview:
+      type: object
+      required: [id, format, headers, previewRows, totalRows, errors, sizeBytes, sha256, createdAt, expiresAt]
+      properties:
+        id: { type: string }
+        tenantId: { type: string }
+        orgId: { type: string }
+        format: { type: string, enum: [csv, xlsx] }
+        headers: { type: array, items: { type: string } }
+        mappedColumns: { type: object, additionalProperties: { type: string } }
+        previewRows: { type: array, items: { type: object, additionalProperties: { type: string } } }
+        totalRows: { type: integer, minimum: 0, maximum: 100000 }
+        errors: { type: array, items: { $ref: '#/components/schemas/ImportRowError' } }
+        sizeBytes: { type: integer, minimum: 0, maximum: 52428800 }
+        sha256: { type: string, pattern: '^[a-f0-9]{64}$' }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+    ImportCommitRequest:
+      type: object
+      required: [previewId]
+      properties:
+        previewId: { type: string, minLength: 1, maxLength: 128 }
+        idempotencyKey: { type: string, maxLength: 191 }
+    ExportRequest:
+      type: object
+      required: [fields]
+      properties:
+        fields: { type: array, minItems: 1, items: { type: string } }
+        allowlist: { type: object, additionalProperties: { type: boolean } }
+        rows: { type: array, maxItems: 100000, items: { type: object, additionalProperties: { type: string } } }
+        idempotencyKey: { type: string, maxLength: 191 }
+    ImportExportJob:
+      type: object
+      required: [id, kind, tenantId, idempotencyKey, status, totalRows, processedRows, errorCount, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [import, export] }
+        tenantId: { type: string }
+        orgId: { type: string }
+        actorId: { type: string }
+        previewId: { type: string }
+        queueTaskId: { type: string }
+        idempotencyKey: { type: string }
+        status: { type: string, enum: [pending, running, succeeded, failed, cancelled] }
+        totalRows: { type: integer, minimum: 0 }
+        processedRows: { type: integer, minimum: 0 }
+        errorCount: { type: integer, minimum: 0 }
+        lastErrorCode: { type: string }
+        downloadUrl: { type: string, format: uri }
+        expiresAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
     SMTPAccount:
       type: object
       required: [id, name, enabled, host, port, username, weight, fromEmail, implicitTls, passwordConfigured, createdAt, updatedAt]

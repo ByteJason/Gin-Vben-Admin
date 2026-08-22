@@ -9,6 +9,7 @@ import (
 	dictionaryapp "example.com/gin-vben-admin/server/internal/application/dictionary"
 	fileapp "example.com/gin-vben-admin/server/internal/application/file"
 	iamapp "example.com/gin-vben-admin/server/internal/application/iam"
+	importsapp "example.com/gin-vben-admin/server/internal/application/imports"
 	installer "example.com/gin-vben-admin/server/internal/application/installer"
 	mailapp "example.com/gin-vben-admin/server/internal/application/mail"
 	monitorapp "example.com/gin-vben-admin/server/internal/application/monitor"
@@ -24,6 +25,7 @@ import (
 	filehttp "example.com/gin-vben-admin/server/internal/transport/http/file"
 	"example.com/gin-vben-admin/server/internal/transport/http/health"
 	iamhttp "example.com/gin-vben-admin/server/internal/transport/http/iam"
+	importexporthttp "example.com/gin-vben-admin/server/internal/transport/http/importexport"
 	installhttp "example.com/gin-vben-admin/server/internal/transport/http/install"
 	mailhttp "example.com/gin-vben-admin/server/internal/transport/http/mail"
 	httpmiddleware "example.com/gin-vben-admin/server/internal/transport/http/middleware"
@@ -69,6 +71,12 @@ func newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasks(cfg config.Config, re
 }
 
 func newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasksAndRuns(cfg config.Config, readiness health.ReadinessChecker, authService appauth.AuthService, limiter appauth.RateLimiter, iamService *iamapp.Service, recovery appauth.AccountRecoveryService, installStatus *installer.StatusService, installPlan installer.PlanProvider, dependencyChecks installhttp.DependencyCheckProvider, applyService *installer.ApplyService, jobService *installer.ApplyJobService, settingsService *settingsapp.Service, auditService *auditapp.Service, captchaProvider appauth.CaptchaProvider, captchaRisk appauth.CaptchaRiskStore, fileService *fileapp.Service, mailService *mailapp.Service, monitorService *monitorapp.Service, dictionaryService *dictionaryapp.Service, taskService *tasksapp.Service, runService *tasksapp.RunService, observations ...httpmiddleware.ObservabilityRuntime) *http.Server {
+	return newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasksAndRunsAndImportExport(cfg, readiness, authService, limiter, iamService, recovery, installStatus, installPlan, dependencyChecks, applyService, jobService, settingsService, auditService, captchaProvider, captchaRisk, fileService, mailService, monitorService, dictionaryService, taskService, runService, nil, observations...)
+}
+
+// newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasksAndRunsAndImportExport
+// extends the compatibility composition seam with the IMPORT-100 handler.
+func newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasksAndRunsAndImportExport(cfg config.Config, readiness health.ReadinessChecker, authService appauth.AuthService, limiter appauth.RateLimiter, iamService *iamapp.Service, recovery appauth.AccountRecoveryService, installStatus *installer.StatusService, installPlan installer.PlanProvider, dependencyChecks installhttp.DependencyCheckProvider, applyService *installer.ApplyService, jobService *installer.ApplyJobService, settingsService *settingsapp.Service, auditService *auditapp.Service, captchaProvider appauth.CaptchaProvider, captchaRisk appauth.CaptchaRiskStore, fileService *fileapp.Service, mailService *mailapp.Service, monitorService *monitorapp.Service, dictionaryService *dictionaryapp.Service, taskService *tasksapp.Service, runService *tasksapp.RunService, importExportService *importsapp.Service, observations ...httpmiddleware.ObservabilityRuntime) *http.Server {
 	var authHandler *authhttp.Handler
 	if authService != nil {
 		authHandler = authhttp.NewHandler(authService, cfg.Auth, limiter)
@@ -108,6 +116,9 @@ func newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasksAndRuns(cfg config.Con
 	}
 	if taskService != nil {
 		auxiliary.Tasks = taskshttp.NewHandler(taskService, runService)
+	}
+	if importExportService != nil {
+		auxiliary.ImportExport = importexporthttp.NewHandler(importExportService)
 	}
 	tenantPolicy := httpmiddleware.TenantPolicy{
 		Mode:                  cfg.Tenant.Mode,
