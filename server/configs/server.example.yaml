@@ -36,6 +36,12 @@ tenant:
   tenant_header: X-Tenant-ID
   organization_header: X-Org-ID
 
+i18n:
+  # Only zh-CN and en-US are bundled in 1.0; mode changes take effect after restart.
+  mode: single
+  default_locale: zh-CN
+  supported_locales: [zh-CN, en-US]
+
 database:
   enabled: false
   driver: mysql

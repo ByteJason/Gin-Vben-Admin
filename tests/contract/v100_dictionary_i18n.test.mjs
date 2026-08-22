@@ -10,6 +10,7 @@ test('B1.2 dictionary contract has tenant overrides, localization, and migration
     'server/internal/application/dictionary/service.go',
     'server/internal/platform/dictionary/gorm_repository.go',
     'server/internal/transport/http/dictionary/handler.go',
+    'server/internal/transport/http/response/response.go',
     'server/migrations/mysql/000016_dictionary.up.sql',
     'server/migrations/mysql/000016_dictionary.down.sql',
     'server/migrations/postgres/000016_dictionary.up.sql',
@@ -23,6 +24,8 @@ test('B1.2 dictionary contract has tenant overrides, localization, and migration
   const handler = read('server/internal/transport/http/dictionary/handler.go');
   assert.match(handler, /\/api\/admin\/v1\/dictionaries/);
   assert.match(handler, /Accept-Language/);
+  assert.match(handler, /MessageKey/);
+  assert.match(read('server/internal/transport/http/response/response.go'), /ErrorWithMessageKey/);
   const mysql = read('server/migrations/mysql/000016_dictionary.up.sql');
   const postgres = read('server/migrations/postgres/000016_dictionary.up.sql');
   for (const sql of [mysql, postgres]) {
@@ -46,6 +49,8 @@ test('B1.2 three UI templates expose equivalent dictionary management pages', ()
     const api = read(`admin/apps/${app}/src/api/core/dictionary.ts`);
     const route = read(`admin/apps/${app}/src/router/routes/modules/system.ts`);
     assert.match(page, /Accept-Language|locale/);
+    assert.match(page, /getSettingApi\(['"]i18n\.mode['"]\)/);
+    assert.match(page, /localeMode\s*===\s*['"]multi['"]|localeMode/);
     assert.match(page, /aria-labelledby/);
     assert.match(page, /overflow-x-auto|table-scroll/);
     assert.match(api, /listDictionary/);

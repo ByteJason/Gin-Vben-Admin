@@ -15,9 +15,19 @@ var ErrInvalidCatalog = errors.New("invalid translation catalog")
 type Catalog struct {
 	fallback string
 	messages map[string]map[string]string
+	missing  func(MissingTranslation)
+}
+
+type MissingTranslation struct {
+	Locale string
+	Key    string
 }
 
 func NewCatalog(fallback string, messages map[string]map[string]string) (*Catalog, error) {
+	return NewCatalogWithSink(fallback, messages, nil)
+}
+
+func NewCatalogWithSink(fallback string, messages map[string]map[string]string, sink func(MissingTranslation)) (*Catalog, error) {
 	fallback = normalizeLocale(fallback)
 	if fallback == "" || len(messages) == 0 {
 		return nil, ErrInvalidCatalog
@@ -39,7 +49,7 @@ func NewCatalog(fallback string, messages map[string]map[string]string) (*Catalo
 	if _, ok := copyMessages[fallback]; !ok {
 		return nil, ErrInvalidCatalog
 	}
-	return &Catalog{fallback: fallback, messages: copyMessages}, nil
+	return &Catalog{fallback: fallback, messages: copyMessages, missing: sink}, nil
 }
 
 // Resolve returns the best supported locale for an Accept-Language value.
@@ -68,6 +78,9 @@ func (c *Catalog) Translate(locale, key string) string {
 				}
 			}
 		}
+	}
+	if c.missing != nil {
+		c.missing(MissingTranslation{Locale: normalizeLocale(locale), Key: key})
 	}
 	return key
 }

@@ -1,6 +1,10 @@
 package response
 
-import "github.com/gin-gonic/gin"
+import (
+	"strconv"
+
+	"github.com/gin-gonic/gin"
+)
 
 // OK writes the shared response envelope used by the OpenAPI contracts.
 // The request ID is copied into both traceId and meta.requestId so callers
@@ -23,10 +27,21 @@ func Write(c *gin.Context, status int, code int, message string, payload any) {
 }
 
 func Error(c *gin.Context, status int, code int, message string) {
-	ErrorWithData(c, status, code, message, nil)
+	ErrorWithMessageKey(c, status, code, message, "error.code."+strconv.Itoa(code), nil)
 }
 
 func ErrorWithData(c *gin.Context, status int, code int, message string, data any) {
+	ErrorWithMessageKeyAndData(c, status, code, message, "error.code."+strconv.Itoa(code), nil, data)
+}
+
+// ErrorWithMessageKey emits a stable, locale-independent diagnostic key and
+// optional interpolation parameters while preserving the legacy message text
+// for clients that have not migrated to client-side translation.
+func ErrorWithMessageKey(c *gin.Context, status int, code int, message, messageKey string, params map[string]any) {
+	ErrorWithMessageKeyAndData(c, status, code, message, messageKey, params, nil)
+}
+
+func ErrorWithMessageKeyAndData(c *gin.Context, status int, code int, message, messageKey string, params map[string]any, data any) {
 	requestID := requestID(c)
 	body := gin.H{
 		"code":    code,
@@ -34,6 +49,13 @@ func ErrorWithData(c *gin.Context, status int, code int, message string, data an
 		"data":    data,
 		"traceId": requestID,
 		"meta":    gin.H{"requestId": requestID},
+	}
+	if messageKey != "" {
+		detail := gin.H{"messageKey": messageKey}
+		if params != nil {
+			detail["params"] = params
+		}
+		body["errors"] = []gin.H{detail}
 	}
 	c.JSON(status, body)
 }

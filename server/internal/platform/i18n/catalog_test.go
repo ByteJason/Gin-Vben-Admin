@@ -26,3 +26,20 @@ func TestCatalogRejectsUnsupportedFallback(t *testing.T) {
 		t.Fatal("expected unsupported fallback error")
 	}
 }
+
+func TestCatalogReportsMissingTranslationWithoutChangingStableKey(t *testing.T) {
+	var missing []MissingTranslation
+	catalog, err := NewCatalogWithSink("zh-CN", map[string]map[string]string{
+		"zh-CN": {"known": "已知"},
+		"en-US": {},
+	}, func(item MissingTranslation) { missing = append(missing, item) })
+	if err != nil {
+		t.Fatalf("NewCatalogWithSink() error = %v", err)
+	}
+	if got := catalog.Translate("en-US", "missing.key"); got != "missing.key" {
+		t.Fatalf("missing translation = %q, want stable key", got)
+	}
+	if len(missing) != 1 || missing[0].Locale != "en-US" || missing[0].Key != "missing.key" {
+		t.Fatalf("missing diagnostics = %#v", missing)
+	}
+}

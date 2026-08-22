@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	platformi18n "example.com/gin-vben-admin/server/internal/platform/i18n"
 )
 
 func TestDefaultIsUsable(t *testing.T) {
@@ -23,6 +25,23 @@ func TestDefaultIsUsable(t *testing.T) {
 	}
 	if !cfg.Tenant.Enabled || cfg.Tenant.Mode != "single" || cfg.Tenant.DefaultID != "default" {
 		t.Fatalf("unexpected tenant defaults: %#v", cfg.Tenant)
+	}
+	if cfg.I18n.Mode != platformi18n.ModeSingle || cfg.I18n.DefaultLocale != platformi18n.LocaleZhCN {
+		t.Fatalf("unexpected i18n defaults: %#v", cfg.I18n)
+	}
+}
+
+func TestI18nConfigurationLoadsFromYamlAndEnvironment(t *testing.T) {
+	path := writeConfigFile(t, "i18n:\n  mode: multi\n  default_locale: en-US\n  supported_locales: [zh-CN, en-US]\n")
+	t.Setenv("I18N_MODE", "single")
+	t.Setenv("I18N_DEFAULT_LOCALE", "zh-CN")
+	t.Setenv("I18N_SUPPORTED_LOCALES", "zh-CN,en-US")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.I18n.Mode != platformi18n.ModeSingle || cfg.I18n.DefaultLocale != platformi18n.LocaleZhCN || !sameStrings(cfg.I18n.SupportedLocales, []string{platformi18n.LocaleZhCN, platformi18n.LocaleEnUS}) {
+		t.Fatalf("i18n config = %#v", cfg.I18n)
 	}
 }
 

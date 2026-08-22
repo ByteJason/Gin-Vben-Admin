@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	platformi18n "example.com/gin-vben-admin/server/internal/platform/i18n"
 )
 
 const maskedValue = "[REDACTED]"
@@ -599,6 +601,15 @@ func validateValue(definition Definition, raw json.RawMessage) error {
 			return fmt.Errorf("%w: %s expects number", ErrInvalidSetting, definition.Key)
 		}
 	case KindJSON:
+		if definition.Key == "i18n.supported_locales" {
+			var values []string
+			if err := json.Unmarshal(raw, &values); err != nil {
+				return ErrInvalidSetting
+			}
+			if _, err := platformi18n.ValidateLocaleList(values); err != nil {
+				return fmt.Errorf("%w: %v", ErrInvalidSetting, err)
+			}
+		}
 	default:
 		return ErrInvalidSetting
 	}

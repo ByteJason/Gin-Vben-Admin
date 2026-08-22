@@ -64,7 +64,7 @@ func (h *Handler) createType(c *gin.Context) {
 	}
 	var input dictionaryapp.TypeInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		response.Error(c, http.StatusBadRequest, 10000, "invalid dictionary type")
+		response.ErrorWithMessageKey(c, http.StatusBadRequest, 10000, "invalid dictionary type", "dictionary.type.invalid", nil)
 		return
 	}
 	item, err := h.service.CreateType(c.Request.Context(), input)
@@ -81,7 +81,7 @@ func (h *Handler) updateType(c *gin.Context) {
 	}
 	var input dictionaryapp.TypeInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		response.Error(c, http.StatusBadRequest, 10000, "invalid dictionary type")
+		response.ErrorWithMessageKey(c, http.StatusBadRequest, 10000, "invalid dictionary type", "dictionary.type.invalid", nil)
 		return
 	}
 	item, err := h.service.UpdateType(c.Request.Context(), c.Param("code"), input)
@@ -123,7 +123,7 @@ func (h *Handler) createItem(c *gin.Context) {
 	}
 	var input dictionaryapp.ItemInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		response.Error(c, http.StatusBadRequest, 10000, "invalid dictionary item")
+		response.ErrorWithMessageKey(c, http.StatusBadRequest, 10000, "invalid dictionary item", "dictionary.item.invalid", nil)
 		return
 	}
 	item, err := h.service.CreateItem(c.Request.Context(), c.Param("type"), input)
@@ -144,7 +144,7 @@ func (h *Handler) importItems(c *gin.Context) {
 	}
 	var request importRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
-		response.Error(c, http.StatusBadRequest, 10000, "invalid dictionary import")
+		response.ErrorWithMessageKey(c, http.StatusBadRequest, 10000, "invalid dictionary import", "dictionary.import.invalid", nil)
 		return
 	}
 	items, err := h.service.ImportItems(c.Request.Context(), c.Param("type"), request.Items)
@@ -161,7 +161,7 @@ func (h *Handler) updateItem(c *gin.Context) {
 	}
 	var input dictionaryapp.ItemInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		response.Error(c, http.StatusBadRequest, 10000, "invalid dictionary item")
+		response.ErrorWithMessageKey(c, http.StatusBadRequest, 10000, "invalid dictionary item", "dictionary.item.invalid", nil)
 		return
 	}
 	item, err := h.service.UpdateItem(c.Request.Context(), c.Param("type"), c.Param("id"), input)
@@ -199,7 +199,7 @@ func locale(c *gin.Context) string {
 
 func scopeOK(c *gin.Context) bool {
 	if _, err := tenant.RequireContext(c.Request.Context()); err != nil {
-		response.Error(c, http.StatusBadRequest, 10000, "invalid tenant context")
+		response.ErrorWithMessageKey(c, http.StatusBadRequest, 10000, "invalid tenant context", "tenant.context.invalid", nil)
 		return false
 	}
 	return true
@@ -208,20 +208,20 @@ func scopeOK(c *gin.Context) bool {
 func writeError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, dictionaryapp.ErrSystemReadOnly):
-		response.Error(c, http.StatusForbidden, 30000, "system dictionary is read-only")
+		response.ErrorWithMessageKey(c, http.StatusForbidden, 30000, "system dictionary is read-only", "dictionary.system.readOnly", nil)
 	case errors.Is(err, dictionaryapp.ErrTypeNotFound), errors.Is(err, dictionaryapp.ErrItemNotFound):
-		response.Error(c, http.StatusNotFound, 10001, "dictionary record not found")
+		response.ErrorWithMessageKey(c, http.StatusNotFound, 10001, "dictionary record not found", "dictionary.record.notFound", nil)
 	case errors.Is(err, dictionaryapp.ErrTypeConflict), errors.Is(err, dictionaryapp.ErrItemConflict):
-		response.Error(c, http.StatusConflict, 10010, "dictionary record already exists")
+		response.ErrorWithMessageKey(c, http.StatusConflict, 10010, "dictionary record already exists", "dictionary.record.conflict", nil)
 	case errors.Is(err, dictionaryapp.ErrInvalidType), errors.Is(err, dictionaryapp.ErrInvalidItem), errors.Is(err, dictionaryapp.ErrImportLimit):
-		response.Error(c, http.StatusBadRequest, 10000, "invalid dictionary request")
+		response.ErrorWithMessageKey(c, http.StatusBadRequest, 10000, "invalid dictionary request", "dictionary.request.invalid", nil)
 	case errors.Is(err, dictionaryapp.ErrRepositoryMissing):
-		response.Error(c, http.StatusServiceUnavailable, 40001, "dictionary dependency unavailable")
+		response.ErrorWithMessageKey(c, http.StatusServiceUnavailable, 40001, "dictionary dependency unavailable", "dictionary.dependency.unavailable", nil)
 	default:
-		response.Error(c, http.StatusInternalServerError, 50000, "internal error")
+		response.ErrorWithMessageKey(c, http.StatusInternalServerError, 50000, "internal error", "error.internal", nil)
 	}
 }
 
 func disabled(c *gin.Context) {
-	response.Error(c, http.StatusServiceUnavailable, 40001, "dictionary capability unavailable")
+	response.ErrorWithMessageKey(c, http.StatusServiceUnavailable, 40001, "dictionary capability unavailable", "dictionary.capability.unavailable", nil)
 }

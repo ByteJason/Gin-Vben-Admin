@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"example.com/gin-vben-admin/server/internal/domain/observability"
+	platformi18n "example.com/gin-vben-admin/server/internal/platform/i18n"
 	"github.com/spf13/viper"
 )
 
@@ -27,6 +28,7 @@ type Config struct {
 	File          FileConfig           `mapstructure:"file" yaml:"file"`
 	Install       InstallConfig        `mapstructure:"install" yaml:"install"`
 	Tenant        TenantConfig         `mapstructure:"tenant" yaml:"tenant"`
+	I18n          platformi18n.Config  `mapstructure:"i18n" yaml:"i18n"`
 	Observability observability.Config `mapstructure:"observability" yaml:"observability"`
 
 	// dynamicObservabilityLocked records values that came from an explicit
@@ -179,7 +181,14 @@ type Summary struct {
 	File          FileSummary          `json:"file"`
 	Install       InstallSummary       `json:"install"`
 	Tenant        TenantSummary        `json:"tenant"`
+	I18n          I18nSummary          `json:"i18n"`
 	Observability observability.Config `json:"observability"`
+}
+
+type I18nSummary struct {
+	Mode             string   `json:"mode"`
+	DefaultLocale    string   `json:"default_locale"`
+	SupportedLocales []string `json:"supported_locales"`
 }
 
 type ServerSummary struct {
@@ -324,6 +333,7 @@ func Default() Config {
 			TenantHeader:       "X-Tenant-ID",
 			OrganizationHeader: "X-Org-ID",
 		},
+		I18n:          platformi18n.DefaultConfig(),
 		Observability: observability.DefaultConfig(),
 	}
 }
@@ -406,6 +416,9 @@ func (cfg Config) Validate() error {
 	}
 	if err := cfg.Tenant.validate(); err != nil {
 		return fmt.Errorf("tenant: %w", err)
+	}
+	if err := cfg.I18n.Validate(); err != nil {
+		return fmt.Errorf("i18n: %w", err)
 	}
 	if err := cfg.Observability.Validate(); err != nil {
 		return fmt.Errorf("observability: %w", err)
@@ -739,6 +752,11 @@ func (cfg Config) SafeSummary() Summary {
 			OrganizationHeader:        cfg.Tenant.OrganizationHeader,
 			PlatformAdminSubjectCount: len(cfg.Tenant.PlatformAdminSubjects),
 		},
+		I18n: I18nSummary{
+			Mode:             string(cfg.I18n.Mode),
+			DefaultLocale:    platformi18n.NormalizeLocale(cfg.I18n.DefaultLocale),
+			SupportedLocales: append([]string(nil), cfg.I18n.SupportedLocales...),
+		},
 		Observability: func() observability.Config {
 			redacted := cfg.Observability
 			redacted.OTLPAPIKey = ""
@@ -821,6 +839,9 @@ func newViper() *viper.Viper {
 	v.SetDefault("tenant.tenant_header", cfg.Tenant.TenantHeader)
 	v.SetDefault("tenant.organization_header", cfg.Tenant.OrganizationHeader)
 	v.SetDefault("tenant.platform_admin_subjects", cfg.Tenant.PlatformAdminSubjects)
+	v.SetDefault("i18n.mode", cfg.I18n.Mode)
+	v.SetDefault("i18n.default_locale", cfg.I18n.DefaultLocale)
+	v.SetDefault("i18n.supported_locales", cfg.I18n.SupportedLocales)
 	v.SetDefault("observability.metrics_enabled", cfg.Observability.MetricsEnabled)
 	v.SetDefault("observability.metrics_endpoint", cfg.Observability.MetricsEndpoint)
 	v.SetDefault("observability.tracing_enabled", cfg.Observability.TracingEnabled)
@@ -902,6 +923,9 @@ var environmentBindings = map[string]string{
 	"tenant.tenant_header":           "TENANT_HEADER",
 	"tenant.organization_header":     "TENANT_ORGANIZATION_HEADER",
 	"tenant.platform_admin_subjects": "TENANT_PLATFORM_ADMIN_SUBJECTS",
+	"i18n.mode":                      "I18N_MODE",
+	"i18n.default_locale":            "I18N_DEFAULT_LOCALE",
+	"i18n.supported_locales":         "I18N_SUPPORTED_LOCALES",
 	"observability.metrics_enabled":  "OBSERVABILITY_METRICS_ENABLED",
 	"observability.metrics_endpoint": "OBSERVABILITY_METRICS_ENDPOINT",
 	"observability.tracing_enabled":  "OBSERVABILITY_TRACING_ENABLED",
@@ -965,6 +989,11 @@ func applyListEnvironmentOverrides(v *viper.Viper, dotEnv map[string]string) {
 		v.Set("tenant.platform_admin_subjects", splitCommaSeparated(value))
 	} else if value, ok := dotEnv["TENANT_PLATFORM_ADMIN_SUBJECTS"]; ok {
 		v.Set("tenant.platform_admin_subjects", splitCommaSeparated(value))
+	}
+	if value, ok := os.LookupEnv("I18N_SUPPORTED_LOCALES"); ok {
+		v.Set("i18n.supported_locales", splitCommaSeparated(value))
+	} else if value, ok := dotEnv["I18N_SUPPORTED_LOCALES"]; ok {
+		v.Set("i18n.supported_locales", splitCommaSeparated(value))
 	}
 }
 

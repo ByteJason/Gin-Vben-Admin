@@ -17,6 +17,7 @@ import {
   saveDictionaryApi,
   saveDictionaryItemApi,
 } from '#/api/core/dictionary';
+import { getSettingApi } from '#/api/core/settings';
 import { $t } from '#/locales';
 
 const emptyType = (): DictionaryTypeInput => ({
@@ -42,6 +43,7 @@ const types = ref<DictionaryType[]>([]);
 const items = ref<DictionaryItem[]>([]);
 const selectedCode = ref('');
 const selectedLocale = ref('zh-CN');
+const localeMode = ref<'single' | 'multi'>('single');
 const includeDisabled = ref(false);
 const loading = ref(false);
 const saving = ref(false);
@@ -112,6 +114,20 @@ async function loadItems() {
     });
   } catch {
     error.value = String($t('page.dictionary.itemsLoadError'));
+  }
+}
+async function loadLocalePolicy() {
+  try {
+    const [mode, defaultLocale] = await Promise.all([
+      getSettingApi('i18n.mode'),
+      getSettingApi('i18n.default_locale'),
+    ]);
+    const parsedMode = JSON.parse(mode.value);
+    const parsedLocale = JSON.parse(defaultLocale.value);
+    if (parsedMode === 'single' || parsedMode === 'multi') localeMode.value = parsedMode;
+    if (parsedLocale === 'zh-CN' || parsedLocale === 'en-US') selectedLocale.value = parsedLocale;
+  } catch {
+    // The dictionary remains usable with the compiled single-language default.
   }
 }
 async function loadTypes() {
@@ -223,7 +239,10 @@ async function importItems() {
     importing.value = false;
   }
 }
-onMounted(loadTypes);
+onMounted(async () => {
+  await loadLocalePolicy();
+  await loadTypes();
+});
 </script>
 
 <template>
@@ -235,7 +254,7 @@ onMounted(loadTypes);
         <p class="description">{{ $t('page.dictionary.description') }}</p>
       </div>
       <div class="toolbar">
-        <label class="compact-field">
+        <label v-if="localeMode === 'multi'" class="compact-field">
           <span>{{ $t('page.dictionary.locale') }}</span>
           <select v-model="selectedLocale" @change="loadItems">
             <option value="zh-CN">zh-CN</option>
@@ -344,4 +363,3 @@ onMounted(loadTypes);
 .eyebrow { margin:0 0 6px; color:#5267d9; font-size:.72rem; font-weight:800; letter-spacing:.12em; } h1{margin:0 0 8px;font-size:clamp(1.7rem,4vw,2.5rem)} h2{margin:0;font-size:1.15rem}.description,.muted,small{color:var(--muted)}.workspace-grid{display:grid;grid-template-columns:minmax(360px,.85fr) minmax(480px,1.5fr);gap:24px;margin-top:24px}.panel{border:1px solid var(--line);border-radius:16px;background:color-mix(in srgb,#fff 94%,#dbeafe);padding:24px;box-shadow:0 10px 28px rgb(30 41 59 / 7%)}.type-form,.item-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:20px 0}.type-form .wide{grid-column:1/-1}.form-actions{display:flex;align-items:end;gap:8px}.primary,.secondary,.actions button{min-height:40px;border:1px solid #cbd5e1;border-radius:9px;padding:0 13px;cursor:pointer;background:#fff;transition:transform .18s ease,box-shadow .18s ease}.primary{border-color:var(--accent);background:var(--accent);color:#fff;font-weight:700}.primary:hover,.secondary:hover,.actions button:hover{transform:translateY(-1px);box-shadow:0 5px 14px rgb(15 23 42 / 12%)}.danger{color:var(--danger)}.feedback{margin:20px 0 0;border-radius:10px;padding:12px 14px}.error{color:#8b1e1e;background:#fef2f2}.success{color:#166534;background:#f0fdf4}.table-scroll{overflow-x:auto;margin-top:18px}table{width:100%;border-collapse:collapse;min-width:560px}th,td{border-bottom:1px solid var(--line);padding:11px 9px;text-align:left;vertical-align:middle}th{color:var(--muted);font-size:.74rem;letter-spacing:.04em;text-transform:uppercase}td small{display:block;margin-top:3px;font-weight:400}.actions{display:flex;gap:7px;flex-wrap:wrap}.link-button{border:0;background:transparent;color:var(--accent);font-weight:700;padding:0;cursor:pointer;text-align:left}.selected{background:#eff6ff}.system-badge{display:inline-flex;margin-left:5px;border-radius:999px;padding:2px 6px;background:#e0e7ff;color:#3730a3;font-size:.68rem}.status-pill{display:inline-flex;border-radius:999px;padding:4px 9px;font-size:.74rem;font-weight:800}.status-pill.ok{color:var(--ok);background:#dcfce7}.status-pill.off{color:#92400e;background:#fef3c7}.toggle{display:flex!important;align-items:center;gap:8px!important;padding-top:20px}.toggle input{width:18px;height:18px}.empty-state,.sr-status{color:var(--muted)}.table-state{text-align:center;color:var(--muted)}.import-card{margin-top:20px;border-top:1px solid var(--line);padding-top:16px}.import-card summary{cursor:pointer;font-weight:800;margin-bottom:12px}.import-card textarea{width:100%;resize:vertical;margin-bottom:10px}.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 @media (max-width:1100px){.workspace-grid{grid-template-columns:1fr}.dictionary-page{padding:22px 16px}}@media (max-width:560px){.page-heading,.section-heading,.toolbar{flex-direction:column;align-items:stretch}.type-form,.item-form{grid-template-columns:1fr}.type-form .wide{grid-column:auto}.toggle{padding-top:0}.form-actions{align-items:stretch;flex-wrap:wrap}}@media (prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition-duration:.01ms!important;animation-duration:.01ms!important}}
 </style>
-

@@ -25,6 +25,18 @@ func TestDefaultDefinitionsExposeCompleteObservabilitySettings(t *testing.T) {
 	}
 }
 
+func TestI18nSupportedLocalesRejectsUnsupportedValues(t *testing.T) {
+	svc := NewService(NewMemoryRepository(), &recordingAudit{}, &recordingInvalidator{}, DefaultDefinitions())
+	_, err := svc.Update(context.Background(), Actor{ID: "admin-1"}, UpdateInput{
+		Key:             "i18n.supported_locales",
+		Value:           json.RawMessage(`["zh-CN","fr-FR"]`),
+		ExpectedVersion: 0,
+	})
+	if !errors.Is(err, ErrInvalidSetting) {
+		t.Fatalf("unsupported locale update error = %v, want ErrInvalidSetting", err)
+	}
+}
+
 func TestServiceUpdateRequiresExpectedVersionAndInvalidatesCache(t *testing.T) {
 	repo := NewMemoryRepository()
 	cache := &recordingInvalidator{}
