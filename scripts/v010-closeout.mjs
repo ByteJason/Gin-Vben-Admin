@@ -10,7 +10,7 @@ import { spawnSync } from "node:child_process";
  * migration rehearsal remains opt-in through MIGRATION_SMOKE_INTEGRATION=1 and
  * --integration, matching the repository's isolated-loopback guard.
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,11 +24,21 @@ const outputIndex = args.indexOf("--output");
 const outputPath = outputIndex >= 0 ? args[outputIndex + 1] : "";
 
 function run(command, commandArgs, options = {}) {
+  const runtimeRoot = join(ROOT, ".runtime");
+  const goCache = join(runtimeRoot, "go-cache");
+  const goTmp = join(runtimeRoot, "go-tmp");
+  mkdirSync(goCache, { recursive: true });
+  mkdirSync(goTmp, { recursive: true });
   return spawnSync(command, commandArgs, {
     cwd: ROOT,
     encoding: "utf8",
     timeout: options.timeout ?? 180_000,
-    env: { ...process.env, ...(options.env ?? {}) },
+    env: {
+      ...process.env,
+      GOCACHE: process.env.GOCACHE ?? goCache,
+      GOTMPDIR: process.env.GOTMPDIR ?? goTmp,
+      ...(options.env ?? {}),
+    },
   });
 }
 
