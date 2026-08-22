@@ -172,6 +172,21 @@
     "roleScopeOwn": "Own data",
     "roleScopeOrg": "Organization data",
     "roleScopeCustom": "Custom data",
-    "roleActiveHelp": "Inactive roles are excluded from new authorization checks."
+    "roleActiveHelp": "Inactive roles are excluded from new authorization checks.",
+    "menus": "Menu metadata",
+    "menusDescription": "View registered menu hierarchy and metadata within the current tenant. Menu writes, dynamic routes, and cache invalidation ship in later slices.",
+    "menusLoading": "Loading menus",
+    "menusLoadError": "Menus could not be loaded. Try again.",
+    "menusEmpty": "No menus found.",
+    "menusTable": "Menu metadata list",
+    "menuId": "Menu ID",
+    "menuParent": "Parent menu",
+    "menuName": "Menu name",
+    "menuPath": "Route path",
+    "menuVisible": "Visibility",
+    "menuActive": "Status",
+    "menuVisibleYes": "Visible",
+    "menuVisibleNo": "Hidden",
+    "menuRoot": "Root menu"
   }
 }

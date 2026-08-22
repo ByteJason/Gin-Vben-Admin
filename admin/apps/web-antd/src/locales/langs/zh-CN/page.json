@@ -172,6 +172,21 @@
     "roleScopeOwn": "本人数据",
     "roleScopeOrg": "本组织数据",
     "roleScopeCustom": "自定义数据",
-    "roleActiveHelp": "停用角色后不会参与新的授权判断。"
+    "roleActiveHelp": "停用角色后不会参与新的授权判断。",
+    "menus": "菜单元数据",
+    "menusDescription": "在当前租户范围查看已注册菜单的层级与元数据；菜单写入、动态路由和缓存失效在后续切片交付。",
+    "menusLoading": "正在加载菜单",
+    "menusLoadError": "菜单列表加载失败，请重试。",
+    "menusEmpty": "暂无菜单。",
+    "menusTable": "菜单元数据列表",
+    "menuId": "菜单 ID",
+    "menuParent": "父级菜单",
+    "menuName": "菜单名称",
+    "menuPath": "路由路径",
+    "menuVisible": "可见性",
+    "menuActive": "状态",
+    "menuVisibleYes": "可见",
+    "menuVisibleNo": "隐藏",
+    "menuRoot": "根菜单"
   }
 }

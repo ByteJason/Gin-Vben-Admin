@@ -59,6 +59,15 @@ export interface IAMRoleCreateInput {
   name: string;
 }
 
+export interface IAMMenu {
+  active: boolean;
+  id: string;
+  name: string;
+  parentId?: string;
+  path: string;
+  visible: boolean;
+}
+
 export interface IAMUserCreateInput {
   active?: boolean;
   avatar?: string;
@@ -192,6 +201,10 @@ export async function createIAMRoleApi(input: IAMRoleCreateInput) {
     active: input.active ?? true,
     dataScope,
   });
+}
+
+export async function listIAMMenusApi() {
+  return requestClient.get<IAMMenu[]>(ADMIN_ENDPOINTS.listIAMMenus);
 }
 
 export async function replaceIAMRoleUsersApi(
