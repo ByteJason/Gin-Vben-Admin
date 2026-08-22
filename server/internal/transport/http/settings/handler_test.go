@@ -41,3 +41,19 @@ func TestSettingsHandlerReadsUpdatesAndRollsBackVersionedValue(t *testing.T) {
 		t.Fatalf("rollback status=%d body=%s", response.Code, response.Body.String())
 	}
 }
+
+func TestSettingsHandlerRunsStructuredConnectionTest(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service := settingsapp.NewService(settingsapp.NewMemoryRepository(), nil, nil, nil)
+	handler := NewHandler(service, func(*gin.Context) settingsapp.Actor { return settingsapp.Actor{ID: "admin-1"} })
+	r := gin.New()
+	RegisterRoutes(r, handler)
+	request := httptest.NewRequest(http.MethodPost, "/api/admin/v1/settings/mail.port/test", strings.NewReader(`{"value":1026}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Request-ID", "req-settings-test")
+	response := httptest.NewRecorder()
+	r.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "req-settings-test") || !strings.Contains(response.Body.String(), `"status":"ok"`) {
+		t.Fatalf("test status=%d body=%s", response.Code, response.Body.String())
+	}
+}

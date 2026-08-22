@@ -23,6 +23,8 @@ type settingVersionRecord struct {
 	Value     []byte    `gorm:"column:value;type:json"`
 	Version   int64     `gorm:"column:version"`
 	Sensitive bool      `gorm:"column:sensitive"`
+	Encrypted bool      `gorm:"column:encrypted"`
+	Source    string    `gorm:"column:source"`
 	UpdatedBy string    `gorm:"column:updated_by"`
 	UpdatedAt time.Time `gorm:"column:updated_at"`
 	TenantID  string    `gorm:"column:tenant_id"`
@@ -99,11 +101,11 @@ func (r *GORMRepository) History(ctx context.Context, key string) ([]settings.St
 }
 
 func toStored(record settingVersionRecord) settings.StoredSetting {
-	return settings.StoredSetting{Key: record.Key, RawValue: append([]byte(nil), record.Value...), Version: record.Version, Sensitive: record.Sensitive, UpdatedBy: record.UpdatedBy, UpdatedAt: record.UpdatedAt}
+	return settings.StoredSetting{Key: record.Key, RawValue: append([]byte(nil), record.Value...), Version: record.Version, Sensitive: record.Sensitive, Encrypted: record.Encrypted, Source: settings.Source(record.Source), UpdatedBy: record.UpdatedBy, UpdatedAt: record.UpdatedAt}
 }
 
 func fromStored(value settings.StoredSetting) settingVersionRecord {
-	return settingVersionRecord{Key: value.Key, Value: append([]byte(nil), value.RawValue...), Version: value.Version, Sensitive: value.Sensitive, UpdatedBy: value.UpdatedBy, UpdatedAt: value.UpdatedAt}
+	return settingVersionRecord{Key: value.Key, Value: append([]byte(nil), value.RawValue...), Version: value.Version, Sensitive: value.Sensitive, Encrypted: value.Encrypted, Source: string(value.Source), UpdatedBy: value.UpdatedBy, UpdatedAt: value.UpdatedAt}
 }
 
 func settingScope(db *gorm.DB, tenantID, key string) *gorm.DB {

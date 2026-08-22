@@ -908,6 +908,27 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/SettingConflict' }
         '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
+  /api/admin/v1/settings/{key}/test:
+    post:
+      tags: [Settings]
+      operationId: testSettingConnection
+      summary: 对设置执行结构化连接测试
+      security: [{BearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/SettingKey'
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SettingConnectionTestRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/SettingConnectionTestResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
   /api/admin/v1/audit/events:
     get:
       tags: [Audit]
@@ -1465,23 +1486,31 @@ components:
         - $ref: '#/components/schemas/IAMDataScope'
     SettingDefinition:
       type: object
-      required: [key, kind, sensitive]
+      required: [key, category, kind, sensitive, restartRequired]
       properties:
         key: { type: string }
+        category: { type: string, enum: [basic, security, mail, file, captcha, i18n, other] }
         kind: { type: string, enum: [string, bool, number, json, secret] }
         sensitive: { type: boolean }
         default: { type: string }
         allowed:
           type: array
           items: { type: string }
+        description: { type: string }
+        restartRequired: { type: boolean }
+        envKey: { type: string }
+        yamlPath: { type: string }
     SettingData:
       type: object
-      required: [key, value, version, sensitive]
+      required: [key, category, value, version, sensitive, source, restartRequired]
       properties:
         key: { type: string }
+        category: { type: string, enum: [basic, security, mail, file, captcha, i18n, other] }
         value: { type: string }
         version: { type: integer, minimum: 0 }
         sensitive: { type: boolean }
+        source: { type: string, enum: [env, dotenv, yaml, database, default] }
+        restartRequired: { type: boolean }
         updatedBy: { type: string }
         updatedAt: { type: string, format: date-time }
     SettingUpdateRequest:
@@ -1496,6 +1525,21 @@ components:
       properties:
         version: { type: integer, minimum: 1 }
         expectedVersion: { type: integer, minimum: 1 }
+    SettingConnectionTestRequest:
+      type: object
+      properties:
+        value: {}
+    SettingConnectionTest:
+      type: object
+      required: [key, category, status, source, requestId, checkedAt]
+      properties:
+        key: { type: string }
+        category: { type: string, enum: [basic, security, mail, file, captcha, i18n, other] }
+        status: { type: string, enum: [ok, failed] }
+        source: { type: string, enum: [env, dotenv, yaml, database, default] }
+        requestId: { type: string }
+        message: { type: string }
+        checkedAt: { type: string, format: date-time }
     AuditEvent:
       type: object
       required: [id, action, resource, outcome, requestId, createdAt]
@@ -1599,6 +1643,16 @@ components:
                   data:
                     type: array
                     items: { $ref: '#/components/schemas/SettingData' }
+    SettingConnectionTestResponse:
+      description: 设置连接测试结果
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/SuccessEnvelope'
+              - type: object
+                properties:
+                  data: { $ref: '#/components/schemas/SettingConnectionTest' }
     AuditPageResponse:
       description: 审计事件查询成功
       content:

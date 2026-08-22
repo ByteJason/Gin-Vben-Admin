@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -159,6 +160,13 @@ func New(cfg config.Config) (*App, error) {
 			nil,
 			nil,
 		)
+		if runtimeKey := strings.TrimSpace(cfg.Auth.JWTSecret); runtimeKey != "" {
+			encryptor, encryptErr := settingsapp.NewEnvelopeEncryptor([]byte(runtimeKey))
+			if encryptErr != nil {
+				return cleanupOnError(errors.New("configure settings encryption"))
+			}
+			app.settings.SetEncryptor(encryptor)
+		}
 		app.audit = auditapp.NewService(auditplatform.NewGORMRepository(app.database))
 	}
 

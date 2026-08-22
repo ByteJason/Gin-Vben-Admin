@@ -2,6 +2,8 @@
 package settingshttp
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -54,6 +56,7 @@ func registerRoutes(group gin.IRouter, handler *Handler) {
 	group.GET("/:key", handler.get)
 	group.GET("/:key/history", handler.history)
 	group.PUT("/:key", handler.update)
+	group.POST("/:key/test", handler.testConnection)
 	group.POST("/:key/rollback", handler.rollback)
 }
 
@@ -65,6 +68,10 @@ type updateRequest struct {
 type rollbackRequest struct {
 	Version         int64 `json:"version"`
 	ExpectedVersion int64 `json:"expectedVersion"`
+}
+
+type connectionTestRequest struct {
+	Value json.RawMessage `json:"value"`
 }
 
 func (h *Handler) actorFor(c *gin.Context) settingsapp.Actor {
@@ -132,6 +139,34 @@ func (h *Handler) rollback(c *gin.Context) {
 		return
 	}
 	response.OK(c, setting)
+}
+
+func (h *Handler) testConnection(c *gin.Context) {
+	var request connectionTestRequest
+	if c.Request.ContentLength != 0 {
+		if err := c.ShouldBindJSON(&request); err != nil {
+			response.Error(c, http.StatusBadRequest, 10000, "invalid request")
+			return
+		}
+	}
+	requestID := strings.TrimSpace(c.GetHeader("X-Request-ID"))
+	if requestID == "" {
+		requestID = newRequestID()
+	}
+	result, err := h.service.TestConnection(c.Request.Context(), h.actorFor(c), c.Param("key"), requestID, request.Value)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	response.OK(c, result)
+}
+
+func newRequestID() string {
+	var bytes [12]byte
+	if _, err := rand.Read(bytes[:]); err != nil {
+		return "settings-test"
+	}
+	return "settings-" + hex.EncodeToString(bytes[:])
 }
 
 func writeError(c *gin.Context, err error) {
