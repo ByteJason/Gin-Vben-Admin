@@ -65,6 +65,31 @@ export interface IAMUserPasswordResetInput {
   password: string;
 }
 
+export interface IAMUserLoginEvent {
+  action: string;
+  actorId?: string;
+  createdAt: string;
+  details?: Record<string, unknown>;
+  id: string;
+  outcome: string;
+  requestId: string;
+  resource: string;
+}
+
+export interface IAMUserLoginEventPage {
+  items: IAMUserLoginEvent[];
+  limit: number;
+  offset: number;
+  total: number;
+}
+
+export interface IAMUserLoginEventParams {
+  from?: string;
+  limit?: number;
+  offset?: number;
+  to?: string;
+}
+
 export type IAMUserBatchStatusResultStatus =
   | 'active'
   | 'disabled'
@@ -101,6 +126,11 @@ const deleteUserPath = (id: string) =>
   ADMIN_ENDPOINTS.deleteIAMUser.replace('{id}', encodeURIComponent(id));
 const resetUserPasswordPath = (id: string) =>
   ADMIN_ENDPOINTS.resetIAMUserPassword.replace('{id}', encodeURIComponent(id));
+const loginEventsPath = (id: string) =>
+  ADMIN_ENDPOINTS.listIAMUserLoginEvents.replace(
+    '{id}',
+    encodeURIComponent(id),
+  );
 
 export async function listIAMUsersApi(params: IAMUserListParams = {}) {
   return requestClient.get<IAMUserPage>(ADMIN_ENDPOINTS.listIAMUsers, {
@@ -153,4 +183,20 @@ export async function resetIAMUserPasswordApi(
   input: IAMUserPasswordResetInput,
 ) {
   return requestClient.post<void>(resetUserPasswordPath(id), input);
+}
+
+export async function listIAMUserLoginEventsApi(
+  id: string,
+  params: IAMUserLoginEventParams = {},
+) {
+  const limit = Math.min(Math.max(params.limit ?? 50, 0), 200);
+  const offset = Math.max(params.offset ?? 0, 0);
+  return requestClient.get<IAMUserLoginEventPage>(loginEventsPath(id), {
+    params: {
+      from: params.from,
+      to: params.to,
+      limit,
+      offset,
+    },
+  });
 }

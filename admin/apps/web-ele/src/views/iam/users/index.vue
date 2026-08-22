@@ -1,25 +1,27 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref } from 'vue';
-
 import type {
   IAMRole,
+  IAMUser,
   IAMUserBatchStatusInput,
   IAMUserCreateInput,
-  IAMUserPasswordResetInput,
-  IAMUser,
+  IAMUserLoginEventPage,
   IAMUserPage,
+  IAMUserPasswordResetInput,
   IAMUserStatus,
   IAMUserUpdateInput,
 } from '#/api/core/iam';
+
+import { computed, nextTick, onMounted, reactive, ref } from 'vue';
 
 import {
   batchUpdateIAMUserStatusApi,
   createIAMUserApi,
   deleteIAMUserApi,
   getIAMUserApi,
-  resetIAMUserPasswordApi,
   listIAMRolesApi,
+  listIAMUserLoginEventsApi,
   listIAMUsersApi,
+  resetIAMUserPasswordApi,
   updateIAMUserApi,
 } from '#/api/core/iam';
 import { $t } from '#/locales';
@@ -59,6 +61,22 @@ const resetUsername = ref('');
 const resetPassword = ref('');
 const resetError = ref('');
 const resetErrorSummary = ref<HTMLElement | null>(null);
+const loginEventsOpen = ref(false);
+const loginEventsLoading = ref(false);
+const loginEventsUserId = ref('');
+const loginEventsUsername = ref('');
+const loginEventsError = ref('');
+const loginEventsErrorSummary = ref<HTMLElement | null>(null);
+const loginEventsFrom = ref('');
+const loginEventsTo = ref('');
+const loginEventsOffset = ref(0);
+const loginEventsPage = ref<IAMUserLoginEventPage>({
+  items: [],
+  limit: 50,
+  offset: 0,
+  total: 0,
+});
+const loginEventsLimit = 50;
 const userForm = reactive({
   active: true,
   email: '',
@@ -79,6 +97,12 @@ const allPageSelected = computed(
     pageIds.value.every((id) => selectedIds.value.includes(id)),
 );
 const selectedCount = computed(() => selectedIds.value.length);
+const loginEventsTotalPages = computed(() =>
+  Math.max(1, Math.ceil(loginEventsPage.value.total / loginEventsLimit)),
+);
+const loginEventsCurrentPage = computed(
+  () => Math.floor(loginEventsOffset.value / loginEventsLimit) + 1,
+);
 
 function roleName(id: string) {
   return roles.value.find((role) => role.id === id)?.name ?? id;
@@ -121,6 +145,11 @@ async function focusActionFeedback() {
 async function focusResetError() {
   await nextTick();
   resetErrorSummary.value?.focus();
+}
+
+async function focusLoginEventsError() {
+  await nextTick();
+  loginEventsErrorSummary.value?.focus();
 }
 
 function clearSelection() {
@@ -320,8 +349,115 @@ async function submitResetPassword() {
   }
 }
 
+function clearLoginEvents() {
+  loginEventsPage.value = {
+    items: [],
+    limit: loginEventsLimit,
+    offset: 0,
+    total: 0,
+  };
+}
+
+function loginEventsDate(value: string) {
+  if (!value) return undefined;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function validateLoginEventsFilters() {
+  const from = loginEventsDate(loginEventsFrom.value);
+  const to = loginEventsDate(loginEventsTo.value);
+  if (from === null || to === null) {
+    return String($t('page.iam.loginEventsDateError'));
+  }
+  if (from && to && from > to) {
+    return String($t('page.iam.loginEventsDateError'));
+  }
+  return '';
+}
+
+async function loadLoginEvents() {
+  loginEventsError.value = '';
+  const validationError = validateLoginEventsFilters();
+  if (validationError) {
+    loginEventsError.value = validationError;
+    await focusLoginEventsError();
+    return;
+  }
+  loginEventsLoading.value = true;
+  try {
+    const from = loginEventsDate(loginEventsFrom.value);
+    const to = loginEventsDate(loginEventsTo.value);
+    loginEventsPage.value = await listIAMUserLoginEventsApi(
+      loginEventsUserId.value,
+      {
+        from: from ?? undefined,
+        to: to ?? undefined,
+        limit: loginEventsLimit,
+        offset: loginEventsOffset.value,
+      },
+    );
+  } catch {
+    loginEventsError.value = String($t('page.iam.loginEventsError'));
+    await focusLoginEventsError();
+  } finally {
+    loginEventsLoading.value = false;
+  }
+}
+
+function openLoginEvents(user: IAMUser) {
+  loginEventsUserId.value = user.id;
+  loginEventsUsername.value = user.username;
+  loginEventsFrom.value = '';
+  loginEventsTo.value = '';
+  loginEventsOffset.value = 0;
+  loginEventsError.value = '';
+  clearLoginEvents();
+  actionError.value = '';
+  actionMessage.value = '';
+  loginEventsOpen.value = true;
+  void loadLoginEvents();
+}
+
+function closeLoginEvents() {
+  if (loginEventsLoading.value) return;
+  loginEventsOpen.value = false;
+  loginEventsError.value = '';
+}
+
+async function applyLoginEventsFilters() {
+  loginEventsOffset.value = 0;
+  await loadLoginEvents();
+}
+
+async function resetLoginEventsFilters() {
+  loginEventsFrom.value = '';
+  loginEventsTo.value = '';
+  loginEventsOffset.value = 0;
+  await loadLoginEvents();
+}
+
+async function changeLoginEventsPage(nextPage: number) {
+  if (
+    loginEventsLoading.value ||
+    nextPage < 1 ||
+    nextPage > loginEventsTotalPages.value
+  ) {
+    return;
+  }
+  loginEventsOffset.value = (nextPage - 1) * loginEventsLimit;
+  await loadLoginEvents();
+}
+
 async function deleteUser(user: IAMUser) {
-  if (actionLoading.value || formLoading.value || resetLoading.value) return;
+  if (
+    actionLoading.value ||
+    formLoading.value ||
+    resetLoading.value ||
+    loginEventsLoading.value
+  ) {
+    return;
+  }
   if (!window.confirm(String($t('page.iam.confirmDelete')))) return;
   actionLoading.value = true;
   actionError.value = '';
@@ -343,6 +479,7 @@ async function batchUpdate(active: boolean) {
   if (
     actionLoading.value ||
     resetLoading.value ||
+    loginEventsLoading.value ||
     selectedIds.value.length === 0
   ) {
     return;
@@ -557,6 +694,7 @@ onMounted(async () => {
               loading ||
               actionLoading ||
               resetLoading ||
+              loginEventsLoading ||
               page.items.length === 0
             "
             type="checkbox"
@@ -571,7 +709,11 @@ onMounted(async () => {
           <button
             type="button"
             :disabled="
-              loading || actionLoading || resetLoading || selectedCount === 0
+              loading ||
+              actionLoading ||
+              resetLoading ||
+              loginEventsLoading ||
+              selectedCount === 0
             "
             @click="batchUpdate(true)"
           >
@@ -580,7 +722,11 @@ onMounted(async () => {
           <button
             type="button"
             :disabled="
-              loading || actionLoading || resetLoading || selectedCount === 0
+              loading ||
+              actionLoading ||
+              resetLoading ||
+              loginEventsLoading ||
+              selectedCount === 0
             "
             @click="batchUpdate(false)"
           >
@@ -626,7 +772,12 @@ onMounted(async () => {
                 <input
                   :id="`iam-user-select-${user.id}`"
                   :checked="selectedIds.includes(user.id)"
-                  :disabled="loading || actionLoading || resetLoading"
+                  :disabled="
+                    loading ||
+                    actionLoading ||
+                    resetLoading ||
+                    loginEventsLoading
+                  "
                   :aria-label="`${$t('page.iam.selectUser')}: ${user.username}`"
                   type="checkbox"
                   @change="onUserSelectionChange(user.id, $event)"
@@ -660,7 +811,11 @@ onMounted(async () => {
                   class="link-button"
                   type="button"
                   :disabled="
-                    loading || actionLoading || formLoading || resetLoading
+                    loading ||
+                    actionLoading ||
+                    formLoading ||
+                    resetLoading ||
+                    loginEventsLoading
                   "
                   @click="openEdit(user)"
                 >
@@ -670,7 +825,25 @@ onMounted(async () => {
                   class="link-button"
                   type="button"
                   :disabled="
-                    loading || actionLoading || formLoading || resetLoading
+                    loading ||
+                    actionLoading ||
+                    formLoading ||
+                    resetLoading ||
+                    loginEventsLoading
+                  "
+                  @click="openLoginEvents(user)"
+                >
+                  {{ $t('page.iam.loginEvents') }}
+                </button>
+                <button
+                  class="link-button"
+                  type="button"
+                  :disabled="
+                    loading ||
+                    actionLoading ||
+                    formLoading ||
+                    resetLoading ||
+                    loginEventsLoading
                   "
                   @click="openResetPassword(user)"
                 >
@@ -680,7 +853,11 @@ onMounted(async () => {
                   class="link-button danger"
                   type="button"
                   :disabled="
-                    loading || actionLoading || formLoading || resetLoading
+                    loading ||
+                    actionLoading ||
+                    formLoading ||
+                    resetLoading ||
+                    loginEventsLoading
                   "
                   @click="deleteUser(user)"
                 >
@@ -938,6 +1115,158 @@ onMounted(async () => {
         </form>
       </div>
     </section>
+    <section
+      v-if="loginEventsOpen"
+      class="modal-backdrop"
+      :aria-label="$t('page.iam.loginEventsTitle')"
+      @click.self="closeLoginEvents"
+    >
+      <div
+        class="user-dialog login-events-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="iam-user-login-events-title"
+        aria-describedby="iam-user-login-events-description"
+      >
+        <header class="dialog-heading">
+          <div>
+            <p class="eyebrow">{{ $t('page.iam.eyebrow') }}</p>
+            <h2 id="iam-user-login-events-title">
+              {{ $t('page.iam.loginEventsTitle') }}
+            </h2>
+          </div>
+          <button
+            class="icon-button"
+            type="button"
+            :aria-label="$t('page.iam.cancel')"
+            :disabled="loginEventsLoading"
+            @click="closeLoginEvents"
+          >
+            ×
+          </button>
+        </header>
+        <p
+          id="iam-user-login-events-description"
+          class="login-events-description"
+        >
+          {{ $t('page.iam.loginEventsDescription') }}
+        </p>
+        <p class="login-events-user">{{ loginEventsUsername }}</p>
+        <form
+          class="login-events-filters"
+          @submit.prevent="applyLoginEventsFilters"
+        >
+          <label class="field" for="iam-user-login-events-from">
+            <span>{{ $t('page.iam.loginEventsFrom') }}</span>
+            <input
+              id="iam-user-login-events-from"
+              v-model="loginEventsFrom"
+              :disabled="loginEventsLoading"
+              type="datetime-local"
+            />
+          </label>
+          <label class="field" for="iam-user-login-events-to">
+            <span>{{ $t('page.iam.loginEventsTo') }}</span>
+            <input
+              id="iam-user-login-events-to"
+              v-model="loginEventsTo"
+              :disabled="loginEventsLoading"
+              type="datetime-local"
+            />
+          </label>
+          <div class="filter-actions">
+            <button
+              class="primary"
+              type="submit"
+              :disabled="loginEventsLoading"
+            >
+              {{ $t('page.iam.loginEventsApply') }}
+            </button>
+            <button
+              type="button"
+              :disabled="loginEventsLoading"
+              @click="resetLoginEventsFilters"
+            >
+              {{ $t('page.iam.loginEventsReset') }}
+            </button>
+          </div>
+        </form>
+        <p
+          v-if="loginEventsError"
+          ref="loginEventsErrorSummary"
+          class="feedback feedback-error"
+          role="alert"
+          tabindex="-1"
+        >
+          {{ loginEventsError }}
+        </p>
+        <p class="sr-status" aria-live="polite">
+          {{ loginEventsLoading ? $t('page.iam.loginEventsLoading') : '' }}
+        </p>
+        <div class="table-wrap login-events-table-wrap">
+          <table class="login-events-table">
+            <caption class="sr-only">
+              {{
+                $t('page.iam.loginEventsTable')
+              }}
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col">{{ $t('page.iam.lastLoginAt') }}</th>
+                <th scope="col">{{ $t('page.iam.loginEventsAction') }}</th>
+                <th scope="col">{{ $t('page.iam.loginEventsResource') }}</th>
+                <th scope="col">{{ $t('page.iam.loginEventsOutcome') }}</th>
+                <th scope="col">{{ $t('page.iam.loginEventsRequestId') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-if="loginEventsLoading">
+                <td class="table-state" colspan="5">
+                  {{ $t('page.iam.loginEventsLoading') }}
+                </td>
+              </tr>
+              <tr v-else-if="loginEventsPage.items.length === 0">
+                <td class="table-state" colspan="5">
+                  {{ $t('page.iam.loginEventsEmpty') }}
+                </td>
+              </tr>
+              <tr v-for="event in loginEventsPage.items" v-else :key="event.id">
+                <td>{{ formatDate(event.createdAt) }}</td>
+                <td>{{ event.action }}</td>
+                <td>{{ event.resource }}</td>
+                <td>{{ event.outcome }}</td>
+                <td>{{ event.requestId || '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <footer
+          class="pagination"
+          :aria-label="$t('page.iam.loginEventsTitle')"
+        >
+          <button
+            type="button"
+            :disabled="loginEventsLoading || loginEventsCurrentPage <= 1"
+            @click="changeLoginEventsPage(loginEventsCurrentPage - 1)"
+          >
+            {{ $t('page.iam.loginEventsPrevious') }}
+          </button>
+          <span aria-live="polite">
+            {{ loginEventsCurrentPage }} / {{ loginEventsTotalPages }}
+          </span>
+          <button
+            type="button"
+            :disabled="
+              loginEventsLoading ||
+              loginEventsCurrentPage >= loginEventsTotalPages
+            "
+            @click="changeLoginEventsPage(loginEventsCurrentPage + 1)"
+          >
+            {{ $t('page.iam.loginEventsNext') }}
+          </button>
+        </footer>
+      </div>
+    </section>
   </main>
 </template>
 
@@ -972,11 +1301,11 @@ onMounted(async () => {
 
 .eyebrow {
   margin: 0;
-  color: hsl(var(--muted-foreground));
   font-size: 0.75rem;
   font-weight: 700;
-  letter-spacing: 0.12em;
+  color: hsl(var(--muted-foreground));
   text-transform: uppercase;
+  letter-spacing: 0.12em;
 }
 
 h1,
@@ -1012,25 +1341,59 @@ h2 {
   width: min(520px, 100%);
 }
 
+.login-events-dialog {
+  width: min(960px, 100%);
+}
+
+.login-events-description {
+  margin: 0 0 8px;
+  color: hsl(var(--muted-foreground));
+}
+
+.login-events-user {
+  margin: 0 0 16px;
+  font-weight: 700;
+}
+
+.login-events-filters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 16px;
+}
+
+.login-events-filters .filter-actions {
+  align-self: end;
+}
+
+.login-events-table-wrap {
+  margin-top: 12px;
+}
+
+.login-events-table {
+  min-width: 680px;
+}
+
 .scope-chip,
 .status-pill {
   display: inline-flex;
   align-items: center;
   min-height: 28px;
   padding: 4px 10px;
-  border-radius: 999px;
-  background: hsl(var(--muted));
-  color: hsl(var(--muted-foreground));
   font-size: 0.78rem;
   font-weight: 650;
+  color: hsl(var(--muted-foreground));
   white-space: nowrap;
+  background: hsl(var(--muted));
+  border-radius: 999px;
 }
 
 .filters,
 .table-card {
+  background: hsl(var(--card));
   border: 1px solid hsl(var(--border));
   border-radius: 14px;
-  background: hsl(var(--card));
   box-shadow: 0 10px 30px rgb(15 23 42 / 4%);
 }
 
@@ -1047,20 +1410,20 @@ h2 {
 .page-size {
   display: grid;
   gap: 6px;
-  color: hsl(var(--muted-foreground));
   font-size: 0.8rem;
   font-weight: 650;
+  color: hsl(var(--muted-foreground));
 }
 
 input,
 select,
 button {
   min-height: 40px;
+  font: inherit;
+  color: inherit;
+  background: hsl(var(--background));
   border: 1px solid hsl(var(--border));
   border-radius: 9px;
-  background: hsl(var(--background));
-  color: inherit;
-  font: inherit;
 }
 
 input,
@@ -1071,8 +1434,8 @@ select {
 
 button {
   padding: 0 14px;
-  cursor: pointer;
   font-weight: 650;
+  cursor: pointer;
 }
 
 button:hover:not(:disabled) {
@@ -1092,17 +1455,17 @@ button:disabled {
 }
 
 button.primary {
-  border-color: hsl(var(--primary));
-  background: hsl(var(--primary));
   color: hsl(var(--primary-foreground));
+  background: hsl(var(--primary));
+  border-color: hsl(var(--primary));
 }
 
 .link-button {
   min-height: 32px;
   padding: 0 8px;
-  border-color: transparent;
-  background: transparent;
   color: hsl(var(--primary));
+  background: transparent;
+  border-color: transparent;
 }
 
 .link-button.danger {
@@ -1113,10 +1476,10 @@ button.primary {
   min-width: 36px;
   min-height: 36px;
   padding: 0;
-  border-color: transparent;
-  background: transparent;
   font-size: 1.4rem;
   line-height: 1;
+  background: transparent;
+  border-color: transparent;
 }
 
 .filter-actions {
@@ -1125,18 +1488,18 @@ button.primary {
 
 .feedback-error {
   padding: 12px 14px;
+  color: hsl(var(--destructive));
+  background: hsl(var(--destructive) / 8%);
   border: 1px solid hsl(var(--destructive) / 35%);
   border-radius: 10px;
-  background: hsl(var(--destructive) / 8%);
-  color: hsl(var(--destructive));
 }
 
 .feedback-success {
   padding: 12px 14px;
-  border: 1px solid hsl(142 70% 40% / 35%);
+  color: hsl(142deg 60% 25%);
+  background: hsl(142deg 70% 40% / 9%);
+  border: 1px solid hsl(142deg 70% 40% / 35%);
   border-radius: 10px;
-  background: hsl(142 70% 40% / 9%);
-  color: hsl(142 60% 25%);
 }
 
 .table-card {
@@ -1155,17 +1518,17 @@ button.primary {
   gap: 12px;
   align-items: center;
   padding: 12px 16px;
-  border-bottom: 1px solid hsl(var(--border));
   background: hsl(var(--muted) / 18%);
+  border-bottom: 1px solid hsl(var(--border));
 }
 
 .bulk-select {
   display: inline-flex;
   gap: 8px;
   align-items: center;
-  color: hsl(var(--foreground));
   font-size: 0.82rem;
   font-weight: 650;
+  color: hsl(var(--foreground));
 }
 
 .bulk-select input,
@@ -1177,8 +1540,8 @@ button.primary {
 }
 
 .selected-count {
-  color: hsl(var(--muted-foreground));
   font-size: 0.8rem;
+  color: hsl(var(--muted-foreground));
 }
 
 .bulk-actions {
@@ -1193,8 +1556,8 @@ button.primary {
 }
 
 .result-count {
-  color: hsl(var(--muted-foreground));
   font-size: 0.8rem;
+  color: hsl(var(--muted-foreground));
 }
 
 .table-wrap {
@@ -1204,24 +1567,24 @@ button.primary {
 table {
   width: 100%;
   min-width: 860px;
-  border-collapse: collapse;
   text-align: left;
+  border-collapse: collapse;
 }
 
 th,
 td {
   padding: 13px 16px;
-  border-bottom: 1px solid hsl(var(--border));
-  vertical-align: middle;
   font-size: 0.88rem;
+  vertical-align: middle;
+  border-bottom: 1px solid hsl(var(--border));
 }
 
 thead th {
-  background: hsl(var(--muted) / 45%);
-  color: hsl(var(--muted-foreground));
   font-size: 0.75rem;
-  letter-spacing: 0.04em;
+  color: hsl(var(--muted-foreground));
   text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: hsl(var(--muted) / 45%);
 }
 
 tbody tr:hover {
@@ -1236,9 +1599,9 @@ tbody tr:hover {
 th small {
   display: block;
   margin-top: 3px;
-  color: hsl(var(--muted-foreground));
   font-size: 0.72rem;
   font-weight: 400;
+  color: hsl(var(--muted-foreground));
 }
 
 .role-list {
@@ -1246,13 +1609,13 @@ th small {
 }
 
 .status-pill[data-status='active'] {
-  background: hsl(142 70% 45% / 14%);
-  color: hsl(142 60% 28%);
+  color: hsl(142deg 60% 28%);
+  background: hsl(142deg 70% 45% / 14%);
 }
 
 .status-pill[data-status='disabled'] {
-  background: hsl(var(--muted));
   color: hsl(var(--muted-foreground));
+  background: hsl(var(--muted));
 }
 
 .table-state {
@@ -1262,15 +1625,15 @@ th small {
 }
 
 .pagination {
-  justify-content: flex-end;
   gap: 10px;
+  justify-content: flex-end;
   padding: 14px 16px;
 }
 
 .modal-backdrop {
   position: fixed;
-  z-index: 20;
   inset: 0;
+  z-index: 20;
   display: grid;
   place-items: center;
   padding: 20px;
@@ -1280,11 +1643,11 @@ th small {
 .user-dialog {
   width: min(680px, 100%);
   max-height: min(720px, calc(100vh - 40px));
-  overflow: auto;
   padding: 22px;
+  overflow: auto;
+  background: hsl(var(--card));
   border: 1px solid hsl(var(--border));
   border-radius: 16px;
-  background: hsl(var(--card));
   box-shadow: 0 24px 70px rgb(15 23 42 / 24%);
 }
 
@@ -1319,8 +1682,8 @@ th small {
   align-items: center;
   justify-content: space-between;
   min-height: 44px;
-  color: hsl(var(--muted-foreground));
   font-size: 0.8rem;
+  color: hsl(var(--muted-foreground));
 }
 
 .switch-row span {
@@ -1329,8 +1692,8 @@ th small {
 }
 
 .switch-row strong {
-  color: hsl(var(--foreground));
   font-size: 0.9rem;
+  color: hsl(var(--foreground));
 }
 
 .switch-row small {
@@ -1345,8 +1708,8 @@ th small {
 
 .dialog-actions {
   grid-column: 1 / -1;
-  justify-content: flex-end;
   gap: 10px;
+  justify-content: flex-end;
   padding-top: 6px;
 }
 
@@ -1368,9 +1731,9 @@ th small {
   padding: 0;
   margin: -1px;
   overflow: hidden;
-  clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+  clip: rect(0, 0, 0, 0);
 }
 
 @media (max-width: 1100px) {
@@ -1424,7 +1787,8 @@ th small {
     flex: 1;
   }
 
-  .user-form {
+  .user-form,
+  .login-events-filters {
     grid-template-columns: 1fr;
   }
 
