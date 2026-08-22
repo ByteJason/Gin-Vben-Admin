@@ -23,6 +23,7 @@ type auditRecord struct {
 	UserID    *uint64           `gorm:"column:user_id"`
 	SessionID string            `gorm:"column:session_id"`
 	EventType string            `gorm:"column:event_type"`
+	Category  string            `gorm:"column:category"`
 	Outcome   string            `gorm:"column:outcome"`
 	RequestID string            `gorm:"column:request_id"`
 	IPAddress string            `gorm:"column:ip_address"`
@@ -62,6 +63,16 @@ func (r *GORMRepository) QueryPage(ctx context.Context, filter auditapp.Filter) 
 	}
 	if filter.Action != "" {
 		query = query.Where("event_type = ?", persistedEventType(filter))
+	}
+	if filter.Category != "" {
+		switch filter.Category {
+		case auditapp.CategoryLogin:
+			query = query.Where("event_type LIKE ?", "auth.%")
+		case auditapp.CategorySystem:
+			query = query.Where("event_type LIKE ?", "system.%")
+		case auditapp.CategoryOperation:
+			query = query.Where("event_type NOT LIKE ? AND event_type NOT LIKE ?", "auth.%", "system.%")
+		}
 	}
 	if filter.Outcome != "" {
 		query = query.Where("outcome = ?", filter.Outcome)
@@ -118,9 +129,32 @@ func (r *GORMRepository) QueryPage(ctx context.Context, filter auditapp.Filter) 
 				break
 			}
 		}
-		events = append(events, auditapp.Event{ID: strconv.FormatUint(row.ID, 10), ActorID: actor, Action: action, Resource: resource, Outcome: row.Outcome, RequestID: row.RequestID, Details: details, CreatedAt: row.CreatedAt})
+		category := auditapp.Classify(resource, action)
+		if row.Category != "" {
+			category = auditapp.Category(row.Category)
+		}
+		events = append(events, auditapp.Event{ID: strconv.FormatUint(row.ID, 10), ActorID: actor, Action: action, Resource: resource, Category: category, Outcome: row.Outcome, RequestID: row.RequestID, Details: details, CreatedAt: row.CreatedAt})
 	}
 	return events, int(total), nil
+}
+
+func (r *GORMRepository) CountBefore(ctx context.Context, cutoff time.Time) (int, error) {
+	if r == nil || r.db == nil {
+		return 0, errors.New("audit repository unavailable")
+	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return 0, err
+	}
+	query := r.db.Read(ctx).Model(&auditRecord{}).Where("tenant_id = ?", scope.TenantID).Where("created_at < ?", cutoff)
+	if scope.Organization != "" {
+		query = query.Where("org_id = ?", scope.Organization)
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return 0, errors.New("audit repository unavailable")
+	}
+	return int(total), nil
 }
 
 func persistedEventType(filter auditapp.Filter) string {

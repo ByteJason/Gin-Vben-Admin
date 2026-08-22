@@ -25,6 +25,7 @@ type authAuditRecord struct {
 	UserID    *uint64           `gorm:"column:user_id"`
 	SessionID string            `gorm:"column:session_id"`
 	EventType string            `gorm:"column:event_type"`
+	Category  string            `gorm:"column:category"`
 	Outcome   string            `gorm:"column:outcome"`
 	RequestID string            `gorm:"column:request_id"`
 	IPAddress string            `gorm:"column:ip_address"`
@@ -68,7 +69,7 @@ func (s *GORMAuditSink) Record(ctx context.Context, event authdomain.AuditEvent)
 		metadata[key] = value
 	}
 	record := authAuditRecord{
-		UserID: userID, SessionID: bounded(event.SessionID, 128), EventType: bounded(event.EventType, 64),
+		UserID: userID, SessionID: bounded(event.SessionID, 128), EventType: bounded(event.EventType, 64), Category: auditCategory(event.EventType),
 		Outcome: bounded(event.Outcome, 32), RequestID: bounded(event.RequestID, 128),
 		IPAddress: bounded(event.IPAddress, 64), UserAgent: bounded(event.UserAgent, 512),
 		Metadata: metadata, CreatedAt: createdAt.UTC(), TenantID: scope.TenantID, OrgID: scope.Organization,
@@ -80,6 +81,16 @@ func (s *GORMAuditSink) Record(ctx context.Context, event authdomain.AuditEvent)
 		return authdomain.ErrDependencyUnavailable
 	}
 	return nil
+}
+
+func auditCategory(eventType string) string {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(eventType)), "auth.") {
+		return "login"
+	}
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(eventType)), "system.") {
+		return "system"
+	}
+	return "operation"
 }
 
 func bounded(value string, max int) string {

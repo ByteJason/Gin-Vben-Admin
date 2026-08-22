@@ -1,5 +1,5 @@
 // Generated from contracts/openapi/admin-v1.yaml; DO NOT EDIT.
-// CONTRACT_SHA256=ce04315372e867d0ac317f792080fa61d28d8464bc1a48dd7822c5edebcaaa0f
+// CONTRACT_SHA256=50c4e58cca351f0f42b9affdc5d88ac98f928fce07fe91217851e4c847ecb5b2
 
 export const ADMIN_API_PREFIX = '/admin/v1' as const;
 
@@ -48,6 +48,8 @@ export const ADMIN_ENDPOINTS = {
   rollbackSetting: '/admin/v1/settings/{key}/rollback',
   testSettingConnection: '/admin/v1/settings/{key}/test',
   queryAuditEvents: '/admin/v1/audit/events',
+  exportAuditEvents: '/admin/v1/audit/events/export',
+  auditRetentionDryRun: '/admin/v1/audit/retention/dry-run',
 } as const;
 
 export const AUTH_API_PREFIX = '/admin/v1/auth' as const;

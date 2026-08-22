@@ -937,6 +937,7 @@ paths:
       security: [{BearerAuth: []}]
       parameters:
         - { name: actorId, in: query, schema: { type: string } }
+        - { name: category, in: query, schema: { $ref: '#/components/schemas/AuditCategory' } }
         - { name: action, in: query, schema: { type: string } }
         - { name: resource, in: query, schema: { type: string } }
         - { name: outcome, in: query, schema: { type: string } }
@@ -947,6 +948,43 @@ paths:
         - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
       responses:
         '200': { $ref: '#/components/responses/AuditPageResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
+  /api/admin/v1/audit/events/export:
+    get:
+      tags: [Audit]
+      operationId: exportAuditEvents
+      summary: 导出脱敏审计事件
+      security: [{BearerAuth: []}]
+      parameters:
+        - { name: category, in: query, schema: { $ref: '#/components/schemas/AuditCategory' } }
+        - { name: actorId, in: query, schema: { type: string } }
+        - { name: action, in: query, schema: { type: string } }
+        - { name: resource, in: query, schema: { type: string } }
+        - { name: outcome, in: query, schema: { type: string } }
+        - { name: requestId, in: query, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 0, maximum: 10000, default: 10000 } }
+        - { name: format, in: query, required: true, schema: { $ref: '#/components/schemas/AuditExportFormat' } }
+      responses:
+        '200': { $ref: '#/components/responses/AuditExportResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
+  /api/admin/v1/audit/retention/dry-run:
+    get:
+      tags: [Audit]
+      operationId: auditRetentionDryRun
+      summary: 预览审计留存清理范围
+      security: [{BearerAuth: []}]
+      parameters:
+        - { name: days, in: query, schema: { type: integer, minimum: 1, maximum: 3650, default: 180 } }
+      responses:
+        '200': { $ref: '#/components/responses/AuditRetentionDryRunResponse' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -988,6 +1026,12 @@ components:
         minLength: 1
         maxLength: 128
   schemas:
+    AuditCategory:
+      type: string
+      enum: [login, operation, system]
+    AuditExportFormat:
+      type: string
+      enum: [csv, json]
     HealthData:
       type: object
       required: [status]
@@ -1542,9 +1586,10 @@ components:
         checkedAt: { type: string, format: date-time }
     AuditEvent:
       type: object
-      required: [id, action, resource, outcome, requestId, createdAt]
+      required: [id, category, action, resource, outcome, requestId, createdAt]
       properties:
         id: { type: string }
+        category: { $ref: '#/components/schemas/AuditCategory' }
         actorId: { type: string }
         action: { type: string }
         resource: { type: string }
@@ -1562,6 +1607,13 @@ components:
         total: { type: integer, minimum: 0 }
         limit: { type: integer, minimum: 0 }
         offset: { type: integer, minimum: 0 }
+    AuditRetentionDryRun:
+      type: object
+      required: [retentionDays, cutoff, matchingCount]
+      properties:
+        retentionDays: { type: integer, minimum: 1 }
+        cutoff: { type: string, format: date-time }
+        matchingCount: { type: integer, minimum: 0 }
     ErrorEnvelope:
       type: object
       required: [code, message, data, traceId, meta]
@@ -1663,6 +1715,23 @@ components:
               - type: object
                 properties:
                   data: { $ref: '#/components/schemas/AuditPage' }
+    AuditExportResponse:
+      description: 脱敏审计事件文件
+      content:
+        text/csv:
+          schema: { type: string, format: binary }
+        application/json:
+          schema: { type: string, format: binary }
+    AuditRetentionDryRunResponse:
+      description: 审计留存清理预览
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/SuccessEnvelope'
+              - type: object
+                properties:
+                  data: { $ref: '#/components/schemas/AuditRetentionDryRun' }
     IAMUserConflict:
       description: 用户名或邮箱在当前租户内已存在
       headers:

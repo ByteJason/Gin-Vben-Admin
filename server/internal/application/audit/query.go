@@ -14,7 +14,36 @@ import (
 
 var ErrInvalidFilter = errors.New("invalid audit filter")
 
+// Category is the stable audit taxonomy exposed to administrators. Writers
+// may persist an event type such as auth.login or settings.update; the read
+// side normalizes those prefixes into one of the three public categories.
+type Category string
+
+const (
+	CategoryLogin     Category = "login"
+	CategoryOperation Category = "operation"
+	CategorySystem    Category = "system"
+)
+
+func (c Category) Valid() bool {
+	return c == "" || c == CategoryLogin || c == CategoryOperation || c == CategorySystem
+}
+
+// Classify maps persisted resource names to the stable taxonomy. Unknown
+// resources are ordinary management operations rather than system events.
+func Classify(resource, _ string) Category {
+	switch strings.ToLower(strings.TrimSpace(resource)) {
+	case "auth", "authentication", "login":
+		return CategoryLogin
+	case "system", "runtime", "health", "observability":
+		return CategorySystem
+	default:
+		return CategoryOperation
+	}
+}
+
 type Event struct {
+	Category  Category       `json:"category"`
 	ID        string         `json:"id"`
 	ActorID   string         `json:"actorId"`
 	Action    string         `json:"action"`
@@ -28,6 +57,7 @@ type Event struct {
 type Filter struct {
 	ActorID   string
 	Action    string
+	Category  Category
 	Resource  string
 	Outcome   string
 	RequestID string
@@ -62,7 +92,7 @@ type Service struct {
 func NewService(repo Repository) *Service { return &Service{repo: repo} }
 
 func (s *Service) Query(ctx context.Context, filter Filter) (Page, error) {
-	if filter.Limit < 0 || filter.Offset < 0 || !filter.From.IsZero() && !filter.To.IsZero() && filter.From.After(filter.To) {
+	if filter.Limit < 0 || filter.Offset < 0 || !filter.Category.Valid() || !filter.From.IsZero() && !filter.To.IsZero() && filter.From.After(filter.To) {
 		return Page{}, ErrInvalidFilter
 	}
 	if filter.Limit == 0 {
@@ -98,7 +128,7 @@ func (s *Service) Query(ctx context.Context, filter Filter) (Page, error) {
 	}
 	page.Items = make([]Event, 0, end-filter.Offset)
 	for _, event := range events[filter.Offset:end] {
-		page.Items = append(page.Items, redactEvent(event))
+		page.Items = append(page.Items, normalizeEvent(event))
 	}
 	return page, nil
 }
@@ -115,7 +145,45 @@ func (s *Service) QueryLoginEvents(ctx context.Context, actorID string, filter F
 	filter.ActorID = actorID
 	filter.Action = "login"
 	filter.Resource = "auth"
+	filter.Category = CategoryLogin
 	return s.Query(ctx, filter)
+}
+
+// RetentionReport describes what a retention policy would affect. It is
+// deliberately read-only; callers must use an explicit, separately reviewed
+// deletion workflow for any physical cleanup.
+type RetentionReport struct {
+	Cutoff        time.Time `json:"cutoff"`
+	MatchingCount int       `json:"matchingCount"`
+	RetentionDays int       `json:"retentionDays"`
+}
+
+type BeforeCounter interface {
+	CountBefore(context.Context, time.Time) (int, error)
+}
+
+func (s *Service) RetentionDryRun(ctx context.Context, now time.Time, days int) (RetentionReport, error) {
+	if days <= 0 || days > 3650 || s == nil || s.repo == nil {
+		return RetentionReport{}, ErrInvalidFilter
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	now = now.UTC()
+	cutoff := now.Add(-time.Duration(days) * 24 * time.Hour)
+	count := 0
+	var err error
+	if counter, ok := s.repo.(BeforeCounter); ok {
+		count, err = counter.CountBefore(ctx, cutoff)
+	} else {
+		var events []Event
+		events, err = s.repo.Query(ctx, Filter{To: cutoff, Limit: 10_000})
+		count = len(events)
+	}
+	if err != nil {
+		return RetentionReport{}, err
+	}
+	return RetentionReport{Cutoff: cutoff, MatchingCount: count, RetentionDays: days}, nil
 }
 
 // MemoryRepository is deterministic and intended for unit tests/local seams.
@@ -139,6 +207,7 @@ func (r *MemoryRepository) Query(_ context.Context, filter Filter) ([]Event, err
 	for _, event := range r.events {
 		if filter.ActorID != "" && event.ActorID != filter.ActorID ||
 			filter.Action != "" && event.Action != filter.Action ||
+			filter.Category != "" && normalizeCategory(event) != filter.Category ||
 			filter.Resource != "" && event.Resource != filter.Resource ||
 			filter.Outcome != "" && event.Outcome != filter.Outcome ||
 			filter.RequestID != "" && event.RequestID != filter.RequestID ||
@@ -152,11 +221,33 @@ func (r *MemoryRepository) Query(_ context.Context, filter Filter) ([]Event, err
 	return filtered, nil
 }
 
+func (r *MemoryRepository) CountBefore(_ context.Context, cutoff time.Time) (int, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	count := 0
+	for _, event := range r.events {
+		if event.CreatedAt.Before(cutoff) {
+			count++
+		}
+	}
+	return count, nil
+}
+
 func redactEvent(event Event) Event {
 	event = cloneEvent(event)
+	event.Category = normalizeCategory(event)
 	event.Details = redactMap(event.Details)
 	return event
 }
+
+func normalizeCategory(event Event) Category {
+	if event.Category.Valid() && event.Category != "" {
+		return event.Category
+	}
+	return Classify(event.Resource, event.Action)
+}
+
+func normalizeEvent(event Event) Event { return redactEvent(event) }
 
 func redactMap(input map[string]any) map[string]any {
 	if input == nil {

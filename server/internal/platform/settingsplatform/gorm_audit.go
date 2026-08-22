@@ -18,6 +18,7 @@ func NewGORMAuditSink(db *gormdb.Store) *GORMAuditSink { return &GORMAuditSink{d
 type settingsAuditRecord struct {
 	UserID    *uint64           `gorm:"column:user_id"`
 	EventType string            `gorm:"column:event_type"`
+	Category  string            `gorm:"column:category"`
 	Outcome   string            `gorm:"column:outcome"`
 	Metadata  map[string]string `gorm:"column:metadata;serializer:json"`
 	CreatedAt time.Time         `gorm:"column:created_at"`
@@ -40,7 +41,7 @@ func (s *GORMAuditSink) Record(ctx context.Context, event settingsapp.AuditEvent
 		userID = &parsed
 	}
 	metadata := map[string]string{"key": event.Key, "version": strconv.FormatInt(event.Version, 10)}
-	record := settingsAuditRecord{UserID: userID, EventType: "settings." + event.Action, Outcome: "success", Metadata: metadata, CreatedAt: time.Now().UTC()}
+	record := settingsAuditRecord{UserID: userID, EventType: "settings." + event.Action, Category: "operation", Outcome: "success", Metadata: metadata, CreatedAt: time.Now().UTC()}
 	record.TenantID = scope.TenantID
 	record.OrgID = scope.Organization
 	if err := s.db.Write(ctx).Create(&record).Error; err != nil {
