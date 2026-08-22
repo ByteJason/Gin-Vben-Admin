@@ -624,6 +624,16 @@ components:
         mode:
           type: string
           enum: [embedded, standalone, api_only, dev]
+        localeMode:
+          type: string
+          enum: [single, multi]
+          default: single
+          description: 语言模式；省略时使用 single
+        locale:
+          type: string
+          enum: [zh-CN, en-US]
+          default: zh-CN
+          description: 安装后默认语言；省略时按浏览器 Accept-Language 建议
         database:
           $ref: '#/components/schemas/DatabaseConnection'
         redis:

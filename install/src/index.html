@@ -99,6 +99,21 @@
                   <option value="dev">开发调试</option>
                 </select>
               </div>
+              <div class="form-field">
+                <label for="locale-mode">语言模式</label>
+                <select id="locale-mode" name="localeMode" required>
+                  <option value="single">单语言</option>
+                  <option value="multi">双语切换</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label for="locale-choice">默认语言</label>
+                <select id="locale-choice" name="locale" required>
+                  <option value="zh-CN">简体中文（zh-CN）</option>
+                  <option value="en-US">English (en-US)</option>
+                </select>
+                <span id="locale-suggestion" class="field-help" aria-live="polite"></span>
+              </div>
               <button id="plan-button" class="primary-button" type="submit">
                 检查目录权限
               </button>

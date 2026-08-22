@@ -9,6 +9,7 @@ import (
 	"time"
 
 	installstate "example.com/gin-vben-admin/server/internal/domain/installstate"
+	platformi18n "example.com/gin-vben-admin/server/internal/platform/i18n"
 )
 
 var (
@@ -28,6 +29,8 @@ type AdminAccount struct {
 type ApplyRequest struct {
 	SelectedUI     string             `json:"selectedUi"`
 	Mode           string             `json:"mode"`
+	Locale         string             `json:"locale,omitempty"`
+	LocaleMode     string             `json:"localeMode,omitempty"`
 	Database       DatabaseConnection `json:"database"`
 	Redis          RedisConnection    `json:"redis"`
 	Admin          AdminAccount       `json:"admin"`
@@ -370,6 +373,18 @@ func validateApplyRequest(request ApplyRequest) (installstate.UI, installstate.M
 		return "", "", ErrInvalidApply
 	}
 	if err := validateRedisConnection(request.Redis); err != nil {
+		return "", "", ErrInvalidApply
+	}
+	localeMode := request.LocaleMode
+	if localeMode == "" {
+		localeMode = string(platformi18n.ModeSingle)
+	}
+	locale := request.Locale
+	if locale == "" {
+		locale = platformi18n.LocaleZhCN
+	}
+	localeConfig := platformi18n.Config{Mode: platformi18n.Mode(localeMode), DefaultLocale: locale, SupportedLocales: []string{platformi18n.LocaleZhCN, platformi18n.LocaleEnUS}}
+	if err := localeConfig.Validate(); err != nil {
 		return "", "", ErrInvalidApply
 	}
 	username := strings.TrimSpace(request.Admin.Username)

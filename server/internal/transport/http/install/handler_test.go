@@ -300,6 +300,25 @@ func TestApplyEndpointReturnsCredentialFreeResult(t *testing.T) {
 	}
 }
 
+func TestApplyEndpointDerivesLocaleSuggestionFromAcceptLanguage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	provider := &applyProviderStub{result: installer.ApplyResult{State: "installed", SelectedUI: "antd", Mode: "embedded"}}
+	router := gin.New()
+	RegisterRoutes(router, NewHandlerWithApply(statusProviderStub{}, nil, nil, nil, provider))
+	body := `{"selectedUi":"antd","mode":"embedded","confirmCleanup":true,"database":{"driver":"mysql","mode":"single","host":"db","port":3306,"database":"app","username":"root","password":"database-secret"},"redis":{"mode":"single","addr":"redis:6379"},"admin":{"username":"admin","password":"administrator-secret"}}`
+	request := httptest.NewRequest(http.MethodPost, "/api/system/install/v1/apply", bytes.NewBufferString(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept-Language", "en-GB,en;q=0.8")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", response.Code, response.Body.String())
+	}
+	if provider.request.Locale != "en-US" || provider.request.LocaleMode != "single" {
+		t.Fatalf("derived locale policy = locale:%q mode:%q", provider.request.Locale, provider.request.LocaleMode)
+	}
+}
+
 func TestApplyEndpointMapsStableErrorsWithoutLeakingCause(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, testCase := range []struct {

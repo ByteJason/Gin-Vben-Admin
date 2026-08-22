@@ -22,6 +22,9 @@ const selectionPanel = document.querySelector('#selection-panel');
 const planForm = document.querySelector('#plan-form');
 const uiChoice = document.querySelector('#ui-choice');
 const modeChoice = document.querySelector('#mode-choice');
+const localeMode = document.querySelector('#locale-mode');
+const localeChoice = document.querySelector('#locale-choice');
+const localeSuggestion = document.querySelector('#locale-suggestion');
 const planButton = document.querySelector('#plan-button');
 const planMessage = document.querySelector('#plan-message');
 const planPanel = document.querySelector('#plan-panel');
@@ -74,6 +77,19 @@ let currentPlan = null;
 let databaseCheckPassed = false;
 let redisCheckPassed = false;
 let lastFailedJobId = null;
+
+function browserLanguageHeader() {
+  const languages = Array.isArray(navigator.languages) && navigator.languages.length
+    ? navigator.languages
+    : [navigator.language || 'en-US'];
+  return languages.join(',');
+}
+
+function suggestBrowserLocale() {
+  const browserLocale = /^zh(?:-|$)/i.test(navigator.language || '') ? 'zh-CN' : 'en-US';
+  localeChoice.value = browserLocale;
+  localeSuggestion.textContent = `已根据浏览器语言建议 ${browserLocale}，可手动调整。`;
+}
 
 async function loadStatus() {
   setPending();
@@ -216,7 +232,11 @@ async function requestPlan(event) {
     const response = await fetch(planEndpoint, {
       method: 'POST',
       credentials: 'same-origin',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      headers: {
+        Accept: 'application/json',
+        'Accept-Language': browserLanguageHeader(),
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify({ selectedUi, mode }),
     });
     const envelope = await response.json();
@@ -437,10 +457,16 @@ async function requestInstallation(event) {
     const response = await fetch(targetEndpoint, {
       method: 'POST',
       credentials: 'same-origin',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      headers: {
+        Accept: 'application/json',
+        'Accept-Language': browserLanguageHeader(),
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify({
         selectedUi: uiChoice.value,
         mode: modeChoice.value,
+        localeMode: localeMode.value,
+        locale: localeChoice.value,
         database: dependencies.database,
         redis: dependencies.redis,
         admin: { username: adminUsername.value.trim(), password: adminPassword.value },
@@ -535,6 +561,7 @@ async function loadAll() {
 }
 
 retryButton.addEventListener('click', loadAll);
+suggestBrowserLocale();
 planForm.addEventListener('submit', requestPlan);
 databaseForm.addEventListener('submit', (event) => requestDependencyCheck(event, databaseCheckEndpoint, databaseResult));
 redisForm.addEventListener('submit', (event) => requestDependencyCheck(event, redisCheckEndpoint, redisResult));

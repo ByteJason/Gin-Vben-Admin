@@ -50,6 +50,9 @@ func TestEnvironmentInstallerPublishesAndRollsBackPrivateRootEnv(t *testing.T) {
 		`AUTH_CAPTCHA_RISK_WINDOW="15m"`,
 		`AUTH_CAPTCHA_CHALLENGE_TTL="2m"`,
 		`AUTH_CAPTCHA_KEY_PREFIX="auth-captcha"`,
+		`I18N_MODE="single"`,
+		`I18N_DEFAULT_LOCALE="zh-CN"`,
+		`I18N_SUPPORTED_LOCALES="zh-CN,en-US"`,
 	} {
 		if !strings.Contains(string(contents), required) {
 			t.Fatalf(".env missing required setting %q", required)
@@ -63,5 +66,29 @@ func TestEnvironmentInstallerPublishesAndRollsBackPrivateRootEnv(t *testing.T) {
 	}
 	if _, err := os.Lstat(path); !os.IsNotExist(err) {
 		t.Fatalf("rollback retained generated .env: %v", err)
+	}
+}
+
+func TestEnvironmentInstallerPersistsExplicitLocalePolicy(t *testing.T) {
+	root := t.TempDir()
+	store := NewAtomicEnvStore(filepath.Join(root, ".env"), filepath.Join(root, "backup"))
+	service := NewEnvironmentInstaller(store, filepath.Join(root, "install"), bytes.NewReader(bytes.Repeat([]byte{0x2a}, 96)))
+	request := installer.ApplyRequest{
+		SelectedUI: "antd", Mode: "standalone", Locale: "en-US", LocaleMode: "multi", ConfirmCleanup: true,
+		Database: installer.DatabaseConnection{Driver: "mysql", Mode: "single", Host: "127.0.0.1", Port: 3306, Database: "app", Username: "app", Password: "database-secret"},
+		Redis:    installer.RedisConnection{Mode: "single", Addr: "127.0.0.1:6379"},
+		Admin:    installer.AdminAccount{Username: "admin", Password: "initial-password-123"},
+	}
+	if _, err := service.Publish(context.Background(), request, installer.AssetReceipt{ArtifactHash: strings.Repeat("a", 64), ManifestHash: strings.Repeat("b", 64)}); err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+	contents, err := os.ReadFile(filepath.Join(root, ".env"))
+	if err != nil {
+		t.Fatalf("ReadFile(.env) error = %v", err)
+	}
+	for _, required := range []string{`I18N_MODE="multi"`, `I18N_DEFAULT_LOCALE="en-US"`, `I18N_SUPPORTED_LOCALES="zh-CN,en-US"`} {
+		if !strings.Contains(string(contents), required) {
+			t.Fatalf(".env missing explicit locale setting %q", required)
+		}
 	}
 }

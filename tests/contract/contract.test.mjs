@@ -153,6 +153,9 @@ test('installation contract exposes one credential-write-only apply operation', 
   assert.match(install, /ApplyJob/);
   assert.match(install, /AdminAccount/);
   assert.match(install, /confirmCleanup/);
+  const applySchema = install.slice(install.indexOf('    ApplyRequest:'), install.indexOf('    AdminAccount:'));
+  assert.match(applySchema, /localeMode:[\s\S]*enum: \[single, multi\]/);
+  assert.match(applySchema, /locale:[\s\S]*enum: \[zh-CN, en-US\]/);
   assert.match(install, /password:[\s\S]*?writeOnly: true/);
   const result = install.slice(install.indexOf('    ApplyResult:'), install.indexOf('    ApplyErrorEnvelope:'));
   assert.doesNotMatch(result, /password|dsn|secret/i);

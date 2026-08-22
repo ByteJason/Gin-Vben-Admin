@@ -19,6 +19,9 @@ test('installation shell is independent and exposes an accessible status region'
   assert.match(html, /id="plan-form"/);
   assert.match(html, /id="ui-choice"/);
   assert.match(html, /id="mode-choice"/);
+  assert.match(html, /id="locale-mode"/);
+  assert.match(html, /id="locale-choice"/);
+  assert.match(html, /id="locale-suggestion"/);
   assert.match(html, /id="plan-panel"/);
   assert.match(html, /id="connection-panel"/);
   assert.match(html, /id="database-form"/);
@@ -63,6 +66,8 @@ test('installation shell is independent and exposes an accessible status region'
   assert.match(script, /modeChoice\.addEventListener\('change'/);
   assert.match(script, /method:\s*'POST'/);
   assert.match(script, /selectedUi/);
+  assert.match(script, /localeMode/);
+  assert.match(script, /localeChoice/);
   assert.match(script, /canCleanup/);
   assert.match(script, /databaseDriver/);
   assert.match(script, /redisAddress/);

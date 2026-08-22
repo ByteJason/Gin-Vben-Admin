@@ -12,6 +12,7 @@ import (
 
 	installer "example.com/gin-vben-admin/server/internal/application/installer"
 	installstate "example.com/gin-vben-admin/server/internal/domain/installstate"
+	platformi18n "example.com/gin-vben-admin/server/internal/platform/i18n"
 	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
 )
 
@@ -48,6 +49,18 @@ func (s *EnvironmentInstaller) Publish(ctx context.Context, request installer.Ap
 	if !validEnvironmentSelection(request.SelectedUI, request.Mode) {
 		return installer.EnvironmentReceipt{}, ErrEnvironmentInstallation
 	}
+	locale := strings.TrimSpace(request.Locale)
+	if locale == "" {
+		locale = platformi18n.LocaleZhCN
+	}
+	localeMode := strings.TrimSpace(request.LocaleMode)
+	if localeMode == "" {
+		localeMode = string(platformi18n.ModeSingle)
+	}
+	localeConfig := platformi18n.Config{Mode: platformi18n.Mode(localeMode), DefaultLocale: locale, SupportedLocales: []string{platformi18n.LocaleZhCN, platformi18n.LocaleEnUS}}
+	if err := localeConfig.Validate(); err != nil {
+		return installer.EnvironmentReceipt{}, ErrEnvironmentInstallation
+	}
 	database, err := databaseOptionsFromRequest(request.Database)
 	if err != nil {
 		return installer.EnvironmentReceipt{}, ErrEnvironmentInstallation
@@ -68,6 +81,9 @@ func (s *EnvironmentInstaller) Publish(ctx context.Context, request installer.Ap
 	values := map[string]string{
 		"APP_UI_ACTIVE":                request.SelectedUI,
 		"APP_UI_MODE":                  request.Mode,
+		"I18N_MODE":                    localeMode,
+		"I18N_DEFAULT_LOCALE":          locale,
+		"I18N_SUPPORTED_LOCALES":       strings.Join(localeConfig.SupportedLocales, ","),
 		"AUTH_ACCESS_TTL":              "30m",
 		"AUTH_AUDIENCE":                "admin",
 		"AUTH_BCRYPT_COST":             "12",

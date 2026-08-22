@@ -6,10 +6,12 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
 	installer "example.com/gin-vben-admin/server/internal/application/installer"
+	platformi18n "example.com/gin-vben-admin/server/internal/platform/i18n"
 	"example.com/gin-vben-admin/server/internal/transport/http/response"
 )
 
@@ -252,7 +254,16 @@ func RegisterRoutes(router gin.IRouter, handler *Handler) {
 func decodeApplyRequest(c *gin.Context, request *installer.ApplyRequest) bool {
 	decoder := json.NewDecoder(c.Request.Body)
 	decoder.DisallowUnknownFields()
-	return decoder.Decode(request) == nil && jsonDocumentEnded(decoder)
+	if decoder.Decode(request) != nil || !jsonDocumentEnded(decoder) {
+		return false
+	}
+	if strings.TrimSpace(request.Locale) == "" {
+		request.Locale = platformi18n.SuggestLocale(c.GetHeader("Accept-Language"))
+	}
+	if strings.TrimSpace(request.LocaleMode) == "" {
+		request.LocaleMode = string(platformi18n.ModeSingle)
+	}
+	return true
 }
 
 func decodeRollbackRequest(c *gin.Context, request *installer.RollbackRequest) bool {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	installstate "example.com/gin-vben-admin/server/internal/domain/installstate"
+	platformi18n "example.com/gin-vben-admin/server/internal/platform/i18n"
 )
 
 func TestApplyServiceCompletesInstallationInSafeOrder(t *testing.T) {
@@ -56,6 +57,27 @@ func TestApplyServiceCompletesInstallationInSafeOrder(t *testing.T) {
 	}
 	if markers.created.SelectedUI != installstate.UIAntd || markers.created.Mode != installstate.ModeEmbedded || markers.created.InstalledAt != completedAt {
 		t.Fatalf("created marker = %#v", markers.created)
+	}
+}
+
+func TestValidateApplyRequestAcceptsOnlyBundledLocalePolicy(t *testing.T) {
+	valid := validApplyRequest()
+	valid.Locale = platformi18n.LocaleEnUS
+	valid.LocaleMode = string(platformi18n.ModeMulti)
+	if _, _, err := validateApplyRequest(valid); err != nil {
+		t.Fatalf("validate bundled locale policy error = %v", err)
+	}
+	for name, edit := range map[string]func(*ApplyRequest){
+		"unknown locale": func(request *ApplyRequest) { request.Locale = "fr-FR" },
+		"unknown mode":   func(request *ApplyRequest) { request.LocaleMode = "fallback" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate := valid
+			edit(&candidate)
+			if _, _, err := validateApplyRequest(candidate); !errors.Is(err, ErrInvalidApply) {
+				t.Fatalf("validate error = %v, want ErrInvalidApply", err)
+			}
+		})
 	}
 }
 
