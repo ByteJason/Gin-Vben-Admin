@@ -57,6 +57,16 @@ export interface IAMRolePermissionsReplaceInput {
   permissionIds: string[];
 }
 
+export interface IAMRoleDataScopeBinding {
+  ids: string[];
+  resource: string;
+  scope: IAMRoleDataScope;
+}
+
+export interface IAMRoleDataScopesReplaceInput {
+  scopes: IAMRoleDataScopeBinding[];
+}
+
 export interface IAMRoleCreateInput {
   active?: boolean;
   dataScope?: IAMRoleDataScope;
@@ -195,9 +205,16 @@ const rolePermissionsPath = (id: string) =>
     '{id}',
     encodeURIComponent(id),
   );
+const roleDataScopesPath = (id: string) =>
+  ADMIN_ENDPOINTS.replaceIAMRoleDataScopes.replace(
+    '{id}',
+    encodeURIComponent(id),
+  );
 
 const roleAssignmentLimit = 100;
 const rolePermissionLimit = 200;
+export const roleDataScopeBindingLimit = 50;
+export const roleDataScopeIdsLimit = 200;
 
 export async function listIAMUsersApi(params: IAMUserListParams = {}) {
   return requestClient.get<IAMUserPage>(ADMIN_ENDPOINTS.listIAMUsers, {
@@ -292,6 +309,43 @@ export async function replaceIAMRolePermissionsApi(
   }
   return requestClient.request<IAMRole>(rolePermissionsPath(id), {
     data: { permissionIds },
+    method: 'PUT',
+  });
+}
+
+export async function replaceIAMRoleDataScopesApi(
+  id: string,
+  input: IAMRoleDataScopesReplaceInput,
+) {
+  const scopes = input.scopes.map((binding) => {
+    const resource = binding.resource.trim();
+    if (!resource || resource.length > 191) {
+      throw new Error('data-scope resource is invalid');
+    }
+    if (!['all', 'own', 'org', 'custom'].includes(binding.scope)) {
+      throw new Error('data-scope scope is invalid');
+    }
+    const ids = Array.from(
+      new Set(binding.ids.map((value) => value.trim()).filter(Boolean)),
+    );
+    if (
+      ids.length > roleDataScopeIdsLimit ||
+      ids.some((value) => value.length > 128)
+    ) {
+      throw new Error('data-scope ids exceed the bounded relation limit');
+    }
+    return { ids, resource, scope: binding.scope };
+  });
+  if (scopes.length > roleDataScopeBindingLimit) {
+    throw new Error('data-scope bindings exceed the bounded relation limit');
+  }
+  if (
+    new Set(scopes.map((binding) => binding.resource)).size !== scopes.length
+  ) {
+    throw new Error('data-scope resources must be unique');
+  }
+  return requestClient.request<IAMRole>(roleDataScopesPath(id), {
+    data: { scopes },
     method: 'PUT',
   });
 }

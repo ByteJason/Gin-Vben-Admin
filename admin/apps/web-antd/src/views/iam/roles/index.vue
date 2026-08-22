@@ -4,6 +4,7 @@ import type {
   IAMRole,
   IAMRoleCreateInput,
   IAMRoleDataScope,
+  IAMRoleDataScopeBinding,
 } from '#/api/core/iam';
 
 import { computed, nextTick, onMounted, reactive, ref } from 'vue';
@@ -11,8 +12,12 @@ import { computed, nextTick, onMounted, reactive, ref } from 'vue';
 import {
   createIAMRoleApi,
   listIAMPermissionsApi,
+  listIAMDataScopesApi,
   listIAMRolesApi,
+  replaceIAMRoleDataScopesApi,
   replaceIAMRolePermissionsApi,
+  roleDataScopeBindingLimit,
+  roleDataScopeIdsLimit,
 } from '#/api/core/iam';
 import { $t } from '#/locales';
 
@@ -34,6 +39,14 @@ const permissionLoading = ref(false);
 const permissionSaving = ref(false);
 const permissionError = ref('');
 const permissionErrorSummary = ref<HTMLElement | null>(null);
+type DataScopeEditorRow = IAMRoleDataScopeBinding & { idsText: string };
+const dataScopeEditorOpen = ref(false);
+const dataScopeRole = ref<IAMRole | null>(null);
+const dataScopeBindings = ref<DataScopeEditorRow[]>([]);
+const dataScopesLoading = ref(false);
+const dataScopeSaving = ref(false);
+const dataScopeError = ref('');
+const dataScopeErrorSummary = ref<HTMLElement | null>(null);
 const roleForm = reactive<{
   active: boolean;
   dataScope: IAMRoleDataScope;
@@ -146,6 +159,127 @@ async function submitPermissions() {
     await focus(permissionErrorSummary);
   } finally {
     permissionSaving.value = false;
+  }
+}
+
+function dataScopeRow(
+  binding?: Partial<IAMRoleDataScopeBinding>,
+): DataScopeEditorRow {
+  return {
+    ids: binding?.ids ? [...binding.ids] : [],
+    idsText: binding?.ids?.join('\n') ?? '',
+    resource: binding?.resource ?? '',
+    scope: binding?.scope ?? 'own',
+  };
+}
+
+function parseDataScopeIds(value: string) {
+  return Array.from(
+    new Set(
+      value
+        .split(/[\s,]+/)
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+async function loadRoleDataScopes() {
+  if (!dataScopeRole.value) return;
+  dataScopesLoading.value = true;
+  dataScopeError.value = '';
+  try {
+    const rows = await listIAMDataScopesApi();
+    dataScopeBindings.value = rows
+      .filter((row) => row.roleId === dataScopeRole.value?.id)
+      .sort((a, b) => a.resource.localeCompare(b.resource))
+      .map((row) => dataScopeRow(row));
+  } catch {
+    dataScopeBindings.value = [];
+    dataScopeError.value = String(
+      $t('page.iam.roleDataScopeBindingsLoadError'),
+    );
+    await focus(dataScopeErrorSummary);
+  } finally {
+    dataScopesLoading.value = false;
+  }
+}
+
+async function openDataScopeEditor(role: IAMRole) {
+  dataScopeRole.value = role;
+  dataScopeBindings.value = [];
+  dataScopeError.value = '';
+  feedback.value = '';
+  dataScopeEditorOpen.value = true;
+  await loadRoleDataScopes();
+}
+
+function closeDataScopeEditor() {
+  if (dataScopeSaving.value) return;
+  dataScopeEditorOpen.value = false;
+  dataScopeRole.value = null;
+  dataScopeBindings.value = [];
+  dataScopeError.value = '';
+}
+
+function addDataScopeBinding() {
+  if (dataScopeBindings.value.length >= roleDataScopeBindingLimit) {
+    dataScopeError.value = String($t('page.iam.roleDataScopeBindingLimit'));
+    return;
+  }
+  dataScopeBindings.value.push(dataScopeRow());
+}
+
+function removeDataScopeBinding(index: number) {
+  if (dataScopeSaving.value) return;
+  dataScopeBindings.value.splice(index, 1);
+}
+
+async function submitDataScopes() {
+  if (!dataScopeRole.value) return;
+  dataScopeError.value = '';
+  const seenResources = new Set<string>();
+  const scopes: IAMRoleDataScopeBinding[] = [];
+  for (const row of dataScopeBindings.value) {
+    const resource = row.resource.trim();
+    const ids = parseDataScopeIds(row.idsText);
+    if (!resource || resource.length > 191 || seenResources.has(resource)) {
+      dataScopeError.value = String($t('page.iam.roleDataScopeSaveError'));
+      await focus(dataScopeErrorSummary);
+      return;
+    }
+    if (
+      ids.length > roleDataScopeIdsLimit ||
+      ids.some((id) => id.length > 128)
+    ) {
+      dataScopeError.value = String($t('page.iam.roleDataScopeIdsLimit'));
+      await focus(dataScopeErrorSummary);
+      return;
+    }
+    seenResources.add(resource);
+    scopes.push({ ids, resource, scope: row.scope });
+  }
+  dataScopeSaving.value = true;
+  try {
+    const updated = await replaceIAMRoleDataScopesApi(dataScopeRole.value.id, {
+      scopes,
+    });
+    const index = roles.value.findIndex(
+      (role) => role.id === dataScopeRole.value?.id,
+    );
+    if (index >= 0) {
+      roles.value[index] = { ...roles.value[index], ...updated };
+    }
+    dataScopeEditorOpen.value = false;
+    dataScopeRole.value = null;
+    dataScopeBindings.value = [];
+    feedback.value = String($t('page.iam.roleDataScopeDone'));
+    await focus(feedbackSummary);
+  } catch {
+    dataScopeError.value = String($t('page.iam.roleDataScopeSaveError'));
+    await focus(dataScopeErrorSummary);
+  } finally {
+    dataScopeSaving.value = false;
   }
 }
 
@@ -319,6 +453,13 @@ onMounted(loadRoles);
                   @click="openPermissionEditor(role)"
                 >
                   {{ $t('page.iam.rolePermissionEdit') }}
+                </button>
+                <button
+                  class="secondary compact"
+                  type="button"
+                  @click="openDataScopeEditor(role)"
+                >
+                  {{ $t('page.iam.roleDataScopeEdit') }}
                 </button>
               </td>
             </tr>
@@ -538,6 +679,164 @@ onMounted(loadRoles);
         </footer>
       </div>
     </section>
+
+    <section
+      v-if="dataScopeEditorOpen"
+      id="iam-role-data-scope-editor"
+      class="modal-backdrop roleDataScopeEditor"
+      :aria-label="$t('page.iam.roleDataScopeTitle')"
+      @click.self="closeDataScopeEditor"
+    >
+      <div
+        class="role-dialog data-scope-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="iam-role-data-scope-title"
+        aria-describedby="iam-role-data-scope-description"
+      >
+        <header class="dialog-heading">
+          <div>
+            <p class="eyebrow">{{ $t('page.iam.eyebrow') }}</p>
+            <h2 id="iam-role-data-scope-title">
+              {{ $t('page.iam.roleDataScopeTitle') }}
+            </h2>
+            <p id="iam-role-data-scope-description" class="description">
+              {{ dataScopeRole?.name }} ·
+              {{ $t('page.iam.roleDataScopeDescription') }}
+            </p>
+          </div>
+          <button
+            class="icon-button"
+            type="button"
+            :aria-label="$t('page.iam.roleCancel')"
+            :disabled="dataScopeSaving"
+            @click="closeDataScopeEditor"
+          >
+            ×
+          </button>
+        </header>
+        <p
+          v-if="dataScopeError"
+          ref="dataScopeErrorSummary"
+          class="feedback feedback-error"
+          role="alert"
+          tabindex="-1"
+        >
+          {{ dataScopeError }}
+        </p>
+        <p class="sr-status" aria-live="polite">
+          {{
+            dataScopesLoading ? $t('page.iam.roleDataScopeBindingsLoading') : ''
+          }}
+        </p>
+        <div class="data-scope-toolbar">
+          <span class="permission-count" aria-live="polite">
+            {{ dataScopeBindings.length }}/{{ roleDataScopeBindingLimit }}
+          </span>
+          <button
+            class="secondary compact"
+            type="button"
+            :disabled="dataScopeSaving || dataScopesLoading"
+            @click="addDataScopeBinding"
+          >
+            {{ $t('page.iam.roleDataScopeAdd') }}
+          </button>
+        </div>
+        <div v-if="dataScopesLoading" class="permission-state">
+          {{ $t('page.iam.roleDataScopeBindingsLoading') }}
+        </div>
+        <div
+          v-else-if="dataScopeBindings.length === 0"
+          class="permission-state"
+        >
+          {{ $t('page.iam.roleDataScopeBindingsEmpty') }}
+        </div>
+        <div v-else class="data-scope-list">
+          <article
+            v-for="(binding, index) in dataScopeBindings"
+            :key="`${binding.resource}-${index}`"
+            class="data-scope-row"
+          >
+            <div class="data-scope-grid">
+              <label class="field" :for="`iam-data-scope-resource-${index}`">
+                <span>{{ $t('page.iam.roleDataScopeResource') }}</span>
+                <input
+                  :id="`iam-data-scope-resource-${index}`"
+                  v-model.trim="binding.resource"
+                  :disabled="dataScopeSaving"
+                  maxlength="191"
+                  required
+                  type="text"
+                />
+              </label>
+              <label class="field" :for="`iam-data-scope-scope-${index}`">
+                <span>{{ $t('page.iam.roleDataScopeScope') }}</span>
+                <select
+                  :id="`iam-data-scope-scope-${index}`"
+                  v-model="binding.scope"
+                  :disabled="dataScopeSaving"
+                >
+                  <option value="all">{{ $t('page.iam.roleScopeAll') }}</option>
+                  <option value="own">{{ $t('page.iam.roleScopeOwn') }}</option>
+                  <option value="org">{{ $t('page.iam.roleScopeOrg') }}</option>
+                  <option value="custom">
+                    {{ $t('page.iam.roleScopeCustom') }}
+                  </option>
+                </select>
+              </label>
+              <label
+                class="field field-wide"
+                :for="`iam-data-scope-ids-${index}`"
+              >
+                <span>{{ $t('page.iam.roleDataScopeIds') }}</span>
+                <textarea
+                  :id="`iam-data-scope-ids-${index}`"
+                  v-model="binding.idsText"
+                  :disabled="dataScopeSaving"
+                  :placeholder="$t('page.iam.roleDataScopeIdsHelp')"
+                  rows="2"
+                />
+                <small>
+                  {{ parseDataScopeIds(binding.idsText).length }}/{{
+                    roleDataScopeIdsLimit
+                  }}
+                  · {{ $t('page.iam.roleDataScopeIdsHelp') }}
+                </small>
+              </label>
+            </div>
+            <button
+              class="secondary compact"
+              type="button"
+              :disabled="dataScopeSaving"
+              @click="removeDataScopeBinding(index)"
+            >
+              {{ $t('page.iam.roleDataScopeRemove') }}
+            </button>
+          </article>
+        </div>
+        <footer class="dialog-actions">
+          <button
+            type="button"
+            :disabled="dataScopeSaving"
+            @click="closeDataScopeEditor"
+          >
+            {{ $t('page.iam.roleCancel') }}
+          </button>
+          <button
+            class="primary"
+            type="button"
+            :disabled="dataScopeSaving || dataScopesLoading"
+            @click="submitDataScopes"
+          >
+            {{
+              dataScopeSaving
+                ? $t('page.iam.roleDataScopeSaving')
+                : $t('page.iam.roleDataScopeSave')
+            }}
+          </button>
+        </footer>
+      </div>
+    </section>
   </main>
 </template>
 
@@ -640,6 +939,57 @@ h2 {
   max-width: 720px;
 }
 
+.data-scope-dialog {
+  max-width: 860px;
+}
+
+.data-scope-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.data-scope-list {
+  display: grid;
+  gap: 12px;
+  max-height: 480px;
+  margin-top: 12px;
+  overflow: auto;
+}
+
+.data-scope-row {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 10px;
+}
+
+.data-scope-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(150px, 0.8fr);
+  gap: 12px;
+}
+
+.data-scope-row textarea {
+  width: 100%;
+  min-height: 72px;
+  padding: 7px 10px;
+  color: hsl(var(--foreground));
+  font: inherit;
+  resize: vertical;
+  background: hsl(var(--background));
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+}
+
+.data-scope-row small {
+  color: hsl(var(--muted-foreground));
+  font-weight: 400;
+}
+
 .permission-list {
   display: grid;
   gap: 8px;
@@ -694,7 +1044,8 @@ h2 {
 
 button:focus-visible,
 input:focus-visible,
-select:focus-visible {
+select:focus-visible,
+textarea:focus-visible {
   outline: 3px solid hsl(var(--ring));
   outline-offset: 2px;
 }
@@ -724,7 +1075,8 @@ select:focus-visible {
 
 button,
 input,
-select {
+select,
+textarea {
   min-height: 38px;
   font: inherit;
 }
@@ -744,7 +1096,8 @@ button:hover:not(:disabled) {
 
 button:disabled,
 input:disabled,
-select:disabled {
+select:disabled,
+textarea:disabled {
   cursor: not-allowed;
   opacity: 0.6;
 }
@@ -893,7 +1246,8 @@ tr:last-child td {
 }
 
 .field input,
-.field select {
+.field select,
+.field textarea {
   width: 100%;
   padding: 7px 10px;
   color: hsl(var(--foreground));
@@ -953,6 +1307,10 @@ tr:last-child td {
   }
 
   .role-form {
+    grid-template-columns: 1fr;
+  }
+
+  .data-scope-grid {
     grid-template-columns: 1fr;
   }
 }
