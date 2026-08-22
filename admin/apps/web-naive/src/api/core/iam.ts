@@ -74,13 +74,60 @@ export interface IAMRoleCreateInput {
   name: string;
 }
 
+export type IAMMenuType = 'directory' | 'menu' | 'button';
+
+export interface IAMComponent {
+  component: string;
+  id: string;
+  kind: 'layout' | 'page';
+  label: string;
+}
+
 export interface IAMMenu {
   active: boolean;
+  component?: string;
+  external?: boolean;
   id: string;
+  icon?: string;
+  keepAlive?: boolean;
   name: string;
   parentId?: string;
   path: string;
+  permission?: string;
+  redirect?: string;
+  sort?: number;
+  type?: IAMMenuType;
   visible: boolean;
+}
+
+export interface IAMMenuCreateInput {
+  active?: boolean;
+  component?: string;
+  external?: boolean;
+  icon?: string;
+  id: string;
+  keepAlive?: boolean;
+  name: string;
+  orgId?: string;
+  parentId?: string;
+  path: string;
+  permission?: string;
+  redirect?: string;
+  sort?: number;
+  type: IAMMenuType;
+  visible?: boolean;
+}
+
+export type IAMMenuPatchInput = Partial<Omit<IAMMenuCreateInput, 'id'>>;
+
+export interface IAMMenuReorderItem {
+  id: string;
+  parentId?: string;
+  sort: number;
+}
+
+export interface IAMMenuReorderInput {
+  items: IAMMenuReorderItem[];
 }
 
 export interface IAMPermission {
@@ -263,6 +310,74 @@ export async function createIAMRoleApi(input: IAMRoleCreateInput) {
 
 export async function listIAMMenusApi() {
   return requestClient.get<IAMMenu[]>(ADMIN_ENDPOINTS.listIAMMenus);
+}
+
+const menuPath = (id: string) =>
+  ADMIN_ENDPOINTS.getIAMMenu.replace('{id}', encodeURIComponent(id));
+
+export async function getIAMMenuApi(id: string) {
+  return requestClient.get<IAMMenu>(menuPath(id));
+}
+
+export async function createIAMMenuApi(input: IAMMenuCreateInput) {
+  const id = input.id.trim();
+  const name = input.name.trim();
+  const path = input.path.trim();
+  if (!id || !name || !path) {
+    throw new Error('menu id, name and path are required');
+  }
+  if (!['directory', 'menu', 'button'].includes(input.type)) {
+    throw new Error('menu type is invalid');
+  }
+  return requestClient.post<IAMMenu>(ADMIN_ENDPOINTS.createIAMMenu, {
+    ...input,
+    id,
+    name,
+    path,
+    parentId: input.parentId?.trim() || undefined,
+    component: input.component?.trim() || undefined,
+    redirect: input.redirect?.trim() || undefined,
+    icon: input.icon?.trim() || undefined,
+    permission: input.permission?.trim() || undefined,
+  });
+}
+
+export async function updateIAMMenuApi(id: string, input: IAMMenuPatchInput) {
+  const data = { ...input };
+  if (data.name !== undefined) data.name = data.name.trim();
+  if (data.path !== undefined) data.path = data.path.trim();
+  if (data.parentId !== undefined) data.parentId = data.parentId.trim();
+  if (data.component !== undefined) data.component = data.component.trim();
+  if (data.redirect !== undefined) data.redirect = data.redirect.trim();
+  if (data.icon !== undefined) data.icon = data.icon.trim();
+  if (data.permission !== undefined) data.permission = data.permission.trim();
+  return requestClient.request<IAMMenu>(menuPath(id), {
+    data,
+    method: 'PATCH',
+  });
+}
+
+export async function deleteIAMMenuApi(id: string) {
+  return requestClient.delete<void>(menuPath(id));
+}
+
+export async function reorderIAMMenusApi(input: IAMMenuReorderInput) {
+  const items = input.items.map((item) => ({
+    id: item.id.trim(),
+    parentId: item.parentId?.trim() || undefined,
+    sort: Number.isFinite(item.sort) ? Math.trunc(item.sort) : 0,
+  }));
+  if (!items.length || items.length > 500 || items.some((item) => !item.id)) {
+    throw new Error('menu reorder items are invalid');
+  }
+  return requestClient.request<void>(ADMIN_ENDPOINTS.reorderIAMMenus, {
+    data: { items },
+    method: 'PUT',
+  });
+}
+
+export async function listIAMComponentsApi() {
+  return requestClient.get<IAMComponent[]>(ADMIN_ENDPOINTS.listIAMComponents);
 }
 
 export async function listIAMPermissionsApi() {
