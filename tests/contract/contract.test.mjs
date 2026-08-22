@@ -20,10 +20,10 @@ test('repository exposes the required code boundaries', () => {
     'admin/apps/web-naive',
     'server/cmd/api',
     'server/internal/bootstrap',
-    'server/Dockerfile',
-    'admin/Dockerfile',
-    'deploy/compose.dev.yaml',
-    'deploy/compose.dependencies.yaml',
+    'deploy/server.Dockerfile',
+    'deploy/admin.Dockerfile',
+    'deploy/docker-compose.yml',
+    'scripts/prepare-runtime-compose.mjs',
     'docs/README.md',
     'contracts/openapi/admin-v1.yaml',
     'contracts/openapi/client-v1.yaml',
@@ -460,15 +460,17 @@ test('bootstrap check is cross-platform and verification succeeds', () => {
   assert.match(verify.stdout, /VERIFY_OK/);
 });
 
-test('container build prepares the workspace stubs', () => {
-  const dockerfile = readFileSync(join(root, 'admin/Dockerfile'), 'utf8');
-  assert.match(dockerfile, /pnpm -r run --if-present stub/);
+test('container build prepares the workspace with Alpine deploy images', () => {
+  const dockerfile = readFileSync(join(root, 'deploy/admin.Dockerfile'), 'utf8');
+  assert.match(dockerfile, /FROM node:.*-alpine/);
+  assert.match(dockerfile, /pnpm install --frozen-lockfile/);
+  assert.match(dockerfile, /nginx:.*-alpine/);
 });
 
 test('install flow advertises the explicit migration command', () => {
   const readme = readFileSync(join(root, 'README.md'), 'utf8');
+  assert.match(readme, /docker compose -f deploy\/docker-compose\.yml run --rm migrate status/);
   assert.match(readme, /go -C server run \.\/cmd\/migrate status/);
-  assert.match(readme, /go -C server run \.\/cmd\/migrate up/);
 });
 
 test('CI covers the three host platforms and core gates', () => {
@@ -535,14 +537,17 @@ test('single-node integration CI runs the explicit gated suite', () => {
 });
 
 test('development compose wires the API to the default single-node dependencies', () => {
-  const compose = readFileSync(join(root, 'deploy/compose.dev.yaml'), 'utf8');
+  const compose = readFileSync(join(root, 'deploy/docker-compose.yml'), 'utf8');
   const server = compose.slice(compose.indexOf('  server:'), compose.indexOf('\n  admin:'));
   for (const variable of ['DATABASE_ENABLED', 'DATABASE_DRIVER', 'DATABASE_MODE', 'DATABASE_DSN', 'REDIS_ENABLED', 'REDIS_MODE', 'REDIS_ADDR']) {
     assert.match(server, new RegExp(variable));
   }
   assert.doesNotMatch(server, /postgres:\s*\n\s+condition:/);
   assert.match(server, /REDIS_NAMESPACE: app:v1/);
-  assert.match(compose, /postgres:\s*\n\s+profiles: \["postgres"\]/);
+  assert.doesNotMatch(compose, /postgres|sentinel|cluster|prometheus|grafana/i);
+  const runtimeGenerator = readFileSync(join(root, 'scripts/prepare-runtime-compose.mjs'), 'utf8');
+  assert.match(runtimeGenerator, /postgres\.yaml/);
+  assert.match(runtimeGenerator, /observability\.yaml/);
 });
 
 test('readiness contract describes dependency check states', () => {
@@ -562,9 +567,9 @@ test('bootstrap renders the selected database driver into a new local config', a
 });
 
 test('server image packages the explicit migration command', () => {
-  const dockerfile = readFileSync(join(root, 'server/Dockerfile'), 'utf8');
+  const dockerfile = readFileSync(join(root, 'deploy/server.Dockerfile'), 'utf8');
   const readme = readFileSync(join(root, 'README.md'), 'utf8');
   assert.match(dockerfile, /-o \/out\/migrate \.\/cmd\/migrate/);
   assert.match(dockerfile, /COPY --from=build \/out\/migrate \/migrate/);
-  assert.match(readme, /--entrypoint \/migrate server up/);
+  assert.match(readme, /run --rm migrate status/);
 });

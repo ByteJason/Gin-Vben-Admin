@@ -164,26 +164,31 @@ go -C server build -o ./bin/server-api ./cmd/api
 
 ### Docker 部署
 
-开发环境（包含服务端、管理端、MySQL、Redis）：
+单机部署（服务端、管理端、单机 MySQL、单机 Redis）：
 
 ```text
-docker compose -f deploy/compose.dev.yaml up -d --build
-docker compose -f deploy/compose.dev.yaml run --rm --entrypoint /migrate server up
-docker compose -f deploy/compose.dev.yaml ps
+docker compose -f deploy/docker-compose.yml up -d --build
+docker compose -f deploy/docker-compose.yml ps
+docker compose -f deploy/docker-compose.yml run --rm migrate status
 ```
 
-需要同时启动 PostgreSQL 服务时增加 `--profile postgres`。服务端使用本地配置或环境变量中的 `database.driver` 与 DSN；启用 Compose profile 不会自动切换数据库驱动。
+生产 `deploy/` 只保留这一份 Compose 入口和两份 Alpine Dockerfile；服务端迁移服务会在 API 前启动，服务端使用本地配置或环境变量中的 `database.driver` 与 DSN。
 
-只启动数据库依赖：
+开发/验收拓扑（双库、读写分离、Redis Sentinel/Cluster、Prometheus/Grafana 和 Mailpit）按需生成到 `.runtime/compose/`，不进入正式部署目录：
 
 ```text
-docker compose -f deploy/compose.dependencies.yaml up -d
+node scripts/prepare-runtime-compose.mjs
+docker compose -f .runtime/compose/dev.yaml config --quiet
+docker compose -f .runtime/compose/postgres.yaml config --quiet
+docker compose -f .runtime/compose/read-write.yaml config --quiet
+docker compose -f .runtime/compose/ha.yaml config --quiet
+docker compose -f .runtime/compose/observability.yaml config --quiet
 ```
 
 停止服务：
 
 ```text
-docker compose -f deploy/compose.dev.yaml down
+docker compose -f deploy/docker-compose.yml down
 ```
 
 默认管理端端口为 `5173`，服务端端口为 `8080`；可通过 Compose 环境变量调整。
@@ -211,7 +216,8 @@ node ./scripts/verify.mjs --scope basic
 可选本地观测组件：
 
 ```text
-docker compose -f deploy/compose.dev.yaml -f deploy/compose.observability.yaml --profile observability up -d
+node scripts/prepare-runtime-compose.mjs
+docker compose -f .runtime/compose/observability.yaml --profile observability up -d
 ```
 
 发布包校验：

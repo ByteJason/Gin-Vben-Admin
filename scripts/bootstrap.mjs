@@ -27,8 +27,10 @@ const required = [
   'contracts/openapi/client-v1.yaml',
   'server/configs/server.example.yaml',
   'server/cmd/migrate',
-  'deploy/compose.dev.yaml',
-  'deploy/compose.dependencies.yaml',
+  'deploy/docker-compose.yml',
+  'deploy/server.Dockerfile',
+  'deploy/admin.Dockerfile',
+  'scripts/prepare-runtime-compose.mjs',
 ];
 
 async function exists(relative) {

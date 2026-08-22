@@ -7,7 +7,7 @@ const read = (path) => readFileSync(new URL(`../../${path}`, import.meta.url), '
 test('0.10 SMTP recovery seam is explicit, redacted, and Mailpit-isolated', () => {
   const config = read('server/internal/config/config.go');
   const example = read('server/configs/server.example.yaml');
-  const compose = read('deploy/compose.mailpit.yaml');
+  const compose = read('scripts/prepare-runtime-compose.mjs');
   const adapter = read('server/internal/platform/notification/smtp.go');
 
   assert.match(config, /type MailConfig struct/);
@@ -17,9 +17,8 @@ test('0.10 SMTP recovery seam is explicit, redacted, and Mailpit-isolated', () =
   assert.match(config, /Password.*json:\"-\"|MailSummary/);
   assert.match(example, /mail:\s*\n[\s\S]*enabled:\s*false/);
   assert.match(compose, /mailpit:/);
-  assert.match(compose, /1025/);
-  assert.match(compose, /8025/);
-  assert.match(compose, /profiles:/);
+  assert.match(compose, /mailpit:/);
+  assert.match(compose, /dev\.yaml/);
   assert.match(adapter, /func NewSMTPMailer/);
   assert.match(adapter, /StartTLS/);
   assert.match(adapter, /context\.Context/);

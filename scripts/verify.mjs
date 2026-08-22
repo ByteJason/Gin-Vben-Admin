@@ -64,9 +64,10 @@ const required = [
   'install/src/styles.css',
   'install/package.json',
   'install/pnpm-lock.yaml',
-  'deploy/compose.dev.yaml',
-  'deploy/compose.dependencies.yaml',
-  'admin/Dockerfile',
+  'deploy/docker-compose.yml',
+  'deploy/server.Dockerfile',
+  'deploy/admin.Dockerfile',
+  'scripts/prepare-runtime-compose.mjs',
   'docs/README.md',
   'LICENSE',
   'LICENSES/Vue-Vben-Admin-MIT.txt',
@@ -107,6 +108,19 @@ if (unexpectedApps.length) {
 }
 if (missing.length || unexpectedRootDirectories.length) {
   console.error(`VERIFY_FAILED missing=${missing.join(',')} unexpected_root=${unexpectedRootDirectories.join(',')}`);
+  process.exit(1);
+}
+
+// Generate disposable development/acceptance topology files outside deploy/.
+// The production entrypoint remains the only checked-in Compose file.
+await run(process.execPath, ['scripts/prepare-runtime-compose.mjs']);
+const runtimeCompose = ['dev.yaml', 'postgres.yaml', 'read-write.yaml', 'ha.yaml', 'observability.yaml'];
+const missingRuntime = [];
+for (const name of runtimeCompose) {
+  if (!(await exists(`.runtime/compose/${name}`))) missingRuntime.push(name);
+}
+if (missingRuntime.length) {
+  console.error(`VERIFY_FAILED missing_runtime_compose=${missingRuntime.join(',')}`);
   process.exit(1);
 }
 

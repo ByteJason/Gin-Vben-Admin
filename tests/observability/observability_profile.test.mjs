@@ -5,14 +5,21 @@ import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
 const root = join(import.meta.dirname, '..', '..');
-const compose = join(root, 'deploy', 'compose.observability.yaml');
-const prometheus = join(root, 'deploy', 'observability', 'prometheus', 'prometheus.yml');
-const rules = join(root, 'deploy', 'observability', 'prometheus', 'rules.yml');
-const otel = join(root, 'deploy', 'observability', 'otel-collector-config.yaml');
-const dashboard = join(root, 'deploy', 'observability', 'grafana', 'dashboards', 'gin-vben-admin.json');
-const alertmanager = join(root, 'deploy', 'observability', 'alertmanager.yml');
+const generator = join(root, 'scripts', 'prepare-runtime-compose.mjs');
+const compose = join(root, '.runtime', 'compose', 'observability.yaml');
+const prometheus = join(root, '.runtime', 'compose', 'observability', 'prometheus.yml');
+const rules = join(root, '.runtime', 'compose', 'observability', 'rules.yml');
+const otel = join(root, '.runtime', 'compose', 'observability', 'otel-collector-config.yaml');
+const dashboard = join(root, '.runtime', 'compose', 'observability', 'dashboard.json');
+const alertmanager = join(root, '.runtime', 'compose', 'observability', 'alertmanager.yml');
+
+function generate() {
+  const result = spawnSync(process.execPath, [generator], { cwd: root, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+}
 
 test('optional observability profile declares external scrape, OTLP, dashboard and webhook paths', () => {
+  generate();
   for (const path of [compose, prometheus, rules, otel, dashboard, alertmanager]) assert.equal(existsSync(path), true, path);
   const composeText = readFileSync(compose, 'utf8');
   assert.match(composeText, /profiles:\s*\["observability"\]/g);
@@ -26,17 +33,19 @@ test('optional observability profile declares external scrape, OTLP, dashboard a
 });
 
 test('compose profile parses without becoming part of the default topology', () => {
-  const result = spawnSync('docker', ['compose', '-f', 'deploy/compose.dev.yaml', '-f', 'deploy/compose.observability.yaml', 'config', '--quiet'], {
+  generate();
+  const result = spawnSync('docker', ['compose', '-f', '.runtime/compose/observability.yaml', 'config', '--quiet'], {
     cwd: root,
     encoding: 'utf8',
   });
   if (result.error?.code === 'ENOENT') return;
   assert.equal(result.status, 0, result.stdout + result.stderr);
-  const defaultText = readFileSync(join(root, 'deploy', 'compose.dev.yaml'), 'utf8');
+  const defaultText = readFileSync(join(root, 'deploy', 'docker-compose.yml'), 'utf8');
   assert.doesNotMatch(defaultText, /prometheus|otel-collector|grafana|alertmanager/);
 });
 
 test('dashboard and alert delivery are local fixtures with no remote destination', () => {
+  generate();
   const dashboardJSON = JSON.parse(readFileSync(dashboard, 'utf8'));
   assert.equal(dashboardJSON.title, 'Gin-Vben-Admin Observability');
   const alertText = readFileSync(alertmanager, 'utf8');

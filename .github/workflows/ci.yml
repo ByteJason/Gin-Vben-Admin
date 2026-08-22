@@ -118,9 +118,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Validate development topology
-        run: docker compose -f deploy/compose.dev.yaml config --quiet
-      - name: Validate dependency topology
-        run: docker compose -f deploy/compose.dependencies.yaml config --quiet
+        run: |
+          node scripts/prepare-runtime-compose.mjs
+          docker compose -f deploy/docker-compose.yml config --quiet
+          for compose in .runtime/compose/dev.yaml .runtime/compose/postgres.yaml .runtime/compose/read-write.yaml .runtime/compose/ha.yaml .runtime/compose/observability.yaml; do
+            docker compose -f "$compose" config --quiet
+          done
 
   integration:
     name: Single-node integration services
