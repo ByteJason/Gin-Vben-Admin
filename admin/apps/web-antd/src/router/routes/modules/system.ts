@@ -39,6 +39,15 @@ const routes: RouteRecordRaw[] = [
         name: 'SystemAudit',
         path: 'audit',
       },
+      {
+        component: () => import('#/views/system/files/index.vue'),
+        meta: {
+          icon: 'lucide:folder-open',
+          title: $t('page.files.title'),
+        },
+        name: 'SystemFiles',
+        path: 'files',
+      },
     ],
   },
 ];
