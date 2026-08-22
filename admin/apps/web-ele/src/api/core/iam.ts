@@ -45,11 +45,16 @@ export interface IAMRole {
   dataScope?: IAMRoleDataScope;
   id: string;
   name: string;
+  permissionIds?: string[];
   userIds?: string[];
 }
 
 export interface IAMRoleUsersReplaceInput {
   userIds: string[];
+}
+
+export interface IAMRolePermissionsReplaceInput {
+  permissionIds: string[];
 }
 
 export interface IAMRoleCreateInput {
@@ -185,8 +190,14 @@ const loginEventsPath = (id: string) =>
   );
 const roleUsersPath = (id: string) =>
   ADMIN_ENDPOINTS.replaceIAMRoleUsers.replace('{id}', encodeURIComponent(id));
+const rolePermissionsPath = (id: string) =>
+  ADMIN_ENDPOINTS.replaceIAMRolePermissions.replace(
+    '{id}',
+    encodeURIComponent(id),
+  );
 
 const roleAssignmentLimit = 100;
+const rolePermissionLimit = 200;
 
 export async function listIAMUsersApi(params: IAMUserListParams = {}) {
   return requestClient.get<IAMUserPage>(ADMIN_ENDPOINTS.listIAMUsers, {
@@ -261,6 +272,26 @@ export async function replaceIAMRoleUsersApi(
   }
   return requestClient.request<IAMRole>(roleUsersPath(id), {
     data: { userIds },
+    method: 'PUT',
+  });
+}
+
+export async function replaceIAMRolePermissionsApi(
+  id: string,
+  input: IAMRolePermissionsReplaceInput,
+) {
+  const permissionIds = Array.from(
+    new Set(
+      input.permissionIds
+        .map((permissionId) => permissionId.trim())
+        .filter(Boolean),
+    ),
+  );
+  if (permissionIds.length > rolePermissionLimit) {
+    throw new Error('role permissions exceed the bounded relation limit');
+  }
+  return requestClient.request<IAMRole>(rolePermissionsPath(id), {
+    data: { permissionIds },
     method: 'PUT',
   });
 }

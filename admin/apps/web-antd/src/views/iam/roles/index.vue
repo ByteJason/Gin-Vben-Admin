@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type {
+  IAMPermission,
   IAMRole,
   IAMRoleCreateInput,
   IAMRoleDataScope,
@@ -7,7 +8,12 @@ import type {
 
 import { computed, nextTick, onMounted, reactive, ref } from 'vue';
 
-import { createIAMRoleApi, listIAMRolesApi } from '#/api/core/iam';
+import {
+  createIAMRoleApi,
+  listIAMPermissionsApi,
+  listIAMRolesApi,
+  replaceIAMRolePermissionsApi,
+} from '#/api/core/iam';
 import { $t } from '#/locales';
 
 const roles = ref<IAMRole[]>([]);
@@ -20,6 +26,14 @@ const roleFormOpen = ref(false);
 const roleLoading = ref(false);
 const roleError = ref('');
 const roleErrorSummary = ref<HTMLElement | null>(null);
+const permissionEditorOpen = ref(false);
+const permissionRole = ref<IAMRole | null>(null);
+const permissions = ref<IAMPermission[]>([]);
+const permissionSelection = ref<string[]>([]);
+const permissionLoading = ref(false);
+const permissionSaving = ref(false);
+const permissionError = ref('');
+const permissionErrorSummary = ref<HTMLElement | null>(null);
 const roleForm = reactive<{
   active: boolean;
   dataScope: IAMRoleDataScope;
@@ -57,6 +71,82 @@ function closeRoleForm() {
   if (roleLoading.value) return;
   roleFormOpen.value = false;
   roleError.value = '';
+}
+
+async function loadPermissions() {
+  permissionLoading.value = true;
+  permissionError.value = '';
+  try {
+    permissions.value = (await listIAMPermissionsApi())
+      .slice()
+      .sort((a, b) => a.id.localeCompare(b.id));
+  } catch {
+    permissions.value = [];
+    permissionError.value = String($t('page.iam.rolePermissionsLoadError'));
+    await focus(permissionErrorSummary);
+  } finally {
+    permissionLoading.value = false;
+  }
+}
+
+async function openPermissionEditor(role: IAMRole) {
+  permissionRole.value = role;
+  permissionSelection.value = Array.from(
+    new Set(
+      (role.permissionIds ?? [])
+        .map((permissionId) => permissionId.trim())
+        .filter(Boolean),
+    ),
+  );
+  permissionError.value = '';
+  feedback.value = '';
+  permissionEditorOpen.value = true;
+  await loadPermissions();
+}
+
+function closePermissionEditor() {
+  if (permissionSaving.value) return;
+  permissionEditorOpen.value = false;
+  permissionRole.value = null;
+  permissionError.value = '';
+}
+
+async function submitPermissions() {
+  if (!permissionRole.value) return;
+  permissionError.value = '';
+  if (permissionSelection.value.length > 200) {
+    permissionError.value = String($t('page.iam.rolePermissionLimit'));
+    await focus(permissionErrorSummary);
+    return;
+  }
+  permissionSaving.value = true;
+  try {
+    const updated = await replaceIAMRolePermissionsApi(
+      permissionRole.value.id,
+      {
+        permissionIds: permissionSelection.value,
+      },
+    );
+    const index = roles.value.findIndex(
+      (role) => role.id === permissionRole.value?.id,
+    );
+    if (index >= 0) {
+      roles.value[index] = {
+        ...roles.value[index],
+        ...updated,
+        permissionIds: [...permissionSelection.value],
+      };
+    }
+    permissionEditorOpen.value = false;
+    permissionRole.value = null;
+    feedback.value = String($t('page.iam.rolePermissionDone'));
+    await focus(feedbackSummary);
+  } catch {
+    permissionError.value = String($t('page.iam.rolePermissionSaveError'));
+    await focus(permissionErrorSummary);
+  } finally {
+    permissionSaving.value = false;
+  }
 }
 
 function validateRoleForm() {
@@ -188,16 +278,18 @@ onMounted(loadRoles);
               <th scope="col">{{ $t('page.iam.roleName') }}</th>
               <th scope="col">{{ $t('page.iam.roleDataScope') }}</th>
               <th scope="col">{{ $t('page.iam.roleActive') }}</th>
+              <th scope="col">{{ $t('page.iam.rolePermissions') }}</th>
+              <th scope="col">{{ $t('page.iam.actions') }}</th>
             </tr>
           </thead>
           <tbody>
             <tr v-if="loading">
-              <td class="table-state" colspan="4">
+              <td class="table-state" colspan="6">
                 {{ $t('page.iam.rolesLoading') }}
               </td>
             </tr>
             <tr v-else-if="roles.length === 0">
-              <td class="table-state" colspan="4">
+              <td class="table-state" colspan="6">
                 {{ $t('page.iam.rolesEmpty') }}
               </td>
             </tr>
@@ -218,6 +310,16 @@ onMounted(loadRoles);
                       : $t('page.iam.disabled')
                   }}
                 </span>
+              </td>
+              <td>{{ (role.permissionIds ?? []).length }}</td>
+              <td>
+                <button
+                  class="secondary compact"
+                  type="button"
+                  @click="openPermissionEditor(role)"
+                >
+                  {{ $t('page.iam.rolePermissionEdit') }}
+                </button>
               </td>
             </tr>
           </tbody>
@@ -334,6 +436,108 @@ onMounted(loadRoles);
         </form>
       </div>
     </section>
+
+    <section
+      v-if="permissionEditorOpen"
+      id="iam-role-permission-editor"
+      class="modal-backdrop rolePermissionEditor"
+      :aria-label="$t('page.iam.rolePermissionTitle')"
+      @click.self="closePermissionEditor"
+    >
+      <div
+        class="role-dialog permission-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="iam-role-permission-title"
+        aria-describedby="iam-role-permission-description"
+      >
+        <header class="dialog-heading">
+          <div>
+            <p class="eyebrow">{{ $t('page.iam.eyebrow') }}</p>
+            <h2 id="iam-role-permission-title">
+              {{ $t('page.iam.rolePermissionTitle') }}
+            </h2>
+            <p id="iam-role-permission-description" class="description">
+              {{ permissionRole?.name }} ·
+              {{ $t('page.iam.rolePermissionDescription') }}
+            </p>
+          </div>
+          <button
+            class="icon-button"
+            type="button"
+            :aria-label="$t('page.iam.roleCancel')"
+            :disabled="permissionSaving"
+            @click="closePermissionEditor"
+          >
+            ×
+          </button>
+        </header>
+        <p
+          v-if="permissionError"
+          ref="permissionErrorSummary"
+          class="feedback feedback-error"
+          role="alert"
+          tabindex="-1"
+        >
+          {{ permissionError }}
+        </p>
+        <p class="sr-status" aria-live="polite">
+          {{ permissionLoading ? $t('page.iam.rolePermissionsLoading') : '' }}
+        </p>
+        <div v-if="permissionLoading" class="permission-state">
+          {{ $t('page.iam.rolePermissionsLoading') }}
+        </div>
+        <div v-else-if="permissions.length === 0" class="permission-state">
+          {{ $t('page.iam.rolePermissionsEmpty') }}
+        </div>
+        <fieldset v-else class="permission-list" :disabled="permissionSaving">
+          <legend class="sr-only">{{ $t('page.iam.rolePermissions') }}</legend>
+          <label
+            v-for="permission in permissions"
+            :key="permission.id"
+            class="permission-option"
+          >
+            <input
+              v-model="permissionSelection"
+              :value="permission.id"
+              type="checkbox"
+            />
+            <span>
+              <strong>{{ permission.name }}</strong>
+              <small
+                >{{ permission.id }} · {{ permission.method }}
+                {{ permission.path }}</small
+              >
+            </span>
+          </label>
+        </fieldset>
+        <p class="permission-count" aria-live="polite">
+          {{ permissionSelection.length }}/200
+          {{ $t('page.iam.rolePermissions') }}
+        </p>
+        <footer class="dialog-actions">
+          <button
+            type="button"
+            :disabled="permissionSaving"
+            @click="closePermissionEditor"
+          >
+            {{ $t('page.iam.roleCancel') }}
+          </button>
+          <button
+            class="primary"
+            type="button"
+            :disabled="permissionSaving || permissionLoading"
+            @click="submitPermissions"
+          >
+            {{
+              permissionSaving
+                ? $t('page.iam.rolePermissionSaving')
+                : $t('page.iam.rolePermissionSave')
+            }}
+          </button>
+        </footer>
+      </div>
+    </section>
   </main>
 </template>
 
@@ -394,7 +598,8 @@ h2 {
 }
 
 .scope-chip,
-.status-pill {
+.status-pill,
+.secondary {
   display: inline-flex;
   align-items: center;
   min-height: 28px;
@@ -417,6 +622,99 @@ h2 {
 .status-pill[data-status='disabled'] {
   color: hsl(var(--muted-foreground));
   background: hsl(var(--muted));
+}
+
+.secondary {
+  color: hsl(var(--foreground));
+  background: hsl(var(--muted));
+  border: 1px solid hsl(var(--border));
+}
+
+.secondary.compact {
+  min-height: 30px;
+  padding: 4px 9px;
+  font-size: 0.76rem;
+}
+
+.permission-dialog {
+  max-width: 720px;
+}
+
+.permission-list {
+  display: grid;
+  gap: 8px;
+  max-height: 360px;
+  padding: 0;
+  margin: 18px 0 0;
+  overflow: auto;
+  border: 0;
+}
+
+.permission-option {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.permission-option input {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  accent-color: hsl(var(--primary));
+}
+
+.permission-option span {
+  display: grid;
+  gap: 3px;
+}
+
+.permission-option small,
+.permission-count {
+  color: hsl(var(--muted-foreground));
+}
+
+.permission-option small {
+  overflow-wrap: anywhere;
+}
+
+.permission-state {
+  padding: 28px 0;
+  color: hsl(var(--muted-foreground));
+  text-align: center;
+}
+
+.permission-count {
+  margin: 10px 0 0;
+  font-size: 0.82rem;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 3px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
+@media (max-width: 720px) {
+  .iam-roles-page {
+    padding: 16px;
+  }
+
+  .page-heading {
+    flex-direction: column;
+  }
+
+  .table-wrap {
+    overflow-x: auto;
+  }
+
+  table {
+    min-width: 680px;
+  }
 }
 
 .primary {
