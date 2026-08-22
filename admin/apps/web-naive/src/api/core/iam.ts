@@ -46,6 +46,10 @@ export interface IAMRole {
   userIds?: string[];
 }
 
+export interface IAMRoleUsersReplaceInput {
+  userIds: string[];
+}
+
 export interface IAMUserCreateInput {
   active?: boolean;
   avatar?: string;
@@ -131,6 +135,10 @@ const loginEventsPath = (id: string) =>
     '{id}',
     encodeURIComponent(id),
   );
+const roleUsersPath = (id: string) =>
+  ADMIN_ENDPOINTS.replaceIAMRoleUsers.replace('{id}', encodeURIComponent(id));
+
+const roleAssignmentLimit = 100;
 
 export async function listIAMUsersApi(params: IAMUserListParams = {}) {
   return requestClient.get<IAMUserPage>(ADMIN_ENDPOINTS.listIAMUsers, {
@@ -157,6 +165,22 @@ export async function batchUpdateIAMUserStatusApi(
 
 export async function listIAMRolesApi() {
   return requestClient.get<IAMRole[]>(ADMIN_ENDPOINTS.listIAMRoles);
+}
+
+export async function replaceIAMRoleUsersApi(
+  id: string,
+  input: IAMRoleUsersReplaceInput,
+) {
+  const userIds = Array.from(
+    new Set(input.userIds.map((userId) => userId.trim()).filter(Boolean)),
+  );
+  if (userIds.length > roleAssignmentLimit) {
+    throw new Error('role assignment exceeds the bounded member limit');
+  }
+  return requestClient.request<IAMRole>(roleUsersPath(id), {
+    data: { userIds },
+    method: 'PUT',
+  });
 }
 
 export async function getIAMUserApi(id: string) {

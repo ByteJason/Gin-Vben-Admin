@@ -134,6 +134,21 @@
     "loginEventsDateError": "请输入有效的时间范围。",
     "loginEventsPrevious": "上一页",
     "loginEventsNext": "下一页",
-    "form": "用户资料表单"
+    "form": "用户资料表单",
+    "roleAssignment": "角色分配",
+    "roleAssignmentTitle": "分配用户角色",
+    "roleAssignmentDescription": "选择该用户在当前租户与组织范围内的角色；提交只更新发生变化的角色。",
+    "roleAssignmentUser": "用户",
+    "roleAssignmentRoles": "可用角色",
+    "roleAssignmentEmpty": "暂无可分配角色。",
+    "roleAssignmentLoading": "正在保存角色分配…",
+    "roleAssignmentSave": "保存角色",
+    "roleAssignmentSaving": "正在保存…",
+    "roleAssignmentError": "角色分配保存失败，请重试。",
+    "roleAssignmentDone": "用户角色已更新。",
+    "roleAssignmentLimit": "单个角色最多关联 100 个用户。",
+    "roleAssignmentNoChanges": "角色未发生变化。",
+    "roleAssignmentConfirm": "确认更新该用户的角色？",
+    "roleAssignmentLoadError": "角色列表加载失败，请重试。"
   }
 }

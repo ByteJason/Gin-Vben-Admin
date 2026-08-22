@@ -134,6 +134,21 @@
     "loginEventsDateError": "Enter a valid time range.",
     "loginEventsPrevious": "Previous",
     "loginEventsNext": "Next",
-    "form": "User profile form"
+    "form": "User profile form",
+    "roleAssignment": "Assign roles",
+    "roleAssignmentTitle": "Assign user roles",
+    "roleAssignmentDescription": "Choose roles for this user within the current tenant and organization; only changed roles are submitted.",
+    "roleAssignmentUser": "User",
+    "roleAssignmentRoles": "Available roles",
+    "roleAssignmentEmpty": "No roles are available.",
+    "roleAssignmentLoading": "Saving role assignment…",
+    "roleAssignmentSave": "Save roles",
+    "roleAssignmentSaving": "Saving…",
+    "roleAssignmentError": "Role assignment could not be saved. Try again.",
+    "roleAssignmentDone": "User roles updated.",
+    "roleAssignmentLimit": "A role can have at most 100 users.",
+    "roleAssignmentNoChanges": "No role changes were made.",
+    "roleAssignmentConfirm": "Update this user’s roles?",
+    "roleAssignmentLoadError": "Roles could not be loaded. Try again."
   }
 }

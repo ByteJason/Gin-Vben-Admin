@@ -4,6 +4,7 @@ import type {
   IAMUser,
   IAMUserBatchStatusInput,
   IAMUserCreateInput,
+  IAMRoleUsersReplaceInput,
   IAMUserLoginEventPage,
   IAMUserPage,
   IAMUserPasswordResetInput,
@@ -22,6 +23,7 @@ import {
   listIAMUserLoginEventsApi,
   listIAMUsersApi,
   resetIAMUserPasswordApi,
+  replaceIAMRoleUsersApi,
   updateIAMUserApi,
 } from '#/api/core/iam';
 import { $t } from '#/locales';
@@ -38,7 +40,16 @@ const state = reactive({
 const page = ref<IAMUserPage>({ items: [], page: 1, pageSize: 20, total: 0 });
 const roles = ref<IAMRole[]>([]);
 const loading = ref(false);
+const roleAssignmentOpen = ref(false);
+const roleAssignmentLoading = ref(false);
+const roleAssignmentUserId = ref('');
+const roleAssignmentUsername = ref('');
+const roleAssignmentSelectedRoleIds = ref<string[]>([]);
+const roleAssignmentInitialRoleIds = ref<string[]>([]);
+const roleAssignmentError = ref('');
+const roleAssignmentErrorSummary = ref<HTMLElement | null>(null);
 const rolesLoading = ref(false);
+const rolesError = ref('');
 const error = ref('');
 const errorSummary = ref<HTMLElement | null>(null);
 const formError = ref('');
@@ -77,6 +88,7 @@ const loginEventsPage = ref<IAMUserLoginEventPage>({
   total: 0,
 });
 const loginEventsLimit = 50;
+const roleAssignmentLimit = 100;
 const userForm = reactive({
   active: true,
   email: '',
@@ -449,12 +461,107 @@ async function changeLoginEventsPage(nextPage: number) {
   await loadLoginEvents();
 }
 
+function roleIdsForUser(userId: string) {
+  return roles.value
+    .filter((role) => role.userIds?.includes(userId))
+    .map((role) => role.id);
+}
+
+async function focusRoleAssignmentError() {
+  await nextTick();
+  roleAssignmentErrorSummary.value?.focus();
+}
+
+function openRoleAssignment(user: IAMUser) {
+  const currentRoleIds = roleIdsForUser(user.id);
+  roleAssignmentUserId.value = user.id;
+  roleAssignmentUsername.value = user.username;
+  roleAssignmentInitialRoleIds.value = [...currentRoleIds];
+  roleAssignmentSelectedRoleIds.value = [...currentRoleIds];
+  roleAssignmentError.value = rolesError.value;
+  actionError.value = '';
+  actionMessage.value = '';
+  roleAssignmentOpen.value = true;
+}
+
+function closeRoleAssignment() {
+  if (roleAssignmentLoading.value) return;
+  roleAssignmentOpen.value = false;
+  roleAssignmentError.value = '';
+}
+
+function roleAssignmentChanges() {
+  const selected = new Set(roleAssignmentSelectedRoleIds.value);
+  const initial = new Set(roleAssignmentInitialRoleIds.value);
+  return roles.value
+    .filter((role) => selected.has(role.id) !== initial.has(role.id))
+    .map((role) => {
+      const members = new Set(
+        (role.userIds ?? []).map((userId) => userId.trim()).filter(Boolean),
+      );
+      if (selected.has(role.id)) {
+        members.add(roleAssignmentUserId.value);
+      } else {
+        members.delete(roleAssignmentUserId.value);
+      }
+      return { role, userIds: [...members] };
+    });
+}
+
+async function submitRoleAssignment() {
+  roleAssignmentError.value = '';
+  if (rolesError.value) {
+    roleAssignmentError.value = rolesError.value;
+    await focusRoleAssignmentError();
+    return;
+  }
+  const changes = roleAssignmentChanges();
+  if (changes.length === 0) {
+    actionMessage.value = String($t('page.iam.roleAssignmentNoChanges'));
+    roleAssignmentOpen.value = false;
+    await focusActionFeedback();
+    return;
+  }
+  const overLimit = changes.find(
+    (change) => change.userIds.length > roleAssignmentLimit,
+  );
+  if (overLimit) {
+    roleAssignmentError.value = String($t('page.iam.roleAssignmentLimit'));
+    await focusRoleAssignmentError();
+    return;
+  }
+  if (!window.confirm(String($t('page.iam.roleAssignmentConfirm')))) return;
+  roleAssignmentLoading.value = true;
+  actionError.value = '';
+  actionMessage.value = '';
+  try {
+    for (const change of changes) {
+      const input: IAMRoleUsersReplaceInput = { userIds: change.userIds };
+      const updated = await replaceIAMRoleUsersApi(change.role.id, input);
+      const localRole = roles.value.find((role) => role.id === change.role.id);
+      if (localRole) {
+        localRole.userIds = [...(updated.userIds ?? change.userIds)];
+      }
+    }
+    roleAssignmentOpen.value = false;
+    actionMessage.value = String($t('page.iam.roleAssignmentDone'));
+    await Promise.all([loadUsers(), loadRoles()]);
+    await focusActionFeedback();
+  } catch {
+    roleAssignmentError.value = String($t('page.iam.roleAssignmentError'));
+    await focusRoleAssignmentError();
+  } finally {
+    roleAssignmentLoading.value = false;
+  }
+}
+
 async function deleteUser(user: IAMUser) {
   if (
     actionLoading.value ||
     formLoading.value ||
     resetLoading.value ||
-    loginEventsLoading.value
+    loginEventsLoading.value ||
+    roleAssignmentLoading.value
   ) {
     return;
   }
@@ -480,6 +587,7 @@ async function batchUpdate(active: boolean) {
     actionLoading.value ||
     resetLoading.value ||
     loginEventsLoading.value ||
+    roleAssignmentLoading.value ||
     selectedIds.value.length === 0
   ) {
     return;
@@ -535,11 +643,13 @@ async function loadUsers() {
 
 async function loadRoles() {
   rolesLoading.value = true;
+  rolesError.value = '';
   try {
     roles.value = await listIAMRolesApi();
   } catch {
     // A role filter is optional; the user list remains useful when roles are unavailable.
     roles.value = [];
+    rolesError.value = String($t('page.iam.roleAssignmentLoadError'));
   } finally {
     rolesLoading.value = false;
   }
@@ -695,6 +805,7 @@ onMounted(async () => {
               actionLoading ||
               resetLoading ||
               loginEventsLoading ||
+              roleAssignmentLoading ||
               page.items.length === 0
             "
             type="checkbox"
@@ -713,6 +824,7 @@ onMounted(async () => {
               actionLoading ||
               resetLoading ||
               loginEventsLoading ||
+              roleAssignmentLoading ||
               selectedCount === 0
             "
             @click="batchUpdate(true)"
@@ -726,6 +838,7 @@ onMounted(async () => {
               actionLoading ||
               resetLoading ||
               loginEventsLoading ||
+              roleAssignmentLoading ||
               selectedCount === 0
             "
             @click="batchUpdate(false)"
@@ -776,7 +889,8 @@ onMounted(async () => {
                     loading ||
                     actionLoading ||
                     resetLoading ||
-                    loginEventsLoading
+                    loginEventsLoading ||
+                    roleAssignmentLoading
                   "
                   :aria-label="`${$t('page.iam.selectUser')}: ${user.username}`"
                   type="checkbox"
@@ -815,7 +929,8 @@ onMounted(async () => {
                     actionLoading ||
                     formLoading ||
                     resetLoading ||
-                    loginEventsLoading
+                    loginEventsLoading ||
+                    roleAssignmentLoading
                   "
                   @click="openEdit(user)"
                 >
@@ -829,7 +944,24 @@ onMounted(async () => {
                     actionLoading ||
                     formLoading ||
                     resetLoading ||
-                    loginEventsLoading
+                    loginEventsLoading ||
+                    roleAssignmentLoading ||
+                    rolesLoading
+                  "
+                  @click="openRoleAssignment(user)"
+                >
+                  {{ $t('page.iam.roleAssignment') }}
+                </button>
+                <button
+                  class="link-button"
+                  type="button"
+                  :disabled="
+                    loading ||
+                    actionLoading ||
+                    formLoading ||
+                    resetLoading ||
+                    loginEventsLoading ||
+                    roleAssignmentLoading
                   "
                   @click="openLoginEvents(user)"
                 >
@@ -843,7 +975,8 @@ onMounted(async () => {
                     actionLoading ||
                     formLoading ||
                     resetLoading ||
-                    loginEventsLoading
+                    loginEventsLoading ||
+                    roleAssignmentLoading
                   "
                   @click="openResetPassword(user)"
                 >
@@ -857,7 +990,8 @@ onMounted(async () => {
                     actionLoading ||
                     formLoading ||
                     resetLoading ||
-                    loginEventsLoading
+                    loginEventsLoading ||
+                    roleAssignmentLoading
                   "
                   @click="deleteUser(user)"
                 >
@@ -1037,6 +1171,108 @@ onMounted(async () => {
     </section>
 
     <section
+      v-if="roleAssignmentOpen"
+      class="modal-backdrop"
+      :aria-label="$t('page.iam.roleAssignmentTitle')"
+      @click.self="closeRoleAssignment"
+    >
+      <div
+        class="user-dialog role-assignment-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="iam-user-role-assignment-title"
+        aria-describedby="iam-user-role-assignment-description"
+      >
+        <header class="dialog-heading">
+          <div>
+            <p class="eyebrow">{{ $t('page.iam.eyebrow') }}</p>
+            <h2 id="iam-user-role-assignment-title">
+              {{ $t('page.iam.roleAssignmentTitle') }}
+            </h2>
+          </div>
+          <button
+            class="icon-button"
+            type="button"
+            :aria-label="$t('page.iam.cancel')"
+            :disabled="roleAssignmentLoading"
+            @click="closeRoleAssignment"
+          >
+            ×
+          </button>
+        </header>
+        <p
+          id="iam-user-role-assignment-description"
+          class="role-assignment-description"
+        >
+          {{ $t('page.iam.roleAssignmentDescription') }}
+        </p>
+        <p class="role-assignment-user">
+          {{ $t('page.iam.roleAssignmentUser') }}: {{ roleAssignmentUsername }}
+        </p>
+        <p
+          v-if="roleAssignmentError"
+          ref="roleAssignmentErrorSummary"
+          class="feedback feedback-error"
+          role="alert"
+          tabindex="-1"
+        >
+          {{ roleAssignmentError }}
+        </p>
+        <p class="sr-status" aria-live="polite">
+          {{
+            roleAssignmentLoading ? $t('page.iam.roleAssignmentLoading') : ''
+          }}
+        </p>
+        <fieldset class="role-assignment-list">
+          <legend>{{ $t('page.iam.roleAssignmentRoles') }}</legend>
+          <label
+            v-for="role in roles"
+            :key="role.id"
+            class="role-assignment-option"
+          >
+            <input
+              v-model="roleAssignmentSelectedRoleIds"
+              :value="role.id"
+              :disabled="roleAssignmentLoading"
+              type="checkbox"
+            />
+            <span>
+              <strong>{{ role.name }}</strong>
+              <small>{{ role.id }}</small>
+            </span>
+          </label>
+          <p
+            v-if="roles.length === 0 && !roleAssignmentError"
+            class="table-state"
+          >
+            {{ $t('page.iam.roleAssignmentEmpty') }}
+          </p>
+        </fieldset>
+        <footer class="dialog-actions">
+          <button
+            type="button"
+            :disabled="roleAssignmentLoading"
+            @click="closeRoleAssignment"
+          >
+            {{ $t('page.iam.cancel') }}
+          </button>
+          <button
+            class="primary"
+            type="button"
+            :disabled="roleAssignmentLoading"
+            @click="submitRoleAssignment"
+          >
+            {{
+              roleAssignmentLoading
+                ? $t('page.iam.roleAssignmentSaving')
+                : $t('page.iam.roleAssignmentSave')
+            }}
+          </button>
+        </footer>
+      </div>
+    </section>
+
+    <section
       v-if="resetOpen"
       class="modal-backdrop"
       :aria-label="$t('page.iam.resetTitle')"
@@ -1139,7 +1375,7 @@ onMounted(async () => {
             class="icon-button"
             type="button"
             :aria-label="$t('page.iam.cancel')"
-            :disabled="loginEventsLoading"
+            :disabled="loginEventsLoading || roleAssignmentLoading"
             @click="closeLoginEvents"
           >
             ×
@@ -1161,7 +1397,7 @@ onMounted(async () => {
             <input
               id="iam-user-login-events-from"
               v-model="loginEventsFrom"
-              :disabled="loginEventsLoading"
+              :disabled="loginEventsLoading || roleAssignmentLoading"
               type="datetime-local"
             />
           </label>
@@ -1170,7 +1406,7 @@ onMounted(async () => {
             <input
               id="iam-user-login-events-to"
               v-model="loginEventsTo"
-              :disabled="loginEventsLoading"
+              :disabled="loginEventsLoading || roleAssignmentLoading"
               type="datetime-local"
             />
           </label>
@@ -1178,13 +1414,13 @@ onMounted(async () => {
             <button
               class="primary"
               type="submit"
-              :disabled="loginEventsLoading"
+              :disabled="loginEventsLoading || roleAssignmentLoading"
             >
               {{ $t('page.iam.loginEventsApply') }}
             </button>
             <button
               type="button"
-              :disabled="loginEventsLoading"
+              :disabled="loginEventsLoading || roleAssignmentLoading"
               @click="resetLoginEventsFilters"
             >
               {{ $t('page.iam.loginEventsReset') }}
@@ -1258,6 +1494,7 @@ onMounted(async () => {
             type="button"
             :disabled="
               loginEventsLoading ||
+              roleAssignmentLoading ||
               loginEventsCurrentPage >= loginEventsTotalPages
             "
             @click="changeLoginEventsPage(loginEventsCurrentPage + 1)"
@@ -1339,6 +1576,61 @@ h2 {
 
 .reset-dialog {
   width: min(520px, 100%);
+}
+
+.role-assignment-dialog {
+  width: min(620px, 100%);
+}
+
+.role-assignment-description {
+  margin: 0 0 8px;
+  color: hsl(var(--muted-foreground));
+}
+
+.role-assignment-user {
+  margin: 0 0 16px;
+  font-weight: 700;
+}
+
+.role-assignment-list {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+
+.role-assignment-list legend {
+  margin-bottom: 8px;
+  font-size: 0.8rem;
+  font-weight: 650;
+  color: hsl(var(--muted-foreground));
+}
+
+.role-assignment-option {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-height: 48px;
+  padding: 8px 10px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 9px;
+}
+
+.role-assignment-option input {
+  width: 18px;
+  min-height: 18px;
+  padding: 0;
+  accent-color: hsl(var(--primary));
+}
+
+.role-assignment-option span {
+  display: grid;
+  gap: 2px;
+}
+
+.role-assignment-option small {
+  color: hsl(var(--muted-foreground));
 }
 
 .login-events-dialog {
