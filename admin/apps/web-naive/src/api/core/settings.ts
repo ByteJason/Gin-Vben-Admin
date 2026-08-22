@@ -2,17 +2,36 @@ import { ADMIN_ENDPOINTS } from '@vben/api-client';
 
 import { requestClient } from '#/api/request';
 
+export type SettingCategory =
+  | 'basic'
+  | 'captcha'
+  | 'file'
+  | 'i18n'
+  | 'mail'
+  | 'other'
+  | 'security';
+
+export type SettingSource = 'database' | 'default' | 'dotenv' | 'env' | 'yaml';
+
 export interface SettingDefinition {
   allowed?: string[];
+  category: SettingCategory;
   default?: string;
+  description?: string;
+  envKey?: string;
   key: string;
   kind: 'bool' | 'json' | 'number' | 'secret' | 'string';
+  restartRequired: boolean;
   sensitive: boolean;
+  yamlPath?: string;
 }
 
 export interface SettingData {
+  category: SettingCategory;
   key: string;
+  restartRequired: boolean;
   sensitive: boolean;
+  source: SettingSource;
   updatedAt?: string;
   updatedBy?: string;
   value: string;
@@ -27,6 +46,16 @@ export interface SettingUpdateInput {
 export interface SettingRollbackInput {
   expectedVersion: number;
   version: number;
+}
+
+export interface SettingConnectionTestResult {
+  category: SettingCategory;
+  checkedAt: string;
+  key: string;
+  message?: string;
+  requestId: string;
+  source: SettingSource;
+  status: 'failed' | 'ok';
 }
 
 const settingPath = (key: string) =>
@@ -63,4 +92,12 @@ export async function rollbackSettingApi(
     encodeURIComponent(key),
   );
   return requestClient.post<SettingData>(endpoint, input);
+}
+
+export async function testSettingConnectionApi(key: string, value?: unknown) {
+  const endpoint = `${settingPath(key)}/test`;
+  return requestClient.post<SettingConnectionTestResult>(
+    endpoint,
+    value === undefined ? undefined : { value },
+  );
 }

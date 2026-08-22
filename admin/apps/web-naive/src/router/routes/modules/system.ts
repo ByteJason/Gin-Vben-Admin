@@ -21,6 +21,15 @@ const routes: RouteRecordRaw[] = [
         name: 'ObservabilitySettings',
         path: 'observability',
       },
+      {
+        component: () => import('#/views/system/settings/index.vue'),
+        meta: {
+          icon: 'lucide:sliders-horizontal',
+          title: $t('page.settings.title'),
+        },
+        name: 'SystemSettings',
+        path: 'settings',
+      },
     ],
   },
 ];
