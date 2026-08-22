@@ -325,7 +325,10 @@ func TestHTTPCompositionAppliesConfiguredTenantPolicy(t *testing.T) {
 func TestHTTPCompositionAllowsLocalSingleNodeMonitorWithoutAuth(t *testing.T) {
 	cfg := config.Default()
 	cfg.Auth.Enabled = false
-	server := newHTTPServerWithPlanAndCaptchaAndFilesAndAux(cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, monitorapp.NewService(monitorapp.Config{Version: "fixture"}))
+	server := newHTTPServerWithPlanAndCaptchaAndFilesAndAux(
+		cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+		nil, nil, monitorapp.NewService(monitorapp.Config{Version: "fixture"}), nil,
+	)
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/v1/ops/monitor", nil)
 	res := httptest.NewRecorder()
 	server.Handler.ServeHTTP(res, req)

@@ -1108,6 +1108,141 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
 
+  /api/admin/v1/dictionaries:
+    get:
+      tags: [Dictionaries]
+      operationId: listDictionaries
+      summary: 查询当前租户的有效字典类型
+      security: [{BearerAuth: []}]
+      parameters:
+        - { name: includeDisabled, in: query, schema: { type: boolean, default: false } }
+      responses:
+        '200': { $ref: '#/components/responses/SuccessResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Dictionaries]
+      operationId: createDictionary
+      summary: 创建租户字典类型
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DictionaryTypeInput' }
+      responses:
+        '200': { $ref: '#/components/responses/SuccessResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/admin/v1/dictionaries/types/{code}:
+    patch:
+      tags: [Dictionaries]
+      operationId: updateDictionary
+      summary: 更新租户字典类型
+      security: [{BearerAuth: []}]
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DictionaryTypeInput' }
+      responses:
+        '200': { $ref: '#/components/responses/SuccessResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Dictionaries]
+      operationId: deleteDictionary
+      summary: 软删除租户字典类型
+      security: [{BearerAuth: []}]
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      responses:
+        '200': { $ref: '#/components/responses/EmptySuccessResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/admin/v1/dictionaries/{type}/items:
+    get:
+      tags: [Dictionaries]
+      operationId: listDictionaryItems
+      summary: 按语言查询有效字典项
+      security: [{BearerAuth: []}]
+      parameters:
+        - { name: type, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+        - { name: locale, in: query, schema: { type: string, enum: [zh-CN, en-US] } }
+        - { name: includeDisabled, in: query, schema: { type: boolean, default: false } }
+      responses:
+        '200': { $ref: '#/components/responses/SuccessResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Dictionaries]
+      operationId: createDictionaryItem
+      summary: 创建租户字典项覆盖
+      security: [{BearerAuth: []}]
+      parameters:
+        - { name: type, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DictionaryItemInput' }
+      responses:
+        '200': { $ref: '#/components/responses/SuccessResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/admin/v1/dictionaries/{type}/items/import:
+    post:
+      tags: [Dictionaries]
+      operationId: importDictionaryItems
+      summary: 原子批量导入租户字典项
+      security: [{BearerAuth: []}]
+      parameters:
+        - { name: type, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DictionaryImportRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/SuccessResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/admin/v1/dictionaries/{type}/items/{id}:
+    patch:
+      tags: [Dictionaries]
+      operationId: updateDictionaryItem
+      summary: 更新租户字典项
+      security: [{BearerAuth: []}]
+      parameters:
+        - { name: type, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+        - { name: id, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DictionaryItemInput' }
+      responses:
+        '200': { $ref: '#/components/responses/SuccessResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Dictionaries]
+      operationId: deleteDictionaryItem
+      summary: 软删除租户字典项
+      security: [{BearerAuth: []}]
+      parameters:
+        - { name: type, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+        - { name: id, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      responses:
+        '200': { $ref: '#/components/responses/EmptySuccessResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /api/admin/v1/mail/accounts:
     get:
       tags: [Admin]
@@ -1313,6 +1448,78 @@ components:
         minLength: 1
         maxLength: 128
   schemas:
+
+    DictionaryType:
+      type: object
+      required: [id, code, nameZhCN, nameEnUS, status, sortOrder, systemOwned, cacheVersion, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        tenantId: { type: string }
+        orgId: { type: string }
+        code: { type: string, minLength: 1, maxLength: 128 }
+        nameZhCN: { type: string, maxLength: 191 }
+        nameEnUS: { type: string, maxLength: 191 }
+        description: { type: string, maxLength: 512 }
+        status: { type: string, enum: [active, disabled] }
+        sortOrder: { type: integer, minimum: 0 }
+        systemOwned: { type: boolean }
+        cacheVersion: { type: integer, format: int64, minimum: 0 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    DictionaryTypeInput:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code: { type: string, minLength: 1, maxLength: 128 }
+        nameZhCN: { type: string, maxLength: 191 }
+        nameEnUS: { type: string, maxLength: 191 }
+        description: { type: string, maxLength: 512 }
+        status: { type: string, enum: [active, disabled], default: active }
+        sortOrder: { type: integer, minimum: 0, default: 0 }
+    DictionaryItem:
+      type: object
+      required: [id, typeCode, value, labelZhCN, labelEnUS, label, status, sortOrder, systemOwned, cacheVersion, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        tenantId: { type: string }
+        orgId: { type: string }
+        typeCode: { type: string }
+        value: { type: string, minLength: 1, maxLength: 191 }
+        labelZhCN: { type: string, maxLength: 191 }
+        labelEnUS: { type: string, maxLength: 191 }
+        label: { type: string }
+        description: { type: string, maxLength: 512 }
+        tag: { type: string, maxLength: 64 }
+        status: { type: string, enum: [active, disabled] }
+        sortOrder: { type: integer, minimum: 0 }
+        systemOwned: { type: boolean }
+        cacheVersion: { type: integer, format: int64, minimum: 0 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    DictionaryItemInput:
+      type: object
+      additionalProperties: false
+      required: [value]
+      properties:
+        value: { type: string, minLength: 1, maxLength: 191 }
+        labelZhCN: { type: string, maxLength: 191 }
+        labelEnUS: { type: string, maxLength: 191 }
+        description: { type: string, maxLength: 512 }
+        tag: { type: string, maxLength: 64 }
+        status: { type: string, enum: [active, disabled], default: active }
+        sortOrder: { type: integer, minimum: 0, default: 0 }
+        enabled: { type: boolean, default: true }
+    DictionaryImportRequest:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items: { $ref: '#/components/schemas/DictionaryItemInput' }
 
     SMTPAccount:
       type: object

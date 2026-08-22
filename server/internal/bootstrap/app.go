@@ -16,6 +16,7 @@ import (
 
 	auditapp "example.com/gin-vben-admin/server/internal/application/audit"
 	appauth "example.com/gin-vben-admin/server/internal/application/auth"
+	dictionaryapp "example.com/gin-vben-admin/server/internal/application/dictionary"
 	fileapp "example.com/gin-vben-admin/server/internal/application/file"
 	iamapp "example.com/gin-vben-admin/server/internal/application/iam"
 	installer "example.com/gin-vben-admin/server/internal/application/installer"
@@ -28,6 +29,7 @@ import (
 	"example.com/gin-vben-admin/server/internal/platform/auditplatform"
 	"example.com/gin-vben-admin/server/internal/platform/authplatform"
 	rediscache "example.com/gin-vben-admin/server/internal/platform/cache/redis"
+	dictionaryplatform "example.com/gin-vben-admin/server/internal/platform/dictionary"
 	platformhealth "example.com/gin-vben-admin/server/internal/platform/health"
 	"example.com/gin-vben-admin/server/internal/platform/iamplatform"
 	"example.com/gin-vben-admin/server/internal/platform/installplatform"
@@ -52,6 +54,7 @@ type App struct {
 	audit              *auditapp.Service
 	files              *fileapp.Service
 	mail               *mailapp.Service
+	dictionary         *dictionaryapp.Service
 	monitor            *monitorapp.Service
 	observability      *observabilityplatform.Manager
 	settingsRepository settingsapp.Repository
@@ -223,6 +226,13 @@ func New(cfg config.Config) (*App, error) {
 		app.mail = mailService
 	}
 	app.monitor = monitorapp.NewService(monitorapp.Config{Version: "1.0.0-dev", Scope: "process", Start: time.Now(), Database: app.database, Redis: app.redis})
+	var dictionaryRepository dictionaryapp.Repository = dictionaryapp.NewMemoryRepository()
+	var dictionaryAudit dictionaryapp.AuditSink = &dictionaryapp.MemoryAuditSink{}
+	if app.database != nil {
+		dictionaryRepository = dictionaryplatform.NewGORMRepository(app.database)
+		dictionaryAudit = dictionaryplatform.NewGORMAuditSink(app.database)
+	}
+	app.dictionary = dictionaryapp.NewService(dictionaryRepository, dictionaryAudit)
 
 	app.readiness = platformhealth.NewChecker(readinessTimeout(cfg), dependencies...)
 	var limiter appauth.RateLimiter
@@ -272,7 +282,7 @@ func New(cfg config.Config) (*App, error) {
 		captchaProvider = authplatform.NewRedisCaptchaProvider(app.redis, cfg.Auth.CaptchaKeyPrefix, cfg.Auth.CaptchaChallengeTTL)
 		captchaRisk = authplatform.NewRedisCaptchaRiskStore(app.redis, cfg.Auth.CaptchaKeyPrefix)
 	}
-	app.http = newHTTPServerWithPlanAndCaptchaAndFilesAndAux(cfg, app.readiness, app.auth, limiter, app.iam, recovery, app.install, installPlan, installplatform.NewSystemDependencyProbe(), applyService, app.applyJobs, app.settings, app.audit, captchaProvider, captchaRisk, app.files, app.mail, app.monitor, app.observability)
+	app.http = newHTTPServerWithPlanAndCaptchaAndFilesAndAux(cfg, app.readiness, app.auth, limiter, app.iam, recovery, app.install, installPlan, installplatform.NewSystemDependencyProbe(), applyService, app.applyJobs, app.settings, app.audit, captchaProvider, captchaRisk, app.files, app.mail, app.monitor, app.dictionary, app.observability)
 	return app, nil
 }
 

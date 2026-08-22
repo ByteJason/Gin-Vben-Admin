@@ -5,6 +5,7 @@ import (
 
 	audithttp "example.com/gin-vben-admin/server/internal/transport/http/audit"
 	authhttp "example.com/gin-vben-admin/server/internal/transport/http/auth"
+	dictionaryhttp "example.com/gin-vben-admin/server/internal/transport/http/dictionary"
 	filehttp "example.com/gin-vben-admin/server/internal/transport/http/file"
 	iamhttp "example.com/gin-vben-admin/server/internal/transport/http/iam"
 	mailhttp "example.com/gin-vben-admin/server/internal/transport/http/mail"
@@ -23,6 +24,7 @@ type AuxiliaryRoutes struct {
 	Files        *filehttp.Handler
 	Mail         *mailhttp.Handler
 	Monitor      *monitorhttp.Handler
+	Dictionary   *dictionaryhttp.Handler
 	TenantPolicy *httpmiddleware.TenantPolicy
 }
 
@@ -56,6 +58,7 @@ func RegisterRoutesWithIAM(r gin.IRouter, authHandler *authhttp.Handler, iamHand
 		filehttp.RegisterRoutesOn(protected, capabilities.Files)
 		mailhttp.RegisterRoutesOn(protected, capabilities.Mail)
 		monitorhttp.RegisterRoutesOn(protected, capabilities.Monitor)
+		dictionaryhttp.RegisterRoutesOn(protected, capabilities.Dictionary)
 		return
 	}
 	// When authentication is deliberately disabled for a local single-node
@@ -68,4 +71,5 @@ func RegisterRoutesWithIAM(r gin.IRouter, authHandler *authhttp.Handler, iamHand
 	filehttp.RegisterRoutesOn(localScoped, capabilities.Files)
 	mailhttp.RegisterRoutesOn(localScoped, capabilities.Mail)
 	monitorhttp.RegisterRoutesOn(localScoped, capabilities.Monitor)
+	dictionaryhttp.RegisterRoutesOn(localScoped, capabilities.Dictionary)
 }

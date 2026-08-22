@@ -1,5 +1,5 @@
 // Generated from contracts/openapi/admin-v1.yaml; DO NOT EDIT.
-// CONTRACT_SHA256=e682e47e206cbf8d83ba9b360e18e663a39b736c623b185c71ef4bc1e30c1c52
+// CONTRACT_SHA256=89f81ee2fa343af573e02f36126f039d6c1748486b1cd25cac37d2033d71468c
 
 export const ADMIN_API_PREFIX = '/admin/v1' as const;
 
@@ -58,6 +58,15 @@ export const ADMIN_ENDPOINTS = {
   previewFile: '/admin/v1/files/{id}/preview',
   signFileURL: '/admin/v1/files/{id}/signed-url',
   fileCleanupDryRun: '/admin/v1/files/cleanup/dry-run',
+  listDictionaries: '/admin/v1/dictionaries',
+  createDictionary: '/admin/v1/dictionaries',
+  updateDictionary: '/admin/v1/dictionaries/types/{code}',
+  deleteDictionary: '/admin/v1/dictionaries/types/{code}',
+  listDictionaryItems: '/admin/v1/dictionaries/{type}/items',
+  createDictionaryItem: '/admin/v1/dictionaries/{type}/items',
+  importDictionaryItems: '/admin/v1/dictionaries/{type}/items/import',
+  updateDictionaryItem: '/admin/v1/dictionaries/{type}/items/{id}',
+  deleteDictionaryItem: '/admin/v1/dictionaries/{type}/items/{id}',
   listSMTPAccounts: '/admin/v1/mail/accounts',
   createSMTPAccount: '/admin/v1/mail/accounts',
   updateSMTPAccount: '/admin/v1/mail/accounts/{id}',
