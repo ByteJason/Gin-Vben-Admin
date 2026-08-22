@@ -80,6 +80,39 @@ type SMTPConfig struct {
 	StartTLS bool
 }
 
+// SMTPAccount describes one independently selectable SMTP sender.
+type SMTPAccount struct {
+	Enabled     bool
+	Name        string
+	TenantID    string
+	Host        string
+	Port        int
+	Username    string
+	Password    string
+	Weight      int
+	FromEmail   string
+	FromName    string
+	ImplicitTLS bool
+}
+
+type SMTPSelection string
+
+const (
+	SMTPSelectionWeightedRandom SMTPSelection = "weighted_random"
+	SMTPSelectionRoundRobin     SMTPSelection = "round_robin"
+)
+
+func (a SMTPAccount) Validate() error {
+	from := strings.TrimSpace(a.FromEmail)
+	if from == "" || strings.TrimSpace(a.Host) == "" || a.Port <= 0 || a.Port > 65535 || a.Weight < 0 || strings.ContainsAny(a.Host+a.Username+a.Password+a.FromEmail+a.FromName+a.Name+a.TenantID, "\r\n") {
+		return ErrInvalidMessage
+	}
+	if _, err := mail.ParseAddress(from); err != nil {
+		return ErrInvalidMessage
+	}
+	return nil
+}
+
 func (c SMTPConfig) Validate() error {
 	if strings.TrimSpace(c.Host) == "" || c.Port <= 0 || c.Port > 65535 || strings.ContainsAny(c.Host+c.Username+c.Password+c.From, "\r\n") {
 		return ErrInvalidMessage

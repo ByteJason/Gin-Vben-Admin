@@ -81,6 +81,66 @@ func TestSMTPMailerHonorsCanceledContext(t *testing.T) {
 	}
 }
 
+func TestSMTPPoolSelectionIsDeterministicAndWeighted(t *testing.T) {
+	p, err := NewSMTPPoolMailer(SMTPPoolConfig{Selection: appnotification.SMTPSelectionRoundRobin, Accounts: []appnotification.SMTPAccount{
+		{Enabled: true, Name: "a", Host: "a.test", Port: 25, FromEmail: "a@example.test"},
+		{Enabled: true, Name: "b", Host: "b.test", Port: 25, FromEmail: "b@example.test"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.pick()[0].Name; got != "a" {
+		t.Fatalf("first round-robin=%q", got)
+	}
+	if got := p.pick()[0].Name; got != "b" {
+		t.Fatalf("second round-robin=%q", got)
+	}
+	p, err = NewSMTPPoolMailer(SMTPPoolConfig{Accounts: []appnotification.SMTPAccount{
+		{Enabled: true, Name: "a", Host: "a.test", Port: 25, Weight: 3, FromEmail: "a@example.test"},
+		{Enabled: true, Name: "b", Host: "b.test", Port: 25, Weight: 1, FromEmail: "b@example.test"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.SetRNG(func(int) int { return 3 })
+	if got := p.pick()[0].Name; got != "b" {
+		t.Fatalf("weighted pick=%q", got)
+	}
+}
+
+func TestSMTPPoolCapsAttemptsAndCoolsFailedAccounts(t *testing.T) {
+	p, err := NewSMTPPoolMailer(SMTPPoolConfig{Selection: appnotification.SMTPSelectionRoundRobin, Accounts: []appnotification.SMTPAccount{
+		{Enabled: true, Name: "a", TenantID: "tenant", Host: "a.test", Port: 587, Username: "user-a", Password: "pass-a", FromEmail: "a@example.test"},
+		{Enabled: true, Name: "b", TenantID: "tenant", Host: "b.test", Port: 587, Username: "user-b", Password: "pass-b", FromEmail: "b@example.test"},
+		{Enabled: true, Name: "c", TenantID: "tenant", Host: "c.test", Port: 587, Username: "user-c", Password: "pass-c", FromEmail: "c@example.test"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.SetRetryPolicy(3, []time.Duration{0})
+	p.SetCooldown(time.Minute)
+	now := time.Now()
+	p.SetClock(func() time.Time { return now })
+	var dials int
+	p.SetDialContext(func(context.Context, string, string) (net.Conn, error) {
+		dials++
+		return nil, errors.New("fixture dial failure")
+	})
+	msg := appnotification.Message{To: "user@example.test", Subject: "fixture", Body: "fixture"}
+	if err := p.Send(context.Background(), msg); !errors.Is(err, appnotification.ErrProvider) {
+		t.Fatalf("Send() error = %v, want provider error", err)
+	}
+	if dials != 3 {
+		t.Fatalf("dials=%d, want max attempts 3", dials)
+	}
+	if err := p.Send(context.Background(), msg); !errors.Is(err, appnotification.ErrProvider) {
+		t.Fatalf("cooled Send() error = %v, want provider error", err)
+	}
+	if dials != 3 {
+		t.Fatalf("cooled dials=%d, want no additional attempts", dials)
+	}
+}
+
 type smtpFixture struct {
 	client net.Conn
 	server net.Conn
