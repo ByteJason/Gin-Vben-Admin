@@ -13,6 +13,7 @@ import (
 	mailapp "example.com/gin-vben-admin/server/internal/application/mail"
 	monitorapp "example.com/gin-vben-admin/server/internal/application/monitor"
 	settingsapp "example.com/gin-vben-admin/server/internal/application/settings"
+	tasksapp "example.com/gin-vben-admin/server/internal/application/tasks"
 	"example.com/gin-vben-admin/server/internal/config"
 	"example.com/gin-vben-admin/server/internal/platform/installplatform"
 	"example.com/gin-vben-admin/server/internal/platform/webassets"
@@ -29,6 +30,7 @@ import (
 	monitorhttp "example.com/gin-vben-admin/server/internal/transport/http/monitor"
 	"example.com/gin-vben-admin/server/internal/transport/http/router"
 	settingshttp "example.com/gin-vben-admin/server/internal/transport/http/settings"
+	taskshttp "example.com/gin-vben-admin/server/internal/transport/http/tasks"
 	"github.com/gin-gonic/gin"
 )
 
@@ -59,6 +61,10 @@ func newHTTPServerWithPlanAndCaptchaAndFiles(cfg config.Config, readiness health
 }
 
 func newHTTPServerWithPlanAndCaptchaAndFilesAndAux(cfg config.Config, readiness health.ReadinessChecker, authService appauth.AuthService, limiter appauth.RateLimiter, iamService *iamapp.Service, recovery appauth.AccountRecoveryService, installStatus *installer.StatusService, installPlan installer.PlanProvider, dependencyChecks installhttp.DependencyCheckProvider, applyService *installer.ApplyService, jobService *installer.ApplyJobService, settingsService *settingsapp.Service, auditService *auditapp.Service, captchaProvider appauth.CaptchaProvider, captchaRisk appauth.CaptchaRiskStore, fileService *fileapp.Service, mailService *mailapp.Service, monitorService *monitorapp.Service, dictionaryService *dictionaryapp.Service, observations ...httpmiddleware.ObservabilityRuntime) *http.Server {
+	return newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasks(cfg, readiness, authService, limiter, iamService, recovery, installStatus, installPlan, dependencyChecks, applyService, jobService, settingsService, auditService, captchaProvider, captchaRisk, fileService, mailService, monitorService, dictionaryService, nil, observations...)
+}
+
+func newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasks(cfg config.Config, readiness health.ReadinessChecker, authService appauth.AuthService, limiter appauth.RateLimiter, iamService *iamapp.Service, recovery appauth.AccountRecoveryService, installStatus *installer.StatusService, installPlan installer.PlanProvider, dependencyChecks installhttp.DependencyCheckProvider, applyService *installer.ApplyService, jobService *installer.ApplyJobService, settingsService *settingsapp.Service, auditService *auditapp.Service, captchaProvider appauth.CaptchaProvider, captchaRisk appauth.CaptchaRiskStore, fileService *fileapp.Service, mailService *mailapp.Service, monitorService *monitorapp.Service, dictionaryService *dictionaryapp.Service, taskService *tasksapp.Service, observations ...httpmiddleware.ObservabilityRuntime) *http.Server {
 	var authHandler *authhttp.Handler
 	if authService != nil {
 		authHandler = authhttp.NewHandler(authService, cfg.Auth, limiter)
@@ -95,6 +101,9 @@ func newHTTPServerWithPlanAndCaptchaAndFilesAndAux(cfg config.Config, readiness 
 	}
 	if dictionaryService != nil {
 		auxiliary.Dictionary = dictionaryhttp.NewHandler(dictionaryService)
+	}
+	if taskService != nil {
+		auxiliary.Tasks = taskshttp.NewHandler(taskService)
 	}
 	tenantPolicy := httpmiddleware.TenantPolicy{
 		Mode:                  cfg.Tenant.Mode,

@@ -24,6 +24,7 @@ import (
 	monitorapp "example.com/gin-vben-admin/server/internal/application/monitor"
 	appnotification "example.com/gin-vben-admin/server/internal/application/notification"
 	settingsapp "example.com/gin-vben-admin/server/internal/application/settings"
+	tasksapp "example.com/gin-vben-admin/server/internal/application/tasks"
 	"example.com/gin-vben-admin/server/internal/config"
 	"example.com/gin-vben-admin/server/internal/domain/tenant"
 	"example.com/gin-vben-admin/server/internal/platform/auditplatform"
@@ -38,6 +39,7 @@ import (
 	observabilityplatform "example.com/gin-vben-admin/server/internal/platform/observability"
 	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
 	"example.com/gin-vben-admin/server/internal/platform/settingsplatform"
+	tasksplatform "example.com/gin-vben-admin/server/internal/platform/tasks"
 )
 
 // App is the composition root for the API process. Optional infrastructure is
@@ -55,6 +57,7 @@ type App struct {
 	files              *fileapp.Service
 	mail               *mailapp.Service
 	dictionary         *dictionaryapp.Service
+	tasks              *tasksapp.Service
 	monitor            *monitorapp.Service
 	observability      *observabilityplatform.Manager
 	settingsRepository settingsapp.Repository
@@ -233,6 +236,11 @@ func New(cfg config.Config) (*App, error) {
 		dictionaryAudit = dictionaryplatform.NewGORMAuditSink(app.database)
 	}
 	app.dictionary = dictionaryapp.NewService(dictionaryRepository, dictionaryAudit)
+	var taskRepository tasksapp.Repository = tasksapp.NewMemoryRepository()
+	if app.database != nil {
+		taskRepository = tasksplatform.NewGORMRepository(app.database)
+	}
+	app.tasks = tasksapp.NewService(taskRepository)
 
 	app.readiness = platformhealth.NewChecker(readinessTimeout(cfg), dependencies...)
 	var limiter appauth.RateLimiter
@@ -282,7 +290,7 @@ func New(cfg config.Config) (*App, error) {
 		captchaProvider = authplatform.NewRedisCaptchaProvider(app.redis, cfg.Auth.CaptchaKeyPrefix, cfg.Auth.CaptchaChallengeTTL)
 		captchaRisk = authplatform.NewRedisCaptchaRiskStore(app.redis, cfg.Auth.CaptchaKeyPrefix)
 	}
-	app.http = newHTTPServerWithPlanAndCaptchaAndFilesAndAux(cfg, app.readiness, app.auth, limiter, app.iam, recovery, app.install, installPlan, installplatform.NewSystemDependencyProbe(), applyService, app.applyJobs, app.settings, app.audit, captchaProvider, captchaRisk, app.files, app.mail, app.monitor, app.dictionary, app.observability)
+	app.http = newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasks(cfg, app.readiness, app.auth, limiter, app.iam, recovery, app.install, installPlan, installplatform.NewSystemDependencyProbe(), applyService, app.applyJobs, app.settings, app.audit, captchaProvider, captchaRisk, app.files, app.mail, app.monitor, app.dictionary, app.tasks, app.observability)
 	return app, nil
 }
 

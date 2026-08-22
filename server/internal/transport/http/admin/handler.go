@@ -13,6 +13,7 @@ import (
 	monitorhttp "example.com/gin-vben-admin/server/internal/transport/http/monitor"
 	"example.com/gin-vben-admin/server/internal/transport/http/response"
 	settingshttp "example.com/gin-vben-admin/server/internal/transport/http/settings"
+	taskshttp "example.com/gin-vben-admin/server/internal/transport/http/tasks"
 )
 
 // AuxiliaryRoutes contains optional B6 management capabilities. Keeping this
@@ -25,6 +26,7 @@ type AuxiliaryRoutes struct {
 	Mail         *mailhttp.Handler
 	Monitor      *monitorhttp.Handler
 	Dictionary   *dictionaryhttp.Handler
+	Tasks        *taskshttp.Handler
 	TenantPolicy *httpmiddleware.TenantPolicy
 }
 
@@ -59,6 +61,7 @@ func RegisterRoutesWithIAM(r gin.IRouter, authHandler *authhttp.Handler, iamHand
 		mailhttp.RegisterRoutesOn(protected, capabilities.Mail)
 		monitorhttp.RegisterRoutesOn(protected, capabilities.Monitor)
 		dictionaryhttp.RegisterRoutesOn(protected, capabilities.Dictionary)
+		taskshttp.RegisterRoutesOn(protected, capabilities.Tasks)
 		return
 	}
 	// When authentication is deliberately disabled for a local single-node
@@ -72,4 +75,5 @@ func RegisterRoutesWithIAM(r gin.IRouter, authHandler *authhttp.Handler, iamHand
 	mailhttp.RegisterRoutesOn(localScoped, capabilities.Mail)
 	monitorhttp.RegisterRoutesOn(localScoped, capabilities.Monitor)
 	dictionaryhttp.RegisterRoutesOn(localScoped, capabilities.Dictionary)
+	taskshttp.RegisterRoutesOn(localScoped, capabilities.Tasks)
 }
