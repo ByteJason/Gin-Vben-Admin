@@ -327,6 +327,79 @@ func TestServiceReplaceRoleUsersScopesAndPreservesOtherRelationships(t *testing.
 	}
 }
 
+func TestServiceReplaceRolePermissionsAtomicallyReplacesRolePolicies(t *testing.T) {
+	store := NewMemoryStore()
+	if err := store.SaveRole(context.Background(), domain.Role{ID: "role-editor", Name: "Editor", TenantID: "tenant-a", OrgID: "org-a", Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	permissions := []domain.Permission{
+		{ID: "users.read", Name: "Read users", Method: "GET", Path: "/users"},
+		{ID: "users.write", Name: "Write users", Method: "POST", Path: "/users"},
+		{ID: "roles.read", Name: "Read roles", Method: "GET", Path: "/roles"},
+	}
+	for _, permission := range permissions {
+		if err := store.SavePermission(context.Background(), permission); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.SavePolicy(context.Background(), domain.Policy{Subject: "u-direct", Method: "GET", Path: "/direct", Effect: domain.EffectAllow}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SavePolicy(context.Background(), domain.Policy{RoleID: "role-editor", PermissionID: "old", Domain: "tenant-a", Method: "DELETE", Path: "/old", Effect: domain.EffectAllow}); err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(store)
+	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a", Organization: "org-a"})
+	updated, err := service.ReplaceRolePermissions(ctx, "role-editor", RolePermissionsInput{PermissionIDs: []string{"roles.read", "users.read"}})
+	if err != nil {
+		t.Fatalf("ReplaceRolePermissions() error = %v", err)
+	}
+	if got, want := updated.PermissionIDs, []string{"roles.read", "users.read"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("permission IDs = %v, want %v", got, want)
+	}
+	policies, err := store.ListPolicies(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rolePolicies := make(map[string]domain.Policy)
+	for _, policy := range policies {
+		if policy.RoleID == "role-editor" {
+			rolePolicies[policy.PermissionID] = policy
+		}
+	}
+	if len(rolePolicies) != 2 || rolePolicies["roles.read"].Path != "/roles" || rolePolicies["users.read"].Path != "/users" {
+		t.Fatalf("role policies = %+v", rolePolicies)
+	}
+	if _, ok := rolePolicies["old"]; ok {
+		t.Fatal("old role policy was not removed")
+	}
+	if len(policies) != 3 {
+		t.Fatalf("direct policy was not preserved: %+v", policies)
+	}
+
+	if _, err := service.ReplaceRolePermissions(ctx, "role-editor", RolePermissionsInput{PermissionIDs: []string{"users.read", "users.read"}}); !errors.Is(err, ErrInvalidRolePermissionAssignment) {
+		t.Fatalf("duplicate permission error = %v", err)
+	}
+	if _, err := service.ReplaceRolePermissions(ctx, "role-editor", RolePermissionsInput{PermissionIDs: []string{"missing"}}); !errors.Is(err, domain.ErrResourceNotFound) {
+		t.Fatalf("missing permission error = %v", err)
+	}
+	if _, err := service.ReplaceRolePermissions(tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-b"}), "role-editor", RolePermissionsInput{}); !errors.Is(err, tenant.ErrCrossTenant) {
+		t.Fatalf("cross-tenant permission error = %v", err)
+	}
+}
+
+func TestServiceReplaceRolePermissionsRejectsOversizedPayload(t *testing.T) {
+	store := NewMemoryStore()
+	if err := store.SaveRole(context.Background(), domain.Role{ID: "role-editor", TenantID: "tenant-a", Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(store)
+	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a"})
+	if _, err := service.ReplaceRolePermissions(ctx, "role-editor", RolePermissionsInput{PermissionIDs: make([]string, MaxRolePermissionBindings+1)}); !errors.Is(err, ErrInvalidRolePermissionAssignment) {
+		t.Fatalf("oversized permission error = %v", err)
+	}
+}
+
 func TestServiceDeleteUserSoftDeletesWithinScopeAndIsIdempotent(t *testing.T) {
 	store := NewMemoryStore()
 	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a", Organization: "org-a"})

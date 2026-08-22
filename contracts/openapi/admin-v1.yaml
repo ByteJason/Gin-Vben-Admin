@@ -623,6 +623,39 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
+  /api/admin/v1/iam/roles/{id}/permissions:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1, maxLength: 128 }
+    put:
+      tags: [IAM]
+      operationId: replaceIAMRolePermissions
+      summary: 替换角色 API 与按钮权限
+      description: 在当前租户和组织范围内原子替换角色权限关系，最多 200 个唯一 permission ID；写入 iam_policies，响应不包含凭据。
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IAMRolePermissionsReplaceRequest' }
+      responses:
+        '200':
+          description: 角色权限替换成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/IAMRole' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
   /api/admin/v1/settings:
     get:
       tags: [Settings]
@@ -1061,6 +1094,9 @@ components:
         userIds:
           type: array
           items: { type: string }
+        permissionIds:
+          type: array
+          items: { type: string }
     IAMRoleRequest:
       allOf:
         - $ref: '#/components/schemas/IAMRole'
@@ -1072,6 +1108,15 @@ components:
         userIds:
           type: array
           maxItems: 100
+          items: { type: string, minLength: 1, maxLength: 128 }
+    IAMRolePermissionsReplaceRequest:
+      type: object
+      additionalProperties: false
+      required: [permissionIds]
+      properties:
+        permissionIds:
+          type: array
+          maxItems: 200
           items: { type: string, minLength: 1, maxLength: 128 }
     IAMMenu:
       type: object

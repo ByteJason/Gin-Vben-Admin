@@ -184,12 +184,13 @@ func (q UserListQuery) SortKey() (string, bool) {
 }
 
 type Role struct {
-	ID, Name  string
-	TenantID  string
-	OrgID     string
-	Active    bool
-	UserIDs   []string
-	DataScope Scope
+	ID, Name      string
+	TenantID      string
+	OrgID         string
+	Active        bool
+	UserIDs       []string
+	PermissionIDs []string
+	DataScope     Scope
 }
 
 type Menu struct {

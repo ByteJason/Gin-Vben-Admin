@@ -15,14 +15,15 @@ import (
 )
 
 var (
-	ErrInvalidID             = errors.New("id is required")
-	ErrRepositoryMissing     = errors.New("iam repository capability is unavailable")
-	ErrInvalidUserQuery      = domain.ErrInvalidUserQuery
-	ErrInvalidUser           = domain.ErrInvalidUser
-	ErrInvalidUserBatch      = errors.New("invalid user status batch")
-	ErrInvalidRoleAssignment = errors.New("invalid role assignment")
-	ErrUserConflict          = domain.ErrUserConflict
-	ErrPasswordHasherMissing = errors.New("iam password hasher is unavailable")
+	ErrInvalidID                       = errors.New("id is required")
+	ErrRepositoryMissing               = errors.New("iam repository capability is unavailable")
+	ErrInvalidUserQuery                = domain.ErrInvalidUserQuery
+	ErrInvalidUser                     = domain.ErrInvalidUser
+	ErrInvalidUserBatch                = errors.New("invalid user status batch")
+	ErrInvalidRoleAssignment           = errors.New("invalid role assignment")
+	ErrInvalidRolePermissionAssignment = errors.New("invalid role permission assignment")
+	ErrUserConflict                    = domain.ErrUserConflict
+	ErrPasswordHasherMissing           = errors.New("iam password hasher is unavailable")
 )
 
 // maxUserBatchStatusItems bounds the number of status mutations accepted by
@@ -39,6 +40,13 @@ const maxRoleAssignmentUsers = 100
 // MaxRoleAssignmentUsers is exported so transport and clients share the
 // bounded role-membership contract.
 const MaxRoleAssignmentUsers = maxRoleAssignmentUsers
+
+const maxRolePermissionBindings = 200
+
+// MaxRolePermissionBindings bounds one atomic replacement of a role's API and
+// button permission relations. The same limit is enforced by HTTP, memory,
+// and durable adapters.
+const MaxRolePermissionBindings = maxRolePermissionBindings
 
 // PasswordHasher is the narrow credential boundary used by the IAM write
 // seam. Plaintext passwords are accepted only for the duration of the
@@ -78,6 +86,12 @@ type UserPasswordResetInput struct {
 // empty list intentionally clears the role for the current scope.
 type RoleUsersInput struct {
 	UserIDs []string
+}
+
+// RolePermissionsInput is the replacement payload for one role's permission
+// relations. An empty list intentionally clears the role in the current scope.
+type RolePermissionsInput struct {
+	PermissionIDs []string
 }
 
 // UserStatusChangeInput is the transport-neutral input for one status change.
@@ -433,6 +447,59 @@ func (s *MemoryStore) AssignRoleUsers(ctx context.Context, roleID string, userID
 	return cloneRole(role), nil
 }
 
+// AssignRolePermissions atomically replaces only role policy rows. Direct-user
+// policies and policies belonging to other roles remain untouched.
+func (s *MemoryStore) AssignRolePermissions(ctx context.Context, roleID string, permissionIDs []string) (domain.Role, error) {
+	if err := check(ctx); err != nil {
+		return domain.Role{}, err
+	}
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" {
+		return domain.Role{}, ErrInvalidID
+	}
+	normalized, err := normalizeRolePermissionIDs(permissionIDs)
+	if err != nil {
+		return domain.Role{}, err
+	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return domain.Role{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	role, ok := s.roles[roleID]
+	if !ok {
+		return domain.Role{}, domain.ErrResourceNotFound
+	}
+	if err := checkRoleScope(scope, role); err != nil {
+		return domain.Role{}, err
+	}
+	for _, permissionID := range normalized {
+		if _, exists := s.permissions[permissionID]; !exists {
+			return domain.Role{}, domain.ErrResourceNotFound
+		}
+	}
+	retained := make([]domain.Policy, 0, len(s.policies)+len(normalized))
+	for _, policy := range s.policies {
+		if strings.TrimSpace(policy.RoleID) == roleID {
+			continue
+		}
+		retained = append(retained, policy)
+	}
+	s.policies = retained
+	for _, permissionID := range normalized {
+		permission := s.permissions[permissionID]
+		s.policies = append(s.policies, domain.Policy{
+			RoleID: roleID, PermissionID: permissionID, Domain: scope.TenantID,
+			Method: permission.Method, Path: permission.Path,
+			Action: permission.Method, Object: permission.Path, Effect: domain.EffectAllow,
+		})
+	}
+	role.PermissionIDs = append([]string(nil), normalized...)
+	s.roles[roleID] = cloneRole(role)
+	return cloneRole(role), nil
+}
+
 func (s *MemoryStore) ListRoles(ctx context.Context) ([]domain.Role, error) {
 	if err := check(ctx); err != nil {
 		return nil, err
@@ -571,6 +638,7 @@ func cloneUser(user domain.User) domain.User {
 
 func cloneRole(role domain.Role) domain.Role {
 	role.UserIDs = append([]string(nil), role.UserIDs...)
+	role.PermissionIDs = append([]string(nil), role.PermissionIDs...)
 	return role
 }
 
@@ -600,6 +668,26 @@ func normalizeRoleUserIDs(userIDs []string) ([]string, error) {
 		}
 		seen[userID] = struct{}{}
 		normalized[index] = userID
+	}
+	return normalized, nil
+}
+
+func normalizeRolePermissionIDs(permissionIDs []string) ([]string, error) {
+	if len(permissionIDs) > maxRolePermissionBindings {
+		return nil, ErrInvalidRolePermissionAssignment
+	}
+	normalized := make([]string, len(permissionIDs))
+	seen := make(map[string]struct{}, len(permissionIDs))
+	for index, permissionID := range permissionIDs {
+		permissionID = strings.TrimSpace(permissionID)
+		if permissionID == "" || len(permissionID) > 128 {
+			return nil, ErrInvalidRolePermissionAssignment
+		}
+		if _, exists := seen[permissionID]; exists {
+			return nil, ErrInvalidRolePermissionAssignment
+		}
+		seen[permissionID] = struct{}{}
+		normalized[index] = permissionID
 	}
 	return normalized, nil
 }
@@ -649,6 +737,9 @@ type userBatchStatusUpdater interface {
 }
 type roleUserAssigner interface {
 	AssignRoleUsers(context.Context, string, []string) (domain.Role, error)
+}
+type rolePermissionAssigner interface {
+	AssignRolePermissions(context.Context, string, []string) (domain.Role, error)
 }
 type userPasswordUpdater interface {
 	UpdateUserPassword(context.Context, string, string, time.Time) (domain.User, error)
@@ -1424,6 +1515,73 @@ func (s *Service) ReplaceRoleUsers(ctx context.Context, roleID string, input Rol
 		updated = role
 	}
 	updated.UserIDs = append([]string(nil), normalized...)
+	if err := s.invalidate(ctx); err != nil {
+		return domain.Role{}, err
+	}
+	return updated, nil
+}
+
+// ReplaceRolePermissions validates permission IDs inside the caller's
+// tenant/org scope, then delegates one atomic relation replacement. The
+// policy store remains the single source of truth for role authorization.
+func (s *Service) ReplaceRolePermissions(ctx context.Context, roleID string, input RolePermissionsInput) (domain.Role, error) {
+	if s == nil || s.Roles == nil || s.Permissions == nil {
+		return domain.Role{}, ErrRepositoryMissing
+	}
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" {
+		return domain.Role{}, ErrInvalidID
+	}
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return domain.Role{}, err
+		}
+	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return domain.Role{}, err
+	}
+	normalized, err := normalizeRolePermissionIDs(input.PermissionIDs)
+	if err != nil {
+		return domain.Role{}, err
+	}
+	role, err := s.Roles.FindRole(ctx, roleID)
+	if err != nil {
+		return domain.Role{}, err
+	}
+	if err := checkRoleScope(scope, role); err != nil {
+		return domain.Role{}, err
+	}
+	permissions, err := s.ListPermissions(ctx)
+	if err != nil {
+		return domain.Role{}, err
+	}
+	known := make(map[string]struct{}, len(permissions))
+	for _, permission := range permissions {
+		if id := strings.TrimSpace(permission.ID); id != "" {
+			known[id] = struct{}{}
+		}
+	}
+	for _, permissionID := range normalized {
+		if _, exists := known[permissionID]; !exists {
+			return domain.Role{}, domain.ErrResourceNotFound
+		}
+	}
+	var updated domain.Role
+	if repo, ok := s.Roles.(rolePermissionAssigner); ok {
+		updated, err = repo.AssignRolePermissions(ctx, roleID, normalized)
+	} else if repo, ok := s.Policies.(rolePermissionAssigner); ok {
+		updated, err = repo.AssignRolePermissions(ctx, roleID, normalized)
+	} else {
+		return domain.Role{}, ErrRepositoryMissing
+	}
+	if err != nil {
+		return domain.Role{}, err
+	}
+	if updated.ID == "" {
+		updated = role
+	}
+	updated.PermissionIDs = append([]string(nil), normalized...)
 	if err := s.invalidate(ctx); err != nil {
 		return domain.Role{}, err
 	}

@@ -522,7 +522,13 @@ func (s *GORMStore) FindRole(ctx context.Context, id string) (domain.Role, error
 		}
 		return domain.Role{}, ErrStoreUnavailable
 	}
-	return row.toDomain(nil), nil
+	permissionIDs, err := s.rolePermissionIDs(ctx, tenantID, id)
+	if err != nil {
+		return domain.Role{}, err
+	}
+	role := row.toDomain(nil)
+	role.PermissionIDs = permissionIDs
+	return role, nil
 }
 
 func (s *GORMStore) SaveRole(ctx context.Context, role domain.Role) error {
@@ -638,6 +644,110 @@ func (s *GORMStore) AssignRoleUsers(ctx context.Context, roleID string, userIDs 
 	return updated, nil
 }
 
+// AssignRolePermissions replaces role policy rows in one primary transaction.
+// iam_policies remains the canonical relation store; permissions supply the
+// method/path projection used by the authorizer.
+func (s *GORMStore) AssignRolePermissions(ctx context.Context, roleID string, permissionIDs []string) (domain.Role, error) {
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" {
+		return domain.Role{}, domain.ErrInvalidPolicy
+	}
+	if len(permissionIDs) > 200 {
+		return domain.Role{}, domain.ErrInvalidPolicy
+	}
+	normalized := make([]string, len(permissionIDs))
+	seen := make(map[string]struct{}, len(permissionIDs))
+	for index, permissionID := range permissionIDs {
+		permissionID = strings.TrimSpace(permissionID)
+		if permissionID == "" || len(permissionID) > 128 {
+			return domain.Role{}, domain.ErrInvalidPolicy
+		}
+		if _, exists := seen[permissionID]; exists {
+			return domain.Role{}, domain.ErrInvalidPolicy
+		}
+		seen[permissionID] = struct{}{}
+		normalized[index] = permissionID
+	}
+	if s == nil || s.db == nil {
+		return domain.Role{}, ErrStoreUnavailable
+	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return domain.Role{}, err
+	}
+	var updated domain.Role
+	err = s.db.WithinTransaction(ctx, func(tx *gorm.DB) error {
+		var roleRowValue roleRow
+		roleQuery := tx.Table("roles").Where("tenant_id = ? AND id = ?", scope.TenantID, roleID)
+		if result := roleQuery.Take(&roleRowValue); result.Error != nil {
+			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+				return domain.ErrResourceNotFound
+			}
+			return ErrStoreUnavailable
+		}
+		if !scope.PlatformAdmin && scope.Organization != "" && stringValue(roleRowValue.OrgID) != "" && stringValue(roleRowValue.OrgID) != scope.Organization {
+			return tenant.ErrOrganizationDenied
+		}
+
+		type permissionRelationRow struct {
+			ID     string
+			Method string
+			Path   string
+			OrgID  *string `gorm:"column:org_id"`
+		}
+		var permissions []permissionRelationRow
+		if len(normalized) > 0 {
+			permissionQuery := tx.Table("permissions").Select("id, method, path, org_id").Where("tenant_id = ? AND id IN ?", scope.TenantID, normalized)
+			if result := permissionQuery.Find(&permissions); result.Error != nil {
+				return ErrStoreUnavailable
+			}
+			if len(permissions) != len(normalized) {
+				return domain.ErrResourceNotFound
+			}
+		}
+		byID := make(map[string]permissionRelationRow, len(permissions))
+		for _, permission := range permissions {
+			if !scope.PlatformAdmin && scope.Organization != "" && stringValue(permission.OrgID) != "" && stringValue(permission.OrgID) != scope.Organization {
+				return tenant.ErrOrganizationDenied
+			}
+			byID[permission.ID] = permission
+		}
+
+		deleteSQL := "DELETE FROM iam_policies WHERE tenant_id = ? AND role_id = ?"
+		deleteArgs := []any{scope.TenantID, roleID}
+		if scope.Organization == "" {
+			deleteSQL += " AND org_id IS NULL"
+		} else {
+			deleteSQL += " AND org_id = ?"
+			deleteArgs = append(deleteArgs, scope.Organization)
+		}
+		if result := tx.Exec(deleteSQL, deleteArgs...); result.Error != nil {
+			return ErrStoreUnavailable
+		}
+		for _, permissionID := range normalized {
+			permission := byID[permissionID]
+			values := map[string]any{
+				"tenant_id": scope.TenantID, "role_id": roleID, "domain": scope.TenantID,
+				"method": permission.Method, "path": permission.Path, "effect": domain.EffectAllow,
+				"org_id": nullableString(scope.Organization),
+			}
+			if result := tx.Table("iam_policies").Create(values); result.Error != nil {
+				return ErrStoreUnavailable
+			}
+		}
+		updated = roleRowValue.toDomain(nil)
+		updated.PermissionIDs = append([]string(nil), normalized...)
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, domain.ErrResourceNotFound) || errors.Is(err, domain.ErrInvalidPolicy) || errors.Is(err, tenant.ErrOrganizationDenied) || errors.Is(err, tenant.ErrCrossTenant) {
+			return domain.Role{}, err
+		}
+		return domain.Role{}, ErrStoreUnavailable
+	}
+	return updated, nil
+}
+
 func (s *GORMStore) ListRoles(ctx context.Context) ([]domain.Role, error) {
 	if s == nil || s.db == nil {
 		return nil, ErrStoreUnavailable
@@ -652,7 +762,13 @@ func (s *GORMStore) ListRoles(ctx context.Context) ([]domain.Role, error) {
 	}
 	out := make([]domain.Role, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, row.toDomain(nil))
+		role := row.toDomain(nil)
+		permissionIDs, permissionErr := s.rolePermissionIDs(ctx, tenantID, row.ID)
+		if permissionErr != nil {
+			return nil, permissionErr
+		}
+		role.PermissionIDs = permissionIDs
+		out = append(out, role)
 	}
 	return out, nil
 }
@@ -862,6 +978,28 @@ func (s *GORMStore) roleIDs(ctx context.Context, tenantID string, userID uint64)
 		roles = append(roles, row.RoleID)
 	}
 	return roles, nil
+}
+
+func (s *GORMStore) rolePermissionIDs(ctx context.Context, tenantID, roleID string) ([]string, error) {
+	if s == nil || s.db == nil {
+		return nil, ErrStoreUnavailable
+	}
+	query := s.read(ctx).Table("iam_policies AS ip").
+		Select("p.id").
+		Joins("JOIN permissions AS p ON p.tenant_id = ip.tenant_id AND p.method = ip.method AND p.path = ip.path").
+		Where("ip.tenant_id = ? AND ip.role_id = ? AND ip.effect = ? AND p.status = ?", tenantID, roleID, domain.EffectAllow, "active")
+	if scope, err := tenant.RequireContext(ctx); err == nil && scope.Organization != "" {
+		query = query.Where("(ip.org_id = ? OR ip.org_id IS NULL) AND (p.org_id = ? OR p.org_id IS NULL)", scope.Organization, scope.Organization)
+	}
+	var rows []struct{ ID string }
+	if err := query.Order("p.id ASC").Find(&rows).Error; err != nil {
+		return nil, ErrStoreUnavailable
+	}
+	permissionIDs := make([]string, 0, len(rows))
+	for _, row := range rows {
+		permissionIDs = append(permissionIDs, row.ID)
+	}
+	return permissionIDs, nil
 }
 
 func (s *GORMStore) read(ctx context.Context) *gorm.DB {

@@ -486,6 +486,77 @@ func TestIAMRoleAssignmentReplacesScopedMembersWithoutCredentialLeak(t *testing.
 	}
 }
 
+func TestIAMRolePermissionAssignmentReplacesPoliciesAndReturnsIDs(t *testing.T) {
+	store := iamapp.NewMemoryStore()
+	admin := domain.User{ID: "admin", Username: "admin", TenantID: "default", OrgID: "org-a", Active: true}
+	role := domain.Role{ID: "role-editor", Name: "Editor", TenantID: "default", OrgID: "org-a", Active: true}
+	for _, permission := range []domain.Permission{
+		{ID: "users.read", Name: "Read users", Method: http.MethodGet, Path: "/api/admin/v1/iam/users"},
+		{ID: "users.write", Name: "Write users", Method: http.MethodPost, Path: "/api/admin/v1/iam/users"},
+	} {
+		if err := store.SavePermission(context.Background(), permission); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, save := range []func() error{
+		func() error { return store.SaveUser(context.Background(), admin) },
+		func() error { return store.SaveRole(context.Background(), role) },
+		func() error {
+			return store.SavePolicy(context.Background(), domain.Policy{Subject: "admin", Method: http.MethodPut, Path: "/api/admin/v1/iam/roles/:id/permissions", Effect: domain.EffectAllow})
+		},
+		func() error {
+			return store.SavePolicy(context.Background(), domain.Policy{RoleID: role.ID, PermissionID: "old", Method: http.MethodDelete, Path: "/old", Effect: domain.EffectAllow})
+		},
+	} {
+		if err := save(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := newIAMTestRouter(store, authdomain.Claims{Subject: admin.ID, Type: authdomain.AccessToken, ExpiresAt: time.Now().Add(time.Minute)})
+	req := httptest.NewRequest(http.MethodPut, "/api/admin/v1/iam/roles/role-editor/permissions", strings.NewReader(`{"permissionIds":["users.write","users.read"]}`))
+	req.Header.Set("Authorization", "Bearer test")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Org-ID", "org-a")
+	resp := httptest.NewRecorder()
+	r.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK || strings.Contains(resp.Body.String(), "password") || strings.Contains(resp.Body.String(), "token") {
+		t.Fatalf("permission assignment status/body = %d/%s", resp.Code, resp.Body.String())
+	}
+	var envelope struct {
+		Code int `json:"code"`
+		Data struct {
+			ID            string   `json:"id"`
+			PermissionIDs []string `json:"permissionIds"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &envelope); err != nil || envelope.Code != 0 || envelope.Data.ID != role.ID || len(envelope.Data.PermissionIDs) != 2 || envelope.Data.PermissionIDs[0] != "users.write" || envelope.Data.PermissionIDs[1] != "users.read" {
+		t.Fatalf("permission assignment envelope = %s err=%v", resp.Body.String(), err)
+	}
+	policies, err := store.ListPolicies(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rolePolicyIDs := make(map[string]bool)
+	for _, policy := range policies {
+		if policy.RoleID == role.ID {
+			rolePolicyIDs[policy.PermissionID] = true
+		}
+	}
+	if len(rolePolicyIDs) != 2 || rolePolicyIDs["old"] {
+		t.Fatalf("role policies after replacement = %+v", rolePolicyIDs)
+	}
+
+	bad := httptest.NewRequest(http.MethodPut, "/api/admin/v1/iam/roles/role-editor/permissions", strings.NewReader(`{"permissionIds":["missing"]}`))
+	bad.Header.Set("Authorization", "Bearer test")
+	bad.Header.Set("Content-Type", "application/json")
+	bad.Header.Set("X-Org-ID", "org-a")
+	resp = httptest.NewRecorder()
+	r.ServeHTTP(resp, bad)
+	if resp.Code != http.StatusNotFound || !strings.Contains(resp.Body.String(), `"code":10001`) {
+		t.Fatalf("missing permission status/body = %d/%s", resp.Code, resp.Body.String())
+	}
+}
+
 func hasRoleID(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {
