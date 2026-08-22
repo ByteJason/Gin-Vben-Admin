@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	authdomain "example.com/gin-vben-admin/server/internal/domain/authdomain"
 	"example.com/gin-vben-admin/server/internal/domain/tenant"
 	"example.com/gin-vben-admin/server/internal/transport/http/response"
 	"github.com/gin-gonic/gin"
@@ -27,6 +28,9 @@ type TenantPolicy struct {
 	TenantHeader       string
 	OrganizationHeader string
 	IsPlatformAdmin    func(*gin.Context) bool
+	// PlatformAdminSubjects is a server-side allowlist matched against
+	// verified auth claims. It is never populated from request headers.
+	PlatformAdminSubjects []string
 }
 
 // TenantContext installs a validated tenant/org scope in request.Context. The
@@ -36,6 +40,9 @@ func TenantContext(policy TenantPolicy) gin.HandlerFunc {
 	policy = normalizeTenantPolicy(policy)
 	return func(c *gin.Context) {
 		platformAdmin := policy.IsPlatformAdmin != nil && policy.IsPlatformAdmin(c)
+		if !platformAdmin {
+			platformAdmin = subjectInPlatformAdminAllowlist(c, policy.PlatformAdminSubjects)
+		}
 		tenantID := strings.TrimSpace(c.GetHeader(policy.TenantHeader))
 		if tenantID == "" && policy.Mode == tenantModeSingle {
 			tenantID = policy.DefaultTenantID
@@ -60,6 +67,23 @@ func TenantContext(policy TenantPolicy) gin.HandlerFunc {
 		c.Request = c.Request.WithContext(tenant.WithContext(c.Request.Context(), scope))
 		c.Next()
 	}
+}
+
+func subjectInPlatformAdminAllowlist(c *gin.Context, subjects []string) bool {
+	if c == nil || len(subjects) == 0 {
+		return false
+	}
+	value, ok := c.Get("auth_claims")
+	claims, claimsOK := value.(authdomain.Claims)
+	if !ok || !claimsOK || strings.TrimSpace(claims.Subject) == "" {
+		return false
+	}
+	for _, subject := range subjects {
+		if strings.TrimSpace(subject) == claims.Subject {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeTenantPolicy(policy TenantPolicy) TenantPolicy {

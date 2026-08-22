@@ -1107,6 +1107,167 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
+
+  /api/admin/v1/mail/accounts:
+    get:
+      tags: [Admin]
+      operationId: listSMTPAccounts
+      summary: 查询租户 SMTP 账户（密码永不回显）
+      security: [{BearerAuth: []}]
+      responses:
+        '200':
+          description: SMTP 账户列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/SMTPAccount' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Admin]
+      operationId: createSMTPAccount
+      summary: 创建 SMTP 账户
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SMTPAccountInput' }
+      responses:
+        '200': { $ref: '#/components/responses/SuccessResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/admin/v1/mail/accounts/{id}:
+    put:
+      tags: [Admin]
+      operationId: updateSMTPAccount
+      summary: 更新 SMTP 账户
+      security: [{BearerAuth: []}]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SMTPAccountInput' }
+      responses:
+        '200': { $ref: '#/components/responses/SuccessResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [Admin]
+      operationId: deleteSMTPAccount
+      summary: 软删除 SMTP 账户
+      security: [{BearerAuth: []}]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/EmptySuccessResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/admin/v1/mail/accounts/{id}/test:
+    post:
+      tags: [Admin]
+      operationId: testSMTPAccount
+      summary: 测试 SMTP DNS/TCP/TLS/EHLO/AUTH（不发送邮件）
+      security: [{BearerAuth: []}]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 分阶段连接结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/SMTPConnectionTestResult' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/admin/v1/mail/messages:
+    get:
+      tags: [Admin]
+      operationId: listEmailMessages
+      summary: 查询脱敏邮件投递记录
+      security: [{BearerAuth: []}]
+      responses:
+        '200':
+          description: 邮件记录分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/EmailMessagePage' }
+    post:
+      tags: [Admin]
+      operationId: sendEmailMessage
+      summary: 创建并发送邮件
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EmailMessageInput' }
+      responses:
+        '200': { $ref: '#/components/responses/SuccessResponse' }
+        '502': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/admin/v1/mail/messages/{id}:
+    get:
+      tags: [Admin]
+      operationId: getEmailMessage
+      summary: 查询邮件投递详情（正文仅受控解密）
+      security: [{BearerAuth: []}]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: includeBody
+          in: query
+          required: false
+          schema: { type: boolean, default: false }
+      responses:
+        '200': { $ref: '#/components/responses/SuccessResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/admin/v1/ops/monitor:
+    get:
+      tags: [Admin]
+      operationId: getMonitorOverview
+      summary: 获取平台管理员只读运维快照
+      security: [{BearerAuth: []}]
+      responses:
+        '200':
+          description: 当前进程/容器与依赖状态
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/MonitorOverview' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
 components:
   securitySchemes:
     BearerAuth:
@@ -1152,6 +1313,122 @@ components:
         minLength: 1
         maxLength: 128
   schemas:
+
+    SMTPAccount:
+      type: object
+      required: [id, name, enabled, host, port, username, weight, fromEmail, implicitTls, passwordConfigured, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        tenantId: { type: string }
+        orgId: { type: string }
+        name: { type: string }
+        enabled: { type: boolean }
+        host: { type: string }
+        port: { type: integer, minimum: 1, maximum: 65535 }
+        username: { type: string }
+        weight: { type: integer, minimum: 1 }
+        fromEmail: { type: string, format: email }
+        fromName: { type: string }
+        implicitTls: { type: boolean }
+        passwordConfigured: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    SMTPAccountInput:
+      type: object
+      required: [name, host, port, fromEmail]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 128 }
+        enabled: { type: boolean, default: true }
+        host: { type: string }
+        port: { type: integer, minimum: 1, maximum: 65535 }
+        username: { type: string }
+        password: { type: string, format: password, writeOnly: true }
+        weight: { type: integer, minimum: 1, default: 1 }
+        fromEmail: { type: string, format: email }
+        fromName: { type: string }
+        implicitTls: { type: boolean }
+    SMTPConnectionTestResult:
+      type: object
+      required: [accountId, requestId, status, checkedAt]
+      properties:
+        accountId: { type: string }
+        requestId: { type: string }
+        status: { type: string, enum: [ok, failed] }
+        stage: { type: string }
+        code: { type: string }
+        message: { type: string }
+        checkedAt: { type: string, format: date-time }
+    EmailRecipient:
+      type: object
+      required: [address, kind]
+      properties:
+        address: { type: string, format: email }
+        kind: { type: string, enum: [to, cc, bcc] }
+    EmailMessage:
+      type: object
+      required: [id, subject, recipients, bodyDigest, status, attemptCount, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        tenantId: { type: string }
+        orgId: { type: string }
+        smtpAccountId: { type: string }
+        senderId: { type: string }
+        subject: { type: string }
+        recipients: { type: array, items: { $ref: '#/components/schemas/EmailRecipient' } }
+        body: { type: string, readOnly: true }
+        bodyDigest: { type: string }
+        status: { type: string, enum: [pending, sending, retrying, sent, failed] }
+        attemptCount: { type: integer }
+        providerMessageId: { type: string }
+        lastErrorCode: { type: string }
+        sentAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    EmailMessageInput:
+      type: object
+      required: [recipients, subject, body]
+      properties:
+        recipients: { type: array, minItems: 1, items: { type: string, format: email } }
+        subject: { type: string }
+        body: { type: string, writeOnly: true }
+        idempotencyKey: { type: string }
+    EmailMessagePage:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/EmailMessage' } }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+    MonitorMetric:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [ok, degraded, unavailable] }
+        cores: { type: integer }
+        load1: { type: number }
+        usedBytes: { type: integer, format: int64 }
+        totalBytes: { type: integer, format: int64 }
+        utilization: { type: number }
+        latencyMs: { type: number }
+        poolOpen: { type: integer }
+        poolIdle: { type: integer }
+        poolMax: { type: integer }
+        keyspace: { type: integer, format: int64 }
+        message: { type: string }
+    MonitorOverview:
+      type: object
+      required: [scope, uptimeSeconds, cpu, memory, disk, database, redis, collectedAt]
+      properties:
+        scope: { type: string, enum: [process, container] }
+        uptimeSeconds: { type: number }
+        version: { type: string }
+        cpu: { $ref: '#/components/schemas/MonitorMetric' }
+        memory: { $ref: '#/components/schemas/MonitorMetric' }
+        disk: { $ref: '#/components/schemas/MonitorMetric' }
+        database: { $ref: '#/components/schemas/MonitorMetric' }
+        redis: { $ref: '#/components/schemas/MonitorMetric' }
+        collectedAt: { type: string, format: date-time }
     AuditCategory:
       type: string
       enum: [login, operation, system]
@@ -1781,6 +2058,11 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/SuccessEnvelope'
+    Conflict:
+      description: 资源唯一约束冲突
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/SuccessEnvelope' }
     CollectionResponse:
       description: 集合查询成功
       content:

@@ -91,6 +91,24 @@ func (s *Store) Ping(ctx context.Context) error {
 	return nil
 }
 
+// RuntimeStats returns non-sensitive SQL pool counters for the operations
+// snapshot. It deliberately exposes no DSN, driver credentials, or query
+// text. Read/write topologies are aggregated across their configured pools.
+func (s *Store) RuntimeStats(context.Context) (open, idle, max int, keyspace int64, err error) {
+	if s == nil || len(s.closers) == 0 {
+		return 0, 0, 0, 0, errors.New("database store is not initialized")
+	}
+	for _, connection := range s.closers {
+		stats := connection.Stats()
+		open += stats.OpenConnections
+		idle += stats.Idle
+		if stats.MaxOpenConnections > max {
+			max = stats.MaxOpenConnections
+		}
+	}
+	return open, idle, max, 0, nil
+}
+
 // Read returns a GORM session explicitly routed to a configured replica when
 // read/write mode is active. Callers that require read-your-write use Write.
 func (s *Store) Read(ctx context.Context) *gorm.DB {

@@ -9,6 +9,8 @@ import (
 	fileapp "example.com/gin-vben-admin/server/internal/application/file"
 	iamapp "example.com/gin-vben-admin/server/internal/application/iam"
 	installer "example.com/gin-vben-admin/server/internal/application/installer"
+	mailapp "example.com/gin-vben-admin/server/internal/application/mail"
+	monitorapp "example.com/gin-vben-admin/server/internal/application/monitor"
 	settingsapp "example.com/gin-vben-admin/server/internal/application/settings"
 	"example.com/gin-vben-admin/server/internal/config"
 	"example.com/gin-vben-admin/server/internal/platform/installplatform"
@@ -20,9 +22,12 @@ import (
 	"example.com/gin-vben-admin/server/internal/transport/http/health"
 	iamhttp "example.com/gin-vben-admin/server/internal/transport/http/iam"
 	installhttp "example.com/gin-vben-admin/server/internal/transport/http/install"
+	mailhttp "example.com/gin-vben-admin/server/internal/transport/http/mail"
 	httpmiddleware "example.com/gin-vben-admin/server/internal/transport/http/middleware"
+	monitorhttp "example.com/gin-vben-admin/server/internal/transport/http/monitor"
 	"example.com/gin-vben-admin/server/internal/transport/http/router"
 	settingshttp "example.com/gin-vben-admin/server/internal/transport/http/settings"
+	"github.com/gin-gonic/gin"
 )
 
 func NewHTTPServer(addr string) *http.Server {
@@ -48,6 +53,10 @@ func newHTTPServerWithPlanAndCaptcha(cfg config.Config, readiness health.Readine
 }
 
 func newHTTPServerWithPlanAndCaptchaAndFiles(cfg config.Config, readiness health.ReadinessChecker, authService appauth.AuthService, limiter appauth.RateLimiter, iamService *iamapp.Service, recovery appauth.AccountRecoveryService, installStatus *installer.StatusService, installPlan installer.PlanProvider, dependencyChecks installhttp.DependencyCheckProvider, applyService *installer.ApplyService, jobService *installer.ApplyJobService, settingsService *settingsapp.Service, auditService *auditapp.Service, captchaProvider appauth.CaptchaProvider, captchaRisk appauth.CaptchaRiskStore, fileService *fileapp.Service, observations ...httpmiddleware.ObservabilityRuntime) *http.Server {
+	return newHTTPServerWithPlanAndCaptchaAndFilesAndAux(cfg, readiness, authService, limiter, iamService, recovery, installStatus, installPlan, dependencyChecks, applyService, jobService, settingsService, auditService, captchaProvider, captchaRisk, fileService, nil, nil, observations...)
+}
+
+func newHTTPServerWithPlanAndCaptchaAndFilesAndAux(cfg config.Config, readiness health.ReadinessChecker, authService appauth.AuthService, limiter appauth.RateLimiter, iamService *iamapp.Service, recovery appauth.AccountRecoveryService, installStatus *installer.StatusService, installPlan installer.PlanProvider, dependencyChecks installhttp.DependencyCheckProvider, applyService *installer.ApplyService, jobService *installer.ApplyJobService, settingsService *settingsapp.Service, auditService *auditapp.Service, captchaProvider appauth.CaptchaProvider, captchaRisk appauth.CaptchaRiskStore, fileService *fileapp.Service, mailService *mailapp.Service, monitorService *monitorapp.Service, observations ...httpmiddleware.ObservabilityRuntime) *http.Server {
 	var authHandler *authhttp.Handler
 	if authService != nil {
 		authHandler = authhttp.NewHandler(authService, cfg.Auth, limiter)
@@ -76,14 +85,28 @@ func newHTTPServerWithPlanAndCaptchaAndFiles(cfg config.Config, readiness health
 	if fileService != nil {
 		auxiliary.Files = filehttp.NewHandler(fileService)
 	}
+	if mailService != nil {
+		auxiliary.Mail = mailhttp.NewHandler(mailService)
+	}
+	if monitorService != nil {
+		auxiliary.Monitor = monitorhttp.NewHandler(monitorService)
+	}
 	tenantPolicy := httpmiddleware.TenantPolicy{
-		Mode:               cfg.Tenant.Mode,
-		DefaultTenantID:    cfg.Tenant.DefaultID,
-		TenantHeader:       cfg.Tenant.TenantHeader,
-		OrganizationHeader: cfg.Tenant.OrganizationHeader,
+		Mode:                  cfg.Tenant.Mode,
+		DefaultTenantID:       cfg.Tenant.DefaultID,
+		TenantHeader:          cfg.Tenant.TenantHeader,
+		OrganizationHeader:    cfg.Tenant.OrganizationHeader,
+		PlatformAdminSubjects: cfg.Tenant.PlatformAdminSubjects,
 	}
 	if !cfg.Tenant.Enabled {
-		tenantPolicy = httpmiddleware.TenantPolicy{Mode: "single", DefaultTenantID: "default"}
+		tenantPolicy = httpmiddleware.TenantPolicy{Mode: "single", DefaultTenantID: "default", PlatformAdminSubjects: cfg.Tenant.PlatformAdminSubjects}
+	}
+	// The dependency-free single-node fixture can run without an auth service;
+	// in that explicitly local mode every request is already inside the process
+	// boundary, so the read-only monitor remains usable. Auth-enabled runs use
+	// the verified-subject allowlist above and never infer this from a header.
+	if !cfg.Auth.Enabled && tenantPolicy.Mode == "single" {
+		tenantPolicy.IsPlatformAdmin = func(*gin.Context) bool { return true }
 	}
 	auxiliary.TenantPolicy = &tenantPolicy
 	var staticAssets []fs.FS

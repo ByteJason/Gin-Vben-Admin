@@ -15,6 +15,7 @@ import (
 	"time"
 
 	appauth "example.com/gin-vben-admin/server/internal/application/auth"
+	monitorapp "example.com/gin-vben-admin/server/internal/application/monitor"
 	settingsapp "example.com/gin-vben-admin/server/internal/application/settings"
 	"example.com/gin-vben-admin/server/internal/config"
 	"example.com/gin-vben-admin/server/internal/domain/authdomain"
@@ -318,6 +319,18 @@ func TestHTTPCompositionAppliesConfiguredTenantPolicy(t *testing.T) {
 	server.Handler.ServeHTTP(res, req)
 	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), `"code":10000`) {
 		t.Fatalf("missing tenant status = %d, want 400; body=%s", res.Code, res.Body.String())
+	}
+}
+
+func TestHTTPCompositionAllowsLocalSingleNodeMonitorWithoutAuth(t *testing.T) {
+	cfg := config.Default()
+	cfg.Auth.Enabled = false
+	server := newHTTPServerWithPlanAndCaptchaAndFilesAndAux(cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, monitorapp.NewService(monitorapp.Config{Version: "fixture"}))
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/v1/ops/monitor", nil)
+	res := httptest.NewRecorder()
+	server.Handler.ServeHTTP(res, req)
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"scope":"process"`) {
+		t.Fatalf("monitor status = %d, body=%s", res.Code, res.Body.String())
 	}
 }
 

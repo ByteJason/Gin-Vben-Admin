@@ -129,6 +129,26 @@ func (c *Client) Ping(ctx context.Context) error {
 	return c.client.Ping(ctx).Err()
 }
 
+// RuntimeStats exposes only pool counters and the logical database key count
+// for the operations snapshot. Authentication material and endpoint details
+// remain private to the client.
+func (c *Client) RuntimeStats(ctx context.Context) (open, idle, max int, keyspace int64, err error) {
+	if c == nil || c.client == nil {
+		return 0, 0, 0, 0, errors.New("redis client is not initialized")
+	}
+	stats := c.client.PoolStats()
+	if stats != nil {
+		open, idle, max = int(stats.TotalConns), int(stats.IdleConns), int(stats.TotalConns)
+	}
+	// DBSize is a count only; it never returns key names or values. Some
+	// clustered providers do not support it, so retain healthy pool stats and
+	// leave keyspace at zero when the optional command is unavailable.
+	if size, sizeErr := c.client.DBSize(ctx).Result(); sizeErr == nil {
+		keyspace = size
+	}
+	return open, idle, max, keyspace, nil
+}
+
 // Key builds a physical cache key under this client's namespace.
 func (c *Client) Key(parts ...string) (string, error) {
 	if len(parts) == 0 {

@@ -1,5 +1,5 @@
 // Generated from contracts/openapi/admin-v1.yaml; DO NOT EDIT.
-// CONTRACT_SHA256=3d6e17ff282781f7b36b7580ce5ea5d641a177a32d1735c5f9e11f2acd995bdc
+// CONTRACT_SHA256=e682e47e206cbf8d83ba9b360e18e663a39b736c623b185c71ef4bc1e30c1c52
 
 export const ADMIN_API_PREFIX = '/admin/v1' as const;
 
@@ -58,6 +58,15 @@ export const ADMIN_ENDPOINTS = {
   previewFile: '/admin/v1/files/{id}/preview',
   signFileURL: '/admin/v1/files/{id}/signed-url',
   fileCleanupDryRun: '/admin/v1/files/cleanup/dry-run',
+  listSMTPAccounts: '/admin/v1/mail/accounts',
+  createSMTPAccount: '/admin/v1/mail/accounts',
+  updateSMTPAccount: '/admin/v1/mail/accounts/{id}',
+  deleteSMTPAccount: '/admin/v1/mail/accounts/{id}',
+  testSMTPAccount: '/admin/v1/mail/accounts/{id}/test',
+  listEmailMessages: '/admin/v1/mail/messages',
+  sendEmailMessage: '/admin/v1/mail/messages',
+  getEmailMessage: '/admin/v1/mail/messages/{id}',
+  getMonitorOverview: '/admin/v1/ops/monitor',
 } as const;
 
 export const AUTH_API_PREFIX = '/admin/v1/auth' as const;
@@ -74,6 +83,81 @@ export const AUTH_ENDPOINTS = {
 
 export const MENU_ENDPOINT = ADMIN_ENDPOINTS.listVisibleMenus;
 export const CURRENT_USER_ENDPOINT = ADMIN_ENDPOINTS.getCurrentAdminUser;
+
+export interface SMTPAccount {
+  id: string;
+  name: string;
+  enabled: boolean;
+  host: string;
+  port: number;
+  username: string;
+  weight: number;
+  fromEmail: string;
+  fromName?: string;
+  implicitTls: boolean;
+  passwordConfigured: boolean;
+  tenantId?: string;
+  orgId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SMTPAccountInput {
+  name: string;
+  enabled?: boolean;
+  host: string;
+  port: number;
+  username?: string;
+  password?: string;
+  weight?: number;
+  fromEmail: string;
+  fromName?: string;
+  implicitTls?: boolean;
+}
+
+export interface EmailRecipient { address: string; kind: 'to' | 'cc' | 'bcc'; }
+export interface EmailMessage {
+  id: string;
+  subject: string;
+  recipients: EmailRecipient[];
+  body?: string;
+  bodyDigest: string;
+  status: 'pending' | 'sending' | 'retrying' | 'sent' | 'failed';
+  attemptCount: number;
+  smtpAccountId?: string;
+  senderId?: string;
+  providerMessageId?: string;
+  lastErrorCode?: string;
+  sentAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MonitorMetric {
+  status: 'ok' | 'degraded' | 'unavailable';
+  cores?: number;
+  load1?: number;
+  usedBytes?: number;
+  totalBytes?: number;
+  utilization?: number;
+  latencyMs?: number;
+  poolOpen?: number;
+  poolIdle?: number;
+  poolMax?: number;
+  keyspace?: number;
+  message?: string;
+}
+export interface MonitorOverview {
+  scope: 'process' | 'container';
+  uptimeSeconds: number;
+  version?: string;
+  cpu: MonitorMetric;
+  memory: MonitorMetric;
+  disk: MonitorMetric;
+  database: MonitorMetric;
+  redis: MonitorMetric;
+  collectedAt: string;
+}
 
 export namespace AuthApi {
   export interface LoginParams {

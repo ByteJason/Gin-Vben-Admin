@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	authdomain "example.com/gin-vben-admin/server/internal/domain/authdomain"
 	"example.com/gin-vben-admin/server/internal/domain/tenant"
 	"github.com/gin-gonic/gin"
 )
@@ -97,6 +98,31 @@ func TestTenantContextDoesNotTrustPlatformAdminHeader(t *testing.T) {
 	resp := httptest.NewRecorder()
 	r.ServeHTTP(resp, req)
 	if resp.Code != http.StatusForbidden {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestTenantContextResolvesConfiguredPlatformAdminSubject(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("X-Tenant-ID", "tenant-b")
+	// Claims are installed by the authentication middleware in production;
+	// this fixture sets the same server-side context value directly.
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Set("auth_claims", authdomain.Claims{Subject: "admin-subject"})
+		c.Next()
+	}, TenantContext(TenantPolicy{Mode: "multi", PlatformAdminSubjects: []string{"admin-subject"}}))
+	r.GET("/", func(c *gin.Context) {
+		scope, err := tenant.RequireContext(c.Request.Context())
+		if err != nil || !scope.PlatformAdmin {
+			t.Fatalf("scope=%+v err=%v", scope, err)
+		}
+		c.Status(http.StatusNoContent)
+	})
+	resp := httptest.NewRecorder()
+	r.ServeHTTP(resp, req)
+	if resp.Code != http.StatusNoContent {
 		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
 	}
 }

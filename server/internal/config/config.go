@@ -108,13 +108,32 @@ type AuthConfig struct {
 // configuration layer so loading does not depend on an application service.
 // Password is intentionally excluded from serialized summaries.
 type MailConfig struct {
-	Enabled  bool   `mapstructure:"enabled" yaml:"enabled"`
-	Host     string `mapstructure:"host" yaml:"host"`
-	Port     int    `mapstructure:"port" yaml:"port"`
-	Username string `mapstructure:"username" yaml:"username"`
-	Password string `mapstructure:"password" yaml:"password" json:"-"`
-	From     string `mapstructure:"from" yaml:"from"`
-	StartTLS bool   `mapstructure:"start_tls" yaml:"start_tls"`
+	Enabled   bool                `mapstructure:"enabled" yaml:"enabled"`
+	Host      string              `mapstructure:"host" yaml:"host"`
+	Port      int                 `mapstructure:"port" yaml:"port"`
+	Username  string              `mapstructure:"username" yaml:"username"`
+	Password  string              `mapstructure:"password" yaml:"password" json:"-"`
+	From      string              `mapstructure:"from" yaml:"from"`
+	StartTLS  bool                `mapstructure:"start_tls" yaml:"start_tls"`
+	Selection string              `mapstructure:"selection" yaml:"selection"`
+	Accounts  []SMTPAccountConfig `mapstructure:"accounts" yaml:"accounts"`
+}
+
+// SMTPAccountConfig is the optional file/environment bootstrap representation
+// of one SMTP account. Database-managed accounts remain the authoritative UI
+// path; password is runtime-only and is never included in summaries.
+type SMTPAccountConfig struct {
+	Enabled     bool   `mapstructure:"enabled" yaml:"enabled"`
+	TenantID    string `mapstructure:"tenant_id" yaml:"tenant_id"`
+	Name        string `mapstructure:"name" yaml:"name"`
+	Host        string `mapstructure:"host" yaml:"host"`
+	Port        int    `mapstructure:"port" yaml:"port"`
+	Username    string `mapstructure:"username" yaml:"username"`
+	Password    string `mapstructure:"password" yaml:"password" json:"-"`
+	Weight      int    `mapstructure:"weight" yaml:"weight"`
+	FromEmail   string `mapstructure:"from_email" yaml:"from_email"`
+	FromName    string `mapstructure:"from_name" yaml:"from_name"`
+	ImplicitTLS bool   `mapstructure:"implicit_tls" yaml:"implicit_tls"`
 }
 
 // FileConfig controls the local 0.10 object provider. Remote providers remain
@@ -136,11 +155,12 @@ type InstallConfig struct {
 // single-tenant operation. Platform-admin resolution remains an authenticated
 // application concern and is never configured from a request header.
 type TenantConfig struct {
-	Enabled            bool   `mapstructure:"enabled" yaml:"enabled"`
-	Mode               string `mapstructure:"mode" yaml:"mode"`
-	DefaultID          string `mapstructure:"default_id" yaml:"default_id"`
-	TenantHeader       string `mapstructure:"tenant_header" yaml:"tenant_header"`
-	OrganizationHeader string `mapstructure:"organization_header" yaml:"organization_header"`
+	Enabled               bool     `mapstructure:"enabled" yaml:"enabled"`
+	Mode                  string   `mapstructure:"mode" yaml:"mode"`
+	DefaultID             string   `mapstructure:"default_id" yaml:"default_id"`
+	TenantHeader          string   `mapstructure:"tenant_header" yaml:"tenant_header"`
+	OrganizationHeader    string   `mapstructure:"organization_header" yaml:"organization_header"`
+	PlatformAdminSubjects []string `mapstructure:"platform_admin_subjects" yaml:"platform_admin_subjects"`
 }
 
 func (cfg InstallConfig) MarkerPath() string {
@@ -213,11 +233,13 @@ type AuthSummary struct {
 }
 
 type MailSummary struct {
-	Enabled  bool   `json:"enabled"`
-	Host     string `json:"host"`
-	Port     int    `json:"port"`
-	From     string `json:"from"`
-	StartTLS bool   `json:"start_tls"`
+	Enabled      bool   `json:"enabled"`
+	Host         string `json:"host"`
+	Port         int    `json:"port"`
+	From         string `json:"from"`
+	StartTLS     bool   `json:"start_tls"`
+	Selection    string `json:"selection"`
+	AccountCount int    `json:"account_count"`
 }
 
 type FileSummary struct {
@@ -232,11 +254,12 @@ type InstallSummary struct {
 }
 
 type TenantSummary struct {
-	Enabled            bool   `json:"enabled"`
-	Mode               string `json:"mode"`
-	DefaultID          string `json:"default_id"`
-	TenantHeader       string `json:"tenant_header"`
-	OrganizationHeader string `json:"organization_header"`
+	Enabled                   bool   `json:"enabled"`
+	Mode                      string `json:"mode"`
+	DefaultID                 string `json:"default_id"`
+	TenantHeader              string `json:"tenant_header"`
+	OrganizationHeader        string `json:"organization_header"`
+	PlatformAdminSubjectCount int    `json:"platform_admin_subject_count"`
 }
 
 // Default returns a complete configuration that starts the HTTP server without
@@ -287,7 +310,7 @@ func Default() Config {
 			CaptchaKeyPrefix:     "auth-captcha",
 			RegistrationEnabled:  false,
 		},
-		Mail: MailConfig{Port: 1025},
+		Mail: MailConfig{Port: 1025, Selection: "weighted_random"},
 		File: FileConfig{
 			Enabled:  true,
 			Root:     filepath.FromSlash("../.runtime/files"),
@@ -427,6 +450,11 @@ func (cfg InstallConfig) validate() error {
 }
 
 func (cfg TenantConfig) validate() error {
+	for _, subject := range cfg.PlatformAdminSubjects {
+		if err := validateTenantValue(subject, "platform_admin_subject"); err != nil {
+			return err
+		}
+	}
 	if !cfg.Enabled {
 		return nil
 	}
@@ -495,8 +523,18 @@ func (cfg AuthConfig) validate() error {
 }
 
 func (cfg MailConfig) validate() error {
+	selection := strings.TrimSpace(cfg.Selection)
+	if selection == "" {
+		selection = "weighted_random"
+	}
+	if selection != "weighted_random" && selection != "round_robin" {
+		return errors.New("mail selection must be weighted_random or round_robin")
+	}
 	if !cfg.Enabled {
-		return nil
+		// File-declared disabled accounts are still parsed for a safe summary,
+		// but do not make the transport invalid when the legacy single config is
+		// intentionally disabled.
+		return validateSMTPAccounts(cfg.Accounts, false)
 	}
 	if strings.TrimSpace(cfg.Host) == "" {
 		return errors.New("host is required when mail is enabled")
@@ -509,6 +547,27 @@ func (cfg MailConfig) validate() error {
 	}
 	if strings.ContainsAny(cfg.Host+cfg.Username+cfg.Password, "\r\n") {
 		return errors.New("mail values must be single-line")
+	}
+	return validateSMTPAccounts(cfg.Accounts, true)
+}
+
+func validateSMTPAccounts(accounts []SMTPAccountConfig, enabledTransport bool) error {
+	for _, account := range accounts {
+		if !account.Enabled {
+			continue
+		}
+		if strings.TrimSpace(account.Name) == "" || strings.TrimSpace(account.Host) == "" || account.Port <= 0 || account.Port > 65535 || account.Weight < 0 {
+			return errors.New("enabled SMTP account has invalid name, host, port, or weight")
+		}
+		if strings.ContainsAny(account.Name+account.Host+account.Username+account.Password+account.FromEmail+account.FromName+account.TenantID, "\r\n") {
+			return errors.New("SMTP account values must be single-line")
+		}
+		if strings.TrimSpace(account.FromEmail) == "" || !strings.Contains(account.FromEmail, "@") {
+			return errors.New("SMTP account from_email must be a valid email address")
+		}
+		if strings.TrimSpace(account.Username) != "" && strings.TrimSpace(account.Password) == "" && enabledTransport {
+			return errors.New("enabled SMTP account password is required when username is set")
+		}
 	}
 	return nil
 }
@@ -657,11 +716,13 @@ func (cfg Config) SafeSummary() Summary {
 			RegistrationEnabled:  cfg.Auth.RegistrationEnabled,
 		},
 		Mail: MailSummary{
-			Enabled:  cfg.Mail.Enabled,
-			Host:     cfg.Mail.Host,
-			Port:     cfg.Mail.Port,
-			From:     cfg.Mail.From,
-			StartTLS: cfg.Mail.StartTLS,
+			Enabled:      cfg.Mail.Enabled,
+			Host:         cfg.Mail.Host,
+			Port:         cfg.Mail.Port,
+			From:         cfg.Mail.From,
+			StartTLS:     cfg.Mail.StartTLS,
+			Selection:    cfg.Mail.Selection,
+			AccountCount: len(cfg.Mail.Accounts),
 		},
 		File: FileSummary{
 			Enabled:  cfg.File.Enabled,
@@ -671,11 +732,12 @@ func (cfg Config) SafeSummary() Summary {
 		},
 		Install: InstallSummary{StateDirectoryAbsolute: filepath.IsAbs(cfg.Install.StateDir)},
 		Tenant: TenantSummary{
-			Enabled:            cfg.Tenant.Enabled,
-			Mode:               cfg.Tenant.Mode,
-			DefaultID:          cfg.Tenant.DefaultID,
-			TenantHeader:       cfg.Tenant.TenantHeader,
-			OrganizationHeader: cfg.Tenant.OrganizationHeader,
+			Enabled:                   cfg.Tenant.Enabled,
+			Mode:                      cfg.Tenant.Mode,
+			DefaultID:                 cfg.Tenant.DefaultID,
+			TenantHeader:              cfg.Tenant.TenantHeader,
+			OrganizationHeader:        cfg.Tenant.OrganizationHeader,
+			PlatformAdminSubjectCount: len(cfg.Tenant.PlatformAdminSubjects),
 		},
 		Observability: func() observability.Config {
 			redacted := cfg.Observability
@@ -750,12 +812,15 @@ func newViper() *viper.Viper {
 	v.SetDefault("mail.password", cfg.Mail.Password)
 	v.SetDefault("mail.from", cfg.Mail.From)
 	v.SetDefault("mail.start_tls", cfg.Mail.StartTLS)
+	v.SetDefault("mail.selection", cfg.Mail.Selection)
+	v.SetDefault("mail.accounts", cfg.Mail.Accounts)
 	v.SetDefault("install.state_dir", cfg.Install.StateDir)
 	v.SetDefault("tenant.enabled", cfg.Tenant.Enabled)
 	v.SetDefault("tenant.mode", cfg.Tenant.Mode)
 	v.SetDefault("tenant.default_id", cfg.Tenant.DefaultID)
 	v.SetDefault("tenant.tenant_header", cfg.Tenant.TenantHeader)
 	v.SetDefault("tenant.organization_header", cfg.Tenant.OrganizationHeader)
+	v.SetDefault("tenant.platform_admin_subjects", cfg.Tenant.PlatformAdminSubjects)
 	v.SetDefault("observability.metrics_enabled", cfg.Observability.MetricsEnabled)
 	v.SetDefault("observability.metrics_endpoint", cfg.Observability.MetricsEndpoint)
 	v.SetDefault("observability.tracing_enabled", cfg.Observability.TracingEnabled)
@@ -829,12 +894,14 @@ var environmentBindings = map[string]string{
 	"mail.password":                  "MAIL_PASSWORD",
 	"mail.from":                      "MAIL_FROM",
 	"mail.start_tls":                 "MAIL_START_TLS",
+	"mail.selection":                 "MAIL_SELECTION",
 	"install.state_dir":              "INSTALL_STATE_DIR",
 	"tenant.enabled":                 "TENANT_ENABLED",
 	"tenant.mode":                    "TENANT_MODE",
 	"tenant.default_id":              "TENANT_DEFAULT_ID",
 	"tenant.tenant_header":           "TENANT_HEADER",
 	"tenant.organization_header":     "TENANT_ORGANIZATION_HEADER",
+	"tenant.platform_admin_subjects": "TENANT_PLATFORM_ADMIN_SUBJECTS",
 	"observability.metrics_enabled":  "OBSERVABILITY_METRICS_ENABLED",
 	"observability.metrics_endpoint": "OBSERVABILITY_METRICS_ENDPOINT",
 	"observability.tracing_enabled":  "OBSERVABILITY_TRACING_ENABLED",
@@ -893,6 +960,11 @@ func applyListEnvironmentOverrides(v *viper.Viper, dotEnv map[string]string) {
 		v.Set("redis.addrs", splitCommaSeparated(value))
 	} else if value, ok := dotEnv["REDIS_ADDRS"]; ok {
 		v.Set("redis.addrs", splitCommaSeparated(value))
+	}
+	if value, ok := os.LookupEnv("TENANT_PLATFORM_ADMIN_SUBJECTS"); ok {
+		v.Set("tenant.platform_admin_subjects", splitCommaSeparated(value))
+	} else if value, ok := dotEnv["TENANT_PLATFORM_ADMIN_SUBJECTS"]; ok {
+		v.Set("tenant.platform_admin_subjects", splitCommaSeparated(value))
 	}
 }
 

@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	cryptorand "crypto/rand"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +19,8 @@ import (
 	fileapp "example.com/gin-vben-admin/server/internal/application/file"
 	iamapp "example.com/gin-vben-admin/server/internal/application/iam"
 	installer "example.com/gin-vben-admin/server/internal/application/installer"
+	mailapp "example.com/gin-vben-admin/server/internal/application/mail"
+	monitorapp "example.com/gin-vben-admin/server/internal/application/monitor"
 	appnotification "example.com/gin-vben-admin/server/internal/application/notification"
 	settingsapp "example.com/gin-vben-admin/server/internal/application/settings"
 	"example.com/gin-vben-admin/server/internal/config"
@@ -28,6 +31,7 @@ import (
 	platformhealth "example.com/gin-vben-admin/server/internal/platform/health"
 	"example.com/gin-vben-admin/server/internal/platform/iamplatform"
 	"example.com/gin-vben-admin/server/internal/platform/installplatform"
+	mailplatform "example.com/gin-vben-admin/server/internal/platform/mail"
 	notificationplatform "example.com/gin-vben-admin/server/internal/platform/notification"
 	observabilityplatform "example.com/gin-vben-admin/server/internal/platform/observability"
 	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
@@ -47,6 +51,8 @@ type App struct {
 	settings           *settingsapp.Service
 	audit              *auditapp.Service
 	files              *fileapp.Service
+	mail               *mailapp.Service
+	monitor            *monitorapp.Service
 	observability      *observabilityplatform.Manager
 	settingsRepository settingsapp.Repository
 	install            *installer.StatusService
@@ -183,6 +189,41 @@ func New(cfg config.Config) (*App, error) {
 		app.audit = auditapp.NewService(auditplatform.NewGORMRepository(app.database))
 	}
 
+	// The 1.0 mail service is available in both database-backed and local
+	// single-process modes. Account/message bodies are envelope-encrypted and
+	// never returned by the transport layer. A configured JWT secret is reused as
+	// the runtime key; when auth is disabled, an ephemeral process key keeps the
+	// local fixture redacted without persisting a secret.
+	mailKey := []byte(strings.TrimSpace(cfg.Auth.JWTSecret))
+	if len(mailKey) == 0 {
+		var ephemeral [32]byte
+		if _, randErr := cryptorand.Read(ephemeral[:]); randErr == nil {
+			mailKey = ephemeral[:]
+		}
+	}
+	if len(mailKey) > 0 {
+		mailCipher, cipherErr := settingsapp.NewEnvelopeEncryptor(mailKey)
+		if cipherErr != nil {
+			return cleanupOnError(errors.New("configure mail encryption"))
+		}
+		var accountRepository mailapp.AccountRepository = mailapp.NewMemoryAccountRepository()
+		var messageRepository mailapp.MessageRepository = mailapp.NewMemoryMessageRepository()
+		var attemptRepository mailapp.AttemptRepository = mailapp.NewMemoryAttemptRepository()
+		if app.database != nil {
+			accountRepository = mailplatform.NewGORMAccountRepository(app.database)
+			messageRepository = mailplatform.NewGORMMessageRepository(app.database)
+			attemptRepository = mailplatform.NewGORMMessageRepository(app.database)
+		}
+		selection := appnotification.SMTPSelection(strings.TrimSpace(cfg.Mail.Selection))
+		if selection == "" {
+			selection = appnotification.SMTPSelectionWeightedRandom
+		}
+		mailService := mailapp.NewService(accountRepository, messageRepository, notificationplatform.NewSMTPAccountProvider(), mailapp.Config{Cipher: mailCipher, Selection: selection, MaxAttempts: 3, RetryDelays: []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}, Cooldown: 30 * time.Second})
+		mailService.SetAttemptRepository(attemptRepository)
+		app.mail = mailService
+	}
+	app.monitor = monitorapp.NewService(monitorapp.Config{Version: "1.0.0-dev", Scope: "process", Start: time.Now(), Database: app.database, Redis: app.redis})
+
 	app.readiness = platformhealth.NewChecker(readinessTimeout(cfg), dependencies...)
 	var limiter appauth.RateLimiter
 	if cfg.Auth.Enabled {
@@ -231,7 +272,7 @@ func New(cfg config.Config) (*App, error) {
 		captchaProvider = authplatform.NewRedisCaptchaProvider(app.redis, cfg.Auth.CaptchaKeyPrefix, cfg.Auth.CaptchaChallengeTTL)
 		captchaRisk = authplatform.NewRedisCaptchaRiskStore(app.redis, cfg.Auth.CaptchaKeyPrefix)
 	}
-	app.http = newHTTPServerWithPlanAndCaptchaAndFiles(cfg, app.readiness, app.auth, limiter, app.iam, recovery, app.install, installPlan, installplatform.NewSystemDependencyProbe(), applyService, app.applyJobs, app.settings, app.audit, captchaProvider, captchaRisk, app.files, app.observability)
+	app.http = newHTTPServerWithPlanAndCaptchaAndFilesAndAux(cfg, app.readiness, app.auth, limiter, app.iam, recovery, app.install, installPlan, installplatform.NewSystemDependencyProbe(), applyService, app.applyJobs, app.settings, app.audit, captchaProvider, captchaRisk, app.files, app.mail, app.monitor, app.observability)
 	return app, nil
 }
 
@@ -318,6 +359,22 @@ func (a *App) Files() *fileapp.Service {
 		return nil
 	}
 	return a.files
+}
+
+// Mail returns the tenant-scoped SMTP account and delivery service.
+func (a *App) Mail() *mailapp.Service {
+	if a == nil {
+		return nil
+	}
+	return a.mail
+}
+
+// Monitor returns the read-only platform monitoring service.
+func (a *App) Monitor() *monitorapp.Service {
+	if a == nil {
+		return nil
+	}
+	return a.monitor
 }
 
 // Observability returns the runtime metrics/tracing collector. It is always

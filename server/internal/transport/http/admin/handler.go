@@ -7,7 +7,9 @@ import (
 	authhttp "example.com/gin-vben-admin/server/internal/transport/http/auth"
 	filehttp "example.com/gin-vben-admin/server/internal/transport/http/file"
 	iamhttp "example.com/gin-vben-admin/server/internal/transport/http/iam"
+	mailhttp "example.com/gin-vben-admin/server/internal/transport/http/mail"
 	httpmiddleware "example.com/gin-vben-admin/server/internal/transport/http/middleware"
+	monitorhttp "example.com/gin-vben-admin/server/internal/transport/http/monitor"
 	"example.com/gin-vben-admin/server/internal/transport/http/response"
 	settingshttp "example.com/gin-vben-admin/server/internal/transport/http/settings"
 )
@@ -19,6 +21,8 @@ type AuxiliaryRoutes struct {
 	Settings     *settingshttp.Handler
 	Audit        *audithttp.Handler
 	Files        *filehttp.Handler
+	Mail         *mailhttp.Handler
+	Monitor      *monitorhttp.Handler
 	TenantPolicy *httpmiddleware.TenantPolicy
 }
 
@@ -50,9 +54,18 @@ func RegisterRoutesWithIAM(r gin.IRouter, authHandler *authhttp.Handler, iamHand
 		settingshttp.RegisterRoutesOn(protected, capabilities.Settings)
 		audithttp.RegisterRoutesOn(protected, capabilities.Audit)
 		filehttp.RegisterRoutesOn(protected, capabilities.Files)
+		mailhttp.RegisterRoutesOn(protected, capabilities.Mail)
+		monitorhttp.RegisterRoutesOn(protected, capabilities.Monitor)
 		return
 	}
-	settingshttp.RegisterRoutes(r, capabilities.Settings)
-	audithttp.RegisterRoutes(r, capabilities.Audit)
-	filehttp.RegisterRoutes(r, capabilities.Files)
+	// When authentication is deliberately disabled for a local single-node
+	// fixture, auxiliary routes still receive the tenant context middleware.
+	// This keeps tenant-scoped services consistent without inventing an auth
+	// principal; production runs enter the branch above.
+	localScoped := r.Group("/api/admin/v1", httpmiddleware.TenantContext(policy))
+	settingshttp.RegisterRoutesOn(localScoped, capabilities.Settings)
+	audithttp.RegisterRoutesOn(localScoped, capabilities.Audit)
+	filehttp.RegisterRoutesOn(localScoped, capabilities.Files)
+	mailhttp.RegisterRoutesOn(localScoped, capabilities.Mail)
+	monitorhttp.RegisterRoutesOn(localScoped, capabilities.Monitor)
 }
