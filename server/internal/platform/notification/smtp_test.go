@@ -48,6 +48,36 @@ func TestSMTPMailerDeliversMessageToIsolatedFixture(t *testing.T) {
 	}
 }
 
+func TestSMTPMailerDeliversAllRecipientsInOneTransaction(t *testing.T) {
+	fixture := newSMTPFixture(t)
+	mailer, err := NewSMTPMailer(appnotification.SMTPConfig{
+		Host: "127.0.0.1",
+		Port: 1025,
+		From: "no-reply@example.test",
+	})
+	if err != nil {
+		t.Fatalf("NewSMTPMailer() error = %v", err)
+	}
+	mailer.dialContext = fixture.dial
+
+	err = mailer.Send(context.Background(), appnotification.Message{
+		ID:         "fixture-message-multi",
+		To:         "first@example.test",
+		Recipients: []string{"first@example.test", "second@example.test"},
+		Subject:    "multiple recipients",
+		Body:       "fixture body",
+	})
+	if err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+	message := fixture.waitMessage(t)
+	for _, want := range []string{"rcpt:<first@example.test>", "rcpt:<second@example.test>"} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("fixture message missing %q: %s", want, message)
+		}
+	}
+}
+
 func TestSMTPMailerRejectsHeaderInjectionAndDoesNotExposePassword(t *testing.T) {
 	_, err := NewSMTPMailer(appnotification.SMTPConfig{
 		Host:     "127.0.0.1",

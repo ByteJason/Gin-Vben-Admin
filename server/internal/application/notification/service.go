@@ -28,13 +28,17 @@ const (
 )
 
 type Message struct {
-	ID        string    `json:"id"`
-	To        string    `json:"to"`
-	Subject   string    `json:"subject"`
-	Body      string    `json:"-"`
-	Status    Status    `json:"status"`
-	ErrorCode string    `json:"errorCode,omitempty"`
-	CreatedAt time.Time `json:"createdAt"`
+	ID string `json:"id"`
+	To string `json:"to"`
+	// Recipients carries the complete envelope recipient set for transports
+	// that can deliver one message to several addresses. To remains the
+	// backwards-compatible single-recipient field and is used as a fallback.
+	Recipients []string  `json:"-"`
+	Subject    string    `json:"subject"`
+	Body       string    `json:"-"`
+	Status     Status    `json:"status"`
+	ErrorCode  string    `json:"errorCode,omitempty"`
+	CreatedAt  time.Time `json:"createdAt"`
 }
 
 type SendInput struct {

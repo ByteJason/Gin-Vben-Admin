@@ -55,6 +55,61 @@ type SMTPPoolMailer struct {
 // SMTPMultiMailer is an alias used by integrations that call the pool a multi-mailer.
 type SMTPMultiMailer = SMTPPoolMailer
 
+// SMTPAccountProvider adapts one persisted account to the application mail
+// service. Selection/retry remains in the application layer when delivery
+// records need an account id; this adapter only speaks SMTP.
+type SMTPAccountProvider struct {
+	dialContext func(context.Context, string, string) (net.Conn, error)
+}
+
+func NewSMTPAccountProvider() *SMTPAccountProvider {
+	return &SMTPAccountProvider{dialContext: (&net.Dialer{}).DialContext}
+}
+
+func (p *SMTPAccountProvider) SetDialContext(fn func(context.Context, string, string) (net.Conn, error)) {
+	if p != nil && fn != nil {
+		p.dialContext = fn
+	}
+}
+
+func (p *SMTPAccountProvider) Send(ctx context.Context, account appnotification.SMTPAccount, message appnotification.Message) error {
+	if p == nil {
+		return appnotification.ErrProvider
+	}
+	mailer, err := NewSMTPMailerFromAccount(account)
+	if err != nil {
+		return err
+	}
+	if p.dialContext != nil {
+		mailer.dialContext = p.dialContext
+	}
+	return mailer.Send(ctx, message)
+}
+
+// SendWithResult returns the locally generated RFC Message-ID value. The
+// SMTP adapter does not expose server credentials or response text; the
+// application records this stable id for idempotency/audit correlation.
+func (p *SMTPAccountProvider) SendWithResult(ctx context.Context, account appnotification.SMTPAccount, message appnotification.Message) (string, error) {
+	if err := p.Send(ctx, account, message); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(message.ID), nil
+}
+
+func (p *SMTPAccountProvider) TestConnection(ctx context.Context, account appnotification.SMTPAccount) error {
+	if p == nil {
+		return appnotification.ErrProvider
+	}
+	mailer, err := NewSMTPMailerFromAccount(account)
+	if err != nil {
+		return err
+	}
+	if p.dialContext != nil {
+		mailer.dialContext = p.dialContext
+	}
+	return mailer.TestConnection(ctx)
+}
+
 func NewSMTPPoolMailer(cfg SMTPPoolConfig) (*SMTPPoolMailer, error) {
 	sel := cfg.Selection
 	if sel == "" {
@@ -298,11 +353,35 @@ func (m *SMTPMailer) sendWithAccount(ctx context.Context, message appnotificatio
 	}
 	to := strings.TrimSpace(message.To)
 	subject := strings.TrimSpace(message.Subject)
-	if to == "" || subject == "" || strings.ContainsAny(to+subject, "\r\n") {
+	if subject == "" || strings.ContainsAny(to+subject, "\r\n") {
 		return appnotification.ErrInvalidMessage
 	}
-	recipient, err := mail.ParseAddress(to)
-	if err != nil || strings.TrimSpace(recipient.Address) == "" {
+	recipientValues := append([]string(nil), message.Recipients...)
+	if len(recipientValues) == 0 && to != "" {
+		recipientValues = []string{to}
+	}
+	if len(recipientValues) == 0 || len(recipientValues) > 100 {
+		return appnotification.ErrInvalidMessage
+	}
+	recipients := make([]string, 0, len(recipientValues))
+	seenRecipients := make(map[string]struct{}, len(recipientValues))
+	for _, value := range recipientValues {
+		value = strings.TrimSpace(value)
+		if value == "" || strings.ContainsAny(value, "\r\n") {
+			return appnotification.ErrInvalidMessage
+		}
+		recipient, parseErr := mail.ParseAddress(value)
+		if parseErr != nil || strings.TrimSpace(recipient.Address) == "" {
+			return appnotification.ErrInvalidMessage
+		}
+		address := strings.ToLower(strings.TrimSpace(recipient.Address))
+		if _, duplicate := seenRecipients[address]; duplicate {
+			continue
+		}
+		seenRecipients[address] = struct{}{}
+		recipients = append(recipients, address)
+	}
+	if len(recipients) == 0 {
 		return appnotification.ErrInvalidMessage
 	}
 
@@ -361,8 +440,10 @@ func (m *SMTPMailer) sendWithAccount(ctx context.Context, message appnotificatio
 	if err := client.Mail(from); err != nil {
 		return providerFailure("mail")
 	}
-	if err := client.Rcpt(recipient.Address); err != nil {
-		return providerFailure("recipient")
+	for _, recipient := range recipients {
+		if err := client.Rcpt(recipient); err != nil {
+			return providerFailure("recipient")
+		}
 	}
 	writer, err := client.Data()
 	if err != nil {
@@ -372,7 +453,7 @@ func (m *SMTPMailer) sendWithAccount(ctx context.Context, message appnotificatio
 	if name := strings.TrimSpace(account.FromName); name != "" {
 		headerFrom = (&mail.Address{Name: name, Address: from}).String()
 	}
-	if err := writeMessage(writer, headerFrom, recipient.Address, message); err != nil {
+	if err := writeMessage(writer, headerFrom, strings.Join(recipients, ", "), message); err != nil {
 		_ = writer.Close()
 		return providerFailure("write")
 	}
@@ -521,6 +602,18 @@ type SMTPError struct {
 
 func (e *SMTPError) Error() string { return "smtp " + e.Stage + " failed (" + e.Code + ")" }
 func (e *SMTPError) Unwrap() error { return appnotification.ErrProvider }
+func (e *SMTPError) SMTPStage() string {
+	if e == nil {
+		return ""
+	}
+	return e.Stage
+}
+func (e *SMTPError) SMTPCode() string {
+	if e == nil {
+		return ""
+	}
+	return e.Code
+}
 
 func providerFailure(stage string) error {
 	return &SMTPError{Stage: stage, Code: "smtp_" + stage}
