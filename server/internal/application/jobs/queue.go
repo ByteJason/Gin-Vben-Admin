@@ -23,6 +23,7 @@ type Status string
 
 const (
 	StatusPending    Status = "pending"
+	StatusRunning    Status = "running"
 	StatusSucceeded  Status = "succeeded"
 	StatusFailed     Status = "failed"
 	StatusDeadLetter Status = "dead_letter"
@@ -48,6 +49,13 @@ type Queue interface {
 	Fail(context.Context, string, error) error
 	Complete(context.Context, string) error
 	Cancel(context.Context, string) error
+}
+
+// RunningQueue is an optional capability used by workers that expose an
+// explicit in-progress state. Queue adapters that do not implement it remain
+// compatible with the base contract.
+type RunningQueue interface {
+	Start(context.Context, string) error
 }
 
 type MemoryQueue struct {
@@ -79,7 +87,9 @@ func (q *MemoryQueue) Enqueue(_ context.Context, task Task) (Task, error) {
 	}
 	task.ID = id
 	task.Payload = append([]byte(nil), task.Payload...)
-	task.MaxAttempts = q.maxAttempts
+	if task.MaxAttempts <= 0 {
+		task.MaxAttempts = q.maxAttempts
+	}
 	task.Status = StatusPending
 	task.CreatedAt = time.Now().UTC()
 	q.tasks[id] = task
@@ -115,7 +125,14 @@ func (q *MemoryQueue) Fail(_ context.Context, id string, cause error) error {
 	}
 	task.Attempts++
 	if cause != nil {
-		task.LastError = cause.Error()
+		switch {
+		case errors.Is(cause, context.DeadlineExceeded):
+			task.LastError = "worker.timeout"
+		case errors.Is(cause, context.Canceled):
+			task.LastError = "worker.cancelled"
+		default:
+			task.LastError = "worker.failed"
+		}
 	}
 	if task.Attempts >= task.MaxAttempts {
 		task.Status = StatusDeadLetter
@@ -128,6 +145,24 @@ func (q *MemoryQueue) Fail(_ context.Context, id string, cause error) error {
 
 func (q *MemoryQueue) Complete(_ context.Context, id string) error {
 	return q.transition(id, StatusSucceeded)
+}
+
+func (q *MemoryQueue) Start(_ context.Context, id string) error {
+	if q == nil {
+		return ErrTaskNotFound
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	task, ok := q.tasks[id]
+	if !ok {
+		return ErrTaskNotFound
+	}
+	if task.Status == StatusDeadLetter || task.Status == StatusCancelled || task.Status == StatusSucceeded {
+		return ErrTaskConflict
+	}
+	task.Status = StatusRunning
+	q.tasks[id] = task
+	return nil
 }
 
 func (q *MemoryQueue) Cancel(_ context.Context, id string) error {

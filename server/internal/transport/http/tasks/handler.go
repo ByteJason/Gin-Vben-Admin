@@ -17,9 +17,18 @@ import (
 
 const basePath = "/api/admin/v1/tasks"
 
-type Handler struct{ service *tasks.Service }
+type Handler struct {
+	service    *tasks.Service
+	runService *tasks.RunService
+}
 
-func NewHandler(service *tasks.Service) *Handler { return &Handler{service: service} }
+func NewHandler(service *tasks.Service, runServices ...*tasks.RunService) *Handler {
+	var runService *tasks.RunService
+	if len(runServices) > 0 {
+		runService = runServices[0]
+	}
+	return &Handler{service: service, runService: runService}
+}
 
 func RegisterRoutes(r gin.IRouter, handler *Handler) { registerRoutes(r.Group(basePath), handler) }
 
@@ -33,7 +42,7 @@ type input struct {
 	PayloadSchema     json.RawMessage `json:"payloadSchema"`
 	Cron              string          `json:"cron"`
 	Timezone          string          `json:"timezone"`
-	Enabled           bool            `json:"enabled"`
+	Enabled           *bool           `json:"enabled"`
 	Concurrency       int             `json:"concurrency"`
 	ConcurrencyPolicy string          `json:"concurrencyPolicy"`
 	TimeoutSeconds    int             `json:"timeoutSeconds"`
@@ -60,7 +69,10 @@ func registerRoutes(group gin.IRouter, handler *Handler) {
 	group.PATCH("/:id", handler.update)
 	group.DELETE("/:id", handler.delete)
 	group.POST("/:id/run", handler.run)
-	group.GET("/:id/runs", handler.runs)
+	group.GET("/:id/runs", handler.listRuns)
+	group.GET("/:id/runs/:runId/logs", handler.runLogs)
+	group.POST("/:id/runs/:runId/cancel", handler.cancelRun)
+	group.POST("/:id/runs/:runId/retry", handler.retryRun)
 }
 
 func (h *Handler) list(c *gin.Context) {
@@ -134,17 +146,19 @@ func (h *Handler) run(c *gin.Context) {
 		writeError(c, err)
 		return
 	}
-	// The first B1.3 slice records the confirmed intent. Queue/worker execution
-	// is attached by the next run-record slice, keeping this endpoint explicit
-	// and preventing an unregistered payload from being executed.
-	response.Write(c, http.StatusAccepted, 0, "accepted", gin.H{
-		"taskId":         definition.ID,
-		"status":         "pending",
-		"idempotencyKey": strings.TrimSpace(request.IdempotencyKey),
-	})
+	if h.runService == nil {
+		response.Write(c, http.StatusAccepted, 0, "accepted", gin.H{"taskId": definition.ID, "status": "pending", "idempotencyKey": strings.TrimSpace(request.IdempotencyKey)})
+		return
+	}
+	run, err := h.runService.Enqueue(c.Request.Context(), definition.ID, request.Payload, request.IdempotencyKey)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	response.Write(c, http.StatusAccepted, 0, "accepted", run)
 }
 
-func (h *Handler) runs(c *gin.Context) {
+func (h *Handler) listRuns(c *gin.Context) {
 	if !scopeOK(c) {
 		return
 	}
@@ -152,13 +166,74 @@ func (h *Handler) runs(c *gin.Context) {
 		writeError(c, err)
 		return
 	}
-	response.OK(c, []any{})
+	if h.runService == nil {
+		response.OK(c, []any{})
+		return
+	}
+	items, err := h.runService.List(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	response.OK(c, items)
+}
+
+func (h *Handler) runLogs(c *gin.Context) {
+	if !scopeOK(c) {
+		return
+	}
+	if h.runService == nil {
+		writeError(c, tasks.ErrRunQueueUnavailable)
+		return
+	}
+	logs, err := h.runService.Logs(c.Request.Context(), c.Param("id"), c.Param("runId"))
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	response.OK(c, logs)
+}
+
+func (h *Handler) cancelRun(c *gin.Context) {
+	if !scopeOK(c) {
+		return
+	}
+	if h.runService == nil {
+		writeError(c, tasks.ErrRunQueueUnavailable)
+		return
+	}
+	run, err := h.runService.Cancel(c.Request.Context(), c.Param("id"), c.Param("runId"))
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	response.OK(c, run)
+}
+
+func (h *Handler) retryRun(c *gin.Context) {
+	if !scopeOK(c) {
+		return
+	}
+	if h.runService == nil {
+		writeError(c, tasks.ErrRunQueueUnavailable)
+		return
+	}
+	run, err := h.runService.Retry(c.Request.Context(), c.Param("id"), c.Param("runId"))
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	response.Write(c, http.StatusAccepted, 0, "accepted", run)
 }
 
 func (in input) definition() tasks.TaskDefinition {
+	enabled := true
+	if in.Enabled != nil {
+		enabled = *in.Enabled
+	}
 	return tasks.TaskDefinition{
 		Name: in.Name, Type: in.Type, PayloadSchema: in.PayloadSchema, Cron: in.Cron,
-		Timezone: in.Timezone, Enabled: in.Enabled, Concurrency: in.Concurrency,
+		Timezone: in.Timezone, Enabled: enabled, Concurrency: in.Concurrency,
 		ConcurrencyPolicy: in.ConcurrencyPolicy, TimeoutSeconds: in.TimeoutSeconds,
 		MaxAttempts: in.MaxAttempts, IdempotencyKey: in.IdempotencyKey,
 	}
@@ -182,6 +257,14 @@ func writeError(c *gin.Context, err error) {
 		response.ErrorWithMessageKey(c, http.StatusNotFound, 10001, "task definition not found", "tasks.definition.notFound", nil)
 	case errors.Is(err, tasks.ErrRepositoryMissing):
 		response.ErrorWithMessageKey(c, http.StatusServiceUnavailable, 40001, "task dependency unavailable", "tasks.dependency.unavailable", nil)
+	case errors.Is(err, tasks.ErrInvalidRunPayload):
+		response.ErrorWithMessageKey(c, http.StatusBadRequest, 10000, "invalid task payload", "tasks.run.payloadInvalid", nil)
+	case errors.Is(err, tasks.ErrRunStateConflict):
+		response.ErrorWithMessageKey(c, http.StatusConflict, 10010, "task run state conflict", "tasks.run.stateConflict", nil)
+	case errors.Is(err, tasks.ErrRunNotFound):
+		response.ErrorWithMessageKey(c, http.StatusNotFound, 10001, "task run not found", "tasks.run.notFound", nil)
+	case errors.Is(err, tasks.ErrRunQueueUnavailable):
+		response.ErrorWithMessageKey(c, http.StatusServiceUnavailable, 40001, "task queue unavailable", "tasks.run.queueUnavailable", nil)
 	default:
 		response.ErrorWithMessageKey(c, http.StatusInternalServerError, 50000, "internal error", "error.internal", nil)
 	}

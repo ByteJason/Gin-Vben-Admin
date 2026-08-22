@@ -38,6 +38,9 @@ func NewWorker(queue Queue, options WorkerOptions) *Worker {
 }
 
 func (w *Worker) Register(taskType string, handler Handler) error {
+	if w == nil {
+		return ErrWorkerUnavailable
+	}
 	taskType = strings.TrimSpace(taskType)
 	if taskType == "" || handler == nil {
 		return ErrInvalidTask
@@ -90,6 +93,11 @@ func (w *Worker) Execute(ctx context.Context, id string) error {
 	if task.Status == StatusSucceeded || task.Status == StatusDeadLetter || task.Status == StatusCancelled {
 		return nil
 	}
+	if starter, ok := w.queue.(RunningQueue); ok {
+		if err := starter.Start(context.Background(), id); err != nil && !errors.Is(err, ErrTaskConflict) {
+			return err
+		}
+	}
 	callCtx := ctx
 	var cancel context.CancelFunc
 	if w.timeout > 0 {
@@ -128,6 +136,9 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 }
 
 func (w *Worker) Run(ctx context.Context, interval time.Duration) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if interval <= 0 {
 		interval = 10 * time.Millisecond
 	}

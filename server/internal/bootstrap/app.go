@@ -20,6 +20,7 @@ import (
 	fileapp "example.com/gin-vben-admin/server/internal/application/file"
 	iamapp "example.com/gin-vben-admin/server/internal/application/iam"
 	installer "example.com/gin-vben-admin/server/internal/application/installer"
+	"example.com/gin-vben-admin/server/internal/application/jobs"
 	mailapp "example.com/gin-vben-admin/server/internal/application/mail"
 	monitorapp "example.com/gin-vben-admin/server/internal/application/monitor"
 	appnotification "example.com/gin-vben-admin/server/internal/application/notification"
@@ -34,6 +35,7 @@ import (
 	platformhealth "example.com/gin-vben-admin/server/internal/platform/health"
 	"example.com/gin-vben-admin/server/internal/platform/iamplatform"
 	"example.com/gin-vben-admin/server/internal/platform/installplatform"
+	jobplatform "example.com/gin-vben-admin/server/internal/platform/jobs"
 	mailplatform "example.com/gin-vben-admin/server/internal/platform/mail"
 	notificationplatform "example.com/gin-vben-admin/server/internal/platform/notification"
 	observabilityplatform "example.com/gin-vben-admin/server/internal/platform/observability"
@@ -58,6 +60,10 @@ type App struct {
 	mail               *mailapp.Service
 	dictionary         *dictionaryapp.Service
 	tasks              *tasksapp.Service
+	taskRuns           *tasksapp.RunService
+	taskQueue          jobs.Queue
+	taskWorker         *jobs.Worker
+	taskScheduler      *tasksapp.Scheduler
 	monitor            *monitorapp.Service
 	observability      *observabilityplatform.Manager
 	settingsRepository settingsapp.Repository
@@ -241,6 +247,17 @@ func New(cfg config.Config) (*App, error) {
 		taskRepository = tasksplatform.NewGORMRepository(app.database)
 	}
 	app.tasks = tasksapp.NewService(taskRepository)
+	var taskRunRepository tasksapp.RunRepository = tasksapp.NewMemoryRunRepository()
+	if app.database != nil {
+		taskRunRepository = tasksplatform.NewGORMRunRepository(app.database)
+	}
+	app.taskQueue = jobs.NewMemoryQueue(3)
+	if app.redis != nil {
+		app.taskQueue = jobplatform.NewRedisQueue(app.redis, 3)
+	}
+	app.taskWorker = jobs.NewWorker(app.taskQueue, jobs.WorkerOptions{Concurrency: 1})
+	app.taskRuns = tasksapp.NewRunService(app.tasks, taskRunRepository, app.taskQueue)
+	app.taskScheduler = tasksapp.NewScheduler(app.tasks, app.taskRuns)
 
 	app.readiness = platformhealth.NewChecker(readinessTimeout(cfg), dependencies...)
 	var limiter appauth.RateLimiter
@@ -290,7 +307,7 @@ func New(cfg config.Config) (*App, error) {
 		captchaProvider = authplatform.NewRedisCaptchaProvider(app.redis, cfg.Auth.CaptchaKeyPrefix, cfg.Auth.CaptchaChallengeTTL)
 		captchaRisk = authplatform.NewRedisCaptchaRiskStore(app.redis, cfg.Auth.CaptchaKeyPrefix)
 	}
-	app.http = newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasks(cfg, app.readiness, app.auth, limiter, app.iam, recovery, app.install, installPlan, installplatform.NewSystemDependencyProbe(), applyService, app.applyJobs, app.settings, app.audit, captchaProvider, captchaRisk, app.files, app.mail, app.monitor, app.dictionary, app.tasks, app.observability)
+	app.http = newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasksAndRuns(cfg, app.readiness, app.auth, limiter, app.iam, recovery, app.install, installPlan, installplatform.NewSystemDependencyProbe(), applyService, app.applyJobs, app.settings, app.audit, captchaProvider, captchaRisk, app.files, app.mail, app.monitor, app.dictionary, app.tasks, app.taskRuns, app.observability)
 	return app, nil
 }
 
@@ -395,6 +412,39 @@ func (a *App) Monitor() *monitorapp.Service {
 	return a.monitor
 }
 
+// Tasks returns the tenant-scoped task definition service.
+func (a *App) Tasks() *tasksapp.Service {
+	if a == nil {
+		return nil
+	}
+	return a.tasks
+}
+
+// TaskRuns returns the persisted execution and retry service.
+func (a *App) TaskRuns() *tasksapp.RunService {
+	if a == nil {
+		return nil
+	}
+	return a.taskRuns
+}
+
+// TaskWorker returns the independently composed worker. Handlers are explicit
+// registrations; no HTTP payload is interpreted as executable code.
+func (a *App) TaskWorker() *jobs.Worker {
+	if a == nil {
+		return nil
+	}
+	return a.taskWorker
+}
+
+// TaskScheduler returns the cron coordinator for the default tenant scope.
+func (a *App) TaskScheduler() *tasksapp.Scheduler {
+	if a == nil {
+		return nil
+	}
+	return a.taskScheduler
+}
+
 // Observability returns the runtime metrics/tracing collector. It is always
 // present after New; disabled configurations expose zero collectors.
 func (a *App) Observability() *observabilityplatform.Manager {
@@ -455,6 +505,20 @@ func (a *App) Run(ctx context.Context) error {
 	}
 	if err := a.preparePersistedObservability(ctx); err != nil {
 		return errors.Join(fmt.Errorf("load persisted observability configuration: %w", err), a.Close())
+	}
+	// The worker and scheduler are independent seams. Handlers must be
+	// explicitly registered by the composition root; scheduler payloads are
+	// always JSON objects and never shell/code fragments.
+	workerCtx, stopWorkers := context.WithCancel(ctx)
+	defer stopWorkers()
+	if a.taskWorker != nil {
+		go func() { _ = a.taskWorker.Run(workerCtx, time.Second) }()
+	}
+	if a.taskScheduler != nil {
+		scope, scopeErr := tenant.NewContext(a.config.Tenant.DefaultID, "", true)
+		if scopeErr == nil {
+			go func() { _ = a.taskScheduler.Run(tenant.WithContext(workerCtx, scope), time.Minute) }()
+		}
 	}
 
 	listener, err := net.Listen("tcp", a.HTTPServer().Addr)

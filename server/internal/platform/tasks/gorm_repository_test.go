@@ -32,3 +32,31 @@ func TestDefinitionRecordRoundTripsTimeoutAndPayload(t *testing.T) {
 		t.Fatalf("round trip = %+v", got)
 	}
 }
+
+func TestGORMRunRepositoryRequiresConfiguredStore(t *testing.T) {
+	repo := NewGORMRunRepository(nil)
+	if _, err := repo.Create(context.Background(), tasksapp.TaskRun{}); !errors.Is(err, tasksapp.ErrRunQueueUnavailable) {
+		t.Fatalf("Create error = %v", err)
+	}
+	if _, err := repo.Get(context.Background(), "run", "tenant", ""); !errors.Is(err, tasksapp.ErrRunQueueUnavailable) {
+		t.Fatalf("Get error = %v", err)
+	}
+	if _, err := repo.GetByIdempotency(context.Background(), "key", "tenant", ""); !errors.Is(err, tasksapp.ErrRunQueueUnavailable) {
+		t.Fatalf("GetByIdempotency error = %v", err)
+	}
+	if _, err := repo.GetByQueueTask(context.Background(), "queue"); !errors.Is(err, tasksapp.ErrRunQueueUnavailable) {
+		t.Fatalf("GetByQueueTask error = %v", err)
+	}
+	if _, err := repo.List(context.Background(), "task", "tenant", ""); !errors.Is(err, tasksapp.ErrRunQueueUnavailable) {
+		t.Fatalf("List error = %v", err)
+	}
+	if _, err := repo.ListLogs(context.Background(), "run", "tenant", ""); !errors.Is(err, tasksapp.ErrRunQueueUnavailable) {
+		t.Fatalf("ListLogs error = %v", err)
+	}
+	if _, err := repo.Update(context.Background(), tasksapp.TaskRun{}); !errors.Is(err, tasksapp.ErrRunQueueUnavailable) {
+		t.Fatalf("Update error = %v", err)
+	}
+	if err := repo.AppendLog(context.Background(), tasksapp.TaskRunLog{}); !errors.Is(err, tasksapp.ErrRunQueueUnavailable) {
+		t.Fatalf("AppendLog error = %v", err)
+	}
+}

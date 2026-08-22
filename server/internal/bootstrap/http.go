@@ -65,6 +65,10 @@ func newHTTPServerWithPlanAndCaptchaAndFilesAndAux(cfg config.Config, readiness 
 }
 
 func newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasks(cfg config.Config, readiness health.ReadinessChecker, authService appauth.AuthService, limiter appauth.RateLimiter, iamService *iamapp.Service, recovery appauth.AccountRecoveryService, installStatus *installer.StatusService, installPlan installer.PlanProvider, dependencyChecks installhttp.DependencyCheckProvider, applyService *installer.ApplyService, jobService *installer.ApplyJobService, settingsService *settingsapp.Service, auditService *auditapp.Service, captchaProvider appauth.CaptchaProvider, captchaRisk appauth.CaptchaRiskStore, fileService *fileapp.Service, mailService *mailapp.Service, monitorService *monitorapp.Service, dictionaryService *dictionaryapp.Service, taskService *tasksapp.Service, observations ...httpmiddleware.ObservabilityRuntime) *http.Server {
+	return newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasksAndRuns(cfg, readiness, authService, limiter, iamService, recovery, installStatus, installPlan, dependencyChecks, applyService, jobService, settingsService, auditService, captchaProvider, captchaRisk, fileService, mailService, monitorService, dictionaryService, taskService, nil, observations...)
+}
+
+func newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasksAndRuns(cfg config.Config, readiness health.ReadinessChecker, authService appauth.AuthService, limiter appauth.RateLimiter, iamService *iamapp.Service, recovery appauth.AccountRecoveryService, installStatus *installer.StatusService, installPlan installer.PlanProvider, dependencyChecks installhttp.DependencyCheckProvider, applyService *installer.ApplyService, jobService *installer.ApplyJobService, settingsService *settingsapp.Service, auditService *auditapp.Service, captchaProvider appauth.CaptchaProvider, captchaRisk appauth.CaptchaRiskStore, fileService *fileapp.Service, mailService *mailapp.Service, monitorService *monitorapp.Service, dictionaryService *dictionaryapp.Service, taskService *tasksapp.Service, runService *tasksapp.RunService, observations ...httpmiddleware.ObservabilityRuntime) *http.Server {
 	var authHandler *authhttp.Handler
 	if authService != nil {
 		authHandler = authhttp.NewHandler(authService, cfg.Auth, limiter)
@@ -103,7 +107,7 @@ func newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasks(cfg config.Config, re
 		auxiliary.Dictionary = dictionaryhttp.NewHandler(dictionaryService)
 	}
 	if taskService != nil {
-		auxiliary.Tasks = taskshttp.NewHandler(taskService)
+		auxiliary.Tasks = taskshttp.NewHandler(taskService, runService)
 	}
 	tenantPolicy := httpmiddleware.TenantPolicy{
 		Mode:                  cfg.Tenant.Mode,
