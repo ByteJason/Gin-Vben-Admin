@@ -48,6 +48,18 @@ const routes: RouteRecordRaw[] = [
         name: 'SystemFiles',
         path: 'files',
       },
+      {
+        component: () => import('#/views/system/mail/index.vue'),
+        meta: { icon: 'lucide:mail', title: 'SMTP Mail' },
+        name: 'SystemMail',
+        path: 'mail',
+      },
+      {
+        component: () => import('#/views/system/monitor/index.vue'),
+        meta: { icon: 'lucide:activity', title: 'Operations Monitor' },
+        name: 'SystemMonitor',
+        path: 'monitor',
+      },
     ],
   },
 ];
