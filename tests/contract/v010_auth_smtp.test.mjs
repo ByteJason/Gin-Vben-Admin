@@ -16,7 +16,10 @@ test('0.10 SMTP recovery seam is explicit, redacted, and Mailpit-isolated', () =
   }
   assert.match(config, /Password.*json:\"-\"|MailSummary/);
   assert.match(example, /mail:\s*\n[\s\S]*enabled:\s*false/);
-  assert.match(compose, /mailpit:/);
+  assert.doesNotMatch(example, /deploy\/compose\.mailpit\.yaml/);
+  assert.match(example, /\.runtime\/compose\/dev\.yaml/);
+  assert.match(example, /selection:\s*weighted_random/);
+  assert.match(example, /accounts:\s*\[\]/);
   assert.match(compose, /mailpit:/);
   assert.match(compose, /dev\.yaml/);
   assert.match(adapter, /func NewSMTPMailer/);

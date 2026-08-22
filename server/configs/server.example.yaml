@@ -94,8 +94,9 @@ auth:
   registration_enabled: false
 
 mail:
-  # Optional SMTP transport. Keep disabled for local runs unless the isolated
-  # Mailpit profile is enabled (deploy/compose.mailpit.yaml).
+  # Optional SMTP transport. Keep disabled for local runs. Generate the
+  # isolated Mailpit fixture with `node scripts/prepare-runtime-compose.mjs`
+  # and use `.runtime/compose/dev.yaml` when transport acceptance is needed.
   enabled: false
   host: "127.0.0.1"
   port: 1025
@@ -103,6 +104,10 @@ mail:
   password: ""
   from: "no-reply@example.test"
   start_tls: false
+  selection: weighted_random
+  # Runtime/database-managed accounts are the preferred 1.0 path. Do not place
+  # real account passwords in this tracked example file.
+  accounts: []
 
 file:
   enabled: true
