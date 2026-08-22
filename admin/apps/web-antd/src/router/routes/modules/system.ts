@@ -69,6 +69,12 @@ const routes: RouteRecordRaw[] = [
         name: 'SystemDictionary',
         path: 'dictionary',
       },
+      {
+        component: () => import('#/views/system/tasks/index.vue'),
+        meta: { icon: 'lucide:workflow', title: $t('page.tasks.title') },
+        name: 'SystemTasks',
+        path: 'tasks',
+      },
     ],
   },
 ];

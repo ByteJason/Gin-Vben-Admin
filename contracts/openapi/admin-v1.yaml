@@ -10,6 +10,7 @@ servers:
 tags:
   - name: Health
   - name: Admin
+  - name: Tasks
 paths:
   /health/live:
     get:
@@ -1243,6 +1244,120 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /api/admin/v1/tasks:
+    get:
+      tags: [Tasks]
+      operationId: listTasks
+      summary: 查询当前租户的持久化任务定义
+      security: [{BearerAuth: []}]
+      responses:
+        '200':
+          description: 任务定义列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/TaskDefinition' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Tasks]
+      operationId: createTask
+      summary: 创建租户任务定义
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TaskDefinitionInput' }
+      responses:
+        '201': { $ref: '#/components/responses/SuccessResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/admin/v1/tasks/{id}:
+    patch:
+      tags: [Tasks]
+      operationId: updateTask
+      summary: 更新租户任务定义
+      security: [{BearerAuth: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TaskDefinitionInput' }
+      responses:
+        '200': { $ref: '#/components/responses/SuccessResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [Tasks]
+      operationId: deleteTask
+      summary: 软删除租户任务定义
+      security: [{BearerAuth: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      responses:
+        '200': { $ref: '#/components/responses/EmptySuccessResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/admin/v1/tasks/{id}/run:
+    post:
+      tags: [Tasks]
+      operationId: runTask
+      summary: 二次确认后手动投递任务
+      security: [{BearerAuth: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TaskRunRequest' }
+      responses:
+        '202': { $ref: '#/components/responses/SuccessResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/admin/v1/tasks/{id}/runs:
+    get:
+      tags: [Tasks]
+      operationId: listTaskRuns
+      summary: 查询任务执行记录
+      security: [{BearerAuth: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      responses:
+        '200':
+          description: 执行记录列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/TaskRun' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /api/admin/v1/mail/accounts:
     get:
       tags: [Admin]
@@ -1521,6 +1636,64 @@ components:
           maxItems: 500
           items: { $ref: '#/components/schemas/DictionaryItemInput' }
 
+    TaskDefinition:
+      type: object
+      required: [id, tenantId, name, type, payloadSchema, timezone, enabled, concurrency, concurrencyPolicy, timeoutSeconds, maxAttempts, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        tenantId: { type: string }
+        orgId: { type: string }
+        name: { type: string }
+        type: { type: string, enum: [manual, http, webhook] }
+        payloadSchema: { type: object, additionalProperties: true }
+        cron: { type: string }
+        timezone: { type: string }
+        enabled: { type: boolean }
+        concurrency: { type: integer, minimum: 1 }
+        concurrencyPolicy: { type: string, enum: [allow, forbid, replace] }
+        timeoutSeconds: { type: integer, minimum: 1 }
+        maxAttempts: { type: integer, minimum: 1, maximum: 10 }
+        idempotencyKey: { type: string, maxLength: 191 }
+        deletedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    TaskDefinitionInput:
+      type: object
+      additionalProperties: false
+      required: [name, type, payloadSchema]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 191 }
+        type: { type: string, enum: [manual, http, webhook] }
+        payloadSchema: { type: object, additionalProperties: true }
+        cron: { type: string, maxLength: 128 }
+        timezone: { type: string, default: UTC }
+        enabled: { type: boolean, default: true }
+        concurrency: { type: integer, minimum: 1, default: 1 }
+        concurrencyPolicy: { type: string, enum: [allow, forbid, replace], default: forbid }
+        timeoutSeconds: { type: integer, minimum: 1, default: 30 }
+        maxAttempts: { type: integer, minimum: 1, maximum: 10, default: 3 }
+        idempotencyKey: { type: string, maxLength: 191 }
+    TaskRunRequest:
+      type: object
+      additionalProperties: false
+      required: [confirm]
+      properties:
+        confirm: { type: boolean, const: true }
+        payload: { type: object, additionalProperties: true }
+        idempotencyKey: { type: string, maxLength: 191 }
+    TaskRun:
+      type: object
+      required: [id, taskId, status, attemptCount, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        taskId: { type: string }
+        status: { type: string, enum: [pending, running, succeeded, failed, dead_letter, cancelled] }
+        attemptCount: { type: integer, minimum: 0 }
+        lastErrorCode: { type: string }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     SMTPAccount:
       type: object
       required: [id, name, enabled, host, port, username, weight, fromEmail, implicitTls, passwordConfigured, createdAt, updatedAt]

@@ -122,6 +122,50 @@ export interface MonitorOverview {
   collectedAt: string;
 }
 
+export interface TaskDefinition {
+  id: string;
+  tenantId: string;
+  orgId?: string;
+  name: string;
+  type: 'manual' | 'http' | 'webhook';
+  payloadSchema: Record<string, unknown>;
+  cron?: string;
+  timezone: string;
+  enabled: boolean;
+  concurrency: number;
+  concurrencyPolicy: 'allow' | 'forbid' | 'replace';
+  timeoutSeconds: number;
+  maxAttempts: number;
+  idempotencyKey?: string;
+  deletedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface TaskDefinitionInput {
+  name: string;
+  type: 'manual' | 'http' | 'webhook';
+  payloadSchema: Record<string, unknown>;
+  cron?: string;
+  timezone?: string;
+  enabled?: boolean;
+  concurrency?: number;
+  concurrencyPolicy?: 'allow' | 'forbid' | 'replace';
+  timeoutSeconds?: number;
+  maxAttempts?: number;
+  idempotencyKey?: string;
+}
+export interface TaskRun {
+  id: string;
+  taskId: string;
+  status: 'pending' | 'running' | 'succeeded' | 'failed' | 'dead_letter' | 'cancelled';
+  attemptCount: number;
+  lastErrorCode?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export namespace AuthApi {\n  export interface LoginParams {\n    captcha?: string;\n    captchaId?: string;\n    identifier?: string;\n    identifierType?: "username" | "email";\n    password: string;\n    username?: string;\n  }\n\n  export interface RegisterParams {\n    password: string;\n    username: string;\n  }\n\n  export interface PasswordResetRequestParams {\n    password?: string;\n    token?: string;\n    username?: string;\n  }\n\n  export interface SessionInfo {\n    createdAt: string;\n    deviceId: string;\n    deviceName: string;\n    expiresAt: string;\n    id: string;\n    ipAddress: string;\n    lastSeenAt: string;\n    revoked: boolean;\n    userAgent: string;\n  }\n\n  export interface LoginResult {\n    accessToken: string;\n    expiresIn: number;\n    tokenType: 'Bearer';\n  }\n\n  export type RefreshTokenResult = LoginResult;\n\n  export interface ApiEnvelope<T> {\n    code: number;\n    data: T;\n    message: string;\n    meta?: { requestId?: string };\n    traceId?: string;\n  }\n\n  export interface WireTokenData {\n    accessToken?: string;\n    access_token?: string;\n    expiresIn?: number;\n    expires_in?: number;\n    tokenType?: 'Bearer' | string;\n    token_type?: 'Bearer' | string;\n  }\n}\n`;
 
 const checkOnly = process.argv.includes('--check');

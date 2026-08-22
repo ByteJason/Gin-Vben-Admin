@@ -1,5 +1,5 @@
 // Generated from contracts/openapi/admin-v1.yaml; DO NOT EDIT.
-// CONTRACT_SHA256=89f81ee2fa343af573e02f36126f039d6c1748486b1cd25cac37d2033d71468c
+// CONTRACT_SHA256=838b350fcecbe20e6a3134813b848d8a40843997b496e2f4316dfb3d019b53ea
 
 export const ADMIN_API_PREFIX = '/admin/v1' as const;
 
@@ -67,6 +67,12 @@ export const ADMIN_ENDPOINTS = {
   importDictionaryItems: '/admin/v1/dictionaries/{type}/items/import',
   updateDictionaryItem: '/admin/v1/dictionaries/{type}/items/{id}',
   deleteDictionaryItem: '/admin/v1/dictionaries/{type}/items/{id}',
+  listTasks: '/admin/v1/tasks',
+  createTask: '/admin/v1/tasks',
+  updateTask: '/admin/v1/tasks/{id}',
+  deleteTask: '/admin/v1/tasks/{id}',
+  runTask: '/admin/v1/tasks/{id}/run',
+  listTaskRuns: '/admin/v1/tasks/{id}/runs',
   listSMTPAccounts: '/admin/v1/mail/accounts',
   createSMTPAccount: '/admin/v1/mail/accounts',
   updateSMTPAccount: '/admin/v1/mail/accounts/{id}',
@@ -166,6 +172,50 @@ export interface MonitorOverview {
   database: MonitorMetric;
   redis: MonitorMetric;
   collectedAt: string;
+}
+
+export interface TaskDefinition {
+  id: string;
+  tenantId: string;
+  orgId?: string;
+  name: string;
+  type: 'manual' | 'http' | 'webhook';
+  payloadSchema: Record<string, unknown>;
+  cron?: string;
+  timezone: string;
+  enabled: boolean;
+  concurrency: number;
+  concurrencyPolicy: 'allow' | 'forbid' | 'replace';
+  timeoutSeconds: number;
+  maxAttempts: number;
+  idempotencyKey?: string;
+  deletedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface TaskDefinitionInput {
+  name: string;
+  type: 'manual' | 'http' | 'webhook';
+  payloadSchema: Record<string, unknown>;
+  cron?: string;
+  timezone?: string;
+  enabled?: boolean;
+  concurrency?: number;
+  concurrencyPolicy?: 'allow' | 'forbid' | 'replace';
+  timeoutSeconds?: number;
+  maxAttempts?: number;
+  idempotencyKey?: string;
+}
+export interface TaskRun {
+  id: string;
+  taskId: string;
+  status: 'pending' | 'running' | 'succeeded' | 'failed' | 'dead_letter' | 'cancelled';
+  attemptCount: number;
+  lastErrorCode?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export namespace AuthApi {
