@@ -22,6 +22,8 @@ var (
 	ErrInvalidUserQuery  = errors.New("invalid user list query")
 	ErrInvalidUser       = errors.New("invalid user profile")
 	ErrUserConflict      = errors.New("user profile conflicts with an existing account")
+	ErrInvalidMenu       = errors.New("menu is invalid")
+	ErrMenuHasChildren   = errors.New("menu has child nodes")
 )
 
 type Effect string
@@ -194,9 +196,87 @@ type Role struct {
 	DataScope     Scope
 }
 
+// MenuType is the finite set of nodes that can be managed by the menu API.
+// Keeping this in the domain prevents transport adapters from inventing a
+// second, subtly different enum.
+type MenuType string
+
+const (
+	MenuTypeDirectory MenuType = "directory"
+	MenuTypeMenu      MenuType = "menu"
+	MenuTypeButton    MenuType = "button"
+)
+
+// MenuOrder is the bounded unit used by the reorder endpoint. Parent changes
+// and sort changes are applied together by capable repositories.
+type MenuOrder struct {
+	ID       string
+	ParentID string
+	Sort     int
+}
+
 type Menu struct {
 	ID, ParentID, Name, Path string
+	Type                     MenuType
+	Component, Redirect      string
+	Icon, Permission         string
+	Sort                     int
 	Visible, Active          bool
+	KeepAlive, External      bool
+	TenantID, OrgID          string
+}
+
+// NormalizeMenu applies shared bounds before a menu enters a repository.
+// Legacy fixtures that omit Type retain their directory semantics, while an
+// explicitly typed menu must provide a registered component at the service
+// boundary.
+func (m Menu) NormalizeMenu() (Menu, error) {
+	m.ID = strings.TrimSpace(m.ID)
+	m.ParentID = strings.TrimSpace(m.ParentID)
+	m.Name = strings.TrimSpace(m.Name)
+	m.Path = strings.TrimSpace(m.Path)
+	m.Component = strings.TrimSpace(m.Component)
+	m.Redirect = strings.TrimSpace(m.Redirect)
+	m.Icon = strings.TrimSpace(m.Icon)
+	m.Permission = strings.TrimSpace(m.Permission)
+	m.TenantID = strings.TrimSpace(m.TenantID)
+	m.OrgID = strings.TrimSpace(m.OrgID)
+	if m.Type == "" {
+		m.Type = MenuTypeDirectory
+		if m.Component != "" {
+			m.Type = MenuTypeMenu
+		}
+	}
+	if m.ID == "" || len(m.ID) > 64 || m.Name == "" || utf8.RuneCountInString(m.Name) > 191 || m.Path == "" || len(m.Path) > 255 {
+		return Menu{}, ErrInvalidMenu
+	}
+	if len(m.ParentID) > 64 || len(m.Component) > 255 || len(m.Redirect) > 255 || len(m.Icon) > 191 || len(m.Permission) > 191 || len(m.TenantID) > 128 || len(m.OrgID) > 128 {
+		return Menu{}, ErrInvalidMenu
+	}
+	switch m.Type {
+	case MenuTypeDirectory, MenuTypeMenu, MenuTypeButton:
+	default:
+		return Menu{}, ErrInvalidMenu
+	}
+	if m.ParentID == m.ID {
+		return Menu{}, ErrInvalidMenu
+	}
+	if m.Sort < -1000000 || m.Sort > 1000000 {
+		return Menu{}, ErrInvalidMenu
+	}
+	if strings.ContainsAny(m.Path, "?#") || strings.Contains(m.Path, "..") || !strings.HasPrefix(m.Path, "/") {
+		return Menu{}, ErrInvalidMenu
+	}
+	if m.Redirect != "" && (strings.ContainsAny(m.Redirect, "?#") || strings.Contains(m.Redirect, "..") || !strings.HasPrefix(m.Redirect, "/")) {
+		return Menu{}, ErrInvalidMenu
+	}
+	if m.Type == MenuTypeButton && m.Component != "" {
+		return Menu{}, ErrInvalidMenu
+	}
+	if m.Type == MenuTypeMenu && m.Component == "" {
+		return Menu{}, ErrInvalidMenu
+	}
+	return m, nil
 }
 
 type Permission struct {
@@ -262,6 +342,17 @@ type RoleRepository interface {
 }
 type MenuRepository interface {
 	ListMenus(context.Context) ([]Menu, error)
+}
+
+// MenuWriter is the optional write-side capability used by the 0.10 menu
+// management seam. Keeping it separate preserves compatibility with read-only
+// adapters while allowing the application to fail closed when writes are not
+// configured.
+type MenuWriter interface {
+	SaveMenu(context.Context, Menu) error
+	FindMenu(context.Context, string) (Menu, error)
+	DeleteMenu(context.Context, string) error
+	ReorderMenus(context.Context, []MenuOrder) error
 }
 type PermissionRepository interface {
 	ListPermissions(context.Context) ([]Permission, error)

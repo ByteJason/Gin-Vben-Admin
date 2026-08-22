@@ -859,30 +859,170 @@ func (s *GORMStore) SaveMenu(ctx context.Context, menu domain.Menu) error {
 	if s == nil || s.db == nil {
 		return ErrStoreUnavailable
 	}
-	tenantID, err := tenantID(ctx)
+	scope, err := tenant.RequireContext(ctx)
 	if err != nil {
 		return err
 	}
-	return s.upsert(ctx, "menus", map[string]any{"tenant_id": tenantID, "id": menu.ID}, map[string]any{"tenant_id": tenantID, "id": menu.ID, "parent_id": nullableString(menu.ParentID), "name": menu.Name, "path": menu.Path, "visible": menu.Visible, "status": statusValue(menu.Active)})
+	menu, err = menu.NormalizeMenu()
+	if err != nil {
+		return err
+	}
+	if menu.TenantID != "" && menu.TenantID != scope.TenantID && !scope.PlatformAdmin {
+		return tenant.ErrCrossTenant
+	}
+	if menu.OrgID != "" && !scope.PlatformAdmin && scope.Organization != "" && menu.OrgID != scope.Organization {
+		return tenant.ErrOrganizationDenied
+	}
+	if menu.OrgID == "" {
+		menu.OrgID = scope.Organization
+	}
+	return s.upsert(ctx, "menus", map[string]any{"tenant_id": scope.TenantID, "id": menu.ID}, map[string]any{
+		"tenant_id": scope.TenantID, "org_id": nullableString(menu.OrgID), "id": menu.ID,
+		"parent_id": nullableString(menu.ParentID), "name": menu.Name, "path": menu.Path,
+		"menu_type": string(menu.Type), "component": nullableString(menu.Component), "redirect": nullableString(menu.Redirect),
+		"icon": nullableString(menu.Icon), "permission": nullableString(menu.Permission), "sort_order": menu.Sort,
+		"visible": menu.Visible, "status": statusValue(menu.Active), "keep_alive": menu.KeepAlive, "external": menu.External,
+	})
 }
 
 func (s *GORMStore) ListMenus(ctx context.Context) ([]domain.Menu, error) {
 	if s == nil || s.db == nil {
 		return nil, ErrStoreUnavailable
 	}
-	tenantID, err := tenantID(ctx)
+	scope, err := tenant.RequireContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 	var rows []menuRow
-	if err := s.read(ctx).Table("menus").Where("tenant_id = ?", tenantID).Order("id ASC").Find(&rows).Error; err != nil {
+	query := s.read(ctx).Table("menus").Where("tenant_id = ?", scope.TenantID)
+	if !scope.PlatformAdmin && scope.Organization != "" {
+		query = query.Where("(org_id = ? OR org_id IS NULL)", scope.Organization)
+	}
+	if err := query.Order("sort_order ASC, id ASC").Find(&rows).Error; err != nil {
 		return nil, ErrStoreUnavailable
 	}
 	out := make([]domain.Menu, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, domain.Menu{ID: row.ID, ParentID: row.ParentID.String, Name: row.Name, Path: row.Path, Visible: row.Visible, Active: row.Status == "active"})
+		out = append(out, row.toDomain())
 	}
 	return out, nil
+}
+
+func (s *GORMStore) FindMenu(ctx context.Context, id string) (domain.Menu, error) {
+	if s == nil || s.db == nil {
+		return domain.Menu{}, ErrStoreUnavailable
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return domain.Menu{}, domain.ErrInvalidMenu
+	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return domain.Menu{}, err
+	}
+	query := s.read(ctx).Table("menus").Where("tenant_id = ? AND id = ?", scope.TenantID, id)
+	if !scope.PlatformAdmin && scope.Organization != "" {
+		query = query.Where("(org_id = ? OR org_id IS NULL)", scope.Organization)
+	}
+	var row menuRow
+	if err := query.Take(&row).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return domain.Menu{}, domain.ErrResourceNotFound
+		}
+		return domain.Menu{}, ErrStoreUnavailable
+	}
+	return row.toDomain(), nil
+}
+
+func (s *GORMStore) DeleteMenu(ctx context.Context, id string) error {
+	if s == nil || s.db == nil {
+		return ErrStoreUnavailable
+	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(id) == "" {
+		return domain.ErrInvalidMenu
+	}
+	return s.db.WithinTransaction(ctx, func(tx *gorm.DB) error {
+		where := tx.Table("menus").Where("tenant_id = ? AND id = ?", scope.TenantID, id)
+		if !scope.PlatformAdmin && scope.Organization != "" {
+			where = where.Where("(org_id = ? OR org_id IS NULL)", scope.Organization)
+		}
+		var count int64
+		if result := where.Count(&count); result.Error != nil {
+			return ErrStoreUnavailable
+		} else if count == 0 {
+			return domain.ErrResourceNotFound
+		}
+		childQuery := tx.Table("menus").Where("tenant_id = ? AND parent_id = ?", scope.TenantID, id)
+		if !scope.PlatformAdmin && scope.Organization != "" {
+			childQuery = childQuery.Where("(org_id = ? OR org_id IS NULL)", scope.Organization)
+		}
+		if result := childQuery.Count(&count); result.Error != nil {
+			return ErrStoreUnavailable
+		} else if count > 0 {
+			return domain.ErrMenuHasChildren
+		}
+		if result := where.Delete(&menuRow{}); result.Error != nil {
+			return ErrStoreUnavailable
+		}
+		return nil
+	})
+}
+
+func (s *GORMStore) ReorderMenus(ctx context.Context, items []domain.MenuOrder) error {
+	if s == nil || s.db == nil {
+		return ErrStoreUnavailable
+	}
+	if len(items) == 0 || len(items) > 500 {
+		return domain.ErrInvalidMenu
+	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return err
+	}
+	seen := make(map[string]struct{}, len(items))
+	err = s.db.WithinTransaction(ctx, func(tx *gorm.DB) error {
+		for _, item := range items {
+			item.ID = strings.TrimSpace(item.ID)
+			item.ParentID = strings.TrimSpace(item.ParentID)
+			if item.ID == "" || item.Sort < -1000000 || item.Sort > 1000000 {
+				return domain.ErrInvalidMenu
+			}
+			if _, exists := seen[item.ID]; exists {
+				return domain.ErrInvalidMenu
+			}
+			seen[item.ID] = struct{}{}
+			where := tx.Table("menus").Where("tenant_id = ? AND id = ?", scope.TenantID, item.ID)
+			if !scope.PlatformAdmin && scope.Organization != "" {
+				where = where.Where("(org_id = ? OR org_id IS NULL)", scope.Organization)
+			}
+			var count int64
+			if result := where.Count(&count); result.Error != nil {
+				return ErrStoreUnavailable
+			} else if count == 0 {
+				return domain.ErrResourceNotFound
+			}
+			if item.ParentID != "" {
+				parent := tx.Table("menus").Where("tenant_id = ? AND id = ?", scope.TenantID, item.ParentID)
+				if !scope.PlatformAdmin && scope.Organization != "" {
+					parent = parent.Where("(org_id = ? OR org_id IS NULL)", scope.Organization)
+				}
+				if result := parent.Count(&count); result.Error != nil {
+					return ErrStoreUnavailable
+				} else if count == 0 {
+					return domain.ErrResourceNotFound
+				}
+			}
+			if result := where.Updates(map[string]any{"parent_id": nullableString(item.ParentID), "sort_order": item.Sort}); result.Error != nil {
+				return ErrStoreUnavailable
+			}
+		}
+		return nil
+	})
+	return err
 }
 
 func (s *GORMStore) SavePermission(ctx context.Context, permission domain.Permission) error {
@@ -1296,13 +1436,38 @@ func (row roleRow) toDomain(userIDs []string) domain.Role {
 }
 
 type menuRow struct {
-	ID       string
-	ParentID sql.NullString `gorm:"column:parent_id"`
-	Name     string
-	Path     string
-	Visible  bool
-	Status   string
+	ID         string
+	TenantID   string         `gorm:"column:tenant_id"`
+	OrgID      sql.NullString `gorm:"column:org_id"`
+	ParentID   sql.NullString `gorm:"column:parent_id"`
+	Name       string
+	Path       string
+	MenuType   sql.NullString `gorm:"column:menu_type"`
+	Component  sql.NullString `gorm:"column:component"`
+	Redirect   sql.NullString `gorm:"column:redirect"`
+	Icon       sql.NullString `gorm:"column:icon"`
+	Permission sql.NullString `gorm:"column:permission"`
+	SortOrder  int            `gorm:"column:sort_order"`
+	Visible    bool
+	Status     string
+	KeepAlive  bool `gorm:"column:keep_alive"`
+	External   bool
 }
+
+func (row menuRow) toDomain() domain.Menu {
+	menuType := domain.MenuType(row.MenuType.String)
+	if menuType == "" {
+		menuType = domain.MenuTypeDirectory
+	}
+	return domain.Menu{
+		ID: row.ID, TenantID: row.TenantID, OrgID: row.OrgID.String, ParentID: row.ParentID.String,
+		Name: row.Name, Path: row.Path, Type: menuType, Component: row.Component.String,
+		Redirect: row.Redirect.String, Icon: row.Icon.String, Permission: row.Permission.String,
+		Sort: row.SortOrder, Visible: row.Visible, Active: row.Status == "active",
+		KeepAlive: row.KeepAlive, External: row.External,
+	}
+}
+
 type permissionRow struct {
 	ID     string
 	Name   string

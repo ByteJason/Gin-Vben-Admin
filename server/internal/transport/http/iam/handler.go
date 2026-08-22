@@ -72,6 +72,11 @@ func RegisterRoutes(r gin.IRouter, handler *Handler, policies ...httpmiddleware.
 	group.PUT("/roles/:id/permissions", handler.replaceRolePermissions)
 	group.PUT("/roles/:id/data-scopes", handler.replaceRoleDataScopes)
 	group.GET("/menus", handler.listMenus)
+	group.GET("/menus/:id", handler.getMenu)
+	group.POST("/menus", handler.createMenu)
+	group.PATCH("/menus/:id", handler.updateMenu)
+	group.DELETE("/menus/:id", handler.deleteMenu)
+	group.PUT("/menus/reorder", handler.reorderMenus)
 	group.GET("/components", handler.listComponents)
 	group.GET("/permissions", handler.listPermissions)
 	group.GET("/policies", handler.listPolicies)
@@ -80,11 +85,11 @@ func RegisterRoutes(r gin.IRouter, handler *Handler, policies ...httpmiddleware.
 	group.POST("/data-scopes", handler.createDataScope)
 	// The UI contract uses this compact menu path; it is the same guarded
 	// collection as /iam/menus and deliberately has no separate policy source.
-	r.Group("/api/admin/v1").Use(authhttp.Middleware(handler.auth), httpmiddleware.TenantContext(policy)).GET("/menu/all", handler.listMenus)
+	r.Group("/api/admin/v1").Use(authhttp.Middleware(handler.auth), httpmiddleware.TenantContext(policy)).GET("/menu/all", handler.listMenuRoutes)
 }
 
 func registerDisabled(group *gin.RouterGroup) {
-	for _, path := range []string{"/me", "/users", "/users/batch-status", "/users/:id/reset-password", "/users/:id/login-events", "/users/:id", "/roles", "/roles/:id/users", "/roles/:id/permissions", "/roles/:id/data-scopes", "/menus", "/components", "/permissions", "/policies", "/data-scopes"} {
+	for _, path := range []string{"/me", "/users", "/users/batch-status", "/users/:id/reset-password", "/users/:id/login-events", "/users/:id", "/roles", "/roles/:id/users", "/roles/:id/permissions", "/roles/:id/data-scopes", "/menus", "/menus/reorder", "/menus/:id", "/components", "/permissions", "/policies", "/data-scopes"} {
 		group.GET(path, disabled)
 		group.POST(path, disabled)
 		group.PATCH(path, disabled)
@@ -628,12 +633,67 @@ func (h *Handler) replaceRoleDataScopes(c *gin.Context) {
 }
 
 type menuResponse struct {
+	ID         string          `json:"id"`
+	ParentID   string          `json:"parentId"`
+	Name       string          `json:"name"`
+	Path       string          `json:"path"`
+	Type       domain.MenuType `json:"type"`
+	Component  string          `json:"component"`
+	Redirect   string          `json:"redirect"`
+	Icon       string          `json:"icon"`
+	Sort       int             `json:"sort"`
+	Visible    bool            `json:"visible"`
+	Active     bool            `json:"active"`
+	KeepAlive  bool            `json:"keepAlive"`
+	External   bool            `json:"external"`
+	Permission string          `json:"permission"`
+	TenantID   string          `json:"tenantId,omitempty"`
+	OrgID      string          `json:"orgId,omitempty"`
+}
+
+type menuRequest struct {
+	ID         string          `json:"id"`
+	ParentID   string          `json:"parentId"`
+	Name       string          `json:"name"`
+	Path       string          `json:"path"`
+	Type       domain.MenuType `json:"type"`
+	Component  string          `json:"component"`
+	Redirect   string          `json:"redirect"`
+	Icon       string          `json:"icon"`
+	Sort       int             `json:"sort"`
+	Visible    *bool           `json:"visible"`
+	Active     *bool           `json:"active"`
+	KeepAlive  *bool           `json:"keepAlive"`
+	External   *bool           `json:"external"`
+	Permission string          `json:"permission"`
+	OrgID      string          `json:"orgId"`
+}
+
+type menuPatchRequest struct {
+	ParentID   *string          `json:"parentId"`
+	Name       *string          `json:"name"`
+	Path       *string          `json:"path"`
+	Type       *domain.MenuType `json:"type"`
+	Component  *string          `json:"component"`
+	Redirect   *string          `json:"redirect"`
+	Icon       *string          `json:"icon"`
+	Sort       *int             `json:"sort"`
+	Visible    *bool            `json:"visible"`
+	Active     *bool            `json:"active"`
+	KeepAlive  *bool            `json:"keepAlive"`
+	External   *bool            `json:"external"`
+	Permission *string          `json:"permission"`
+	OrgID      *string          `json:"orgId"`
+}
+
+type menuReorderItemRequest struct {
 	ID       string `json:"id"`
 	ParentID string `json:"parentId"`
-	Name     string `json:"name"`
-	Path     string `json:"path"`
-	Visible  bool   `json:"visible"`
-	Active   bool   `json:"active"`
+	Sort     int    `json:"sort"`
+}
+
+type menuReorderRequest struct {
+	Items []menuReorderItemRequest `json:"items"`
 }
 
 func (h *Handler) listMenus(c *gin.Context) {
@@ -647,9 +707,116 @@ func (h *Handler) listMenus(c *gin.Context) {
 	}
 	out := make([]menuResponse, 0, len(menus))
 	for _, menu := range menus {
-		out = append(out, menuResponse{ID: menu.ID, ParentID: menu.ParentID, Name: menu.Name, Path: menu.Path, Visible: menu.Visible, Active: menu.Active})
+		out = append(out, responseFromMenu(menu))
 	}
 	response.OK(c, out)
+}
+
+func (h *Handler) getMenu(c *gin.Context) {
+	if !h.guard(c) {
+		return
+	}
+	menu, err := h.service.GetMenu(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	response.OK(c, responseFromMenu(menu))
+}
+
+func responseFromMenu(menu domain.Menu) menuResponse {
+	return menuResponse{
+		ID: menu.ID, ParentID: menu.ParentID, Name: menu.Name, Path: menu.Path, Type: menu.Type,
+		Component: menu.Component, Redirect: menu.Redirect, Icon: menu.Icon, Sort: menu.Sort,
+		Visible: menu.Visible, Active: menu.Active, KeepAlive: menu.KeepAlive, External: menu.External,
+		Permission: menu.Permission, TenantID: menu.TenantID, OrgID: menu.OrgID,
+	}
+}
+
+func (h *Handler) createMenu(c *gin.Context) {
+	if !h.guard(c) {
+		return
+	}
+	var req menuRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid request")
+		return
+	}
+	menu, err := h.service.CreateMenu(c.Request.Context(), iamapp.MenuCreateInput{
+		ID: req.ID, ParentID: req.ParentID, Name: req.Name, Path: req.Path, Type: req.Type,
+		Component: req.Component, Redirect: req.Redirect, Icon: req.Icon, Sort: req.Sort,
+		Visible: req.Visible, Active: req.Active, KeepAlive: req.KeepAlive, External: req.External,
+		Permission: req.Permission, OrgID: req.OrgID,
+	})
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	response.OK(c, responseFromMenu(menu))
+}
+
+func (h *Handler) updateMenu(c *gin.Context) {
+	if !h.guard(c) {
+		return
+	}
+	var req menuPatchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid request")
+		return
+	}
+	menu, err := h.service.UpdateMenu(c.Request.Context(), c.Param("id"), iamapp.MenuPatchInput{
+		ParentID: req.ParentID, Name: req.Name, Path: req.Path, Type: req.Type, Component: req.Component,
+		Redirect: req.Redirect, Icon: req.Icon, Sort: req.Sort, Visible: req.Visible, Active: req.Active,
+		KeepAlive: req.KeepAlive, External: req.External, Permission: req.Permission, OrgID: req.OrgID,
+	})
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	response.OK(c, responseFromMenu(menu))
+}
+
+func (h *Handler) deleteMenu(c *gin.Context) {
+	if !h.guard(c) {
+		return
+	}
+	if err := h.service.DeleteMenu(c.Request.Context(), c.Param("id")); err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	response.OK(c, nil)
+}
+
+func (h *Handler) reorderMenus(c *gin.Context) {
+	if !h.guard(c) {
+		return
+	}
+	var req menuReorderRequest
+	if err := c.ShouldBindJSON(&req); err != nil || len(req.Items) == 0 || len(req.Items) > 500 {
+		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid request")
+		return
+	}
+	items := make([]domain.MenuOrder, 0, len(req.Items))
+	for _, item := range req.Items {
+		items = append(items, domain.MenuOrder{ID: item.ID, ParentID: item.ParentID, Sort: item.Sort})
+	}
+	if err := h.service.ReorderMenus(c.Request.Context(), iamapp.MenuReorderInput{Items: items}); err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	response.OK(c, nil)
+}
+
+func (h *Handler) listMenuRoutes(c *gin.Context) {
+	if !h.guard(c) {
+		return
+	}
+	routes, err := h.service.ListMenuRoutes(c.Request.Context())
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	response.OK(c, routes)
 }
 
 func (h *Handler) listComponents(c *gin.Context) {
@@ -806,6 +973,14 @@ func writeServiceError(c *gin.Context, err error) {
 		response.Error(c, http.StatusNotFound, codeNotFound, "resource not found")
 		return
 	}
+	if errors.Is(err, iamapp.ErrMenuConflict) {
+		response.Error(c, http.StatusConflict, codeUserConflict, "menu already exists")
+		return
+	}
+	if errors.Is(err, iamapp.ErrMenuHasChildren) {
+		response.Error(c, http.StatusConflict, codeUserConflict, "menu has child nodes")
+		return
+	}
 	if errors.Is(err, iamapp.ErrRepositoryMissing) || errors.Is(err, authdomain.ErrDependencyUnavailable) {
 		response.Error(c, http.StatusServiceUnavailable, codeUnavailable, "dependency unavailable")
 		return
@@ -814,7 +989,7 @@ func writeServiceError(c *gin.Context, err error) {
 		response.Error(c, http.StatusServiceUnavailable, codeUnavailable, "dependency unavailable")
 		return
 	}
-	if errors.Is(err, iamapp.ErrInvalidID) || errors.Is(err, iamapp.ErrInvalidUserQuery) || errors.Is(err, iamapp.ErrInvalidUser) || errors.Is(err, iamapp.ErrInvalidUserBatch) || errors.Is(err, iamapp.ErrInvalidRoleAssignment) || errors.Is(err, iamapp.ErrInvalidRolePermissionAssignment) || errors.Is(err, iamapp.ErrInvalidRoleDataScopeAssignment) || errors.Is(err, domain.ErrInvalidPolicy) || errors.Is(err, domain.ErrInvalidDataScope) || errors.Is(err, auditapp.ErrInvalidFilter) {
+	if errors.Is(err, iamapp.ErrInvalidID) || errors.Is(err, iamapp.ErrInvalidUserQuery) || errors.Is(err, iamapp.ErrInvalidUser) || errors.Is(err, iamapp.ErrInvalidUserBatch) || errors.Is(err, iamapp.ErrInvalidRoleAssignment) || errors.Is(err, iamapp.ErrInvalidRolePermissionAssignment) || errors.Is(err, iamapp.ErrInvalidRoleDataScopeAssignment) || errors.Is(err, iamapp.ErrInvalidMenu) || errors.Is(err, domain.ErrInvalidPolicy) || errors.Is(err, domain.ErrInvalidDataScope) || errors.Is(err, auditapp.ErrInvalidFilter) {
 		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid request")
 		return
 	}

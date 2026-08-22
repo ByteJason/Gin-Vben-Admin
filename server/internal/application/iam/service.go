@@ -23,6 +23,9 @@ var (
 	ErrInvalidRoleAssignment           = errors.New("invalid role assignment")
 	ErrInvalidRolePermissionAssignment = errors.New("invalid role permission assignment")
 	ErrInvalidRoleDataScopeAssignment  = errors.New("invalid role data scope assignment")
+	ErrInvalidMenu                     = domain.ErrInvalidMenu
+	ErrMenuConflict                    = errors.New("menu conflicts with an existing resource")
+	ErrMenuHasChildren                 = domain.ErrMenuHasChildren
 	ErrUserConflict                    = domain.ErrUserConflict
 	ErrPasswordHasherMissing           = errors.New("iam password hasher is unavailable")
 )
@@ -126,6 +129,34 @@ type UserStatusChangeInput struct {
 
 type UserBatchStatusInput struct {
 	Items []UserStatusChangeInput
+}
+
+// MenuCreateInput is the bounded management payload. Pointer booleans let the
+// transport distinguish omitted values from an explicit false.
+type MenuCreateInput struct {
+	ID, ParentID, Name, Path string
+	Type                     domain.MenuType
+	Component, Redirect      string
+	Icon, Permission         string
+	Sort                     int
+	Visible, Active          *bool
+	KeepAlive, External      *bool
+	OrgID                    string
+}
+
+type MenuPatchInput struct {
+	ParentID, Name, Path *string
+	Type                 *domain.MenuType
+	Component, Redirect  *string
+	Icon, Permission     *string
+	Sort                 *int
+	Visible, Active      *bool
+	KeepAlive, External  *bool
+	OrgID                *string
+}
+
+type MenuReorderInput struct {
+	Items []domain.MenuOrder
 }
 
 // UserStatusResult preserves input order and carries a typed per-item error.
@@ -585,7 +616,35 @@ func (s *MemoryStore) ListRoles(ctx context.Context) ([]domain.Role, error) {
 }
 
 func (s *MemoryStore) SaveMenu(ctx context.Context, menu domain.Menu) error {
-	return s.save(ctx, menu.ID, func() { s.menus[menu.ID] = menu })
+	if err := check(ctx); err != nil {
+		return err
+	}
+	normalized, err := menu.NormalizeMenu()
+	if err != nil {
+		return err
+	}
+	if scope, scoped := tenant.FromContext(ctx); scoped {
+		if normalized.TenantID != "" && normalized.TenantID != scope.TenantID && !scope.PlatformAdmin {
+			return tenant.ErrCrossTenant
+		}
+		if normalized.OrgID != "" && !scope.PlatformAdmin && scope.Organization != "" && normalized.OrgID != scope.Organization {
+			return tenant.ErrOrganizationDenied
+		}
+		normalized.TenantID = scope.TenantID
+		if normalized.OrgID == "" {
+			normalized.OrgID = scope.Organization
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// The memory adapter keeps IDs tenant-local while retaining the legacy
+	// unscoped key shape used by older fixtures.
+	key := normalized.ID
+	if normalized.TenantID != "" {
+		key = normalized.TenantID + "\x00" + normalized.ID
+	}
+	s.menus[key] = normalized
+	return nil
 }
 
 func (s *MemoryStore) ListMenus(ctx context.Context) ([]domain.Menu, error) {
@@ -594,12 +653,112 @@ func (s *MemoryStore) ListMenus(ctx context.Context) ([]domain.Menu, error) {
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	requestScope, scoped := tenant.FromContext(ctx)
 	out := make([]domain.Menu, 0, len(s.menus))
 	for _, menu := range s.menus {
-		out = append(out, menu)
+		if scoped && menu.TenantID != "" && menu.TenantID != requestScope.TenantID && !requestScope.PlatformAdmin {
+			continue
+		}
+		if scoped && !requestScope.PlatformAdmin && requestScope.Organization != "" && menu.OrgID != "" && menu.OrgID != requestScope.Organization {
+			continue
+		}
+		out = append(out, cloneMenu(menu))
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Sort != out[j].Sort {
+			return out[i].Sort < out[j].Sort
+		}
+		return out[i].ID < out[j].ID
+	})
 	return out, nil
+}
+
+func (s *MemoryStore) FindMenu(ctx context.Context, id string) (domain.Menu, error) {
+	if err := check(ctx); err != nil {
+		return domain.Menu{}, err
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return domain.Menu{}, ErrInvalidID
+	}
+	requestScope, scoped := tenant.FromContext(ctx)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, menu := range s.menus {
+		if menu.ID != id {
+			continue
+		}
+		if scoped && menu.TenantID != "" && menu.TenantID != requestScope.TenantID && !requestScope.PlatformAdmin {
+			continue
+		}
+		if scoped && !requestScope.PlatformAdmin && requestScope.Organization != "" && menu.OrgID != "" && menu.OrgID != requestScope.Organization {
+			continue
+		}
+		return cloneMenu(menu), nil
+	}
+	return domain.Menu{}, domain.ErrResourceNotFound
+}
+
+func (s *MemoryStore) DeleteMenu(ctx context.Context, id string) error {
+	menu, err := s.FindMenu(ctx, id)
+	if err != nil {
+		return err
+	}
+	menus, err := s.ListMenus(ctx)
+	if err != nil {
+		return err
+	}
+	for _, candidate := range menus {
+		if candidate.ParentID == menu.ID {
+			return ErrMenuHasChildren
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for key, candidate := range s.menus {
+		if candidate.ID == menu.ID && candidate.TenantID == menu.TenantID {
+			delete(s.menus, key)
+		}
+	}
+	return nil
+}
+
+func (s *MemoryStore) ReorderMenus(ctx context.Context, items []domain.MenuOrder) error {
+	if err := check(ctx); err != nil {
+		return err
+	}
+	if len(items) == 0 || len(items) > 500 {
+		return ErrInvalidMenu
+	}
+	requestScope, scoped := tenant.FromContext(ctx)
+	seen := make(map[string]struct{}, len(items))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, item := range items {
+		item.ID = strings.TrimSpace(item.ID)
+		if item.ID == "" || item.Sort < -1000000 || item.Sort > 1000000 {
+			return ErrInvalidMenu
+		}
+		if _, exists := seen[item.ID]; exists {
+			return ErrInvalidMenu
+		}
+		seen[item.ID] = struct{}{}
+		for key, menu := range s.menus {
+			if menu.ID != item.ID || (scoped && menu.TenantID != requestScope.TenantID && !requestScope.PlatformAdmin) {
+				continue
+			}
+			if !requestScope.PlatformAdmin && scoped && requestScope.Organization != "" && menu.OrgID != "" && menu.OrgID != requestScope.Organization {
+				continue
+			}
+			menu.ParentID = strings.TrimSpace(item.ParentID)
+			menu.Sort = item.Sort
+			s.menus[key] = menu
+			goto nextItem
+		}
+		return domain.ErrResourceNotFound
+	nextItem:
+	}
+	return nil
 }
 
 func (s *MemoryStore) SavePermission(ctx context.Context, permission domain.Permission) error {
@@ -721,6 +880,10 @@ func cloneRole(role domain.Role) domain.Role {
 func cloneDataScope(scope domain.DataScope) domain.DataScope {
 	scope.IDs = append([]string(nil), scope.IDs...)
 	return scope
+}
+
+func cloneMenu(menu domain.Menu) domain.Menu {
+	return menu
 }
 
 func withoutString(values []string, target string) []string {
@@ -852,6 +1015,15 @@ type roleSaver interface {
 }
 type menuSaver interface {
 	SaveMenu(context.Context, domain.Menu) error
+}
+type menuFinder interface {
+	FindMenu(context.Context, string) (domain.Menu, error)
+}
+type menuWriter interface {
+	menuSaver
+	menuFinder
+	DeleteMenu(context.Context, string) error
+	ReorderMenus(context.Context, []domain.MenuOrder) error
 }
 type permissionSaver interface {
 	SavePermission(context.Context, domain.Permission) error
@@ -1777,6 +1949,315 @@ func (s *Service) ListMenus(ctx context.Context) ([]domain.Menu, error) {
 		return nil, ErrRepositoryMissing
 	}
 	return repo.ListMenus(ctx)
+}
+
+// ListMenuRoutes projects the current tenant's visible menu records into the
+// route tree consumed by the three UI templates.
+func (s *Service) ListMenuRoutes(ctx context.Context) ([]MenuRoute, error) {
+	menus, err := s.ListMenus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, menu := range menus {
+		if strings.TrimSpace(menu.Component) == "" {
+			continue
+		}
+		if err := s.ValidateComponent(menu.Component); err != nil {
+			return nil, err
+		}
+	}
+	return BuildMenuRoutes(menus)
+}
+
+func (s *Service) GetMenu(ctx context.Context, id string) (domain.Menu, error) {
+	if s == nil || s.Menus == nil {
+		return domain.Menu{}, ErrRepositoryMissing
+	}
+	repo, ok := s.Menus.(menuFinder)
+	if !ok {
+		return domain.Menu{}, ErrRepositoryMissing
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return domain.Menu{}, ErrInvalidID
+	}
+	return repo.FindMenu(ctx, id)
+}
+
+func (s *Service) CreateMenu(ctx context.Context, input MenuCreateInput) (domain.Menu, error) {
+	if s == nil || s.Menus == nil {
+		return domain.Menu{}, ErrRepositoryMissing
+	}
+	writer, ok := s.Menus.(menuWriter)
+	if !ok {
+		return domain.Menu{}, ErrRepositoryMissing
+	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return domain.Menu{}, err
+	}
+	menu := domain.Menu{
+		ID: strings.TrimSpace(input.ID), ParentID: strings.TrimSpace(input.ParentID), Name: strings.TrimSpace(input.Name), Path: strings.TrimSpace(input.Path),
+		Type: input.Type, Component: input.Component, Redirect: input.Redirect, Icon: input.Icon, Permission: input.Permission, Sort: input.Sort,
+		TenantID: scope.TenantID, OrgID: strings.TrimSpace(input.OrgID),
+	}
+	if input.Visible == nil {
+		menu.Visible = true
+	} else {
+		menu.Visible = *input.Visible
+	}
+	if input.Active == nil {
+		menu.Active = true
+	} else {
+		menu.Active = *input.Active
+	}
+	if input.KeepAlive != nil {
+		menu.KeepAlive = *input.KeepAlive
+	}
+	if input.External != nil {
+		menu.External = *input.External
+	}
+	if !scope.PlatformAdmin && scope.Organization != "" {
+		if menu.OrgID != "" && menu.OrgID != scope.Organization {
+			return domain.Menu{}, tenant.ErrOrganizationDenied
+		}
+		menu.OrgID = scope.Organization
+	}
+	menu, err = menu.NormalizeMenu()
+	if err != nil {
+		return domain.Menu{}, ErrInvalidMenu
+	}
+	if menu.Component != "" {
+		if err := s.ValidateComponent(menu.Component); err != nil {
+			return domain.Menu{}, err
+		}
+	}
+	if _, err := writer.FindMenu(ctx, menu.ID); err == nil {
+		return domain.Menu{}, ErrMenuConflict
+	} else if !errors.Is(err, domain.ErrResourceNotFound) {
+		return domain.Menu{}, err
+	}
+	if err := s.validateMenuParent(ctx, menu); err != nil {
+		return domain.Menu{}, err
+	}
+	if err := writer.SaveMenu(ctx, menu); err != nil {
+		return domain.Menu{}, err
+	}
+	if err := s.invalidate(ctx); err != nil {
+		return domain.Menu{}, err
+	}
+	return menu, nil
+}
+
+func (s *Service) UpdateMenu(ctx context.Context, id string, input MenuPatchInput) (domain.Menu, error) {
+	if s == nil || s.Menus == nil {
+		return domain.Menu{}, ErrRepositoryMissing
+	}
+	writer, ok := s.Menus.(menuWriter)
+	if !ok {
+		return domain.Menu{}, ErrRepositoryMissing
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return domain.Menu{}, ErrInvalidID
+	}
+	current, err := writer.FindMenu(ctx, id)
+	if err != nil {
+		return domain.Menu{}, err
+	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return domain.Menu{}, err
+	}
+	if !scope.PlatformAdmin && scope.Organization != "" && input.OrgID != nil && strings.TrimSpace(*input.OrgID) != scope.Organization {
+		return domain.Menu{}, tenant.ErrOrganizationDenied
+	}
+	if input.ParentID != nil {
+		current.ParentID = *input.ParentID
+	}
+	if input.Name != nil {
+		current.Name = *input.Name
+	}
+	if input.Path != nil {
+		current.Path = *input.Path
+	}
+	if input.Type != nil {
+		current.Type = *input.Type
+	}
+	if input.Component != nil {
+		current.Component = *input.Component
+	}
+	if input.Redirect != nil {
+		current.Redirect = *input.Redirect
+	}
+	if input.Icon != nil {
+		current.Icon = *input.Icon
+	}
+	if input.Permission != nil {
+		current.Permission = *input.Permission
+	}
+	if input.Sort != nil {
+		current.Sort = *input.Sort
+	}
+	if input.Visible != nil {
+		current.Visible = *input.Visible
+	}
+	if input.Active != nil {
+		current.Active = *input.Active
+	}
+	if input.KeepAlive != nil {
+		current.KeepAlive = *input.KeepAlive
+	}
+	if input.External != nil {
+		current.External = *input.External
+	}
+	if input.OrgID != nil {
+		current.OrgID = strings.TrimSpace(*input.OrgID)
+	}
+	if current.Component != "" {
+		if err := s.ValidateComponent(current.Component); err != nil {
+			return domain.Menu{}, err
+		}
+	}
+	current, err = current.NormalizeMenu()
+	if err != nil {
+		return domain.Menu{}, ErrInvalidMenu
+	}
+	if err := s.validateMenuParent(ctx, current); err != nil {
+		return domain.Menu{}, err
+	}
+	if err := writer.SaveMenu(ctx, current); err != nil {
+		return domain.Menu{}, err
+	}
+	if err := s.invalidate(ctx); err != nil {
+		return domain.Menu{}, err
+	}
+	return current, nil
+}
+
+func (s *Service) DeleteMenu(ctx context.Context, id string) error {
+	if s == nil || s.Menus == nil {
+		return ErrRepositoryMissing
+	}
+	writer, ok := s.Menus.(menuWriter)
+	if !ok {
+		return ErrRepositoryMissing
+	}
+	if strings.TrimSpace(id) == "" {
+		return ErrInvalidID
+	}
+	if _, err := writer.FindMenu(ctx, id); err != nil {
+		return err
+	}
+	if err := writer.DeleteMenu(ctx, strings.TrimSpace(id)); err != nil {
+		return err
+	}
+	return s.invalidate(ctx)
+}
+
+func (s *Service) ReorderMenus(ctx context.Context, input MenuReorderInput) error {
+	if s == nil || s.Menus == nil {
+		return ErrRepositoryMissing
+	}
+	writer, ok := s.Menus.(menuWriter)
+	if !ok {
+		return ErrRepositoryMissing
+	}
+	if len(input.Items) == 0 || len(input.Items) > 500 {
+		return ErrInvalidMenu
+	}
+	seen := make(map[string]struct{}, len(input.Items))
+	for _, item := range input.Items {
+		item.ID = strings.TrimSpace(item.ID)
+		item.ParentID = strings.TrimSpace(item.ParentID)
+		if item.ID == "" || item.Sort < -1000000 || item.Sort > 1000000 {
+			return ErrInvalidMenu
+		}
+		if _, exists := seen[item.ID]; exists {
+			return ErrInvalidMenu
+		}
+		seen[item.ID] = struct{}{}
+		if _, err := writer.FindMenu(ctx, item.ID); err != nil {
+			return err
+		}
+	}
+	// Validate the complete proposed tree before handing the batch to a
+	// repository. This catches parent cycles and button parents atomically even
+	// when the adapter only exposes a primitive update port.
+	menus, err := s.ListMenus(ctx)
+	if err != nil {
+		return err
+	}
+	byID := make(map[string]domain.Menu, len(menus))
+	for _, menu := range menus {
+		byID[menu.ID] = menu
+	}
+	for _, item := range input.Items {
+		menu, ok := byID[item.ID]
+		if !ok {
+			return domain.ErrResourceNotFound
+		}
+		menu.ParentID = strings.TrimSpace(item.ParentID)
+		menu.Sort = item.Sort
+		byID[item.ID] = menu
+	}
+	for _, menu := range byID {
+		if menu.ParentID == "" {
+			continue
+		}
+		parent, ok := byID[menu.ParentID]
+		if !ok || parent.Type == domain.MenuTypeButton {
+			return ErrInvalidMenu
+		}
+	}
+	proposed := make([]domain.Menu, 0, len(byID))
+	for _, menu := range byID {
+		proposed = append(proposed, menu)
+	}
+	if _, err := BuildMenuRoutes(proposed); err != nil {
+		return ErrInvalidMenu
+	}
+	if err := writer.ReorderMenus(ctx, input.Items); err != nil {
+		return err
+	}
+	return s.invalidate(ctx)
+}
+
+func (s *Service) validateMenuParent(ctx context.Context, menu domain.Menu) error {
+	if menu.ParentID == "" {
+		return nil
+	}
+	if menu.ParentID == menu.ID {
+		return ErrInvalidMenu
+	}
+	repo, ok := s.Menus.(menuFinder)
+	if !ok {
+		return ErrRepositoryMissing
+	}
+	parent, err := repo.FindMenu(ctx, menu.ParentID)
+	if err != nil {
+		return err
+	}
+	if parent.Type == domain.MenuTypeButton {
+		return ErrInvalidMenu
+	}
+	// Walk the existing chain so updating a node cannot introduce a cycle.
+	seen := map[string]struct{}{menu.ID: {}}
+	for current := parent; current.ParentID != ""; {
+		if _, exists := seen[current.ID]; exists {
+			return ErrInvalidMenu
+		}
+		seen[current.ID] = struct{}{}
+		next, findErr := repo.FindMenu(ctx, current.ParentID)
+		if errors.Is(findErr, domain.ErrResourceNotFound) {
+			break
+		}
+		if findErr != nil {
+			return findErr
+		}
+		current = next
+	}
+	return nil
 }
 
 func (s *Service) SaveMenu(ctx context.Context, menu domain.Menu) error {

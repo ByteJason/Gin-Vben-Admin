@@ -52,6 +52,24 @@ func TestIAMRoutesRequireBearer(t *testing.T) {
 	}
 }
 
+func TestIAMDisabledMenuWriterRoutesRemainAvailableAs503(t *testing.T) {
+	r := gin.New()
+	RegisterRoutes(r, nil)
+	for _, methodPath := range [][2]string{
+		{http.MethodPost, "/api/admin/v1/iam/menus"},
+		{http.MethodPatch, "/api/admin/v1/iam/menus/menu"},
+		{http.MethodDelete, "/api/admin/v1/iam/menus/menu"},
+		{http.MethodPut, "/api/admin/v1/iam/menus/reorder"},
+	} {
+		request := httptest.NewRequest(methodPath[0], methodPath[1], strings.NewReader(`{"items":[]}`))
+		response := httptest.NewRecorder()
+		r.ServeHTTP(response, request)
+		if response.Code != http.StatusServiceUnavailable {
+			t.Fatalf("%s %s status=%d body=%s", methodPath[0], methodPath[1], response.Code, response.Body.String())
+		}
+	}
+}
+
 func TestIAMComponentRegistryIsGuardedAndReturnsAllowlist(t *testing.T) {
 	store := iamapp.NewMemoryStore()
 	if err := store.SaveUser(context.Background(), domain.User{ID: "u1", Username: "alice", Active: true}); err != nil {
@@ -80,6 +98,52 @@ func TestIAMComponentRegistryIsGuardedAndReturnsAllowlist(t *testing.T) {
 	}
 	if envelope.Code != 0 || len(envelope.Data) == 0 || envelope.Data[0].Component == "" || envelope.Data[0].Kind == "" {
 		t.Fatalf("envelope=%s", response.Body.String())
+	}
+}
+
+func TestIAMMenuWriterAndDynamicRouteProjection(t *testing.T) {
+	store := iamapp.NewMemoryStore()
+	if err := store.SaveUser(context.Background(), domain.User{ID: "u1", Username: "alice", Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	paths := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodPost, "/api/admin/v1/iam/menus"},
+		{http.MethodGet, "/api/admin/v1/menu/all"},
+		{http.MethodPatch, "/api/admin/v1/iam/menus/:id"},
+		{http.MethodPut, "/api/admin/v1/iam/menus/reorder"},
+		{http.MethodDelete, "/api/admin/v1/iam/menus/:id"},
+	}
+	for _, item := range paths {
+		if err := store.SavePolicy(context.Background(), domain.Policy{Subject: "u1", Method: item.method, Path: item.path, Effect: domain.EffectAllow}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := newIAMTestRouter(store, authdomain.Claims{Subject: "u1", Type: authdomain.AccessToken, ExpiresAt: time.Now().Add(time.Minute)})
+	request := httptest.NewRequest(http.MethodPost, "/api/admin/v1/iam/menus", strings.NewReader(`{"id":"page","name":"Page","path":"/page","type":"menu","component":"/iam/users/index.vue"}`))
+	request.Header.Set("Authorization", "Bearer test")
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	r.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("create status=%d body=%s", response.Code, response.Body.String())
+	}
+	request = httptest.NewRequest(http.MethodGet, "/api/admin/v1/menu/all", nil)
+	request.Header.Set("Authorization", "Bearer test")
+	response = httptest.NewRecorder()
+	r.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"component":"/iam/users/index.vue"`) {
+		t.Fatalf("routes status=%d body=%s", response.Code, response.Body.String())
+	}
+	request = httptest.NewRequest(http.MethodPatch, "/api/admin/v1/iam/menus/page", strings.NewReader(`{"name":"Updated","sort":3}`))
+	request.Header.Set("Authorization", "Bearer test")
+	request.Header.Set("Content-Type", "application/json")
+	response = httptest.NewRecorder()
+	r.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"name":"Updated"`) {
+		t.Fatalf("update status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 

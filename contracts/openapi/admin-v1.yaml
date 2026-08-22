@@ -496,6 +496,114 @@ paths:
         '200': { $ref: '#/components/responses/CollectionResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [IAM]
+      operationId: createIAMMenu
+      summary: 创建菜单
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IAMMenuCreateRequest' }
+      responses:
+        '200':
+          description: 菜单创建成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/IAMMenu' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/IAMUserConflict' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
+  /api/admin/v1/iam/menus/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1, maxLength: 64 }
+    patch:
+      tags: [IAM]
+      operationId: updateIAMMenu
+      summary: 更新菜单元数据
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IAMMenuPatchRequest' }
+      responses:
+        '200':
+          description: 菜单更新成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/IAMMenu' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
+    get:
+      tags: [IAM]
+      operationId: getIAMMenu
+      summary: 查询单个菜单
+      security: [{BearerAuth: []}]
+      responses:
+        '200':
+          description: 菜单详情
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/IAMMenu' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
+    delete:
+      tags: [IAM]
+      operationId: deleteIAMMenu
+      summary: 删除菜单
+      security: [{BearerAuth: []}]
+      responses:
+        '200': { $ref: '#/components/responses/SuccessResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/IAMUserConflict' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
+  /api/admin/v1/iam/menus/reorder:
+    put:
+      tags: [IAM]
+      operationId: reorderIAMMenus
+      summary: 原子调整菜单顺序与父级
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IAMMenuReorderRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/SuccessResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
   /api/admin/v1/iam/components:
     get:
       tags: [IAM]
@@ -526,7 +634,18 @@ paths:
       summary: 查询当前用户菜单
       security: [{BearerAuth: []}]
       responses:
-        '200': { $ref: '#/components/responses/CollectionResponse' }
+        '200':
+          description: 当前用户可见动态路由
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/IAMMenuRoute' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
   /api/admin/v1/iam/permissions:
@@ -1196,14 +1315,108 @@ components:
           items: { $ref: '#/components/schemas/IAMRoleDataScopeBinding' }
     IAMMenu:
       type: object
-      required: [id, name, path, visible, active]
+      additionalProperties: false
+      required: [id, name, path, type, component, redirect, icon, sort, visible, active, keepAlive, external, permission]
       properties:
-        id: { type: string }
-        parentId: { type: string }
-        name: { type: string }
-        path: { type: string }
+        id: { type: string, minLength: 1, maxLength: 64 }
+        parentId: { type: string, maxLength: 64 }
+        name: { type: string, minLength: 1, maxLength: 191 }
+        path: { type: string, minLength: 1, maxLength: 255 }
+        type: { type: string, enum: [directory, menu, button] }
+        component: { type: string, maxLength: 255 }
+        redirect: { type: string, maxLength: 255 }
+        icon: { type: string, maxLength: 191 }
+        sort: { type: integer, minimum: -1000000, maximum: 1000000 }
         visible: { type: boolean }
         active: { type: boolean }
+        keepAlive: { type: boolean }
+        external: { type: boolean }
+        permission: { type: string, maxLength: 191 }
+        tenantId: { type: string, maxLength: 128 }
+        orgId: { type: string, maxLength: 128 }
+    IAMMenuCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [id, name, path, type]
+      properties:
+        id: { type: string, minLength: 1, maxLength: 64 }
+        parentId: { type: string, maxLength: 64 }
+        name: { type: string, minLength: 1, maxLength: 191 }
+        path: { type: string, minLength: 1, maxLength: 255 }
+        type: { type: string, enum: [directory, menu, button] }
+        component: { type: string, maxLength: 255 }
+        redirect: { type: string, maxLength: 255 }
+        icon: { type: string, maxLength: 191 }
+        sort: { type: integer, minimum: -1000000, maximum: 1000000, default: 0 }
+        visible: { type: boolean, default: true }
+        active: { type: boolean, default: true }
+        keepAlive: { type: boolean, default: false }
+        external: { type: boolean, default: false }
+        permission: { type: string, maxLength: 191 }
+        orgId: { type: string, maxLength: 128 }
+    IAMMenuPatchRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        parentId: { type: string, maxLength: 64 }
+        name: { type: string, minLength: 1, maxLength: 191 }
+        path: { type: string, minLength: 1, maxLength: 255 }
+        type: { type: string, enum: [directory, menu, button] }
+        component: { type: string, maxLength: 255 }
+        redirect: { type: string, maxLength: 255 }
+        icon: { type: string, maxLength: 191 }
+        sort: { type: integer, minimum: -1000000, maximum: 1000000 }
+        visible: { type: boolean }
+        active: { type: boolean }
+        keepAlive: { type: boolean }
+        external: { type: boolean }
+        permission: { type: string, maxLength: 191 }
+        orgId: { type: string, maxLength: 128 }
+    IAMMenuReorderRequest:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, sort]
+            properties:
+              id: { type: string, minLength: 1, maxLength: 64 }
+              parentId: { type: string, maxLength: 64 }
+              sort: { type: integer, minimum: -1000000, maximum: 1000000 }
+    IAMMenuRoute:
+      type: object
+      additionalProperties: false
+      required: [name, path, component, meta]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        path: { type: string, minLength: 1, maxLength: 255 }
+        component: { type: string, minLength: 1, maxLength: 255 }
+        redirect: { type: string, maxLength: 255 }
+        meta:
+          type: object
+          additionalProperties: false
+          required: [title, order]
+          properties:
+            title: { type: string, minLength: 1, maxLength: 191 }
+            icon: { type: string, maxLength: 191 }
+            order: { type: integer }
+            hideInMenu: { type: boolean }
+            keepAlive: { type: boolean }
+            link: { type: string, maxLength: 255 }
+            openInNewWindow: { type: boolean }
+            authority:
+              type: array
+              maxItems: 1
+              items: { type: string, maxLength: 191 }
+        children:
+          type: array
+          items: { $ref: '#/components/schemas/IAMMenuRoute' }
     IAMComponent:
       type: object
       additionalProperties: false
