@@ -68,6 +68,14 @@ export interface IAMMenu {
   visible: boolean;
 }
 
+export interface IAMPermission {
+  active: boolean;
+  id: string;
+  method: string;
+  name: string;
+  path: string;
+}
+
 export interface IAMUserCreateInput {
   active?: boolean;
   avatar?: string;
@@ -205,6 +213,10 @@ export async function createIAMRoleApi(input: IAMRoleCreateInput) {
 
 export async function listIAMMenusApi() {
   return requestClient.get<IAMMenu[]>(ADMIN_ENDPOINTS.listIAMMenus);
+}
+
+export async function listIAMPermissionsApi() {
+  return requestClient.get<IAMPermission[]>(ADMIN_ENDPOINTS.listIAMPermissions);
 }
 
 export async function replaceIAMRoleUsersApi(

@@ -39,6 +39,15 @@ const routes: RouteRecordRaw[] = [
         name: 'IAMMenus',
         path: 'menus',
       },
+      {
+        component: () => import('#/views/iam/permissions/index.vue'),
+        meta: {
+          icon: 'lucide:key-round',
+          title: $t('page.iam.permissions'),
+        },
+        name: 'IAMPermissions',
+        path: 'permissions',
+      },
     ],
   },
 ];

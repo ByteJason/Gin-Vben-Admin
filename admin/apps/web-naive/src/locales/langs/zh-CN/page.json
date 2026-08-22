@@ -187,6 +187,19 @@
     "menuActive": "状态",
     "menuVisibleYes": "可见",
     "menuVisibleNo": "隐藏",
-    "menuRoot": "根菜单"
+    "menuRoot": "根菜单",
+    "permissions": "权限元数据",
+    "permissionsDescription": "在当前租户范围查看 API 与按钮权限元数据；策略绑定、数据范围和写入操作在后续切片交付。",
+    "permissionsLoading": "正在加载权限",
+    "permissionsLoadError": "权限列表加载失败，请重试。",
+    "permissionsEmpty": "暂无权限。",
+    "permissionsTable": "权限元数据列表",
+    "permissionId": "权限 ID",
+    "permissionName": "权限名称",
+    "permissionMethod": "方法",
+    "permissionPath": "路径",
+    "permissionActive": "状态",
+    "permissionActiveYes": "启用",
+    "permissionActiveNo": "停用"
   }
 }

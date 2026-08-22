@@ -187,6 +187,19 @@
     "menuActive": "Status",
     "menuVisibleYes": "Visible",
     "menuVisibleNo": "Hidden",
-    "menuRoot": "Root menu"
+    "menuRoot": "Root menu",
+    "permissions": "Permission metadata",
+    "permissionsDescription": "View API and button permission metadata within the current tenant. Policy bindings, data scopes, and writes ship in later slices.",
+    "permissionsLoading": "Loading permissions",
+    "permissionsLoadError": "Permissions could not be loaded. Try again.",
+    "permissionsEmpty": "No permissions found.",
+    "permissionsTable": "Permission metadata list",
+    "permissionId": "Permission ID",
+    "permissionName": "Permission name",
+    "permissionMethod": "Method",
+    "permissionPath": "Path",
+    "permissionActive": "Status",
+    "permissionActiveYes": "Active",
+    "permissionActiveNo": "Inactive"
   }
 }
