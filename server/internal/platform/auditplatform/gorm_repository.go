@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"strings"
 	"time"
 
 	auditapp "example.com/gin-vben-admin/server/internal/application/audit"
@@ -20,9 +21,12 @@ func NewGORMRepository(db *gormdb.Store) *GORMRepository { return &GORMRepositor
 type auditRecord struct {
 	ID        uint64            `gorm:"column:id;primaryKey"`
 	UserID    *uint64           `gorm:"column:user_id"`
+	SessionID string            `gorm:"column:session_id"`
 	EventType string            `gorm:"column:event_type"`
 	Outcome   string            `gorm:"column:outcome"`
 	RequestID string            `gorm:"column:request_id"`
+	IPAddress string            `gorm:"column:ip_address"`
+	UserAgent string            `gorm:"column:user_agent"`
 	Metadata  map[string]string `gorm:"column:metadata;serializer:json"`
 	CreatedAt time.Time         `gorm:"column:created_at"`
 	TenantID  string            `gorm:"column:tenant_id"`
@@ -57,7 +61,7 @@ func (r *GORMRepository) QueryPage(ctx context.Context, filter auditapp.Filter) 
 		}
 	}
 	if filter.Action != "" {
-		query = query.Where("event_type = ?", filter.Action)
+		query = query.Where("event_type = ?", persistedEventType(filter))
 	}
 	if filter.Outcome != "" {
 		query = query.Where("outcome = ?", filter.Outcome)
@@ -98,6 +102,15 @@ func (r *GORMRepository) QueryPage(ctx context.Context, filter auditapp.Filter) 
 		for key, value := range row.Metadata {
 			details[key] = value
 		}
+		if row.SessionID != "" {
+			details["sessionId"] = row.SessionID
+		}
+		if row.IPAddress != "" {
+			details["ipAddress"] = row.IPAddress
+		}
+		if row.UserAgent != "" {
+			details["userAgent"] = row.UserAgent
+		}
 		action, resource := row.EventType, ""
 		for index := 0; index < len(row.EventType); index++ {
 			if row.EventType[index] == '.' {
@@ -108,6 +121,17 @@ func (r *GORMRepository) QueryPage(ctx context.Context, filter auditapp.Filter) 
 		events = append(events, auditapp.Event{ID: strconv.FormatUint(row.ID, 10), ActorID: actor, Action: action, Resource: resource, Outcome: row.Outcome, RequestID: row.RequestID, Details: details, CreatedAt: row.CreatedAt})
 	}
 	return events, int(total), nil
+}
+
+func persistedEventType(filter auditapp.Filter) string {
+	action := strings.TrimSpace(filter.Action)
+	if action == "" {
+		return ""
+	}
+	if strings.Contains(action, ".") || strings.TrimSpace(filter.Resource) == "" {
+		return action
+	}
+	return strings.Trim(strings.TrimSpace(filter.Resource), ".") + "." + action
 }
 
 var _ auditapp.Repository = (*GORMRepository)(nil)

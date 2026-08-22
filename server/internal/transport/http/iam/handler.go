@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	auditapp "example.com/gin-vben-admin/server/internal/application/audit"
 	appauth "example.com/gin-vben-admin/server/internal/application/auth"
 	iamapp "example.com/gin-vben-admin/server/internal/application/iam"
 	"example.com/gin-vben-admin/server/internal/domain/authdomain"
@@ -32,10 +33,15 @@ const (
 type Handler struct {
 	service *iamapp.Service
 	auth    appauth.AuthService
+	audit   *auditapp.Service
 }
 
 func NewHandler(service *iamapp.Service, auth appauth.AuthService) *Handler {
-	return &Handler{service: service, auth: auth}
+	return NewHandlerWithAudit(service, auth, nil)
+}
+
+func NewHandlerWithAudit(service *iamapp.Service, auth appauth.AuthService, audit *auditapp.Service) *Handler {
+	return &Handler{service: service, auth: auth, audit: audit}
 }
 
 // RegisterRoutes installs protected CRUD/read seams. The server remains
@@ -55,6 +61,7 @@ func RegisterRoutes(r gin.IRouter, handler *Handler, policies ...httpmiddleware.
 	group.GET("/users", handler.listUsers)
 	group.POST("/users/batch-status", handler.batchUpdateUserStatus)
 	group.POST("/users/:id/reset-password", handler.resetUserPassword)
+	group.GET("/users/:id/login-events", handler.loginEvents)
 	group.GET("/users/:id", handler.getUser)
 	group.POST("/users", handler.createUser)
 	group.PATCH("/users/:id", handler.updateUser)
@@ -74,7 +81,7 @@ func RegisterRoutes(r gin.IRouter, handler *Handler, policies ...httpmiddleware.
 }
 
 func registerDisabled(group *gin.RouterGroup) {
-	for _, path := range []string{"/me", "/users", "/users/batch-status", "/users/:id/reset-password", "/users/:id", "/roles", "/roles/:id/users", "/menus", "/permissions", "/policies", "/data-scopes"} {
+	for _, path := range []string{"/me", "/users", "/users/batch-status", "/users/:id/reset-password", "/users/:id/login-events", "/users/:id", "/roles", "/roles/:id/users", "/menus", "/permissions", "/policies", "/data-scopes"} {
 		group.GET(path, disabled)
 		group.POST(path, disabled)
 		group.PATCH(path, disabled)
@@ -424,6 +431,70 @@ func (h *Handler) resetUserPassword(c *gin.Context) {
 	response.OK(c, nil)
 }
 
+func (h *Handler) loginEvents(c *gin.Context) {
+	if !h.guard(c) {
+		return
+	}
+	if h.audit == nil {
+		response.Error(c, http.StatusServiceUnavailable, codeUnavailable, "dependency unavailable")
+		return
+	}
+	userID := strings.TrimSpace(c.Param("id"))
+	if userID == "" {
+		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid request")
+		return
+	}
+	if _, err := h.service.GetUser(c.Request.Context(), userID); err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	filter, err := loginEventFilter(c)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid request")
+		return
+	}
+	page, err := h.audit.QueryLoginEvents(c.Request.Context(), userID, filter)
+	if err != nil {
+		if errors.Is(err, auditapp.ErrInvalidFilter) {
+			response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid request")
+			return
+		}
+		response.Error(c, http.StatusServiceUnavailable, codeUnavailable, "dependency unavailable")
+		return
+	}
+	response.OK(c, page)
+}
+
+func loginEventFilter(c *gin.Context) (auditapp.Filter, error) {
+	filter := auditapp.Filter{Limit: 0, Offset: 0}
+	var err error
+	if value := strings.TrimSpace(c.Query("limit")); value != "" {
+		filter.Limit, err = strconv.Atoi(value)
+		if err != nil || filter.Limit < 0 {
+			return auditapp.Filter{}, auditapp.ErrInvalidFilter
+		}
+	}
+	if value := strings.TrimSpace(c.Query("offset")); value != "" {
+		filter.Offset, err = strconv.Atoi(value)
+		if err != nil || filter.Offset < 0 {
+			return auditapp.Filter{}, auditapp.ErrInvalidFilter
+		}
+	}
+	if value := strings.TrimSpace(c.Query("from")); value != "" {
+		filter.From, err = time.Parse(time.RFC3339, value)
+		if err != nil {
+			return auditapp.Filter{}, auditapp.ErrInvalidFilter
+		}
+	}
+	if value := strings.TrimSpace(c.Query("to")); value != "" {
+		filter.To, err = time.Parse(time.RFC3339, value)
+		if err != nil {
+			return auditapp.Filter{}, auditapp.ErrInvalidFilter
+		}
+	}
+	return filter, nil
+}
+
 type roleRequest struct {
 	ID        string       `json:"id"`
 	Name      string       `json:"name"`
@@ -675,7 +746,7 @@ func writeServiceError(c *gin.Context, err error) {
 		response.Error(c, http.StatusServiceUnavailable, codeUnavailable, "dependency unavailable")
 		return
 	}
-	if errors.Is(err, iamapp.ErrInvalidID) || errors.Is(err, iamapp.ErrInvalidUserQuery) || errors.Is(err, iamapp.ErrInvalidUser) || errors.Is(err, iamapp.ErrInvalidUserBatch) || errors.Is(err, iamapp.ErrInvalidRoleAssignment) || errors.Is(err, domain.ErrInvalidPolicy) {
+	if errors.Is(err, iamapp.ErrInvalidID) || errors.Is(err, iamapp.ErrInvalidUserQuery) || errors.Is(err, iamapp.ErrInvalidUser) || errors.Is(err, iamapp.ErrInvalidUserBatch) || errors.Is(err, iamapp.ErrInvalidRoleAssignment) || errors.Is(err, domain.ErrInvalidPolicy) || errors.Is(err, auditapp.ErrInvalidFilter) {
 		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid request")
 		return
 	}

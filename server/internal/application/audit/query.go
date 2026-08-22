@@ -103,6 +103,21 @@ func (s *Service) Query(ctx context.Context, filter Filter) (Page, error) {
 	return page, nil
 }
 
+// QueryLoginEvents returns only authentication login events for one actor.
+// Keeping the event type fixed here prevents a user-management caller from
+// widening the seam into arbitrary audit access while preserving the shared
+// pagination, tenant scope and redaction behavior of Query.
+func (s *Service) QueryLoginEvents(ctx context.Context, actorID string, filter Filter) (Page, error) {
+	actorID = strings.TrimSpace(actorID)
+	if actorID == "" {
+		return Page{}, ErrInvalidFilter
+	}
+	filter.ActorID = actorID
+	filter.Action = "login"
+	filter.Resource = "auth"
+	return s.Query(ctx, filter)
+}
+
 // MemoryRepository is deterministic and intended for unit tests/local seams.
 type MemoryRepository struct {
 	mu     sync.RWMutex

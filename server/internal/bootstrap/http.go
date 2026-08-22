@@ -54,7 +54,7 @@ func newHTTPServerWithPlanAndCaptcha(cfg config.Config, readiness health.Readine
 	}
 	var iamHandler *iamhttp.Handler
 	if iamService != nil {
-		iamHandler = iamhttp.NewHandler(iamService, authService)
+		iamHandler = iamhttp.NewHandlerWithAudit(iamService, authService, auditService)
 	}
 	var installHandler *installhttp.Handler
 	if installStatus != nil {

@@ -1,5 +1,5 @@
 // Generated from contracts/openapi/admin-v1.yaml; DO NOT EDIT.
-// CONTRACT_SHA256=20adbea7df6d1e0c2e7d981522fa5429382d55300cc59273fca80b3cd9a2b1a2
+// CONTRACT_SHA256=39d3f40058605afd12fa4027dea051ab5872f3d2eecbff9a073ff513b17dc1c7
 
 export const ADMIN_API_PREFIX = '/admin/v1' as const;
 
@@ -18,6 +18,7 @@ export const ADMIN_ENDPOINTS = {
   listIAMUsers: '/admin/v1/iam/users',
   createIAMUser: '/admin/v1/iam/users',
   batchUpdateIAMUserStatus: '/admin/v1/iam/users/batch-status',
+  listIAMUserLoginEvents: '/admin/v1/iam/users/{id}/login-events',
   getIAMUser: '/admin/v1/iam/users/{id}',
   updateIAMUser: '/admin/v1/iam/users/{id}',
   deleteIAMUser: '/admin/v1/iam/users/{id}',
