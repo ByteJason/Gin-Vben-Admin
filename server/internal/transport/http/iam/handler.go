@@ -61,6 +61,7 @@ func RegisterRoutes(r gin.IRouter, handler *Handler, policies ...httpmiddleware.
 	group.DELETE("/users/:id", handler.deleteUser)
 	group.GET("/roles", handler.listRoles)
 	group.POST("/roles", handler.createRole)
+	group.PUT("/roles/:id/users", handler.replaceRoleUsers)
 	group.GET("/menus", handler.listMenus)
 	group.GET("/permissions", handler.listPermissions)
 	group.GET("/policies", handler.listPolicies)
@@ -73,11 +74,12 @@ func RegisterRoutes(r gin.IRouter, handler *Handler, policies ...httpmiddleware.
 }
 
 func registerDisabled(group *gin.RouterGroup) {
-	for _, path := range []string{"/me", "/users", "/users/batch-status", "/users/:id/reset-password", "/users/:id", "/roles", "/menus", "/permissions", "/policies", "/data-scopes"} {
+	for _, path := range []string{"/me", "/users", "/users/batch-status", "/users/:id/reset-password", "/users/:id", "/roles", "/roles/:id/users", "/menus", "/permissions", "/policies", "/data-scopes"} {
 		group.GET(path, disabled)
 		group.POST(path, disabled)
 		group.PATCH(path, disabled)
 		group.DELETE(path, disabled)
+		group.PUT(path, disabled)
 	}
 }
 
@@ -429,6 +431,10 @@ type roleRequest struct {
 	DataScope domain.Scope `json:"dataScope"`
 }
 
+type roleUsersRequest struct {
+	UserIDs *[]string `json:"userIds"`
+}
+
 type roleResponse struct {
 	ID        string       `json:"id"`
 	Name      string       `json:"name"`
@@ -475,6 +481,23 @@ func (h *Handler) createRole(c *gin.Context) {
 		return
 	}
 	response.OK(c, roleResponse{ID: role.ID, Name: role.Name, Active: role.Active, DataScope: role.DataScope})
+}
+
+func (h *Handler) replaceRoleUsers(c *gin.Context) {
+	if !h.guard(c) {
+		return
+	}
+	var req roleUsersRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.UserIDs == nil || len(*req.UserIDs) > iamapp.MaxRoleAssignmentUsers {
+		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid request")
+		return
+	}
+	role, err := h.service.ReplaceRoleUsers(c.Request.Context(), c.Param("id"), iamapp.RoleUsersInput{UserIDs: append([]string(nil), (*req.UserIDs)...)})
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	response.OK(c, roleResponse{ID: role.ID, Name: role.Name, Active: role.Active, DataScope: role.DataScope, UserIDs: append([]string(nil), role.UserIDs...)})
 }
 
 type menuResponse struct {
@@ -652,7 +675,7 @@ func writeServiceError(c *gin.Context, err error) {
 		response.Error(c, http.StatusServiceUnavailable, codeUnavailable, "dependency unavailable")
 		return
 	}
-	if errors.Is(err, iamapp.ErrInvalidID) || errors.Is(err, iamapp.ErrInvalidUserQuery) || errors.Is(err, iamapp.ErrInvalidUser) || errors.Is(err, iamapp.ErrInvalidUserBatch) || errors.Is(err, domain.ErrInvalidPolicy) {
+	if errors.Is(err, iamapp.ErrInvalidID) || errors.Is(err, iamapp.ErrInvalidUserQuery) || errors.Is(err, iamapp.ErrInvalidUser) || errors.Is(err, iamapp.ErrInvalidUserBatch) || errors.Is(err, iamapp.ErrInvalidRoleAssignment) || errors.Is(err, domain.ErrInvalidPolicy) {
 		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid request")
 		return
 	}

@@ -20,6 +20,7 @@ var (
 	ErrInvalidUserQuery      = domain.ErrInvalidUserQuery
 	ErrInvalidUser           = domain.ErrInvalidUser
 	ErrInvalidUserBatch      = errors.New("invalid user status batch")
+	ErrInvalidRoleAssignment = errors.New("invalid role assignment")
 	ErrUserConflict          = domain.ErrUserConflict
 	ErrPasswordHasherMissing = errors.New("iam password hasher is unavailable")
 )
@@ -32,6 +33,12 @@ const maxUserBatchStatusItems = 100
 // MaxUserBatchStatusItems is exported for clients that need to mirror the
 // contract without depending on the private implementation constant.
 const MaxUserBatchStatusItems = maxUserBatchStatusItems
+
+const maxRoleAssignmentUsers = 100
+
+// MaxRoleAssignmentUsers is exported so transport and clients share the
+// bounded role-membership contract.
+const MaxRoleAssignmentUsers = maxRoleAssignmentUsers
 
 // PasswordHasher is the narrow credential boundary used by the IAM write
 // seam. Plaintext passwords are accepted only for the duration of the
@@ -65,6 +72,12 @@ type UserUpdateInput struct {
 // role, and login-event fields stay outside the administrator reset seam.
 type UserPasswordResetInput struct {
 	Password string
+}
+
+// RoleUsersInput is the replacement payload for one role's membership. An
+// empty list intentionally clears the role for the current scope.
+type RoleUsersInput struct {
+	UserIDs []string
 }
 
 // UserStatusChangeInput is the transport-neutral input for one status change.
@@ -344,6 +357,82 @@ func (s *MemoryStore) SaveRole(ctx context.Context, role domain.Role) error {
 	return s.save(ctx, role.ID, func() { s.roles[role.ID] = cloneRole(role) })
 }
 
+// AssignRoleUsers replaces one role's membership within the validated tenant
+// and organization scope. It updates only relationship fields and keeps
+// unrelated roles on each user intact.
+func (s *MemoryStore) AssignRoleUsers(ctx context.Context, roleID string, userIDs []string) (domain.Role, error) {
+	if err := check(ctx); err != nil {
+		return domain.Role{}, err
+	}
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" {
+		return domain.Role{}, domain.ErrInvalidUser
+	}
+	normalized, err := normalizeRoleUserIDs(userIDs)
+	if err != nil {
+		return domain.Role{}, err
+	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return domain.Role{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	role, ok := s.roles[roleID]
+	if !ok {
+		return domain.Role{}, domain.ErrResourceNotFound
+	}
+	if err := checkRoleScope(scope, role); err != nil {
+		return domain.Role{}, err
+	}
+	// Validate every requested target before changing any relationship so a
+	// malformed or out-of-scope list is atomic in the memory adapter too.
+	for _, userID := range normalized {
+		user, exists := s.users[userID]
+		if !exists {
+			return domain.Role{}, domain.ErrResourceNotFound
+		}
+		if err := checkUserScope(scope, user); err != nil {
+			return domain.Role{}, err
+		}
+	}
+	for id, user := range s.users {
+		if err := checkUserScope(scope, user); err != nil {
+			continue
+		}
+		user.RoleIDs = withoutString(user.RoleIDs, roleID)
+		s.users[id] = cloneUser(user)
+	}
+	for _, userID := range normalized {
+		user := s.users[userID]
+		if !containsString(user.RoleIDs, roleID) {
+			user.RoleIDs = append(user.RoleIDs, roleID)
+		}
+		s.users[userID] = cloneUser(user)
+	}
+	members := make(map[string]struct{}, len(role.UserIDs)+len(normalized))
+	for _, memberID := range role.UserIDs {
+		memberID = strings.TrimSpace(memberID)
+		if memberID == "" {
+			continue
+		}
+		if user, exists := s.users[memberID]; exists && checkUserScope(scope, user) == nil {
+			continue
+		}
+		members[memberID] = struct{}{}
+	}
+	for _, userID := range normalized {
+		members[userID] = struct{}{}
+	}
+	role.UserIDs = make([]string, 0, len(members))
+	for memberID := range members {
+		role.UserIDs = append(role.UserIDs, memberID)
+	}
+	sort.Strings(role.UserIDs)
+	s.roles[roleID] = cloneRole(role)
+	return cloneRole(role), nil
+}
+
 func (s *MemoryStore) ListRoles(ctx context.Context) ([]domain.Role, error) {
 	if err := check(ctx); err != nil {
 		return nil, err
@@ -485,6 +574,36 @@ func cloneRole(role domain.Role) domain.Role {
 	return role
 }
 
+func withoutString(values []string, target string) []string {
+	filtered := make([]string, 0, len(values))
+	for _, value := range values {
+		if value != target {
+			filtered = append(filtered, value)
+		}
+	}
+	return filtered
+}
+
+func normalizeRoleUserIDs(userIDs []string) ([]string, error) {
+	if len(userIDs) > maxRoleAssignmentUsers {
+		return nil, ErrInvalidRoleAssignment
+	}
+	normalized := make([]string, len(userIDs))
+	seen := make(map[string]struct{}, len(userIDs))
+	for index, userID := range userIDs {
+		userID = strings.TrimSpace(userID)
+		if userID == "" {
+			return nil, ErrInvalidUser
+		}
+		if _, exists := seen[userID]; exists {
+			return nil, ErrInvalidUser
+		}
+		seen[userID] = struct{}{}
+		normalized[index] = userID
+	}
+	return normalized, nil
+}
+
 type Service struct {
 	Users          domain.UserRepository
 	Roles          domain.RoleRepository
@@ -527,6 +646,9 @@ type userStatusUpdater interface {
 }
 type userBatchStatusUpdater interface {
 	UpdateUserStatuses(context.Context, []domain.UserStatusChange) (map[string]domain.User, error)
+}
+type roleUserAssigner interface {
+	AssignRoleUsers(context.Context, string, []string) (domain.Role, error)
 }
 type userPasswordUpdater interface {
 	UpdateUserPassword(context.Context, string, string, time.Time) (domain.User, error)
@@ -1095,6 +1217,19 @@ func checkUserScope(scope tenant.Context, user domain.User) error {
 	return nil
 }
 
+func checkRoleScope(scope tenant.Context, role domain.Role) error {
+	if scope.PlatformAdmin {
+		return nil
+	}
+	if role.TenantID != "" && role.TenantID != scope.TenantID {
+		return tenant.ErrCrossTenant
+	}
+	if scope.Organization != "" && role.OrgID != "" && role.OrgID != scope.Organization {
+		return tenant.ErrOrganizationDenied
+	}
+	return nil
+}
+
 func filterUsers(users []domain.User, query domain.UserListQuery, scope tenant.Context) []domain.User {
 	keyword := strings.ToLower(query.Keyword)
 	filtered := make([]domain.User, 0, len(users))
@@ -1232,6 +1367,67 @@ func (s *Service) SaveRole(ctx context.Context, role domain.Role) error {
 		return err
 	}
 	return s.invalidate(ctx)
+}
+
+// ReplaceRoleUsers validates every target in the caller's tenant/org scope,
+// then delegates one bounded relationship replacement to the durable adapter.
+// No profile, credential, status, or unrelated role field is accepted here.
+func (s *Service) ReplaceRoleUsers(ctx context.Context, roleID string, input RoleUsersInput) (domain.Role, error) {
+	if s == nil || s.Roles == nil || s.Users == nil {
+		return domain.Role{}, ErrRepositoryMissing
+	}
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" {
+		return domain.Role{}, ErrInvalidID
+	}
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return domain.Role{}, err
+		}
+	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return domain.Role{}, err
+	}
+	normalized, err := normalizeRoleUserIDs(input.UserIDs)
+	if err != nil {
+		return domain.Role{}, err
+	}
+	role, err := s.Roles.FindRole(ctx, roleID)
+	if err != nil {
+		return domain.Role{}, err
+	}
+	if err := checkRoleScope(scope, role); err != nil {
+		return domain.Role{}, err
+	}
+	for _, userID := range normalized {
+		user, findErr := s.Users.FindUser(ctx, userID)
+		if findErr != nil {
+			return domain.Role{}, findErr
+		}
+		if scopeErr := checkUserScope(scope, user); scopeErr != nil {
+			return domain.Role{}, scopeErr
+		}
+	}
+	var updated domain.Role
+	if repo, ok := s.Roles.(roleUserAssigner); ok {
+		updated, err = repo.AssignRoleUsers(ctx, roleID, normalized)
+	} else if repo, ok := s.Users.(roleUserAssigner); ok {
+		updated, err = repo.AssignRoleUsers(ctx, roleID, normalized)
+	} else {
+		return domain.Role{}, ErrRepositoryMissing
+	}
+	if err != nil {
+		return domain.Role{}, err
+	}
+	if updated.ID == "" {
+		updated = role
+	}
+	updated.UserIDs = append([]string(nil), normalized...)
+	if err := s.invalidate(ctx); err != nil {
+		return domain.Role{}, err
+	}
+	return updated, nil
 }
 
 func (s *Service) ListMenus(ctx context.Context) ([]domain.Menu, error) {

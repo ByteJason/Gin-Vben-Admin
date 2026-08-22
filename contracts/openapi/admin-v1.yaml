@@ -554,6 +554,39 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
+  /api/admin/v1/iam/roles/{id}/users:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1, maxLength: 128 }
+    put:
+      tags: [IAM]
+      operationId: replaceIAMRoleUsers
+      summary: 替换角色成员
+      description: 在当前租户和组织范围内原子替换角色成员，最多 100 个用户；空数组清空当前范围，响应不包含凭据。
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IAMRoleUsersReplaceRequest' }
+      responses:
+        '200':
+          description: 角色成员替换成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/IAMRole' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
   /api/admin/v1/settings:
     get:
       tags: [Settings]
@@ -995,6 +1028,15 @@ components:
     IAMRoleRequest:
       allOf:
         - $ref: '#/components/schemas/IAMRole'
+    IAMRoleUsersReplaceRequest:
+      type: object
+      additionalProperties: false
+      required: [userIds]
+      properties:
+        userIds:
+          type: array
+          maxItems: 100
+          items: { type: string, minLength: 1, maxLength: 128 }
     IAMMenu:
       type: object
       required: [id, name, path, visible, active]

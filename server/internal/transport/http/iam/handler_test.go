@@ -431,6 +431,70 @@ func TestIAMUserResetPasswordReturnsNoCredentialAndPreservesState(t *testing.T) 
 	}
 }
 
+func TestIAMRoleAssignmentReplacesScopedMembersWithoutCredentialLeak(t *testing.T) {
+	store := iamapp.NewMemoryStore()
+	admin := domain.User{ID: "admin", Username: "admin", TenantID: "default", Active: true}
+	targetA := domain.User{ID: "u1", Username: "alice", TenantID: "default", OrgID: "org-a", Active: true, PasswordHash: "hash-a", RoleIDs: []string{"role-editor", "role-other"}}
+	targetB := domain.User{ID: "u2", Username: "bob", TenantID: "default", OrgID: "org-a", Active: true, PasswordHash: "hash-b"}
+	otherOrg := domain.User{ID: "u3", Username: "carol", TenantID: "default", OrgID: "org-b", Active: true, PasswordHash: "hash-c", RoleIDs: []string{"role-editor"}}
+	for _, user := range []domain.User{admin, targetA, targetB, otherOrg} {
+		if err := store.SaveUser(context.Background(), user); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.SaveRole(context.Background(), domain.Role{ID: "role-editor", Name: "Editor", Active: true, UserIDs: []string{"u1", "u3"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SavePolicy(context.Background(), domain.Policy{Subject: "admin", Method: http.MethodPut, Path: "/api/admin/v1/iam/roles/:id/users", Effect: domain.EffectAllow}); err != nil {
+		t.Fatal(err)
+	}
+	r := newIAMTestRouter(store, authdomain.Claims{Subject: "admin", Type: authdomain.AccessToken, ExpiresAt: time.Now().Add(time.Minute)})
+	req := httptest.NewRequest(http.MethodPut, "/api/admin/v1/iam/roles/role-editor/users", strings.NewReader(`{"userIds":["u2"]}`))
+	req.Header.Set("Authorization", "Bearer test")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Org-ID", "org-a")
+	resp := httptest.NewRecorder()
+	r.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK || !strings.Contains(resp.Body.String(), `"code":0`) || strings.Contains(resp.Body.String(), "hash-a") || strings.Contains(resp.Body.String(), "passwordHash") {
+		t.Fatalf("role assignment status/body = %d/%s", resp.Code, resp.Body.String())
+	}
+	var envelope struct {
+		Code int `json:"code"`
+		Data struct {
+			ID      string   `json:"id"`
+			UserIDs []string `json:"userIds"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &envelope); err != nil || envelope.Code != 0 || envelope.Data.ID != "role-editor" || len(envelope.Data.UserIDs) != 1 || envelope.Data.UserIDs[0] != "u2" {
+		t.Fatalf("role assignment envelope = %s err=%v", resp.Body.String(), err)
+	}
+	storedA, _ := store.FindUser(context.Background(), targetA.ID)
+	storedB, _ := store.FindUser(context.Background(), targetB.ID)
+	storedOther, _ := store.FindUser(context.Background(), otherOrg.ID)
+	if hasRoleID(storedA.RoleIDs, "role-editor") || !hasRoleID(storedA.RoleIDs, "role-other") || !hasRoleID(storedB.RoleIDs, "role-editor") || !hasRoleID(storedOther.RoleIDs, "role-editor") || storedA.PasswordHash != targetA.PasswordHash {
+		t.Fatalf("role assignment relationships/credentials = a:%v b:%v other:%v hashes:%q", storedA.RoleIDs, storedB.RoleIDs, storedOther.RoleIDs, storedA.PasswordHash)
+	}
+
+	bad := httptest.NewRequest(http.MethodPut, "/api/admin/v1/iam/roles/role-editor/users", strings.NewReader(`{"userIds":["u3"]}`))
+	bad.Header.Set("Authorization", "Bearer test")
+	bad.Header.Set("Content-Type", "application/json")
+	bad.Header.Set("X-Org-ID", "org-a")
+	resp = httptest.NewRecorder()
+	r.ServeHTTP(resp, bad)
+	if resp.Code != http.StatusForbidden || !strings.Contains(resp.Body.String(), `"code":30000`) {
+		t.Fatalf("cross-organization assignment status/body = %d/%s", resp.Code, resp.Body.String())
+	}
+}
+
+func hasRoleID(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
 type testPasswordHasher struct{}
 
 func (testPasswordHasher) Hash(password string) (string, error) { return "hash:" + password, nil }

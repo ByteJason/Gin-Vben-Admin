@@ -522,7 +522,7 @@ func (s *GORMStore) FindRole(ctx context.Context, id string) (domain.Role, error
 		}
 		return domain.Role{}, ErrStoreUnavailable
 	}
-	return domain.Role{ID: row.ID, Name: row.Name, Active: row.Status == "active", DataScope: domain.Scope(row.DataScope)}, nil
+	return row.toDomain(nil), nil
 }
 
 func (s *GORMStore) SaveRole(ctx context.Context, role domain.Role) error {
@@ -537,7 +537,105 @@ func (s *GORMStore) SaveRole(ctx context.Context, role domain.Role) error {
 	if role.Active {
 		status = "active"
 	}
-	return s.upsert(ctx, "roles", map[string]any{"tenant_id": tenantID, "id": role.ID}, map[string]any{"tenant_id": tenantID, "id": role.ID, "name": role.Name, "status": status, "data_scope": role.DataScope})
+	return s.upsert(ctx, "roles", map[string]any{"tenant_id": tenantID, "id": role.ID}, map[string]any{"tenant_id": tenantID, "id": role.ID, "name": role.Name, "status": status, "data_scope": role.DataScope, "org_id": nullableString(role.OrgID)})
+}
+
+// AssignRoleUsers replaces one role's user_roles rows in a primary transaction.
+// Every user and relationship predicate carries the tenant boundary; an
+// organization-scoped caller only replaces members in that organization.
+func (s *GORMStore) AssignRoleUsers(ctx context.Context, roleID string, userIDs []string) (domain.Role, error) {
+	roleID = strings.TrimSpace(roleID)
+	if roleID == "" {
+		return domain.Role{}, domain.ErrInvalidUser
+	}
+	if len(userIDs) > 100 {
+		return domain.Role{}, domain.ErrInvalidUser
+	}
+	normalized := make([]string, len(userIDs))
+	seen := make(map[string]struct{}, len(userIDs))
+	numericIDs := make([]uint64, len(userIDs))
+	for index, userID := range userIDs {
+		userID = strings.TrimSpace(userID)
+		if userID == "" {
+			return domain.Role{}, domain.ErrInvalidUser
+		}
+		if _, exists := seen[userID]; exists {
+			return domain.Role{}, domain.ErrInvalidUser
+		}
+		numeric, err := numericID(userID)
+		if err != nil {
+			return domain.Role{}, domain.ErrInvalidUser
+		}
+		seen[userID] = struct{}{}
+		normalized[index] = userID
+		numericIDs[index] = numeric
+	}
+	if s == nil || s.db == nil {
+		return domain.Role{}, ErrStoreUnavailable
+	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return domain.Role{}, err
+	}
+	var updated domain.Role
+	err = s.db.WithinTransaction(ctx, func(tx *gorm.DB) error {
+		var roleRowValue roleRow
+		roleQuery := tx.Table("roles").Where("tenant_id = ? AND id = ?", scope.TenantID, roleID)
+		queryResult := roleQuery.Take(&roleRowValue)
+		if queryResult.Error != nil {
+			if errors.Is(queryResult.Error, gorm.ErrRecordNotFound) {
+				return domain.ErrResourceNotFound
+			}
+			return ErrStoreUnavailable
+		}
+		if !scope.PlatformAdmin && scope.Organization != "" && stringValue(roleRowValue.OrgID) != "" && stringValue(roleRowValue.OrgID) != scope.Organization {
+			return tenant.ErrOrganizationDenied
+		}
+		updated = roleRowValue.toDomain(nil)
+
+		var users []userRow
+		if len(numericIDs) > 0 {
+			userQuery := tx.Table("users").Where("tenant_id = ? AND id IN ?", scope.TenantID, numericIDs)
+			if !scope.PlatformAdmin && scope.Organization != "" {
+				userQuery = userQuery.Where("org_id = ?", scope.Organization)
+			}
+			if result := userQuery.Find(&users); result.Error != nil {
+				return ErrStoreUnavailable
+			}
+			if len(users) != len(numericIDs) {
+				return domain.ErrResourceNotFound
+			}
+		}
+
+		deleteSQL := "DELETE FROM user_roles WHERE tenant_id = ? AND role_id = ?"
+		deleteArgs := []any{scope.TenantID, roleID}
+		if !scope.PlatformAdmin && scope.Organization != "" {
+			deleteSQL += " AND org_id = ?"
+			deleteArgs = append(deleteArgs, scope.Organization)
+		}
+		if result := tx.Exec(deleteSQL, deleteArgs...); result.Error != nil {
+			return ErrStoreUnavailable
+		}
+		for _, user := range users {
+			if result := tx.Table("user_roles").Create(map[string]any{
+				"tenant_id": scope.TenantID,
+				"user_id":   user.ID,
+				"role_id":   roleID,
+				"org_id":    nullableString(stringValue(user.OrgID)),
+			}); result.Error != nil {
+				return ErrStoreUnavailable
+			}
+		}
+		updated.UserIDs = append([]string(nil), normalized...)
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, domain.ErrResourceNotFound) || errors.Is(err, domain.ErrInvalidUser) || errors.Is(err, tenant.ErrOrganizationDenied) || errors.Is(err, tenant.ErrCrossTenant) {
+			return domain.Role{}, err
+		}
+		return domain.Role{}, ErrStoreUnavailable
+	}
+	return updated, nil
 }
 
 func (s *GORMStore) ListRoles(ctx context.Context) ([]domain.Role, error) {
@@ -554,7 +652,7 @@ func (s *GORMStore) ListRoles(ctx context.Context) ([]domain.Role, error) {
 	}
 	out := make([]domain.Role, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, domain.Role{ID: row.ID, Name: row.Name, Active: row.Status == "active", DataScope: domain.Scope(row.DataScope)})
+		out = append(out, row.toDomain(nil))
 	}
 	return out, nil
 }
@@ -959,10 +1057,20 @@ func timeValue(value *time.Time) time.Time {
 
 type roleRow struct {
 	ID        string
+	TenantID  string  `gorm:"column:tenant_id"`
+	OrgID     *string `gorm:"column:org_id"`
 	Name      string
 	Status    string
 	DataScope string `gorm:"column:data_scope"`
 }
+
+func (row roleRow) toDomain(userIDs []string) domain.Role {
+	return domain.Role{
+		ID: row.ID, Name: row.Name, TenantID: row.TenantID, OrgID: stringValue(row.OrgID),
+		Active: row.Status == "active", DataScope: domain.Scope(row.DataScope), UserIDs: append([]string(nil), userIDs...),
+	}
+}
+
 type menuRow struct {
 	ID       string
 	ParentID sql.NullString `gorm:"column:parent_id"`

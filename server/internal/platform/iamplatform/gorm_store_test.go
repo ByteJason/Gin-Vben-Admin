@@ -85,6 +85,10 @@ var _ interface {
 	ListDataScopes(context.Context) ([]domain.DataScope, error)
 } = (*GORMStore)(nil)
 
+var _ interface {
+	AssignRoleUsers(context.Context, string, []string) (domain.Role, error)
+} = (*GORMStore)(nil)
+
 func TestGORMStoreUserWriteValidationRunsBeforeUnavailableDependency(t *testing.T) {
 	store := NewGORMStore(nil)
 	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "default"})
@@ -132,5 +136,19 @@ func TestGORMStoreResetPasswordValidatesBeforeUnavailableDependency(t *testing.T
 	}
 	if _, err := store.UpdateUserPassword(ctx, "7", "encoded", time.Now().UTC()); !errors.Is(err, ErrStoreUnavailable) {
 		t.Fatalf("UpdateUserPassword(unavailable) error = %v, want ErrStoreUnavailable", err)
+	}
+}
+
+func TestGORMStoreRoleAssignmentValidatesBeforeUnavailableDependency(t *testing.T) {
+	store := NewGORMStore(nil)
+	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "default"})
+	if _, err := store.AssignRoleUsers(ctx, "role-editor", []string{"not-numeric"}); !errors.Is(err, domain.ErrInvalidUser) {
+		t.Fatalf("AssignRoleUsers(non-numeric user) error = %v, want ErrInvalidUser", err)
+	}
+	if _, err := store.AssignRoleUsers(ctx, "", []string{}); !errors.Is(err, domain.ErrInvalidUser) {
+		t.Fatalf("AssignRoleUsers(empty role) error = %v, want ErrInvalidUser", err)
+	}
+	if _, err := store.AssignRoleUsers(ctx, "role-editor", []string{"7"}); !errors.Is(err, ErrStoreUnavailable) {
+		t.Fatalf("AssignRoleUsers(unavailable) error = %v, want ErrStoreUnavailable", err)
 	}
 }

@@ -273,6 +273,60 @@ func TestServiceResetUserPasswordEnforcesTenantOrganizationAndHasherBoundary(t *
 	}
 }
 
+func TestServiceReplaceRoleUsersScopesAndPreservesOtherRelationships(t *testing.T) {
+	store := NewMemoryStore()
+	users := []domain.User{
+		{ID: "u1", Username: "alice", TenantID: "tenant-a", OrgID: "org-a", Active: true, RoleIDs: []string{"role-editor", "role-other"}},
+		{ID: "u2", Username: "bob", TenantID: "tenant-a", OrgID: "org-a", Active: true, RoleIDs: []string{"role-other"}},
+		{ID: "u3", Username: "carol", TenantID: "tenant-a", OrgID: "org-b", Active: true, RoleIDs: []string{"role-editor"}},
+		{ID: "u4", Username: "dave", TenantID: "tenant-b", OrgID: "org-a", Active: true, RoleIDs: []string{"role-editor"}},
+	}
+	for _, user := range users {
+		if err := store.SaveUser(context.Background(), user); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.SaveRole(context.Background(), domain.Role{ID: "role-editor", Name: "Editor", Active: true, UserIDs: []string{"u1", "u3", "u4"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveRole(context.Background(), domain.Role{ID: "role-other", Name: "Other", Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(store)
+	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a", Organization: "org-a"})
+	updated, err := service.ReplaceRoleUsers(ctx, "role-editor", RoleUsersInput{UserIDs: []string{"u2"}})
+	if err != nil {
+		t.Fatalf("ReplaceRoleUsers() error = %v", err)
+	}
+	if len(updated.UserIDs) != 1 || updated.UserIDs[0] != "u2" {
+		t.Fatalf("updated role users = %+v", updated)
+	}
+	u1, _ := store.FindUser(context.Background(), "u1")
+	u2, _ := store.FindUser(context.Background(), "u2")
+	u3, _ := store.FindUser(context.Background(), "u3")
+	u4, _ := store.FindUser(context.Background(), "u4")
+	if containsString(u1.RoleIDs, "role-editor") || !containsString(u1.RoleIDs, "role-other") || !containsString(u2.RoleIDs, "role-editor") || !containsString(u3.RoleIDs, "role-editor") || !containsString(u4.RoleIDs, "role-editor") {
+		t.Fatalf("role relationships after scoped replace: u1=%v u2=%v u3=%v u4=%v", u1.RoleIDs, u2.RoleIDs, u3.RoleIDs, u4.RoleIDs)
+	}
+	if _, err := service.ReplaceRoleUsers(ctx, "role-editor", RoleUsersInput{UserIDs: []string{"u3"}}); !errors.Is(err, tenant.ErrOrganizationDenied) {
+		t.Fatalf("cross-organization assignment error = %v", err)
+	}
+	if _, err := service.ReplaceRoleUsers(ctx, "role-editor", RoleUsersInput{UserIDs: []string{"u2", "u2"}}); !errors.Is(err, ErrInvalidUser) {
+		t.Fatalf("duplicate assignment error = %v", err)
+	}
+	if _, err := service.ReplaceRoleUsers(ctx, "role-editor", RoleUsersInput{UserIDs: make([]string, MaxRoleAssignmentUsers+1)}); !errors.Is(err, ErrInvalidRoleAssignment) {
+		t.Fatalf("oversized assignment error = %v", err)
+	}
+	cleared, err := service.ReplaceRoleUsers(ctx, "role-editor", RoleUsersInput{UserIDs: []string{}})
+	if err != nil || len(cleared.UserIDs) != 0 {
+		t.Fatalf("empty assignment clear = %+v err=%v", cleared, err)
+	}
+	u2, _ = store.FindUser(context.Background(), "u2")
+	if containsString(u2.RoleIDs, "role-editor") || !containsString(u2.RoleIDs, "role-other") {
+		t.Fatalf("clear changed unrelated relationships: %v", u2.RoleIDs)
+	}
+}
+
 func TestServiceDeleteUserSoftDeletesWithinScopeAndIsIdempotent(t *testing.T) {
 	store := NewMemoryStore()
 	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a", Organization: "org-a"})
