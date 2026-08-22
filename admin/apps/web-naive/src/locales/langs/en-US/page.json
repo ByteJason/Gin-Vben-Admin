@@ -108,6 +108,14 @@
     "confirmDelete": "Disable this user while keeping the profile?",
     "deleted": "User disabled.",
     "deleteError": "User could not be disabled. Try again.",
+    "resetPassword": "Reset credential",
+    "resetTitle": "Reset user credential",
+    "resetDescription": "Enter a new 8–128 byte credential. The previous credential expires after submission.",
+    "resetPasswordLabel": "New credential",
+    "confirmResetPassword": "Reset this user's credential?",
+    "resetDone": "User credential reset.",
+    "resetError": "User credential could not be reset. Try again.",
+    "resetSaving": "Resetting…",
     "form": "User profile form"
   }
 }

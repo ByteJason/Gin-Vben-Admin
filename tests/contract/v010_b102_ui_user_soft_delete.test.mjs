@@ -21,7 +21,6 @@ for (const app of apps) {
     assert.match(view, /confirm/);
     assert.match(view, /deleteError/);
     assert.match(view, /deleted/);
-    assert.doesNotMatch(view, /resetIAMUserPasswordApi/);
     assert.doesNotMatch(view, /passwordHash|response\.password|Authorization/);
   });
 }

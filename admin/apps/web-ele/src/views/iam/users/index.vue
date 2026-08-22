@@ -5,6 +5,7 @@ import type {
   IAMRole,
   IAMUserBatchStatusInput,
   IAMUserCreateInput,
+  IAMUserPasswordResetInput,
   IAMUser,
   IAMUserPage,
   IAMUserStatus,
@@ -16,6 +17,7 @@ import {
   createIAMUserApi,
   deleteIAMUserApi,
   getIAMUserApi,
+  resetIAMUserPasswordApi,
   listIAMRolesApi,
   listIAMUsersApi,
   updateIAMUserApi,
@@ -50,6 +52,13 @@ const formOpen = ref(false);
 const formLoading = ref(false);
 const formMode = ref<'create' | 'edit'>('create');
 const editingId = ref('');
+const resetOpen = ref(false);
+const resetLoading = ref(false);
+const resetUserId = ref('');
+const resetUsername = ref('');
+const resetPassword = ref('');
+const resetError = ref('');
+const resetErrorSummary = ref<HTMLElement | null>(null);
 const userForm = reactive({
   active: true,
   email: '',
@@ -107,6 +116,11 @@ async function focusActionError() {
 async function focusActionFeedback() {
   await nextTick();
   actionFeedback.value?.focus();
+}
+
+async function focusResetError() {
+  await nextTick();
+  resetErrorSummary.value?.focus();
 }
 
 function clearSelection() {
@@ -251,8 +265,63 @@ async function submitUserForm() {
   }
 }
 
+function openResetPassword(user: IAMUser) {
+  resetUserId.value = user.id;
+  resetUsername.value = user.username;
+  resetPassword.value = '';
+  resetError.value = '';
+  actionError.value = '';
+  actionMessage.value = '';
+  resetOpen.value = true;
+}
+
+function closeResetPassword() {
+  if (resetLoading.value) return;
+  resetOpen.value = false;
+  resetPassword.value = '';
+  resetError.value = '';
+}
+
+function validateResetPassword() {
+  const bytes = new TextEncoder().encode(resetPassword.value).length;
+  if (bytes < 8 || bytes > 128) {
+    return String($t('page.iam.passwordLength'));
+  }
+  return '';
+}
+
+async function submitResetPassword() {
+  resetError.value = '';
+  actionError.value = '';
+  actionMessage.value = '';
+  const validationError = validateResetPassword();
+  if (validationError) {
+    resetError.value = validationError;
+    await focusResetError();
+    return;
+  }
+  if (!window.confirm(String($t('page.iam.confirmResetPassword')))) return;
+  resetLoading.value = true;
+  try {
+    const input: IAMUserPasswordResetInput = {
+      password: resetPassword.value,
+    };
+    await resetIAMUserPasswordApi(resetUserId.value, input);
+    resetPassword.value = '';
+    resetOpen.value = false;
+    actionMessage.value = String($t('page.iam.resetDone'));
+    await loadUsers();
+    await focusActionFeedback();
+  } catch {
+    resetError.value = String($t('page.iam.resetError'));
+    await focusResetError();
+  } finally {
+    resetLoading.value = false;
+  }
+}
+
 async function deleteUser(user: IAMUser) {
-  if (actionLoading.value || formLoading.value) return;
+  if (actionLoading.value || formLoading.value || resetLoading.value) return;
   if (!window.confirm(String($t('page.iam.confirmDelete')))) return;
   actionLoading.value = true;
   actionError.value = '';
@@ -271,7 +340,13 @@ async function deleteUser(user: IAMUser) {
 }
 
 async function batchUpdate(active: boolean) {
-  if (actionLoading.value || selectedIds.value.length === 0) return;
+  if (
+    actionLoading.value ||
+    resetLoading.value ||
+    selectedIds.value.length === 0
+  ) {
+    return;
+  }
   if (!active && !window.confirm(String($t('page.iam.batchConfirmDisable')))) {
     return;
   }
@@ -478,7 +553,12 @@ onMounted(async () => {
           <input
             id="iam-users-select-all"
             :checked="allPageSelected"
-            :disabled="loading || actionLoading || page.items.length === 0"
+            :disabled="
+              loading ||
+              actionLoading ||
+              resetLoading ||
+              page.items.length === 0
+            "
             type="checkbox"
             @change="onPageSelectionChange"
           />
@@ -490,14 +570,18 @@ onMounted(async () => {
         <div class="bulk-actions">
           <button
             type="button"
-            :disabled="loading || actionLoading || selectedCount === 0"
+            :disabled="
+              loading || actionLoading || resetLoading || selectedCount === 0
+            "
             @click="batchUpdate(true)"
           >
             {{ $t('page.iam.batchEnable') }}
           </button>
           <button
             type="button"
-            :disabled="loading || actionLoading || selectedCount === 0"
+            :disabled="
+              loading || actionLoading || resetLoading || selectedCount === 0
+            "
             @click="batchUpdate(false)"
           >
             {{ $t('page.iam.batchDisable') }}
@@ -542,7 +626,7 @@ onMounted(async () => {
                 <input
                   :id="`iam-user-select-${user.id}`"
                   :checked="selectedIds.includes(user.id)"
-                  :disabled="loading || actionLoading"
+                  :disabled="loading || actionLoading || resetLoading"
                   :aria-label="`${$t('page.iam.selectUser')}: ${user.username}`"
                   type="checkbox"
                   @change="onUserSelectionChange(user.id, $event)"
@@ -575,15 +659,29 @@ onMounted(async () => {
                 <button
                   class="link-button"
                   type="button"
-                  :disabled="loading || actionLoading || formLoading"
+                  :disabled="
+                    loading || actionLoading || formLoading || resetLoading
+                  "
                   @click="openEdit(user)"
                 >
                   {{ $t('page.iam.edit') }}
                 </button>
                 <button
+                  class="link-button"
+                  type="button"
+                  :disabled="
+                    loading || actionLoading || formLoading || resetLoading
+                  "
+                  @click="openResetPassword(user)"
+                >
+                  {{ $t('page.iam.resetPassword') }}
+                </button>
+                <button
                   class="link-button danger"
                   type="button"
-                  :disabled="loading || actionLoading || formLoading"
+                  :disabled="
+                    loading || actionLoading || formLoading || resetLoading
+                  "
                   @click="deleteUser(user)"
                 >
                   {{ $t('page.iam.delete') }}
@@ -760,6 +858,86 @@ onMounted(async () => {
         </form>
       </div>
     </section>
+
+    <section
+      v-if="resetOpen"
+      class="modal-backdrop"
+      :aria-label="$t('page.iam.resetTitle')"
+      @click.self="closeResetPassword"
+    >
+      <div
+        class="user-dialog reset-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="iam-user-reset-password-title"
+        aria-describedby="iam-user-reset-password-description"
+      >
+        <header class="dialog-heading">
+          <div>
+            <p class="eyebrow">{{ $t('page.iam.eyebrow') }}</p>
+            <h2 id="iam-user-reset-password-title">
+              {{ $t('page.iam.resetTitle') }}
+            </h2>
+          </div>
+          <button
+            class="icon-button"
+            type="button"
+            :aria-label="$t('page.iam.cancel')"
+            :disabled="resetLoading"
+            @click="closeResetPassword"
+          >
+            ×
+          </button>
+        </header>
+        <p id="iam-user-reset-password-description" class="reset-description">
+          {{ $t('page.iam.resetDescription') }}
+        </p>
+        <p class="reset-user">{{ resetUsername }}</p>
+        <p
+          v-if="resetError"
+          ref="resetErrorSummary"
+          class="feedback feedback-error"
+          role="alert"
+          tabindex="-1"
+        >
+          {{ resetError }}
+        </p>
+        <form
+          class="user-form reset-form"
+          @submit.prevent="submitResetPassword"
+        >
+          <label class="field field-wide" for="iam-user-reset-password">
+            <span>{{ $t('page.iam.resetPasswordLabel') }}</span>
+            <input
+              id="iam-user-reset-password"
+              v-model="resetPassword"
+              :disabled="resetLoading"
+              autocomplete="new-password"
+              minlength="8"
+              maxlength="128"
+              required
+              type="password"
+            />
+          </label>
+          <footer class="dialog-actions">
+            <button
+              type="button"
+              :disabled="resetLoading"
+              @click="closeResetPassword"
+            >
+              {{ $t('page.iam.cancel') }}
+            </button>
+            <button class="primary" type="submit" :disabled="resetLoading">
+              {{
+                resetLoading
+                  ? $t('page.iam.resetSaving')
+                  : $t('page.iam.resetPassword')
+              }}
+            </button>
+          </footer>
+        </form>
+      </div>
+    </section>
   </main>
 </template>
 
@@ -818,6 +996,20 @@ h2 {
   max-width: 720px;
   margin: 0;
   color: hsl(var(--muted-foreground));
+}
+
+.reset-description {
+  margin: 0 0 12px;
+  color: hsl(var(--muted-foreground));
+}
+
+.reset-user {
+  margin: 0 0 16px;
+  font-weight: 700;
+}
+
+.reset-dialog {
+  width: min(520px, 100%);
 }
 
 .scope-chip,

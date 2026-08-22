@@ -108,6 +108,14 @@
     "confirmDelete": "确认将该用户停用并保留其资料？",
     "deleted": "用户已停用。",
     "deleteError": "用户停用失败，请重试。",
+    "resetPassword": "重置凭据",
+    "resetTitle": "重置用户凭据",
+    "resetDescription": "输入新的 8–128 字节凭据，提交后旧凭据立即失效。",
+    "resetPasswordLabel": "新凭据",
+    "confirmResetPassword": "确认重置该用户凭据？",
+    "resetDone": "用户凭据已重置。",
+    "resetError": "用户凭据重置失败，请重试。",
+    "resetSaving": "正在重置…",
     "form": "用户资料表单"
   }
 }

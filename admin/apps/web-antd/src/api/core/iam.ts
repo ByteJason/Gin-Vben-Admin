@@ -61,6 +61,10 @@ export interface IAMUserBatchStatusInput {
   items: Array<{ active: boolean; id: string }>;
 }
 
+export interface IAMUserPasswordResetInput {
+  password: string;
+}
+
 export type IAMUserBatchStatusResultStatus =
   | 'active'
   | 'disabled'
@@ -95,6 +99,8 @@ const updateUserPath = (id: string) =>
   ADMIN_ENDPOINTS.updateIAMUser.replace('{id}', encodeURIComponent(id));
 const deleteUserPath = (id: string) =>
   ADMIN_ENDPOINTS.deleteIAMUser.replace('{id}', encodeURIComponent(id));
+const resetUserPasswordPath = (id: string) =>
+  ADMIN_ENDPOINTS.resetIAMUserPassword.replace('{id}', encodeURIComponent(id));
 
 export async function listIAMUsersApi(params: IAMUserListParams = {}) {
   return requestClient.get<IAMUserPage>(ADMIN_ENDPOINTS.listIAMUsers, {
@@ -140,4 +146,11 @@ export async function updateIAMUserApi(id: string, input: IAMUserUpdateInput) {
 
 export async function deleteIAMUserApi(id: string) {
   return requestClient.delete<void>(deleteUserPath(id));
+}
+
+export async function resetIAMUserPasswordApi(
+  id: string,
+  input: IAMUserPasswordResetInput,
+) {
+  return requestClient.post<void>(resetUserPasswordPath(id), input);
 }
