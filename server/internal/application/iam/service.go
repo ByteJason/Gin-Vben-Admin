@@ -61,6 +61,12 @@ type UserUpdateInput struct {
 	Active   *bool
 }
 
+// UserPasswordResetInput is deliberately credential-only. Profile, status,
+// role, and login-event fields stay outside the administrator reset seam.
+type UserPasswordResetInput struct {
+	Password string
+}
+
 // UserStatusChangeInput is the transport-neutral input for one status change.
 // It deliberately contains no profile, credential, or relationship fields.
 type UserStatusChangeInput struct {
@@ -171,6 +177,32 @@ func (s *MemoryStore) UpdateUser(ctx context.Context, user domain.User) (domain.
 		return domain.User{}, domain.ErrUserConflict
 	}
 	s.users[user.ID] = cloneUser(user)
+	return cloneUser(user), nil
+}
+
+// UpdateUserPassword changes only the credential columns in the memory
+// adapter. The application seam supplies an already-hashed value and the
+// change timestamp, so plaintext never enters a repository.
+func (s *MemoryStore) UpdateUserPassword(ctx context.Context, id, passwordHash string, changedAt time.Time) (domain.User, error) {
+	if err := check(ctx); err != nil {
+		return domain.User{}, err
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return domain.User{}, ErrInvalidID
+	}
+	if strings.TrimSpace(passwordHash) == "" || changedAt.IsZero() {
+		return domain.User{}, domain.ErrInvalidUser
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user, ok := s.users[id]
+	if !ok {
+		return domain.User{}, domain.ErrResourceNotFound
+	}
+	user.PasswordHash = passwordHash
+	user.PasswordChangedAt = changedAt.UTC()
+	s.users[id] = cloneUser(user)
 	return cloneUser(user), nil
 }
 
@@ -496,6 +528,9 @@ type userStatusUpdater interface {
 type userBatchStatusUpdater interface {
 	UpdateUserStatuses(context.Context, []domain.UserStatusChange) (map[string]domain.User, error)
 }
+type userPasswordUpdater interface {
+	UpdateUserPassword(context.Context, string, string, time.Time) (domain.User, error)
+}
 type roleSaver interface {
 	SaveRole(context.Context, domain.Role) error
 }
@@ -783,6 +818,66 @@ func (s *Service) UpdateUser(ctx context.Context, id string, input UserUpdateInp
 	}
 	if err := s.invalidate(ctx); err != nil {
 		return domain.User{}, err
+	}
+	return updated, nil
+}
+
+// ResetUserPassword performs the bounded administrator credential reset. It
+// validates the tenant/organization scope before hashing, sends only the
+// encoded hash to a dedicated repository port, and leaves all other user
+// state untouched.
+func (s *Service) ResetUserPassword(ctx context.Context, id string, input UserPasswordResetInput) (domain.User, error) {
+	if s == nil || s.Users == nil {
+		return domain.User{}, ErrRepositoryMissing
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return domain.User{}, ErrInvalidID
+	}
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return domain.User{}, err
+		}
+	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return domain.User{}, err
+	}
+	existing, err := s.Users.FindUser(ctx, id)
+	if err != nil {
+		return domain.User{}, err
+	}
+	if err := checkUserScope(scope, existing); err != nil {
+		return domain.User{}, err
+	}
+	if !validManagementPassword(input.Password) {
+		return domain.User{}, ErrInvalidUser
+	}
+	if s.passwordHasher == nil {
+		return domain.User{}, ErrPasswordHasherMissing
+	}
+	hash, err := s.passwordHasher.Hash(input.Password)
+	if err != nil || strings.TrimSpace(hash) == "" {
+		return domain.User{}, ErrPasswordHasherMissing
+	}
+	updater, ok := s.Users.(userPasswordUpdater)
+	if !ok {
+		return domain.User{}, ErrRepositoryMissing
+	}
+	changedAt := time.Now().UTC()
+	updated, err := updater.UpdateUserPassword(ctx, id, hash, changedAt)
+	if err != nil {
+		return domain.User{}, err
+	}
+	if updated.ID == "" {
+		// A repository may return only an acknowledgement. Keep the response
+		// deterministic without weakening the credential-only write boundary.
+		updated = existing
+	}
+	updated.PasswordHash = hash
+	updated.PasswordChangedAt = changedAt
+	if updated.TenantID == "" {
+		updated.TenantID = scope.TenantID
 	}
 	return updated, nil
 }

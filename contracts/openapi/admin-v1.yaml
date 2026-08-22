@@ -530,6 +530,30 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /api/admin/v1/iam/users/{id}/reset-password:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    post:
+      tags: [IAM]
+      operationId: resetIAMUserPassword
+      summary: 管理员重置用户密码
+      description: 仅更新目标用户的密码哈希与变更时间；不会修改资料、状态、角色或登录事件，响应不回显凭据。
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IAMUserPasswordResetRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/SuccessResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
   /api/admin/v1/settings:
     get:
       tags: [Settings]
@@ -948,6 +972,12 @@ components:
           type: string
           enum: [active, disabled, not_found, forbidden, invalid, error]
         code: { type: integer, minimum: 0 }
+    IAMUserPasswordResetRequest:
+      type: object
+      additionalProperties: false
+      required: [password]
+      properties:
+        password: { type: string, minLength: 8, maxLength: 128, writeOnly: true }
     IAMUserRequest:
       allOf:
         - $ref: '#/components/schemas/IAMUserCreateRequest'

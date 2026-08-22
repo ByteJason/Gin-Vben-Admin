@@ -117,3 +117,20 @@ func TestGORMStoreBatchStatusValidatesBeforeUnavailableDependency(t *testing.T) 
 		t.Fatalf("UpdateUserStatuses(unavailable) error = %v, want ErrStoreUnavailable", err)
 	}
 }
+
+func TestGORMStoreResetPasswordValidatesBeforeUnavailableDependency(t *testing.T) {
+	store := NewGORMStore(nil)
+	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "default"})
+	if _, err := store.UpdateUserPassword(ctx, "not-numeric", "encoded", time.Now().UTC()); !errors.Is(err, ErrInvalidNumericID) {
+		t.Fatalf("UpdateUserPassword(non-numeric) error = %v, want ErrInvalidNumericID", err)
+	}
+	if _, err := store.UpdateUserPassword(ctx, "7", "", time.Now().UTC()); !errors.Is(err, domain.ErrInvalidUser) {
+		t.Fatalf("UpdateUserPassword(empty hash) error = %v, want ErrInvalidUser", err)
+	}
+	if _, err := store.UpdateUserPassword(ctx, "7", "encoded", time.Time{}); !errors.Is(err, domain.ErrInvalidUser) {
+		t.Fatalf("UpdateUserPassword(zero timestamp) error = %v, want ErrInvalidUser", err)
+	}
+	if _, err := store.UpdateUserPassword(ctx, "7", "encoded", time.Now().UTC()); !errors.Is(err, ErrStoreUnavailable) {
+		t.Fatalf("UpdateUserPassword(unavailable) error = %v, want ErrStoreUnavailable", err)
+	}
+}

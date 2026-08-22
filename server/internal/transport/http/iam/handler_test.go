@@ -389,6 +389,48 @@ func TestIAMUserBatchStatusReturnsPerItemResultsWithoutCrossTenantLeak(t *testin
 	}
 }
 
+func TestIAMUserResetPasswordReturnsNoCredentialAndPreservesState(t *testing.T) {
+	store := iamapp.NewMemoryStore()
+	admin := domain.User{ID: "admin", Username: "admin", TenantID: "default", Active: true}
+	target := domain.User{ID: "target", Username: "alice", TenantID: "default", OrgID: "org-a", Active: false, PasswordHash: "old-hash", RoleIDs: []string{"r-reader"}}
+	for _, user := range []domain.User{admin, target} {
+		if err := store.SaveUser(context.Background(), user); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.SavePolicy(context.Background(), domain.Policy{Subject: "admin", Method: http.MethodPost, Path: "/api/admin/v1/iam/users/:id/reset-password", Effect: domain.EffectAllow}); err != nil {
+		t.Fatal(err)
+	}
+	service := iamapp.NewService(store)
+	service.SetPasswordHasher(testPasswordHasher{})
+	r := newIAMTestRouter(store, authdomain.Claims{Subject: "admin", Type: authdomain.AccessToken, ExpiresAt: time.Now().Add(time.Minute)})
+	// The default router builds its own service; wire the same hasher through a
+	// handler so the endpoint exercises the production credential seam.
+	r = gin.New()
+	RegisterRoutes(r, NewHandler(service, authStub{claims: authdomain.Claims{Subject: "admin", Type: authdomain.AccessToken, ExpiresAt: time.Now().Add(time.Minute)}}))
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/v1/iam/users/target/reset-password", strings.NewReader(`{"password":"new-password"}`))
+	req.Header.Set("Authorization", "Bearer test")
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	r.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK || !strings.Contains(resp.Body.String(), `"code":0`) || strings.Contains(resp.Body.String(), "passwordHash") || strings.Contains(resp.Body.String(), "new-password") || strings.Contains(resp.Body.String(), "hash:new-password") {
+		t.Fatalf("reset status/body = %d/%s", resp.Code, resp.Body.String())
+	}
+	stored, err := store.FindUser(context.Background(), target.ID)
+	if err != nil || stored.PasswordHash != "hash:new-password" || stored.Active || len(stored.RoleIDs) != 1 || stored.RoleIDs[0] != "r-reader" {
+		t.Fatalf("stored reset target = %+v err=%v", stored, err)
+	}
+
+	short := httptest.NewRequest(http.MethodPost, "/api/admin/v1/iam/users/target/reset-password", strings.NewReader(`{"password":"short"}`))
+	short.Header.Set("Authorization", "Bearer test")
+	short.Header.Set("Content-Type", "application/json")
+	resp = httptest.NewRecorder()
+	r.ServeHTTP(resp, short)
+	if resp.Code != http.StatusBadRequest || !strings.Contains(resp.Body.String(), `"code":10000`) {
+		t.Fatalf("short reset status/body = %d/%s", resp.Code, resp.Body.String())
+	}
+}
+
 type testPasswordHasher struct{}
 
 func (testPasswordHasher) Hash(password string) (string, error) { return "hash:" + password, nil }

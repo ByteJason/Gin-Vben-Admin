@@ -194,6 +194,85 @@ func TestServiceGetAndUpdateUserEnforceOrganizationAndPreservePassword(t *testin
 	}
 }
 
+type resetRecordingHasher struct {
+	password string
+}
+
+func (h *resetRecordingHasher) Hash(password string) (string, error) {
+	h.password = password
+	return "encoded-reset-password", nil
+}
+
+func TestServiceResetUserPasswordHashesOnlyCredentialAndPreservesUserState(t *testing.T) {
+	store := NewMemoryStore()
+	oldChangedAt := time.Unix(100, 0).UTC()
+	original := domain.User{
+		ID: "target", Username: "alice", DisplayName: "Alice", Nickname: "A", Avatar: "avatar",
+		Email: "alice@example.test", Phone: "+8613800138000", PasswordHash: "old-hash",
+		LastLoginIP: "192.0.2.10", LastLoginAt: time.Unix(90, 0).UTC(), PasswordChangedAt: oldChangedAt,
+		TenantID: "tenant-a", OrgID: "org-a", Active: false, RoleIDs: []string{"r-reader", "r-auditor"},
+	}
+	if err := store.SaveUser(context.Background(), original); err != nil {
+		t.Fatal(err)
+	}
+	hasher := &resetRecordingHasher{}
+	service := NewService(store)
+	service.SetPasswordHasher(hasher)
+	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a", Organization: "org-a"})
+
+	updated, err := service.ResetUserPassword(ctx, original.ID, UserPasswordResetInput{Password: "new-password"})
+	if err != nil {
+		t.Fatalf("ResetUserPassword() error = %v", err)
+	}
+	if hasher.password != "new-password" {
+		t.Fatalf("hasher input = %q", hasher.password)
+	}
+	if updated.PasswordHash != "encoded-reset-password" || !updated.PasswordChangedAt.After(oldChangedAt) {
+		t.Fatalf("updated credential = %+v", updated)
+	}
+	if updated.Username != original.Username || updated.DisplayName != original.DisplayName || updated.Nickname != original.Nickname || updated.Avatar != original.Avatar || updated.Email != original.Email || updated.Phone != original.Phone || updated.LastLoginIP != original.LastLoginIP || !updated.LastLoginAt.Equal(original.LastLoginAt) || updated.TenantID != original.TenantID || updated.OrgID != original.OrgID || updated.Active != original.Active || strings.Join(updated.RoleIDs, ",") != strings.Join(original.RoleIDs, ",") {
+		t.Fatalf("reset changed non-credential state: before=%+v after=%+v", original, updated)
+	}
+	stored, err := store.FindUser(context.Background(), original.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.PasswordHash != "encoded-reset-password" || !stored.PasswordChangedAt.Equal(updated.PasswordChangedAt) || len(stored.RoleIDs) != len(original.RoleIDs) || stored.Active != original.Active {
+		t.Fatalf("stored reset user = %+v", stored)
+	}
+
+	if _, err := service.ResetUserPassword(ctx, original.ID, UserPasswordResetInput{Password: "short"}); !errors.Is(err, ErrInvalidUser) {
+		t.Fatalf("short password error = %v, want ErrInvalidUser", err)
+	}
+	unchanged, err := store.FindUser(context.Background(), original.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unchanged.PasswordHash != "encoded-reset-password" {
+		t.Fatalf("invalid reset mutated hash = %q", unchanged.PasswordHash)
+	}
+}
+
+func TestServiceResetUserPasswordEnforcesTenantOrganizationAndHasherBoundary(t *testing.T) {
+	store := NewMemoryStore()
+	original := domain.User{ID: "target", Username: "alice", PasswordHash: "old-hash", TenantID: "tenant-a", OrgID: "org-a", Active: true}
+	if err := store.SaveUser(context.Background(), original); err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(store)
+	service.SetPasswordHasher(&resetRecordingHasher{})
+	if _, err := service.ResetUserPassword(tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-b"}), original.ID, UserPasswordResetInput{Password: "new-password"}); !errors.Is(err, tenant.ErrCrossTenant) {
+		t.Fatalf("cross-tenant reset error = %v", err)
+	}
+	if _, err := service.ResetUserPassword(tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a", Organization: "org-b"}), original.ID, UserPasswordResetInput{Password: "new-password"}); !errors.Is(err, tenant.ErrOrganizationDenied) {
+		t.Fatalf("cross-organization reset error = %v", err)
+	}
+	withoutHasher := NewService(store)
+	if _, err := withoutHasher.ResetUserPassword(tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a", Organization: "org-a"}), original.ID, UserPasswordResetInput{Password: "new-password"}); !errors.Is(err, ErrPasswordHasherMissing) {
+		t.Fatalf("missing hasher error = %v", err)
+	}
+}
+
 func TestServiceDeleteUserSoftDeletesWithinScopeAndIsIdempotent(t *testing.T) {
 	store := NewMemoryStore()
 	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a", Organization: "org-a"})

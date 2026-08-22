@@ -54,6 +54,7 @@ func RegisterRoutes(r gin.IRouter, handler *Handler, policies ...httpmiddleware.
 	group.GET("/me", handler.currentUser)
 	group.GET("/users", handler.listUsers)
 	group.POST("/users/batch-status", handler.batchUpdateUserStatus)
+	group.POST("/users/:id/reset-password", handler.resetUserPassword)
 	group.GET("/users/:id", handler.getUser)
 	group.POST("/users", handler.createUser)
 	group.PATCH("/users/:id", handler.updateUser)
@@ -72,7 +73,7 @@ func RegisterRoutes(r gin.IRouter, handler *Handler, policies ...httpmiddleware.
 }
 
 func registerDisabled(group *gin.RouterGroup) {
-	for _, path := range []string{"/me", "/users", "/users/batch-status", "/users/:id", "/roles", "/menus", "/permissions", "/policies", "/data-scopes"} {
+	for _, path := range []string{"/me", "/users", "/users/batch-status", "/users/:id/reset-password", "/users/:id", "/roles", "/menus", "/permissions", "/policies", "/data-scopes"} {
 		group.GET(path, disabled)
 		group.POST(path, disabled)
 		group.PATCH(path, disabled)
@@ -162,6 +163,10 @@ type userBatchStatusItemRequest struct {
 
 type userBatchStatusRequest struct {
 	Items []userBatchStatusItemRequest `json:"items"`
+}
+
+type userPasswordResetRequest struct {
+	Password string `json:"password"`
 }
 
 type userBatchStatusItemResponse struct {
@@ -397,6 +402,24 @@ func (h *Handler) batchUpdateUserStatus(c *gin.Context) {
 		out.Results = append(out.Results, item)
 	}
 	response.OK(c, out)
+}
+
+func (h *Handler) resetUserPassword(c *gin.Context) {
+	if !h.guard(c) {
+		return
+	}
+	var req userPasswordResetRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid request")
+		return
+	}
+	if _, err := h.service.ResetUserPassword(c.Request.Context(), c.Param("id"), iamapp.UserPasswordResetInput{Password: req.Password}); err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	// The response is intentionally empty: neither plaintext nor encoded
+	// credentials cross the HTTP boundary.
+	response.OK(c, nil)
 }
 
 type roleRequest struct {

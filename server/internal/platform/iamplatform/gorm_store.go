@@ -248,6 +248,61 @@ func (s *GORMStore) SoftDeleteUser(ctx context.Context, id string) (domain.User,
 	return row.toDomain(roles), nil
 }
 
+// UpdateUserPassword changes only password_hash and password_changed_at on
+// the primary endpoint. Organization predicates are applied for scoped
+// administrators; profile, status, login metadata, and role relations are
+// deliberately excluded from this write.
+func (s *GORMStore) UpdateUserPassword(ctx context.Context, id, passwordHash string, changedAt time.Time) (domain.User, error) {
+	numericID, err := numericID(id)
+	if err != nil {
+		return domain.User{}, err
+	}
+	if strings.TrimSpace(passwordHash) == "" || changedAt.IsZero() {
+		return domain.User{}, domain.ErrInvalidUser
+	}
+	if s == nil || s.db == nil {
+		return domain.User{}, ErrStoreUnavailable
+	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return domain.User{}, err
+	}
+	query := s.write(ctx).Table("users").Where("tenant_id = ? AND id = ?", scope.TenantID, numericID)
+	if !scope.PlatformAdmin && scope.Organization != "" {
+		query = query.Where("org_id = ?", scope.Organization)
+	}
+	var row userRow
+	queryResult := query.Take(&row)
+	if queryResult.Error != nil {
+		if errors.Is(queryResult.Error, gorm.ErrRecordNotFound) {
+			return domain.User{}, domain.ErrResourceNotFound
+		}
+		return domain.User{}, ErrStoreUnavailable
+	}
+	changedAt = changedAt.UTC()
+	updateQuery := s.write(ctx).Table("users").Where("tenant_id = ? AND id = ?", scope.TenantID, numericID)
+	if !scope.PlatformAdmin && scope.Organization != "" {
+		updateQuery = updateQuery.Where("org_id = ?", scope.Organization)
+	}
+	result := updateQuery.Updates(map[string]any{
+		"password_hash":       passwordHash,
+		"password_changed_at": changedAt,
+	})
+	if err := mapUserWriteError(result.Error); err != nil {
+		return domain.User{}, err
+	}
+	if result.RowsAffected == 0 {
+		return domain.User{}, domain.ErrResourceNotFound
+	}
+	row.PasswordHash = passwordHash
+	row.PasswordChangedAt = &changedAt
+	roles, err := s.roleIDs(ctx, scope.TenantID, numericID)
+	if err != nil {
+		return domain.User{}, err
+	}
+	return row.toDomain(roles), nil
+}
+
 // UpdateUserStatus is the single-item adapter used by the application
 // fallback seam. The bulk implementation keeps the SQL behavior identical
 // for one and many requested changes.
