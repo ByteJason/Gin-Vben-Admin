@@ -214,6 +214,22 @@
     "policyPath": "Path",
     "policyEffect": "Effect",
     "policyAllow": "Allow",
-    "policyDeny": "Deny"
+    "policyDeny": "Deny",
+    "dataScopes": "Data scopes",
+    "dataScopesDescription": "View data-scope bindings within the current tenant. Data-scope writes, relation editing, and cache invalidation ship in later slices.",
+    "dataScopesLoading": "Loading data scopes",
+    "dataScopesLoadError": "Data scopes could not be loaded. Try again.",
+    "dataScopesEmpty": "No data scopes found.",
+    "dataScopesTable": "Data-scope bindings",
+    "dataScopeSubject": "Subject",
+    "dataScopeRole": "Role",
+    "dataScopeDomain": "Domain",
+    "dataScopeResource": "Resource",
+    "dataScopeScope": "Scope",
+    "dataScopeIds": "Bound IDs",
+    "dataScopeAll": "All",
+    "dataScopeOwn": "Own",
+    "dataScopeOrg": "Organization",
+    "dataScopeCustom": "Custom"
   }
 }

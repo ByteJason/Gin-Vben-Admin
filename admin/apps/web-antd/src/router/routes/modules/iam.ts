@@ -57,6 +57,15 @@ const routes: RouteRecordRaw[] = [
         name: 'IAMPolicies',
         path: 'policies',
       },
+      {
+        component: () => import('#/views/iam/data-scopes/index.vue'),
+        meta: {
+          icon: 'lucide:database',
+          title: $t('page.iam.dataScopes'),
+        },
+        name: 'IAMDataScopes',
+        path: 'data-scopes',
+      },
     ],
   },
 ];

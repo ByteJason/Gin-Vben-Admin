@@ -87,6 +87,17 @@ export interface IAMPolicy {
   subject?: string;
 }
 
+export type IAMDataScopeType = 'all' | 'own' | 'org' | 'custom';
+
+export interface IAMDataScope {
+  domain?: string;
+  ids: string[];
+  resource: string;
+  roleId?: string;
+  scope: IAMDataScopeType;
+  subject?: string;
+}
+
 export interface IAMUserCreateInput {
   active?: boolean;
   avatar?: string;
@@ -232,6 +243,10 @@ export async function listIAMPermissionsApi() {
 
 export async function listIAMPoliciesApi() {
   return requestClient.get<IAMPolicy[]>(ADMIN_ENDPOINTS.listIAMPolicies);
+}
+
+export async function listIAMDataScopesApi() {
+  return requestClient.get<IAMDataScope[]>(ADMIN_ENDPOINTS.listIAMDataScopes);
 }
 
 export async function replaceIAMRoleUsersApi(

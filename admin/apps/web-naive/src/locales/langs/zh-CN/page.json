@@ -214,6 +214,22 @@
     "policyPath": "路径",
     "policyEffect": "效果",
     "policyAllow": "允许",
-    "policyDeny": "拒绝"
+    "policyDeny": "拒绝",
+    "dataScopes": "数据范围",
+    "dataScopesDescription": "在当前租户范围查看数据范围绑定；数据范围写入、关系编辑和缓存失效在后续切片交付。",
+    "dataScopesLoading": "正在加载数据范围",
+    "dataScopesLoadError": "数据范围列表加载失败，请重试。",
+    "dataScopesEmpty": "暂无数据范围。",
+    "dataScopesTable": "数据范围绑定列表",
+    "dataScopeSubject": "主体",
+    "dataScopeRole": "角色",
+    "dataScopeDomain": "域",
+    "dataScopeResource": "资源",
+    "dataScopeScope": "范围",
+    "dataScopeIds": "限定 ID",
+    "dataScopeAll": "全部",
+    "dataScopeOwn": "本人",
+    "dataScopeOrg": "组织",
+    "dataScopeCustom": "自定义"
   }
 }
