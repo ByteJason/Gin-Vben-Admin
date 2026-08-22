@@ -60,6 +60,15 @@ const routes: RouteRecordRaw[] = [
         name: 'SystemMonitor',
         path: 'monitor',
       },
+      {
+        component: () => import('#/views/system/dictionary/index.vue'),
+        meta: {
+          icon: 'lucide:book-open',
+          title: $t('page.dictionary.title'),
+        },
+        name: 'SystemDictionary',
+        path: 'dictionary',
+      },
     ],
   },
 ];

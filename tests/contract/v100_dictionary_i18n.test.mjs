@@ -31,3 +31,29 @@ test('B1.2 dictionary contract has tenant overrides, localization, and migration
     }
   }
 });
+
+test('B1.2 three UI templates expose equivalent dictionary management pages', () => {
+  for (const app of ['web-antd', 'web-ele', 'web-naive']) {
+    const files = [
+      `admin/apps/${app}/src/api/core/dictionary.ts`,
+      `admin/apps/${app}/src/views/system/dictionary/index.vue`,
+      `admin/apps/${app}/src/locales/langs/zh-CN/page.json`,
+      `admin/apps/${app}/src/locales/langs/en-US/page.json`,
+      `admin/apps/${app}/src/router/routes/modules/system.ts`,
+    ];
+    for (const path of files) assert.ok(existsSync(new URL(path, root)), `missing ${path}`);
+    const page = read(`admin/apps/${app}/src/views/system/dictionary/index.vue`);
+    const api = read(`admin/apps/${app}/src/api/core/dictionary.ts`);
+    const route = read(`admin/apps/${app}/src/router/routes/modules/system.ts`);
+    assert.match(page, /Accept-Language|locale/);
+    assert.match(page, /aria-labelledby/);
+    assert.match(page, /overflow-x-auto|table-scroll/);
+    assert.match(api, /listDictionary/);
+    assert.match(route, /SystemDictionary|system\/dictionary|dictionary/);
+    for (const locale of ['zh-CN', 'en-US']) {
+      const messages = JSON.parse(read(`admin/apps/${app}/src/locales/langs/${locale}/page.json`));
+      assert.ok(messages.dictionary?.title, `${app} ${locale} dictionary.title missing`);
+      assert.ok(messages.dictionary?.save, `${app} ${locale} dictionary.save missing`);
+    }
+  }
+});
