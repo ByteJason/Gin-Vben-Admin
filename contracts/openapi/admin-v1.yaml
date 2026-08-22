@@ -1357,6 +1357,50 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/admin/v1/tasks/{id}/runs/{runId}/logs:
+    get:
+      tags: [Tasks]
+      operationId: listTaskRunLogs
+      summary: 查询任务执行日志
+      security: [{BearerAuth: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+        - { name: runId, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      responses:
+        '200': { $ref: '#/components/responses/SuccessResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/admin/v1/tasks/{id}/runs/{runId}/cancel:
+    post:
+      tags: [Tasks]
+      operationId: cancelTaskRun
+      summary: 取消待执行任务
+      security: [{BearerAuth: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+        - { name: runId, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      responses:
+        '200': { $ref: '#/components/responses/SuccessResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/admin/v1/tasks/{id}/runs/{runId}/retry:
+    post:
+      tags: [Tasks]
+      operationId: retryTaskRun
+      summary: 重试失败任务
+      security: [{BearerAuth: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+        - { name: runId, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      responses:
+        '202': { $ref: '#/components/responses/SuccessResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
 
   /api/admin/v1/mail/accounts:
     get:
@@ -1683,15 +1727,33 @@ components:
         idempotencyKey: { type: string, maxLength: 191 }
     TaskRun:
       type: object
-      required: [id, taskId, status, attemptCount, createdAt, updatedAt]
+      required: [id, taskId, tenantId, status, payloadDigest, attemptCount, maxAttempts, createdAt, updatedAt]
       properties:
         id: { type: string }
         taskId: { type: string }
+        tenantId: { type: string }
+        orgId: { type: string }
+        queueTaskId: { type: string }
+        idempotencyKey: { type: string }
         status: { type: string, enum: [pending, running, succeeded, failed, dead_letter, cancelled] }
+        payloadDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
         attemptCount: { type: integer, minimum: 0 }
+        maxAttempts: { type: integer, minimum: 1 }
         lastErrorCode: { type: string }
         startedAt: { type: string, format: date-time }
         finishedAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    TaskRunLog:
+      type: object
+      required: [id, runId, attempt, status, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        runId: { type: string }
+        attempt: { type: integer, minimum: 0 }
+        status: { type: string, enum: [pending, running, succeeded, failed, dead_letter, cancelled] }
+        errorCode: { type: string }
+        message: { type: string }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
     SMTPAccount:

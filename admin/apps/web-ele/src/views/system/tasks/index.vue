@@ -1,13 +1,16 @@
 <script setup lang="ts">
-import type { TaskDefinition, TaskDefinitionInput, TaskRun } from '#/api/core/tasks';
+import type { TaskDefinition, TaskDefinitionInput, TaskRun, TaskRunLog } from '#/api/core/tasks';
 
 import { computed, onMounted, reactive, ref } from 'vue';
 
 import {
+  cancelTaskRunApi,
   createTaskApi,
   deleteTaskApi,
+  listTaskRunLogsApi,
   listTaskRunsApi,
   listTasksApi,
+  retryTaskRunApi,
   runTaskApi,
   updateTaskApi,
 } from '#/api/core/tasks';
@@ -15,6 +18,8 @@ import { $t } from '#/locales';
 
 const tasks = ref<TaskDefinition[]>([]);
 const runs = ref<TaskRun[]>([]);
+const logs = ref<Record<string, TaskRunLog[]>>({});
+const runAction = ref('');
 const selectedId = ref('');
 const editingId = ref('');
 const loading = ref(false);
@@ -102,6 +107,14 @@ async function loadRuns(id: string) {
     error.value = String($t('page.tasks.runsLoadError'));
   }
 }
+async function loadRunLogs(taskId: string, runId: string) {
+  try {
+    logs.value[runId] = await listTaskRunLogsApi(taskId, runId);
+  } catch {
+    logs.value[runId] = [];
+    error.value = String($t('page.tasks.logsLoadError'));
+  }
+}
 async function saveTask() {
   error.value = '';
   notice.value = '';
@@ -159,15 +172,40 @@ async function runTask(item: TaskDefinition) {
     running.value = '';
   }
 }
-async function retryRun(item: TaskDefinition) {
-  await runTask(item);
+async function cancelRun(item: TaskRun) {
+  if (!selected.value || !window.confirm(String($t('page.tasks.cancelRunConfirm')))) return;
+  runAction.value = item.id;
+  error.value = '';
+  try {
+    await cancelTaskRunApi(selected.value.id, item.id);
+    notice.value = String($t('page.tasks.runCancelled'));
+    await loadRuns(selected.value.id);
+  } catch {
+    error.value = String($t('page.tasks.cancelRunError'));
+  } finally {
+    runAction.value = '';
+  }
+}
+async function retryRun(item: TaskRun) {
+  if (!selected.value || !window.confirm(String($t('page.tasks.retryRunConfirm')))) return;
+  runAction.value = item.id;
+  error.value = '';
+  try {
+    await retryTaskRunApi(selected.value.id, item.id);
+    notice.value = String($t('page.tasks.retryAccepted'));
+    await loadRuns(selected.value.id);
+  } catch {
+    error.value = String($t('page.tasks.retryError'));
+  } finally {
+    runAction.value = '';
+  }
 }
 
 onMounted(() => void loadTasks());
 </script>
 
 <template>
-  <main class="tasks-page" :aria-busy="loading || saving || Boolean(running)" aria-labelledby="tasks-title">
+  <main class="tasks-page" :aria-busy="loading || saving || Boolean(running) || Boolean(runAction)" aria-labelledby="tasks-title">
     <header class="page-heading">
       <div>
         <p class="eyebrow">{{ $t('page.tasks.eyebrow') }}</p>
@@ -220,9 +258,9 @@ onMounted(() => void loadTasks());
           <div class="form-actions"><button class="primary" type="submit" :disabled="saving">{{ saving ? $t('page.tasks.saving') : $t('page.tasks.save') }}</button><button v-if="editingId" class="secondary" type="button" @click="resetForm">{{ $t('page.tasks.cancel') }}</button></div>
         </form>
         <section v-if="selected" class="runs" aria-labelledby="task-runs-title">
-          <div class="section-heading"><h3 id="task-runs-title">{{ $t('page.tasks.runsTitle') }}</h3><button class="secondary" type="button" @click="retryRun(selected)">{{ $t('page.tasks.retry') }}</button></div>
+          <div class="section-heading"><h3 id="task-runs-title">{{ $t('page.tasks.runsTitle') }}</h3><button class="secondary" type="button" @click="loadRuns(selected.id)">{{ $t('page.tasks.refreshRuns') }}</button></div>
           <p v-if="runs.length === 0" class="empty-state">{{ $t('page.tasks.runsEmpty') }}</p>
-          <ul v-else><li v-for="run in runs" :key="run.id"><span>{{ run.status }}</span><small>{{ run.attemptCount }} · {{ run.createdAt }}</small></li></ul>
+          <ul v-else><li v-for="run in runs" :key="run.id"><div><span>{{ run.status }}</span><small>{{ run.attemptCount }}/{{ run.maxAttempts }} · {{ run.createdAt }}</small></div><div class="run-actions"><button v-if="run.status === 'pending' || run.status === 'failed'" type="button" :disabled="runAction === run.id" @click="cancelRun(run)">{{ $t('page.tasks.cancelRun') }}</button><button v-if="run.status === 'failed' || run.status === 'dead_letter'" type="button" :disabled="runAction === run.id" @click="retryRun(run)">{{ $t('page.tasks.retry') }}</button><button type="button" @click="loadRunLogs(selected.id, run.id)">{{ $t('page.tasks.logs') }}</button></div><ul v-if="logs[run.id]?.length" class="run-logs"><li v-for="entry in logs[run.id]" :key="entry.id"><span>{{ entry.status }}</span><small>{{ entry.errorCode || $t('page.tasks.noError') }} · {{ entry.createdAt }}</small></li></ul></li></ul>
         </section>
       </article>
     </section>
@@ -231,6 +269,6 @@ onMounted(() => void loadTasks());
 
 <style scoped>
 .tasks-page { --ink:#172033; --muted:#64748b; --line:#dbe3ef; --accent:#2563eb; --ok:#15803d; --danger:#b42318; max-width:1600px; margin:0 auto; padding:32px; color:var(--ink); }
-.page-heading,.section-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; }.toolbar,.actions,.form-actions{display:flex;gap:8px;flex-wrap:wrap}.eyebrow{margin:0 0 6px;color:#5267d9;font-size:.72rem;font-weight:800;letter-spacing:.12em}h1{margin:0 0 8px;font-size:clamp(1.7rem,4vw,2.5rem)}h2,h3{margin:0;font-size:1.15rem}.description,.muted,small{color:var(--muted)}.workspace-grid{display:grid;grid-template-columns:minmax(420px,1fr) minmax(480px,1.2fr);gap:24px;margin-top:24px}.panel{border:1px solid var(--line);border-radius:16px;background:color-mix(in srgb,#fff 94%,#dbeafe);padding:24px;box-shadow:0 10px 28px rgb(30 41 59 / 7%)}.task-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:20px}.task-form label{display:grid;gap:7px;font-size:.82rem;font-weight:700}.task-form .wide{grid-column:1/-1}.task-form input,.task-form select,.task-form textarea{min-height:40px;border:1px solid #cbd5e1;border-radius:9px;padding:8px 10px;color:var(--ink);background:#fff}.task-form textarea{resize:vertical;font-family:ui-monospace,monospace}.primary,.secondary,.actions button{min-height:40px;border:1px solid #cbd5e1;border-radius:9px;padding:0 13px;cursor:pointer;background:#fff}.primary{border-color:var(--accent);background:var(--accent);color:#fff;font-weight:700}.danger{color:var(--danger)}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid rgb(37 99 235 / 25%);outline-offset:2px}.feedback{margin:20px 0 0;border-radius:10px;padding:12px 14px}.error{color:#8b1e1e;background:#fef2f2}.success{color:#166534;background:#f0fdf4}.table-scroll{overflow-x:auto;margin-top:18px}table{width:100%;border-collapse:collapse;min-width:580px}th,td{border-bottom:1px solid var(--line);padding:11px 9px;text-align:left;vertical-align:middle}th{color:var(--muted);font-size:.74rem;letter-spacing:.04em;text-transform:uppercase}td small{display:block;margin-top:3px;font-weight:400}.link-button{border:0;background:transparent;color:var(--accent);font-weight:700;padding:0;cursor:pointer;text-align:left}.selected{background:#eff6ff}.status-pill{display:inline-flex;border-radius:999px;padding:4px 9px;font-size:.74rem;font-weight:800}.status-pill.ok{color:var(--ok);background:#dcfce7}.status-pill.off{color:#92400e;background:#fef3c7}.toggle{display:flex!important;align-items:center;gap:8px!important;padding-top:20px}.toggle input{width:18px;height:18px}.empty-state,.sr-status{color:var(--muted)}.table-state{text-align:center;color:var(--muted)}.runs{border-top:1px solid var(--line);margin-top:24px;padding-top:18px}.runs ul{list-style:none;padding:0;margin:12px 0}.runs li{display:flex;justify-content:space-between;border-bottom:1px solid var(--line);padding:10px 0}.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.page-heading,.section-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; }.toolbar,.actions,.form-actions{display:flex;gap:8px;flex-wrap:wrap}.eyebrow{margin:0 0 6px;color:#5267d9;font-size:.72rem;font-weight:800;letter-spacing:.12em}h1{margin:0 0 8px;font-size:clamp(1.7rem,4vw,2.5rem)}h2,h3{margin:0;font-size:1.15rem}.description,.muted,small{color:var(--muted)}.workspace-grid{display:grid;grid-template-columns:minmax(420px,1fr) minmax(480px,1.2fr);gap:24px;margin-top:24px}.panel{border:1px solid var(--line);border-radius:16px;background:color-mix(in srgb,#fff 94%,#dbeafe);padding:24px;box-shadow:0 10px 28px rgb(30 41 59 / 7%)}.task-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:20px}.task-form label{display:grid;gap:7px;font-size:.82rem;font-weight:700}.task-form .wide{grid-column:1/-1}.task-form input,.task-form select,.task-form textarea{min-height:40px;border:1px solid #cbd5e1;border-radius:9px;padding:8px 10px;color:var(--ink);background:#fff}.task-form textarea{resize:vertical;font-family:ui-monospace,monospace}.primary,.secondary,.actions button{min-height:40px;border:1px solid #cbd5e1;border-radius:9px;padding:0 13px;cursor:pointer;background:#fff}.primary{border-color:var(--accent);background:var(--accent);color:#fff;font-weight:700}.danger{color:var(--danger)}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid rgb(37 99 235 / 25%);outline-offset:2px}.feedback{margin:20px 0 0;border-radius:10px;padding:12px 14px}.error{color:#8b1e1e;background:#fef2f2}.success{color:#166534;background:#f0fdf4}.table-scroll{overflow-x:auto;margin-top:18px}table{width:100%;border-collapse:collapse;min-width:580px}th,td{border-bottom:1px solid var(--line);padding:11px 9px;text-align:left;vertical-align:middle}th{color:var(--muted);font-size:.74rem;letter-spacing:.04em;text-transform:uppercase}td small{display:block;margin-top:3px;font-weight:400}.link-button{border:0;background:transparent;color:var(--accent);font-weight:700;padding:0;cursor:pointer;text-align:left}.selected{background:#eff6ff}.status-pill{display:inline-flex;border-radius:999px;padding:4px 9px;font-size:.74rem;font-weight:800}.status-pill.ok{color:var(--ok);background:#dcfce7}.status-pill.off{color:#92400e;background:#fef3c7}.toggle{display:flex!important;align-items:center;gap:8px!important;padding-top:20px}.toggle input{width:18px;height:18px}.empty-state,.sr-status{color:var(--muted)}.table-state{text-align:center;color:var(--muted)}.runs{border-top:1px solid var(--line);margin-top:24px;padding-top:18px}.runs ul{list-style:none;padding:0;margin:12px 0}.runs li{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid var(--line);padding:10px 0}.run-actions{display:flex;gap:6px;flex-wrap:wrap}.run-logs{width:100%;margin:8px 0 0!important;padding-left:12px!important;font-size:.8rem}.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 @media (max-width:1100px){.workspace-grid{grid-template-columns:1fr}.tasks-page{padding:22px 16px}}@media (max-width:560px){.page-heading,.section-heading,.toolbar{flex-direction:column;align-items:stretch}.task-form{grid-template-columns:1fr}.task-form .wide{grid-column:auto}.toggle{padding-top:0}}@media (prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition-duration:.01ms!important;animation-duration:.01ms!important}}
 </style>

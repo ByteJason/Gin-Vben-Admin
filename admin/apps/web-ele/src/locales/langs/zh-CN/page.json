@@ -575,6 +575,17 @@
     "deleteError": "任务删除失败，请重试。",
     "runConfirm": "确认立即投递该任务？",
     "runAccepted": "任务已进入待执行队列。",
-    "runError": "任务投递失败，请重试。"
+    "runError": "任务投递失败，请重试。",
+    "refreshRuns": "刷新记录",
+    "cancelRun": "取消",
+    "cancelRunConfirm": "确认取消这次执行？",
+    "cancelRunError": "取消执行失败，请重试。",
+    "runCancelled": "执行已取消。",
+    "retryRunConfirm": "确认重试这次失败执行？",
+    "retryAccepted": "重试已进入队列。",
+    "retryError": "重试失败，请重试。",
+    "logs": "日志",
+    "logsLoadError": "执行日志加载失败，请重试。",
+    "noError": "无错误"
   }
 }

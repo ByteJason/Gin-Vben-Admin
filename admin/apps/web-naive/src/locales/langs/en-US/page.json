@@ -575,6 +575,17 @@
     "deleteError": "Task could not be deleted. Try again.",
     "runConfirm": "Dispatch this task now?",
     "runAccepted": "Task is queued for execution.",
-    "runError": "Task dispatch failed. Try again."
+    "runError": "Task dispatch failed. Try again.",
+    "refreshRuns": "Refresh runs",
+    "cancelRun": "Cancel",
+    "cancelRunConfirm": "Cancel this execution?",
+    "cancelRunError": "The execution could not be cancelled. Try again.",
+    "runCancelled": "Execution cancelled.",
+    "retryRunConfirm": "Retry this failed execution?",
+    "retryAccepted": "Retry queued.",
+    "retryError": "Retry failed. Try again.",
+    "logs": "Logs",
+    "logsLoadError": "Execution logs could not be loaded. Try again.",
+    "noError": "No error"
   }
 }

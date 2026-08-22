@@ -1,5 +1,5 @@
 // Generated from contracts/openapi/admin-v1.yaml; DO NOT EDIT.
-// CONTRACT_SHA256=838b350fcecbe20e6a3134813b848d8a40843997b496e2f4316dfb3d019b53ea
+// CONTRACT_SHA256=c14a97a82631afcbdce7733206863a603bb911c89c69ba9e515e62a334f5c7ae
 
 export const ADMIN_API_PREFIX = '/admin/v1' as const;
 
@@ -73,6 +73,9 @@ export const ADMIN_ENDPOINTS = {
   deleteTask: '/admin/v1/tasks/{id}',
   runTask: '/admin/v1/tasks/{id}/run',
   listTaskRuns: '/admin/v1/tasks/{id}/runs',
+  listTaskRunLogs: '/admin/v1/tasks/{id}/runs/{runId}/logs',
+  cancelTaskRun: '/admin/v1/tasks/{id}/runs/{runId}/cancel',
+  retryTaskRun: '/admin/v1/tasks/{id}/runs/{runId}/retry',
   listSMTPAccounts: '/admin/v1/mail/accounts',
   createSMTPAccount: '/admin/v1/mail/accounts',
   updateSMTPAccount: '/admin/v1/mail/accounts/{id}',
@@ -209,11 +212,27 @@ export interface TaskDefinitionInput {
 export interface TaskRun {
   id: string;
   taskId: string;
+  tenantId: string;
+  orgId?: string;
+  queueTaskId?: string;
+  idempotencyKey: string;
   status: 'pending' | 'running' | 'succeeded' | 'failed' | 'dead_letter' | 'cancelled';
+  payloadDigest: string;
   attemptCount: number;
+  maxAttempts: number;
   lastErrorCode?: string;
   startedAt?: string;
   finishedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface TaskRunLog {
+  id: string;
+  runId: string;
+  attempt: number;
+  status: 'pending' | 'running' | 'succeeded' | 'failed' | 'dead_letter' | 'cancelled';
+  errorCode?: string;
+  message?: string;
   createdAt: string;
   updatedAt: string;
 }

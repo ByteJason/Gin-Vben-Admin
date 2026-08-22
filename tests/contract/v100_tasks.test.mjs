@@ -8,6 +8,10 @@ const read = (path) => readFileSync(new URL(path, root), 'utf8');
 test('B1.3 task contract exposes persisted definitions and execution seams', () => {
   for (const path of [
     'server/internal/application/tasks/service.go',
+    'server/internal/application/tasks/scheduler.go',
+    'server/internal/application/tasks/runs.go',
+    'server/internal/application/jobs/worker.go',
+    'server/internal/platform/jobs/redis_queue.go',
     'server/internal/transport/http/tasks/handler.go',
     'server/migrations/mysql/000017_tasks.up.sql',
     'server/migrations/mysql/000017_tasks.down.sql',
@@ -22,6 +26,10 @@ test('B1.3 task contract exposes persisted definitions and execution seams', () 
   for (const token of ['TaskDefinition', 'cron', 'timezone', 'idempotency', 'MaxAttempts', 'PayloadSchema']) {
     assert.match(taskSurface, new RegExp(token, 'i'), `task surface missing ${token}`);
   }
+  const execution = `${read('server/internal/application/tasks/runs.go')}\n${read('server/internal/application/tasks/scheduler.go')}\n${read('server/internal/platform/jobs/redis_queue.go')}`;
+  for (const token of ['RunService', 'RunFailed', 'RunDeadLetter', 'Cancel', 'Retry', 'AppendLog', 'Scheduler', 'RedisQueue', 'NewAsynqQueue']) {
+    assert.match(execution, new RegExp(token), `execution seam missing ${token}`);
+  }
   const handler = read('server/internal/transport/http/tasks/handler.go');
   for (const token of ['/api/admin/v1/tasks', 'manual', 'run', 'tenant', 'MessageKey']) {
     assert.match(handler, new RegExp(token, 'i'), `handler missing ${token}`);
@@ -32,11 +40,15 @@ test('B1.3 task contract exposes persisted definitions and execution seams', () 
     '/api/admin/v1/tasks/{id}:',
     '/api/admin/v1/tasks/{id}/run:',
     '/api/admin/v1/tasks/{id}/runs:',
+    '/api/admin/v1/tasks/{id}/runs/{runId}/logs:',
+    '/api/admin/v1/tasks/{id}/runs/{runId}/cancel:',
+    '/api/admin/v1/tasks/{id}/runs/{runId}/retry:',
   ]) {
     assert.match(openapi, new RegExp(`\\n  ${path.replaceAll('/', '\\/')}`), path);
   }
   assert.match(openapi, /TaskDefinition/);
   assert.match(openapi, /TaskRun/);
+  assert.match(openapi, /TaskRunLog/);
   assert.match(openapi, /payloadSchema/);
   assert.match(openapi, /writeOnly: true/);
 });
@@ -53,10 +65,11 @@ test('B1.3 three UI templates expose equivalent task management pages', () => {
     const page = read(`admin/apps/${app}/src/views/system/tasks/index.vue`);
     const api = read(`admin/apps/${app}/src/api/core/tasks.ts`);
     const route = read(`admin/apps/${app}/src/router/routes/modules/system.ts`);
-    for (const token of ['loading', 'empty', 'error', 'aria-busy', 'manual', 'run', 'retry']) {
+    for (const token of ['loading', 'empty', 'error', 'aria-busy', 'manual', 'run', 'retry', 'cancelRun', 'logs']) {
       assert.match(page, new RegExp(token, 'i'), `${app} page missing ${token}`);
     }
     assert.match(api, /listTasks|runTask/);
+    assert.match(api, /cancelTaskRunApi|retryTaskRunApi|listTaskRunLogsApi/);
     assert.match(route, /SystemTasks|system\/tasks|tasks/);
     for (const locale of ['zh-CN', 'en-US']) {
       const messages = JSON.parse(read(`admin/apps/${app}/src/locales/langs/${locale}/page.json`));

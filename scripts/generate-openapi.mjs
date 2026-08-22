@@ -157,11 +157,27 @@ export interface TaskDefinitionInput {
 export interface TaskRun {
   id: string;
   taskId: string;
+  tenantId: string;
+  orgId?: string;
+  queueTaskId?: string;
+  idempotencyKey: string;
   status: 'pending' | 'running' | 'succeeded' | 'failed' | 'dead_letter' | 'cancelled';
+  payloadDigest: string;
   attemptCount: number;
+  maxAttempts: number;
   lastErrorCode?: string;
   startedAt?: string;
   finishedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface TaskRunLog {
+  id: string;
+  runId: string;
+  attempt: number;
+  status: 'pending' | 'running' | 'succeeded' | 'failed' | 'dead_letter' | 'cancelled';
+  errorCode?: string;
+  message?: string;
   createdAt: string;
   updatedAt: string;
 }
