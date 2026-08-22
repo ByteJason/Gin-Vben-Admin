@@ -51,6 +51,7 @@
     "eyebrow": "Identity & access",
     "description": "按当前租户与组织范围查看管理用户，支持关键词、状态、角色和组织筛选。",
     "readOnly": "只读视图",
+    "manage": "可执行管理操作",
     "loading": "正在加载用户",
     "loadError": "用户列表加载失败，请重试。",
     "empty": "暂无匹配的用户。",
@@ -93,6 +94,16 @@
     "nickname": "昵称",
     "activeHelp": "停用后用户不能登录。",
     "actions": "操作",
+    "bulkActions": "批量状态操作",
+    "selectAll": "选择当前页",
+    "selectUser": "选择用户",
+    "selectedCount": "已选择",
+    "batchEnable": "批量启用",
+    "batchDisable": "批量停用",
+    "batchConfirmDisable": "确认停用所选用户？",
+    "batchUpdated": "所选用户状态已更新。",
+    "batchPartial": "部分用户状态未更新，请检查后重试。",
+    "batchError": "批量状态更新失败，请重试。",
     "form": "用户资料表单"
   }
 }

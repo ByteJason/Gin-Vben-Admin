@@ -57,6 +57,28 @@ export interface IAMUserCreateInput {
   username: string;
 }
 
+export interface IAMUserBatchStatusInput {
+  items: Array<{ active: boolean; id: string }>;
+}
+
+export type IAMUserBatchStatusResultStatus =
+  | 'active'
+  | 'disabled'
+  | 'error'
+  | 'forbidden'
+  | 'invalid'
+  | 'not_found';
+
+export interface IAMUserBatchStatusResult {
+  code: number;
+  id: string;
+  status: IAMUserBatchStatusResultStatus;
+}
+
+export interface IAMUserBatchStatusResponse {
+  results: IAMUserBatchStatusResult[];
+}
+
 export interface IAMUserUpdateInput {
   active?: boolean;
   avatar?: string;
@@ -84,6 +106,15 @@ export async function listIAMUsersApi(params: IAMUserListParams = {}) {
       sort: params.sort ?? 'username',
     },
   });
+}
+
+export async function batchUpdateIAMUserStatusApi(
+  input: IAMUserBatchStatusInput,
+) {
+  return requestClient.post<IAMUserBatchStatusResponse>(
+    ADMIN_ENDPOINTS.batchUpdateIAMUserStatus,
+    input,
+  );
 }
 
 export async function listIAMRolesApi() {

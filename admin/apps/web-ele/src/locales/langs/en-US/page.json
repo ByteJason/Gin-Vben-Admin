@@ -51,6 +51,7 @@
     "eyebrow": "Identity & access",
     "description": "View management users within the current tenant and organization with keyword, status, role, and organization filters.",
     "readOnly": "Read-only view",
+    "manage": "Management actions enabled",
     "loading": "Loading users",
     "loadError": "Users could not be loaded. Try again.",
     "empty": "No matching users.",
@@ -93,6 +94,16 @@
     "nickname": "Nickname",
     "activeHelp": "Disabled users cannot sign in.",
     "actions": "Actions",
+    "bulkActions": "Bulk status actions",
+    "selectAll": "Select current page",
+    "selectUser": "Select user",
+    "selectedCount": "Selected",
+    "batchEnable": "Enable selected",
+    "batchDisable": "Disable selected",
+    "batchConfirmDisable": "Disable the selected users?",
+    "batchUpdated": "Selected user statuses updated.",
+    "batchPartial": "Some user statuses were not updated. Review and retry.",
+    "batchError": "Batch status update failed. Try again.",
     "form": "User profile form"
   }
 }

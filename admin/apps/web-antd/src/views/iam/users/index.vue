@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, reactive, ref } from 'vue';
 
 import type {
   IAMRole,
+  IAMUserBatchStatusInput,
   IAMUserCreateInput,
   IAMUser,
   IAMUserPage,
@@ -11,6 +12,7 @@ import type {
 } from '#/api/core/iam';
 
 import {
+  batchUpdateIAMUserStatusApi,
   createIAMUserApi,
   getIAMUserApi,
   listIAMRolesApi,
@@ -37,6 +39,12 @@ const errorSummary = ref<HTMLElement | null>(null);
 const formError = ref('');
 const formErrorSummary = ref<HTMLElement | null>(null);
 const formMessage = ref('');
+const selectedIds = ref<string[]>([]);
+const actionLoading = ref(false);
+const actionError = ref('');
+const actionErrorSummary = ref<HTMLElement | null>(null);
+const actionMessage = ref('');
+const actionFeedback = ref<HTMLElement | null>(null);
 const formOpen = ref(false);
 const formLoading = ref(false);
 const formMode = ref<'create' | 'edit'>('create');
@@ -54,6 +62,13 @@ const userForm = reactive({
 const totalPages = computed(() =>
   Math.max(1, Math.ceil(page.value.total / state.pageSize)),
 );
+const pageIds = computed(() => page.value.items.map((user) => user.id));
+const allPageSelected = computed(
+  () =>
+    pageIds.value.length > 0 &&
+    pageIds.value.every((id) => selectedIds.value.includes(id)),
+);
+const selectedCount = computed(() => selectedIds.value.length);
 
 function roleName(id: string) {
   return roles.value.find((role) => role.id === id)?.name ?? id;
@@ -81,6 +96,41 @@ async function focusError() {
 async function focusFormError() {
   await nextTick();
   formErrorSummary.value?.focus();
+}
+
+async function focusActionError() {
+  await nextTick();
+  actionErrorSummary.value?.focus();
+}
+
+async function focusActionFeedback() {
+  await nextTick();
+  actionFeedback.value?.focus();
+}
+
+function clearSelection() {
+  selectedIds.value = [];
+}
+
+function togglePageSelection(checked: boolean) {
+  selectedIds.value = checked ? [...pageIds.value] : [];
+}
+
+function onPageSelectionChange(event: Event) {
+  togglePageSelection((event.target as HTMLInputElement).checked);
+}
+
+function onUserSelectionChange(id: string, event: Event) {
+  const checked = (event.target as HTMLInputElement).checked;
+  if (checked && !selectedIds.value.includes(id)) {
+    selectedIds.value = [...selectedIds.value, id];
+    return;
+  }
+  if (!checked) {
+    selectedIds.value = selectedIds.value.filter(
+      (selectedId) => selectedId !== id,
+    );
+  }
 }
 
 function clearUserForm() {
@@ -200,6 +250,35 @@ async function submitUserForm() {
   }
 }
 
+async function batchUpdate(active: boolean) {
+  if (actionLoading.value || selectedIds.value.length === 0) return;
+  if (!active && !window.confirm(String($t('page.iam.batchConfirmDisable')))) {
+    return;
+  }
+  actionLoading.value = true;
+  actionError.value = '';
+  actionMessage.value = '';
+  const input: IAMUserBatchStatusInput = {
+    items: selectedIds.value.map((id) => ({ id, active })),
+  };
+  try {
+    const result = await batchUpdateIAMUserStatusApi(input);
+    const hasFailures = result.results.some(
+      (item) => item.status !== (active ? 'active' : 'disabled'),
+    );
+    actionMessage.value = String(
+      $t(hasFailures ? 'page.iam.batchPartial' : 'page.iam.batchUpdated'),
+    );
+    await loadUsers();
+    await focusActionFeedback();
+  } catch {
+    actionError.value = String($t('page.iam.batchError'));
+    await focusActionError();
+  } finally {
+    actionLoading.value = false;
+  }
+}
+
 async function loadUsers() {
   loading.value = true;
   error.value = '';
@@ -213,6 +292,7 @@ async function loadUsers() {
       status: state.status,
       sort: 'username',
     });
+    clearSelection();
   } catch {
     error.value = String($t('page.iam.loadError'));
     await focusError();
@@ -276,7 +356,7 @@ onMounted(async () => {
         <p class="description">{{ $t('page.iam.description') }}</p>
       </div>
       <div class="heading-actions">
-        <span class="scope-chip">{{ $t('page.iam.readOnly') }}</span>
+        <span class="scope-chip">{{ $t('page.iam.manage') }}</span>
         <button class="primary" type="button" @click="openCreate">
           {{ $t('page.iam.create') }}
         </button>
@@ -297,6 +377,24 @@ onMounted(async () => {
     </p>
     <p v-if="formMessage" class="feedback feedback-success" aria-live="polite">
       {{ formMessage }}
+    </p>
+    <p
+      v-if="actionError"
+      ref="actionErrorSummary"
+      class="feedback feedback-error"
+      role="alert"
+      tabindex="-1"
+    >
+      {{ actionError }}
+    </p>
+    <p
+      v-if="actionMessage"
+      ref="actionFeedback"
+      class="feedback feedback-success"
+      aria-live="polite"
+      tabindex="-1"
+    >
+      {{ actionMessage }}
     </p>
 
     <form class="filters" role="search" @submit.prevent="search">
@@ -351,6 +449,41 @@ onMounted(async () => {
           >{{ page.total }} {{ $t('page.iam.rows') }}</span
         >
       </div>
+      <div
+        class="bulk-toolbar"
+        role="toolbar"
+        :aria-label="$t('page.iam.bulkActions')"
+      >
+        <label class="bulk-select" for="iam-users-select-all">
+          <input
+            id="iam-users-select-all"
+            :checked="allPageSelected"
+            :disabled="loading || actionLoading || page.items.length === 0"
+            type="checkbox"
+            @change="onPageSelectionChange"
+          />
+          <span>{{ $t('page.iam.selectAll') }}</span>
+        </label>
+        <span class="selected-count" aria-live="polite">
+          {{ $t('page.iam.selectedCount') }}: {{ selectedCount }}
+        </span>
+        <div class="bulk-actions">
+          <button
+            type="button"
+            :disabled="loading || actionLoading || selectedCount === 0"
+            @click="batchUpdate(true)"
+          >
+            {{ $t('page.iam.batchEnable') }}
+          </button>
+          <button
+            type="button"
+            :disabled="loading || actionLoading || selectedCount === 0"
+            @click="batchUpdate(false)"
+          >
+            {{ $t('page.iam.batchDisable') }}
+          </button>
+        </div>
+      </div>
       <div class="table-wrap">
         <table>
           <caption class="sr-only">
@@ -360,6 +493,9 @@ onMounted(async () => {
           </caption>
           <thead>
             <tr>
+              <th scope="col" class="selection-column">
+                <span class="sr-only">{{ $t('page.iam.selectAll') }}</span>
+              </th>
               <th scope="col">{{ $t('page.iam.username') }}</th>
               <th scope="col">{{ $t('page.iam.displayName') }}</th>
               <th scope="col">{{ $t('page.iam.email') }}</th>
@@ -372,16 +508,26 @@ onMounted(async () => {
           </thead>
           <tbody>
             <tr v-if="loading">
-              <td class="table-state" colspan="8">
+              <td class="table-state" colspan="9">
                 {{ $t('page.iam.loading') }}
               </td>
             </tr>
             <tr v-else-if="page.items.length === 0">
-              <td class="table-state" colspan="8">
+              <td class="table-state" colspan="9">
                 {{ $t('page.iam.empty') }}
               </td>
             </tr>
             <tr v-for="user in page.items" v-else :key="user.id">
+              <td class="selection-column">
+                <input
+                  :id="`iam-user-select-${user.id}`"
+                  :checked="selectedIds.includes(user.id)"
+                  :disabled="loading || actionLoading"
+                  :aria-label="`${$t('page.iam.selectUser')}: ${user.username}`"
+                  type="checkbox"
+                  @change="onUserSelectionChange(user.id, $event)"
+                />
+              </td>
               <th scope="row">
                 <span class="primary-text">{{ user.username }}</span>
                 <small>{{ user.id }}</small>
@@ -778,6 +924,49 @@ button.primary {
   border-bottom: 1px solid hsl(var(--border));
 }
 
+.bulk-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--muted) / 18%);
+}
+
+.bulk-select {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  color: hsl(var(--foreground));
+  font-size: 0.82rem;
+  font-weight: 650;
+}
+
+.bulk-select input,
+.selection-column input {
+  width: 18px;
+  min-height: 18px;
+  padding: 0;
+  accent-color: hsl(var(--primary));
+}
+
+.selected-count {
+  color: hsl(var(--muted-foreground));
+  font-size: 0.8rem;
+}
+
+.bulk-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.selection-column {
+  width: 48px;
+  text-align: center;
+}
+
 .result-count {
   color: hsl(var(--muted-foreground));
   font-size: 0.8rem;
@@ -1001,6 +1190,15 @@ th small {
     margin-top: 12px;
   }
 
+  .bulk-actions {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .bulk-actions > * {
+    flex: 1;
+  }
+
   .user-form {
     grid-template-columns: 1fr;
   }
@@ -1011,6 +1209,10 @@ th small {
 }
 
 @media (max-width: 480px) {
+  .bulk-toolbar {
+    align-items: flex-start;
+  }
+
   .pagination {
     flex-wrap: wrap;
     justify-content: space-between;
