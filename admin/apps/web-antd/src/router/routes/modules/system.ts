@@ -75,6 +75,12 @@ const routes: RouteRecordRaw[] = [
         name: 'SystemTasks',
         path: 'tasks',
       },
+      {
+        component: () => import('#/views/system/import-export/index.vue'),
+        meta: { icon: 'lucide:file-spreadsheet', title: $t('page.importExport.title') },
+        name: 'SystemImportExport',
+        path: 'import-export',
+      },
     ],
   },
 ];
