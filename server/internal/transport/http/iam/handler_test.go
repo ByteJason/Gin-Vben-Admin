@@ -308,6 +308,42 @@ func TestIAMUserDetailCreateAndUpdateHidePasswordAndMapConflict(t *testing.T) {
 	}
 }
 
+func TestIAMUserDeleteSoftDeletesAndIsIdempotent(t *testing.T) {
+	store := iamapp.NewMemoryStore()
+	admin := domain.User{ID: "admin", Username: "admin", TenantID: "default", Active: true}
+	target := domain.User{ID: "target", Username: "alice", TenantID: "default", Active: true, PasswordHash: "secret-hash", RoleIDs: []string{"r-reader"}}
+	if err := store.SaveUser(context.Background(), admin); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveUser(context.Background(), target); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SavePolicy(context.Background(), domain.Policy{Subject: "admin", Method: http.MethodDelete, Path: "/api/admin/v1/iam/users/:id", Effect: domain.EffectAllow}); err != nil {
+		t.Fatal(err)
+	}
+	r := newIAMTestRouter(store, authdomain.Claims{Subject: "admin", Type: authdomain.AccessToken, ExpiresAt: time.Now().Add(time.Minute)})
+	request := func(id string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodDelete, "/api/admin/v1/iam/users/"+id, nil)
+		req.Header.Set("Authorization", "Bearer test")
+		resp := httptest.NewRecorder()
+		r.ServeHTTP(resp, req)
+		return resp
+	}
+	if resp := request(target.ID); resp.Code != http.StatusOK || !strings.Contains(resp.Body.String(), `"code":0`) || strings.Contains(resp.Body.String(), "secret-hash") {
+		t.Fatalf("delete status/body = %d/%s", resp.Code, resp.Body.String())
+	}
+	stored, err := store.FindUser(context.Background(), target.ID)
+	if err != nil || stored.Active || stored.PasswordHash != target.PasswordHash || len(stored.RoleIDs) != 1 {
+		t.Fatalf("stored deleted user = %+v err=%v", stored, err)
+	}
+	if resp := request(target.ID); resp.Code != http.StatusOK || !strings.Contains(resp.Body.String(), `"code":0`) {
+		t.Fatalf("idempotent delete status/body = %d/%s", resp.Code, resp.Body.String())
+	}
+	if resp := request("missing"); resp.Code != http.StatusNotFound || !strings.Contains(resp.Body.String(), `"code":10001`) {
+		t.Fatalf("missing delete status/body = %d/%s", resp.Code, resp.Body.String())
+	}
+}
+
 type testPasswordHasher struct{}
 
 func (testPasswordHasher) Hash(password string) (string, error) { return "hash:" + password, nil }

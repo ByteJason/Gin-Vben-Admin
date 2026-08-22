@@ -386,6 +386,18 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/IAMUserConflict' }
         '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
+    delete:
+      tags: [IAM]
+      operationId: deleteIAMUser
+      summary: 默认软删除管理用户
+      description: 将用户状态置为 disabled，保留资料、凭据和关系；重复请求幂等成功。
+      security: [{BearerAuth: []}]
+      responses:
+        '200': { $ref: '#/components/responses/SuccessResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
   /api/admin/v1/iam/roles:
     get:
       tags: [IAM]

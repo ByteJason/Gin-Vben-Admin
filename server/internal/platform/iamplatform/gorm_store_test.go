@@ -95,3 +95,14 @@ func TestGORMStoreUserWriteValidationRunsBeforeUnavailableDependency(t *testing.
 		t.Fatalf("UpdateUser() error = %v, want ErrInvalidNumericID", err)
 	}
 }
+
+func TestGORMStoreSoftDeleteValidatesIDAndDependency(t *testing.T) {
+	store := NewGORMStore(nil)
+	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "default"})
+	if _, err := store.SoftDeleteUser(ctx, "not-numeric"); !errors.Is(err, ErrInvalidNumericID) {
+		t.Fatalf("SoftDeleteUser(non-numeric) error = %v, want ErrInvalidNumericID", err)
+	}
+	if _, err := store.SoftDeleteUser(ctx, "7"); !errors.Is(err, ErrStoreUnavailable) {
+		t.Fatalf("SoftDeleteUser(unavailable) error = %v, want ErrStoreUnavailable", err)
+	}
+}

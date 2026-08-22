@@ -204,6 +204,50 @@ func (s *GORMStore) UpdateUser(ctx context.Context, user domain.User) (domain.Us
 	return s.FindUser(ctx, user.ID)
 }
 
+// SoftDeleteUser changes only the status column on the primary endpoint. The
+// existing row is read first so an already-disabled account remains an
+// idempotent success and credentials/relations are never rewritten.
+func (s *GORMStore) SoftDeleteUser(ctx context.Context, id string) (domain.User, error) {
+	numericID, err := numericID(id)
+	if err != nil {
+		return domain.User{}, err
+	}
+	if s == nil || s.db == nil {
+		return domain.User{}, ErrStoreUnavailable
+	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return domain.User{}, err
+	}
+	var row userRow
+	if err := s.write(ctx).Table("users").Where("tenant_id = ? AND id = ?", scope.TenantID, numericID).Take(&row).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return domain.User{}, domain.ErrResourceNotFound
+		}
+		return domain.User{}, ErrStoreUnavailable
+	}
+	if !scope.PlatformAdmin && scope.Organization != "" && stringValue(row.OrgID) != scope.Organization {
+		return domain.User{}, tenant.ErrOrganizationDenied
+	}
+	if row.Status != "disabled" {
+		result := s.write(ctx).Table("users").Where("tenant_id = ? AND id = ?", scope.TenantID, numericID).Updates(map[string]any{"status": "disabled"})
+		if err := mapUserWriteError(result.Error); err != nil {
+			return domain.User{}, err
+		}
+		if result.RowsAffected == 0 {
+			// The row may have disappeared between the read and the update;
+			// do not turn that race into a false successful deletion.
+			return domain.User{}, domain.ErrResourceNotFound
+		}
+	}
+	row.Status = "disabled"
+	roles, err := s.roleIDs(ctx, scope.TenantID, numericID)
+	if err != nil {
+		return domain.User{}, err
+	}
+	return row.toDomain(roles), nil
+}
+
 func (s *GORMStore) ListUsers(ctx context.Context) ([]domain.User, error) {
 	if s == nil || s.db == nil {
 		return nil, ErrStoreUnavailable
@@ -791,6 +835,7 @@ var (
 		SaveUser(context.Context, domain.User) error
 		CreateUser(context.Context, domain.User) (domain.User, error)
 		UpdateUser(context.Context, domain.User) (domain.User, error)
+		SoftDeleteUser(context.Context, string) (domain.User, error)
 		ListUsers(context.Context) ([]domain.User, error)
 		ListUsersPage(context.Context, domain.UserListQuery) (domain.UserPage, error)
 	} = (*GORMStore)(nil)

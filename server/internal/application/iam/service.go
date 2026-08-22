@@ -144,6 +144,28 @@ func (s *MemoryStore) UpdateUser(ctx context.Context, user domain.User) (domain.
 	return cloneUser(user), nil
 }
 
+// SoftDeleteUser disables a user in place and preserves credentials, profile
+// fields, and role relations. Repeating the operation is intentionally
+// idempotent for the management API.
+func (s *MemoryStore) SoftDeleteUser(ctx context.Context, id string) (domain.User, error) {
+	if err := check(ctx); err != nil {
+		return domain.User{}, err
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return domain.User{}, ErrInvalidID
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user, ok := s.users[id]
+	if !ok {
+		return domain.User{}, domain.ErrResourceNotFound
+	}
+	user.Active = false
+	s.users[id] = cloneUser(user)
+	return cloneUser(user), nil
+}
+
 func hasUserIdentifierConflict(users map[string]domain.User, candidate domain.User, excludeID string) bool {
 	for id, existing := range users {
 		if id == excludeID || (existing.TenantID != "" && existing.TenantID != candidate.TenantID) {
@@ -378,6 +400,9 @@ type userCreator interface {
 }
 type userUpdater interface {
 	UpdateUser(context.Context, domain.User) (domain.User, error)
+}
+type userSoftDeleter interface {
+	SoftDeleteUser(context.Context, string) (domain.User, error)
 }
 type roleSaver interface {
 	SaveRole(context.Context, domain.Role) error
@@ -668,6 +693,56 @@ func (s *Service) UpdateUser(ctx context.Context, id string, input UserUpdateInp
 		return domain.User{}, err
 	}
 	return updated, nil
+}
+
+// DeleteUser implements the bounded default soft-delete seam. The repository
+// must retain the row and relationships while changing only its active state;
+// legacy repositories fall back to the existing profile update/save ports.
+func (s *Service) DeleteUser(ctx context.Context, id string) (domain.User, error) {
+	if s == nil || s.Users == nil {
+		return domain.User{}, ErrRepositoryMissing
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return domain.User{}, ErrInvalidID
+	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return domain.User{}, err
+	}
+	existing, err := s.Users.FindUser(ctx, id)
+	if err != nil {
+		return domain.User{}, err
+	}
+	if err := checkUserScope(scope, existing); err != nil {
+		return domain.User{}, err
+	}
+	existing.Active = false
+	var deleted domain.User
+	if repo, ok := s.Users.(userSoftDeleter); ok {
+		deleted, err = repo.SoftDeleteUser(ctx, id)
+	} else if repo, ok := s.Users.(userUpdater); ok {
+		deleted, err = repo.UpdateUser(ctx, existing)
+	} else if repo, ok := s.Users.(userSaver); ok {
+		err = repo.SaveUser(ctx, existing)
+		deleted = existing
+	} else {
+		return domain.User{}, ErrRepositoryMissing
+	}
+	if err != nil {
+		return domain.User{}, err
+	}
+	if deleted.ID == "" {
+		deleted = existing
+	}
+	if deleted.TenantID == "" {
+		deleted.TenantID = scope.TenantID
+	}
+	deleted.Active = false
+	if err := s.invalidate(ctx); err != nil {
+		return domain.User{}, err
+	}
+	return deleted, nil
 }
 
 func checkUserScope(scope tenant.Context, user domain.User) error {

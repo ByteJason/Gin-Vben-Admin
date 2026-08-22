@@ -193,3 +193,39 @@ func TestServiceGetAndUpdateUserEnforceOrganizationAndPreservePassword(t *testin
 		t.Fatalf("cross-organization UpdateUser error = %v", err)
 	}
 }
+
+func TestServiceDeleteUserSoftDeletesWithinScopeAndIsIdempotent(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a", Organization: "org-a"})
+	original := domain.User{
+		ID: "u-delete", Username: "alice", DisplayName: "Alice", TenantID: "tenant-a", OrgID: "org-a",
+		Active: true, PasswordHash: "bcrypt-hash", RoleIDs: []string{"role-reader"}, Email: "alice@example.test",
+	}
+	if err := store.SaveUser(ctx, original); err != nil {
+		t.Fatal(err)
+	}
+
+	deleted, err := NewService(store).DeleteUser(ctx, original.ID)
+	if err != nil {
+		t.Fatalf("DeleteUser() error = %v", err)
+	}
+	if deleted.Active || deleted.PasswordHash != original.PasswordHash || len(deleted.RoleIDs) != 1 || deleted.RoleIDs[0] != "role-reader" {
+		t.Fatalf("soft-deleted user = %+v", deleted)
+	}
+	stored, err := store.FindUser(ctx, original.ID)
+	if err != nil || stored.Active || stored.PasswordHash != original.PasswordHash || stored.Username != original.Username {
+		t.Fatalf("stored soft-deleted user = %+v err=%v", stored, err)
+	}
+	if _, err := NewService(store).DeleteUser(ctx, original.ID); err != nil {
+		t.Fatalf("idempotent DeleteUser() error = %v", err)
+	}
+	if _, err := NewService(store).DeleteUser(ctx, "missing"); !errors.Is(err, domain.ErrResourceNotFound) {
+		t.Fatalf("missing DeleteUser() error = %v", err)
+	}
+	if _, err := NewService(store).DeleteUser(tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a", Organization: "org-b"}), original.ID); !errors.Is(err, tenant.ErrOrganizationDenied) {
+		t.Fatalf("cross-organization DeleteUser() error = %v", err)
+	}
+	if _, err := NewService(store).DeleteUser(tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-b"}), original.ID); !errors.Is(err, tenant.ErrCrossTenant) {
+		t.Fatalf("cross-tenant DeleteUser() error = %v", err)
+	}
+}

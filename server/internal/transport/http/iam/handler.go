@@ -56,6 +56,7 @@ func RegisterRoutes(r gin.IRouter, handler *Handler, policies ...httpmiddleware.
 	group.GET("/users/:id", handler.getUser)
 	group.POST("/users", handler.createUser)
 	group.PATCH("/users/:id", handler.updateUser)
+	group.DELETE("/users/:id", handler.deleteUser)
 	group.GET("/roles", handler.listRoles)
 	group.POST("/roles", handler.createRole)
 	group.GET("/menus", handler.listMenus)
@@ -74,6 +75,7 @@ func registerDisabled(group *gin.RouterGroup) {
 		group.GET(path, disabled)
 		group.POST(path, disabled)
 		group.PATCH(path, disabled)
+		group.DELETE(path, disabled)
 	}
 }
 
@@ -312,6 +314,17 @@ func (h *Handler) updateUser(c *gin.Context) {
 		return
 	}
 	response.OK(c, responseFromUser(user))
+}
+
+func (h *Handler) deleteUser(c *gin.Context) {
+	if !h.guard(c) {
+		return
+	}
+	if _, err := h.service.DeleteUser(c.Request.Context(), c.Param("id")); err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	response.OK(c, nil)
 }
 
 type roleRequest struct {
