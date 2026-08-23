@@ -18,6 +18,24 @@ export const STATES = Object.freeze({
   INCONSISTENT: 'inconsistent',
 });
 
+export const STATE_REASONS = Object.freeze({
+  NONE: 'NONE',
+  SOURCE_MOVE_TRANSACTION_PRESENT: 'SOURCE_MOVE_TRANSACTION_PRESENT',
+  TRANSACTION_INVALID: 'TRANSACTION_INVALID',
+  TRANSACTION_MARKER_CONFLICT: 'TRANSACTION_MARKER_CONFLICT',
+  RUNTIME_WITHOUT_PROFILE: 'RUNTIME_WITHOUT_PROFILE',
+  MARKER_WITHOUT_PROFILE: 'MARKER_WITHOUT_PROFILE',
+  PROFILE_INVALID: 'PROFILE_INVALID',
+  RECEIPT_WITHOUT_PROFILE: 'RECEIPT_WITHOUT_PROFILE',
+  SELECTED_APP_MISSING: 'SELECTED_APP_MISSING',
+  EXTRA_TEMPLATE_PRESENT: 'EXTRA_TEMPLATE_PRESENT',
+  RECEIPT_INVALID: 'RECEIPT_INVALID',
+  RUNTIME_INVALID: 'RUNTIME_INVALID',
+  RUNTIME_RECORD_PRESENT: 'RUNTIME_RECORD_PRESENT',
+  RUNTIME_MARKER_CONFLICT: 'RUNTIME_MARKER_CONFLICT',
+  MARKER_INVALID: 'MARKER_INVALID',
+});
+
 export function installURL(port) {
   return `http://127.0.0.1:${port}/install`;
 }
@@ -30,6 +48,7 @@ export function statePaths(root) {
     runtime: join(root, '.ui-init-runtime.json'),
     marker: join(root, 'apps', 'install', '.installed'),
     backupRoot: resolve(root, '..', '.runtime', 'init-backup'),
+    recoveryRoot: resolve(root, '..', '.runtime', 'init-recovery'),
   };
 }
 
@@ -115,28 +134,97 @@ export function inspectState(root) {
   const profile = hasProfile ? parseProfile(location.profile) : null;
 
   if (hasTransaction) {
-    return { state: validTransaction(location.transaction) && !hasMarker ? STATES.INSTALLING : STATES.INCONSISTENT, profile: null };
+    if (!validTransaction(location.transaction)) {
+      return { state: STATES.INCONSISTENT, profile: null, reason: STATE_REASONS.TRANSACTION_INVALID };
+    }
+    return hasMarker
+      ? { state: STATES.INCONSISTENT, profile: null, reason: STATE_REASONS.TRANSACTION_MARKER_CONFLICT }
+      : { state: STATES.INSTALLING, profile: null, reason: STATE_REASONS.SOURCE_MOVE_TRANSACTION_PRESENT };
   }
-  if (hasRuntime && !profile) return { state: STATES.INCONSISTENT, profile: null };
-  if (hasMarker && !profile) return { state: STATES.INCONSISTENT, profile: null };
-  if (hasProfile && !profile) return { state: STATES.INCONSISTENT, profile: null };
-  if (hasReceipt && !profile) return { state: STATES.INCONSISTENT, profile: null };
-  if (!profile) return { state: STATES.PRISTINE, profile: null };
+  if (hasRuntime && !profile) return { state: STATES.INCONSISTENT, profile: null, reason: STATE_REASONS.RUNTIME_WITHOUT_PROFILE };
+  if (hasMarker && !profile) return { state: STATES.INCONSISTENT, profile: null, reason: STATE_REASONS.MARKER_WITHOUT_PROFILE };
+  if (hasProfile && !profile) return { state: STATES.INCONSISTENT, profile: null, reason: STATE_REASONS.PROFILE_INVALID };
+  if (hasReceipt && !profile) return { state: STATES.INCONSISTENT, profile: null, reason: STATE_REASONS.RECEIPT_WITHOUT_PROFILE };
+  if (!profile) return { state: STATES.PRISTINE, profile: null, reason: STATE_REASONS.NONE };
   if (!plainDirectory(join(root, profile.appDirectory))) {
-    return { state: STATES.INCONSISTENT, profile: null };
+    return { state: STATES.INCONSISTENT, profile: null, reason: STATE_REASONS.SELECTED_APP_MISSING };
   }
   if (Object.entries(UI_PROFILES).some(([ui, entry]) => ui !== profile.selectedUi && existsSync(join(root, entry.appDirectory)))) {
-    return { state: STATES.INCONSISTENT, profile: null };
+    return { state: STATES.INCONSISTENT, profile: null, reason: STATE_REASONS.EXTRA_TEMPLATE_PRESENT };
   }
   if (hasReceipt && !validReceipt(location.receipt, profile)) {
-    return { state: STATES.INCONSISTENT, profile: null };
+    return { state: STATES.INCONSISTENT, profile: null, reason: STATE_REASONS.RECEIPT_INVALID };
   }
   if (hasRuntime) {
-    if (!validRuntime(location.runtime) || hasMarker) return { state: STATES.INCONSISTENT, profile: null };
-    return { state: STATES.INSTALLING, profile };
+    if (!validRuntime(location.runtime)) return { state: STATES.INCONSISTENT, profile: null, reason: STATE_REASONS.RUNTIME_INVALID };
+    if (hasMarker) return { state: STATES.INCONSISTENT, profile: null, reason: STATE_REASONS.RUNTIME_MARKER_CONFLICT };
+    return { state: STATES.INSTALLING, profile, reason: STATE_REASONS.RUNTIME_RECORD_PRESENT };
   }
-  if (hasMarker && !validMarker(location.marker, profile)) return { state: STATES.INCONSISTENT, profile: null };
-  return { state: hasMarker ? STATES.INSTALLED : STATES.UI_PREPARED, profile };
+  if (hasMarker && !validMarker(location.marker, profile)) {
+    return { state: STATES.INCONSISTENT, profile: null, reason: STATE_REASONS.MARKER_INVALID };
+  }
+  return { state: hasMarker ? STATES.INSTALLED : STATES.UI_PREPARED, profile, reason: STATE_REASONS.NONE };
+}
+
+function pristineTemplateLayout(root) {
+  return Object.values(UI_PROFILES).every((entry) => plainDirectory(join(root, entry.appDirectory)))
+    && !existsSync(join(root, 'apps', 'web'));
+}
+
+// This recovery is intentionally narrow: a receipt and runtime record are
+// written only after the UI profile and both template moves succeed. If the
+// profile is absent while all three original templates are intact and no
+// stronger marker exists, these ignored files are stale local metadata.
+// Quarantining them is reversible and never deletes or overwrites sources.
+export async function recoverSafeLocalState(root) {
+  const current = inspectState(root);
+  const recoverableReasons = new Set([
+    STATE_REASONS.RECEIPT_WITHOUT_PROFILE,
+    STATE_REASONS.RUNTIME_WITHOUT_PROFILE,
+  ]);
+  if (!recoverableReasons.has(current.reason)) return { ...current, recovered: false };
+
+  const location = statePaths(root);
+  if (
+    existsSync(location.profile)
+    || existsSync(location.transaction)
+    || existsSync(location.marker)
+    || !pristineTemplateLayout(root)
+  ) {
+    return { ...current, recovered: false };
+  }
+
+  const recoveryId = randomUUID();
+  const recoveryDirectory = join(location.recoveryRoot, recoveryId);
+  const candidates = [
+    [location.receipt, '.ui-init-receipt.json'],
+    [location.runtime, '.ui-init-runtime.json'],
+  ].filter(([source]) => existsSync(source));
+  const moved = [];
+  mkdirSync(recoveryDirectory, { recursive: true, mode: 0o700 });
+  try {
+    for (const [source, name] of candidates) {
+      const destination = join(recoveryDirectory, name);
+      await rename(source, destination);
+      moved.push([source, destination]);
+    }
+    const recovered = inspectState(root);
+    if (recovered.state !== STATES.PRISTINE) throw new Error('RECOVERY_VALIDATION_FAILED');
+    const repositoryRoot = resolve(root, '..');
+    const recoveryBackup = relative(repositoryRoot, recoveryDirectory).split('\\').join('/');
+    return {
+      ...recovered,
+      recovered: true,
+      recoveryReason: current.reason,
+      recoveryBackup,
+    };
+  } catch (error) {
+    for (const [source, destination] of moved.reverse()) {
+      if (existsSync(destination) && !existsSync(source)) await rename(destination, source);
+    }
+    await rm(recoveryDirectory, { force: true, recursive: true });
+    throw error;
+  }
 }
 
 async function atomicWrite(file, contents) {
@@ -296,10 +384,24 @@ export async function clearRuntime(root) {
   await rm(statePaths(root).runtime, { force: true });
 }
 
-export function formatStatus({ state, profile, next, error = 'NONE', port = 8080 }) {
+export function actionForState({ state, reason = STATE_REASONS.NONE }) {
+  if ([STATE_REASONS.RECEIPT_WITHOUT_PROFILE, STATE_REASONS.RUNTIME_WITHOUT_PROFILE].includes(reason)) {
+    return 'RUN_INIT_AUTO_RECOVERY';
+  }
+  if (state === STATES.PRISTINE) return 'START_INITIALIZATION';
+  if (state === STATES.UI_PREPARED) return 'OPEN_INSTALLER';
+  if (state === STATES.INSTALLING) return 'WAIT_FOR_INITIALIZATION';
+  if (state === STATES.INSTALLED) return 'RUN_SELECTED_APP';
+  if (reason === STATE_REASONS.EXTRA_TEMPLATE_PRESENT) return 'RESUME_UI_SELECTION';
+  return 'KEEP_STATE_AND_REPORT_CODE';
+}
+
+export function formatStatus({ state, profile, reason = STATE_REASONS.NONE, action, next, error = 'NONE', port = 8080 }) {
   return [
     `INIT_STATE=${state}`,
     `INIT_SELECTED_UI=${profile?.selectedUi ?? 'none'}`,
+    `INIT_REASON=${reason}`,
+    `INIT_ACTION=${action ?? actionForState({ state, reason })}`,
     `INIT_URL=${installURL(port)}`,
     `INIT_NEXT=${next}`,
     `INIT_ERROR=${error}`,

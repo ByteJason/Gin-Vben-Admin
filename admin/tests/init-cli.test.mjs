@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -182,7 +182,7 @@ test('profile gate reports an inconsistent profile and a persistent transaction 
   }
 });
 
-test('an orphaned local receipt is inconsistent and init never overwrites it', () => {
+test('init safely quarantines an orphaned local receipt and continues first-time setup', () => {
   const root = fixture();
   try {
     const receiptPath = join(root, '.ui-init-receipt.json');
@@ -190,12 +190,72 @@ test('an orphaned local receipt is inconsistent and init never overwrites it', (
     writeFileSync(receiptPath, receipt);
 
     const result = run(root, 'init.mjs', ['--ui', 'antd', '--confirm-cleanup', '--no-open']);
+    assert.equal(result.status, 0, output(result));
+    assert.match(output(result), /检测到上次初始化留下的本地状态，已安全备份并自动恢复。/);
+    assert.match(output(result), /INIT_RECOVERY=completed/);
+    assert.match(output(result), /INIT_RECOVERY_REASON=RECEIPT_WITHOUT_PROFILE/);
+    assert.match(output(result), /INIT_RECOVERY_BACKUP=\.runtime\/init-recovery\/[0-9a-f-]+/);
+    assert.match(output(result), /INIT_STATE=ui_prepared/);
+    assert.match(output(result), /INIT_SELECTED_UI=antd/);
+    assert.equal(existsSync(join(root, '.ui-profile.json')), true);
+    assert.equal(existsSync(join(root, 'apps', 'web-antd')), true);
+    assert.equal(existsSync(join(root, 'apps', 'web-ele')), false);
+    assert.equal(existsSync(join(root, 'apps', 'web-naive')), false);
+
+    const recoveryRoot = join(root, '..', '.runtime', 'init-recovery');
+    const recoveryDirectories = readdirSync(recoveryRoot);
+    assert.equal(recoveryDirectories.length, 1);
+    assert.equal(
+      readFileSync(join(recoveryRoot, recoveryDirectories[0], '.ui-init-receipt.json'), 'utf8'),
+      receipt,
+    );
+  } finally {
+    dispose(root);
+  }
+});
+
+test('init safely quarantines an orphaned runtime record and continues first-time setup', () => {
+  const root = fixture();
+  try {
+    const runtimePath = join(root, '.ui-init-runtime.json');
+    const runtime = '{"schema":1,"port":8080,"pid":12345}\n';
+    writeFileSync(runtimePath, runtime);
+
+    const result = run(root, 'init.mjs', ['--ui', 'naive', '--confirm-cleanup', '--no-open']);
+    assert.equal(result.status, 0, output(result));
+    assert.match(output(result), /INIT_RECOVERY=completed/);
+    assert.match(output(result), /INIT_RECOVERY_REASON=RUNTIME_WITHOUT_PROFILE/);
+    assert.match(output(result), /INIT_STATE=ui_prepared/);
+    assert.match(output(result), /INIT_SELECTED_UI=naive/);
+
+    const recoveryRoot = join(root, '..', '.runtime', 'init-recovery');
+    const recoveryDirectories = readdirSync(recoveryRoot);
+    assert.equal(recoveryDirectories.length, 1);
+    assert.equal(
+      readFileSync(join(recoveryRoot, recoveryDirectories[0], '.ui-init-runtime.json'), 'utf8'),
+      runtime,
+    );
+  } finally {
+    dispose(root);
+  }
+});
+
+test('check explains a recoverable first-time state without asking users to inspect hidden files', () => {
+  const root = fixture();
+  try {
+    const receiptPath = join(root, '.ui-init-receipt.json');
+    const receipt = '{"schema":0}\n';
+    writeFileSync(receiptPath, receipt);
+
+    const result = run(root, 'init.mjs', ['--check', '--no-open']);
     assert.equal(result.status, 3, output(result));
-    assert.match(output(result), /INIT_STATE=inconsistent/);
-    assert.match(output(result), /INIT_ERROR=STATE_INCONSISTENT/);
+    assert.match(output(result), /检测到可自动恢复的首次初始化状态。/);
+    assert.match(output(result), /直接重新运行 pnpm run init，程序会先备份现场再继续。/);
+    assert.match(output(result), /INIT_REASON=RECEIPT_WITHOUT_PROFILE/);
+    assert.match(output(result), /INIT_ACTION=RUN_INIT_AUTO_RECOVERY/);
+    assert.doesNotMatch(output(result), /\.ui-init-receipt\.json|git status|for %F|Get-Content/);
     assert.equal(readFileSync(receiptPath, 'utf8'), receipt);
-    assert.equal(existsSync(join(root, '.ui-profile.json')), false);
-    for (const ui of ['antd', 'ele', 'naive']) assert.equal(existsSync(join(root, 'apps', `web-${ui}`)), true);
+    assert.equal(existsSync(join(root, '..', '.runtime', 'init-recovery')), false);
   } finally {
     dispose(root);
   }

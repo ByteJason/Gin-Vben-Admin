@@ -2,7 +2,18 @@
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
 
-import { STATES, UI_PROFILES, formatStatus, initialize, inspectState, preflightInitialization, reset, rootFromScript } from './init-state.mjs';
+import {
+  STATES,
+  STATE_REASONS,
+  UI_PROFILES,
+  formatStatus,
+  initialize,
+  inspectState,
+  preflightInitialization,
+  recoverSafeLocalState,
+  reset,
+  rootFromScript,
+} from './init-state.mjs';
 import { runInstallerRuntime } from './init-runtime.mjs';
 
 function usage() {
@@ -58,6 +69,21 @@ function print(status) {
   stdout.write(`${formatStatus(status)}\n`);
 }
 
+function printRecovery(recovery) {
+  stdout.write('检测到上次初始化留下的本地状态，已安全备份并自动恢复。\n');
+  stdout.write(`INIT_RECOVERY=completed\nINIT_RECOVERY_REASON=${recovery.recoveryReason}\nINIT_RECOVERY_BACKUP=${recovery.recoveryBackup}\n`);
+}
+
+function printStateGuidance(snapshot) {
+  if ([STATE_REASONS.RECEIPT_WITHOUT_PROFILE, STATE_REASONS.RUNTIME_WITHOUT_PROFILE].includes(snapshot.reason)) {
+    stdout.write('检测到可自动恢复的首次初始化状态。\n');
+    stdout.write('直接重新运行 pnpm run init，程序会先备份现场再继续。\n');
+    return;
+  }
+  stdout.write('初始化状态需要进一步确认；程序已保护现场，没有覆盖项目文件。\n');
+  stdout.write(`请向维护者提供状态代码 ${snapshot.reason}，无需检查隐藏文件。\n`);
+}
+
 const root = rootFromScript(import.meta.url);
 let port = 8080;
 
@@ -92,10 +118,18 @@ async function main() {
       return 0;
     }
     port = options.port;
-    const current = inspectState(root);
+    let current = inspectState(root);
     if (options.check) {
+      if (current.state === STATES.INCONSISTENT) printStateGuidance(current);
       print({ ...current, next: 'CHECK_COMPLETE', error: current.state === STATES.INCONSISTENT ? 'STATE_INCONSISTENT' : 'NONE', port });
       return current.state === STATES.INCONSISTENT ? 3 : 0;
+    }
+    if (!options.reset && current.state === STATES.INCONSISTENT) {
+      const recovery = await recoverSafeLocalState(root);
+      if (recovery.recovered) {
+        printRecovery(recovery);
+        current = inspectState(root);
+      }
     }
     if (options.reset) {
       if (current.state === STATES.INSTALLED) throw new Error('RESET_UNAVAILABLE_INSTALLED');
@@ -113,6 +147,7 @@ async function main() {
     }
     if (current.state !== STATES.PRISTINE) {
       const error = current.state === STATES.INCONSISTENT ? 'STATE_INCONSISTENT' : 'INITIALIZATION_IN_PROGRESS';
+      if (current.state === STATES.INCONSISTENT) printStateGuidance(current);
       print({ ...current, next: 'RECOVER_INITIALIZATION', error, port });
       return 3;
     }
