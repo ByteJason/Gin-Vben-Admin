@@ -5,6 +5,10 @@ import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
 const root = join(import.meta.dirname, '..', '..');
+const profilePath = join(root, 'admin/.ui-profile.json');
+const managementApps = existsSync(profilePath)
+  ? [`web-${JSON.parse(readFileSync(profilePath, 'utf8')).selectedUi}`]
+  : ['web-antd', 'web-ele', 'web-naive'];
 
 function runNode(script, ...args) {
   return spawnSync(process.execPath, [join(root, script), ...args], {
@@ -15,9 +19,7 @@ function runNode(script, ...args) {
 
 test('repository exposes the required code boundaries', () => {
   for (const path of [
-    'admin/apps/web-antd',
-    'admin/apps/web-ele',
-    'admin/apps/web-naive',
+    ...managementApps.map((app) => `admin/apps/${app}`),
     'server/cmd/api',
     'server/internal/bootstrap',
     'deploy/server.Dockerfile',
@@ -28,11 +30,11 @@ test('repository exposes the required code boundaries', () => {
     'contracts/openapi/admin-v1.yaml',
     'contracts/openapi/client-v1.yaml',
     'contracts/openapi/install-v1.yaml',
-    'install/src/index.html',
-    'install/src/app.js',
-    'install/src/styles.css',
-    'install/package.json',
-    'install/pnpm-lock.yaml',
+    'admin/apps/install/src/index.html',
+    'admin/apps/install/src/app.js',
+    'admin/apps/install/src/styles.css',
+    'admin/apps/install/package.json',
+    'admin/pnpm-lock.yaml',
     'LICENSE',
     'LICENSES/Vue-Vben-Admin-MIT.txt',
     'NOTICE',
@@ -41,7 +43,7 @@ test('repository exposes the required code boundaries', () => {
   }
   const allowed = new Set([
     '.dev-docs', '.git', '.github', '.idea', '.pnpm-store', '.runtime', 'LICENSES', 'admin', 'contracts', 'deploy', 'docs',
-    'install', 'scripts', 'server', 'tests',
+    'scripts', 'server', 'tests',
   ]);
   const unexpected = readdirSync(root, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && !allowed.has(entry.name))
@@ -68,7 +70,7 @@ test('management UIs consume the generated admin API client contract', () => {
   assert.match(generated, /Generated from contracts\/openapi\/admin-v1\.yaml/);
   assert.match(generated, /adminAuthLogin:\s*'\/admin\/v1\/auth\/login'/);
   assert.match(generated, /listVisibleMenus:\s*'\/admin\/v1\/menu\/all'/);
-  for (const app of ['web-antd', 'web-ele', 'web-naive']) {
+  for (const app of managementApps) {
     const packageJSON = readFileSync(join(root, `admin/apps/${app}/package.json`), 'utf8');
     const auth = readFileSync(join(root, `admin/apps/${app}/src/api/core/auth.ts`), 'utf8');
     const menu = readFileSync(join(root, `admin/apps/${app}/src/api/core/menu.ts`), 'utf8');
@@ -90,6 +92,7 @@ test('installation contract exposes credential-free status on its own scope', ()
   assert.match(install, /schemaVersion/);
   assert.match(install, /installerVersion/);
   assert.match(install, /selectedUi/);
+  assert.match(install, /enum: \[pristine, ui_prepared, installing, installed, inconsistent\]/);
   assert.match(install, /enum: \[antd, ele, naive\]/);
   assert.match(install, /enum: \[embedded, standalone, api_only, dev\]/);
   const statusSchema = install.slice(install.indexOf('    InstallationStatus:'), install.indexOf('    ErrorEnvelope:'));
@@ -109,6 +112,9 @@ test('installation contract exposes a permission plan without filesystem details
   assert.match(install, /requiresRestart/);
   assert.match(install, /path:/);
   assert.match(install, /action:/);
+  const requestSchema = install.slice(install.indexOf('    PlanRequest:'), install.indexOf('    InstallationPlanEnvelope:'));
+  assert.match(requestSchema, /required: \[mode\]/);
+  assert.doesNotMatch(requestSchema, /selectedUi/);
   const planSchema = install.slice(install.indexOf('    InstallationPlan:'), install.indexOf('    PlanErrorEnvelope:'));
   assert.doesNotMatch(planSchema, /absolutePath|rootPath|password|dsn|jwtSecret|redisPassword/i);
 });
@@ -152,8 +158,9 @@ test('installation contract exposes one credential-write-only apply operation', 
   assert.match(install, /\/api\/system\/install\/v1\/retry\/{id}:/);
   assert.match(install, /ApplyJob/);
   assert.match(install, /AdminAccount/);
-  assert.match(install, /confirmCleanup/);
   const applySchema = install.slice(install.indexOf('    ApplyRequest:'), install.indexOf('    AdminAccount:'));
+  assert.match(applySchema, /required: \[mode, database, redis, admin\]/);
+  assert.doesNotMatch(applySchema, /selectedUi|confirmCleanup/);
   assert.match(applySchema, /localeMode:[\s\S]*enum: \[single, multi\]/);
   assert.match(applySchema, /locale:[\s\S]*enum: \[zh-CN, en-US\]/);
   assert.match(install, /password:[\s\S]*?writeOnly: true/);
@@ -184,11 +191,11 @@ test('installation contract exposes an explicit confirmed rollback operation', (
 });
 
 test('installation workspace smoke and runtime artifacts stay cross-platform', () => {
-  const smoke = runNode('install/tests/smoke.test.mjs');
+  const smoke = runNode('admin/apps/install/tests/smoke.test.mjs');
   assert.equal(smoke.status, 0, smoke.stdout + smoke.stderr);
   const ignore = readFileSync(join(root, '.gitignore'), 'utf8');
-  assert.match(ignore, /\/install\/\.installed/);
-  assert.match(ignore, /\/install\/dist\//);
+  assert.match(ignore, /\/admin\/apps\/install\/\.installed/);
+  assert.match(ignore, /\*\*\/dist\//);
 });
 
 test('authentication contract declares login, refresh, and logout endpoints', () => {

@@ -32,15 +32,13 @@ func TestApplyServiceCompletesInstallationInSafeOrder(t *testing.T) {
 	service := NewApplyService(markers, planner, dependencies, schemas, assets, identity, environment, func() time.Time { return completedAt })
 
 	result, err := service.Apply(context.Background(), ApplyRequest{
-		SelectedUI: "antd",
-		Mode:       "embedded",
+		Mode: "embedded",
 		Database: DatabaseConnection{
 			Driver: "mysql", Mode: "single", Host: "127.0.0.1", Port: 3306,
 			Database: "app", Username: "app", Password: "database-secret",
 		},
-		Redis:          RedisConnection{Mode: "single", Addr: "127.0.0.1:6379", Password: "redis-secret"},
-		Admin:          AdminAccount{Username: "admin", Password: "initial-password-123"},
-		ConfirmCleanup: true,
+		Redis: RedisConnection{Mode: "single", Addr: "127.0.0.1:6379", Password: "redis-secret"},
+		Admin: AdminAccount{Username: "admin", Password: "initial-password-123"},
 	})
 	if err != nil {
 		t.Fatalf("Apply() error = %v", err)
@@ -48,6 +46,9 @@ func TestApplyServiceCompletesInstallationInSafeOrder(t *testing.T) {
 	wantCalls := []string{"marker.load", "plan", "database.check", "redis.check", "schema.up", "assets.prepare", "identity.initialize", "environment.publish", "marker.create"}
 	if !reflect.DeepEqual(calls, wantCalls) {
 		t.Fatalf("calls = %#v, want %#v", calls, wantCalls)
+	}
+	if planner.request.Mode != "embedded" {
+		t.Fatalf("plan request = %#v, want mode sourced without UI input", planner.request)
 	}
 	if result.State != StateInstalled || result.SelectedUI != installstate.UIAntd || result.Mode != installstate.ModeEmbedded || result.InstalledAt != completedAt {
 		t.Fatalf("result = %#v", result)
@@ -64,7 +65,7 @@ func TestValidateApplyRequestAcceptsOnlyBundledLocalePolicy(t *testing.T) {
 	valid := validApplyRequest()
 	valid.Locale = platformi18n.LocaleEnUS
 	valid.LocaleMode = string(platformi18n.ModeMulti)
-	if _, _, err := validateApplyRequest(valid); err != nil {
+	if _, err := validateApplyRequest(valid); err != nil {
 		t.Fatalf("validate bundled locale policy error = %v", err)
 	}
 	for name, edit := range map[string]func(*ApplyRequest){
@@ -74,7 +75,7 @@ func TestValidateApplyRequestAcceptsOnlyBundledLocalePolicy(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			candidate := valid
 			edit(&candidate)
-			if _, _, err := validateApplyRequest(candidate); !errors.Is(err, ErrInvalidApply) {
+			if _, err := validateApplyRequest(candidate); !errors.Is(err, ErrInvalidApply) {
 				t.Fatalf("validate error = %v, want ErrInvalidApply", err)
 			}
 		})
@@ -142,7 +143,7 @@ func TestApplyServiceKeepsFailedCompensationForExplicitRollback(t *testing.T) {
 
 func validApplyRequest() ApplyRequest {
 	return ApplyRequest{
-		SelectedUI: "antd", Mode: "embedded", ConfirmCleanup: true,
+		Mode:     "embedded",
 		Database: DatabaseConnection{Driver: "mysql", Mode: "single", DSN: "user:secret@tcp(db:3306)/app"},
 		Redis:    RedisConnection{Mode: "single", Addr: "redis:6379"},
 		Admin:    AdminAccount{Username: "admin", Password: "initial-password-123"},
@@ -172,12 +173,14 @@ func (s *applyMarkerStub) Remove(context.Context, installstate.Marker) error {
 }
 
 type applyPlanStub struct {
-	calls *[]string
-	plan  Plan
+	calls   *[]string
+	plan    Plan
+	request PlanRequest
 }
 
-func (s *applyPlanStub) Plan(context.Context, PlanRequest) (Plan, error) {
+func (s *applyPlanStub) Plan(_ context.Context, request PlanRequest) (Plan, error) {
 	*s.calls = append(*s.calls, "plan")
+	s.request = request
 	return s.plan, nil
 }
 
@@ -232,7 +235,7 @@ type applyEnvironmentStub struct {
 	rollbackErr error
 }
 
-func (s *applyEnvironmentStub) Publish(context.Context, ApplyRequest, AssetReceipt) (EnvironmentReceipt, error) {
+func (s *applyEnvironmentStub) Publish(context.Context, ApplyRequest, AssetReceipt, Plan) (EnvironmentReceipt, error) {
 	*s.calls = append(*s.calls, "environment.publish")
 	return EnvironmentReceipt{Digest: strings.Repeat("c", 64)}, nil
 }

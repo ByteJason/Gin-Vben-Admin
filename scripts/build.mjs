@@ -222,7 +222,7 @@ function selectedUis(ui) {
 }
 
 function buildFrontends(ui) {
-  runCommand(process.execPath, ['install/scripts/build.mjs']);
+  runCommand('pnpm', ['--dir', 'admin', '--filter', '@gin-vben-admin/install', 'run', 'build:installer']);
   for (const selected of selectedUis(ui)) {
     runCommand('pnpm', ['--dir', 'admin', 'run', `build:${selected}`]);
   }
@@ -242,7 +242,7 @@ function runStandaloneBuild(ui) {
     buildFrontends(ui);
 
     const uiDist = join(root, 'admin', 'apps', `web-${ui}`, 'dist');
-    const installDist = join(root, 'install', 'dist');
+    const installDist = join(root, 'admin', 'apps', 'install', 'dist');
     if (!statSync(uiDist).isDirectory() || !statSync(installDist).isDirectory()) {
       throw buildError('frontend build did not produce the expected dist directories');
     }
@@ -293,7 +293,7 @@ function runEmbeddedBuild(ui) {
 
   try {
     buildFrontends(ui);
-    const installDist = join(root, 'install', 'dist');
+    const installDist = join(root, 'admin', 'apps', 'install', 'dist');
     if (!statSync(installDist).isDirectory()) {
       throw buildError('installer build did not produce its dist directory');
     }
@@ -389,7 +389,7 @@ function validate(options) {
   }
 
   if (options.mode !== 'api_only') {
-    requirePath('install/package.json');
+    requirePath('admin/apps/install/package.json');
     if (!commandExists('pnpm')) {
       fail('required command is not executable: pnpm', 1);
     }

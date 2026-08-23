@@ -19,7 +19,7 @@ func TestEnvironmentInstallerPublishesAndRollsBackPrivateRootEnv(t *testing.T) {
 	store := NewAtomicEnvStore(path, filepath.Join(root, "install", ".install-backup", "apply"))
 	service := NewEnvironmentInstaller(store, "../install", bytes.NewReader(bytes.Repeat([]byte{0x5a}, 96)))
 	request := installer.ApplyRequest{
-		SelectedUI: "naive", Mode: "embedded", ConfirmCleanup: true,
+		Mode: "embedded",
 		Database: installer.DatabaseConnection{
 			Driver: "postgres", Mode: "single", Host: "127.0.0.1", Port: 5432,
 			Database: "app", Username: "app-user", Password: "database-secret", TLSMode: "disable",
@@ -29,7 +29,7 @@ func TestEnvironmentInstallerPublishesAndRollsBackPrivateRootEnv(t *testing.T) {
 	}
 	receipt, err := service.Publish(context.Background(), request, installer.AssetReceipt{
 		ArtifactHash: strings.Repeat("a", 64), ManifestHash: strings.Repeat("b", 64),
-	})
+	}, installer.Plan{SelectedUI: "naive", Mode: "embedded"})
 	if err != nil {
 		t.Fatalf("Publish() error = %v", err)
 	}
@@ -74,12 +74,12 @@ func TestEnvironmentInstallerPersistsExplicitLocalePolicy(t *testing.T) {
 	store := NewAtomicEnvStore(filepath.Join(root, ".env"), filepath.Join(root, "backup"))
 	service := NewEnvironmentInstaller(store, filepath.Join(root, "install"), bytes.NewReader(bytes.Repeat([]byte{0x2a}, 96)))
 	request := installer.ApplyRequest{
-		SelectedUI: "antd", Mode: "standalone", Locale: "en-US", LocaleMode: "multi", ConfirmCleanup: true,
+		Mode: "standalone", Locale: "en-US", LocaleMode: "multi",
 		Database: installer.DatabaseConnection{Driver: "mysql", Mode: "single", Host: "127.0.0.1", Port: 3306, Database: "app", Username: "app", Password: "database-secret"},
 		Redis:    installer.RedisConnection{Mode: "single", Addr: "127.0.0.1:6379"},
 		Admin:    installer.AdminAccount{Username: "admin", Password: "initial-password-123"},
 	}
-	if _, err := service.Publish(context.Background(), request, installer.AssetReceipt{ArtifactHash: strings.Repeat("a", 64), ManifestHash: strings.Repeat("b", 64)}); err != nil {
+	if _, err := service.Publish(context.Background(), request, installer.AssetReceipt{ArtifactHash: strings.Repeat("a", 64), ManifestHash: strings.Repeat("b", 64)}, installer.Plan{SelectedUI: "antd", Mode: "standalone"}); err != nil {
 		t.Fatalf("Publish() error = %v", err)
 	}
 	contents, err := os.ReadFile(filepath.Join(root, ".env"))

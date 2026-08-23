@@ -14,12 +14,61 @@ const CurrentInstallerVersion = "0.4.0-dev"
 type State string
 
 const (
+	StatePristine     State = "pristine"
+	StateUIPrepared   State = "ui_prepared"
+	StateInstalling   State = "installing"
+	StateInstalled    State = "installed"
+	StateInconsistent State = "inconsistent"
+	// StateUninstalled is retained only by the legacy marker-only constructor.
+	// Profile-aware status responses always use StatePristine instead.
 	StateUninstalled State = "uninstalled"
-	StateInstalled   State = "installed"
 )
 
 type MarkerReader interface {
 	Load(context.Context) (installstate.Marker, bool, error)
+}
+
+// InstallationProfile is the credential-free UI selection prepared by the
+// local initializer. It is read-only from the installation API boundary.
+type InstallationProfile struct {
+	SelectedUI installstate.UI
+	Installing bool
+}
+
+// ProfileProvider returns the initializer's selected UI. exists=false means
+// no profile has been prepared; Installing denotes an active apply job.
+type ProfileProvider interface {
+	Profile(context.Context) (profile InstallationProfile, exists bool, err error)
+}
+
+// InstallationActivity exposes only whether a first-install job currently
+// owns the apply transaction. It deliberately omits job identifiers and input.
+type InstallationActivity interface {
+	InstallationActive() bool
+}
+
+type activityProfileProvider struct {
+	profiles ProfileProvider
+	activity InstallationActivity
+}
+
+// NewActivityProfileProvider decorates a durable UI profile with transient job
+// activity for status reporting. Planning keeps using the undecorated profile,
+// so a running temporary HTTP process does not make the profile unusable.
+func NewActivityProfileProvider(profiles ProfileProvider, activity InstallationActivity) ProfileProvider {
+	return activityProfileProvider{profiles: profiles, activity: activity}
+}
+
+func (p activityProfileProvider) Profile(ctx context.Context) (InstallationProfile, bool, error) {
+	if p.profiles == nil {
+		return InstallationProfile{}, false, errors.New("installation profile provider is not configured")
+	}
+	profile, exists, err := p.profiles.Profile(ctx)
+	if err != nil || !exists {
+		return profile, exists, err
+	}
+	profile.Installing = p.activity != nil && p.activity.InstallationActive()
+	return profile, true, nil
 }
 
 // Status is the public, credential-free installation summary. Artifact and
@@ -36,31 +85,60 @@ type Status struct {
 }
 
 type StatusService struct {
-	markers MarkerReader
+	markers  MarkerReader
+	profiles ProfileProvider
+	legacy   bool
 }
 
+// NewStatusService keeps marker-only embeddings compatible. New initializer
+// runtimes use NewStatusServiceWithProfile for profile/marker consistency.
 func NewStatusService(markers MarkerReader) *StatusService {
-	return &StatusService{markers: markers}
+	return &StatusService{markers: markers, legacy: true}
+}
+
+func NewStatusServiceWithProfile(markers MarkerReader, profiles ProfileProvider) *StatusService {
+	return &StatusService{markers: markers, profiles: profiles}
 }
 
 func (s *StatusService) Status(ctx context.Context) (Status, error) {
 	if s == nil || s.markers == nil {
 		return Status{}, errors.New("installation marker reader is not configured")
 	}
-	marker, installed, err := s.markers.Load(ctx)
+	marker, markerExists, err := s.markers.Load(ctx)
 	if err != nil {
 		return Status{}, fmt.Errorf("read installation marker: %w", err)
 	}
-	if !installed {
-		return Status{
-			State:            StateUninstalled,
-			Installed:        false,
-			SchemaVersion:    installstate.CurrentSchemaVersion,
-			InstallerVersion: CurrentInstallerVersion,
-		}, nil
+	if s.legacy {
+		return statusFromLegacyMarker(marker, markerExists)
+	}
+	if s.profiles == nil {
+		return Status{}, errors.New("installation profile provider is not configured")
+	}
+	profile, profileExists, err := s.profiles.Profile(ctx)
+	if err != nil {
+		return Status{}, fmt.Errorf("read installation profile: %w", err)
+	}
+	if !markerExists && !profileExists {
+		return pristineStatus(), nil
+	}
+	if !profileExists || !validProfile(profile) {
+		return inconsistentStatus(profile), nil
+	}
+	if !markerExists {
+		state := StateUIPrepared
+		if profile.Installing {
+			state = StateInstalling
+		}
+		return Status{State: state, SchemaVersion: installstate.CurrentSchemaVersion, InstallerVersion: CurrentInstallerVersion, SelectedUI: profile.SelectedUI}, nil
 	}
 	if err := marker.Validate(); err != nil {
-		return Status{}, fmt.Errorf("validate installation marker: %w", err)
+		return inconsistentStatus(profile), nil
+	}
+	if marker.SelectedUI != profile.SelectedUI {
+		return inconsistentStatus(profile), nil
+	}
+	if profile.Installing {
+		return Status{State: StateInstalling, SchemaVersion: installstate.CurrentSchemaVersion, InstallerVersion: CurrentInstallerVersion, SelectedUI: profile.SelectedUI}, nil
 	}
 	installedAt := marker.InstalledAt
 	return Status{
@@ -72,4 +150,32 @@ func (s *StatusService) Status(ctx context.Context) (Status, error) {
 		Mode:             marker.Mode,
 		InstalledAt:      &installedAt,
 	}, nil
+}
+
+func statusFromLegacyMarker(marker installstate.Marker, exists bool) (Status, error) {
+	if !exists {
+		return Status{State: StateUninstalled, SchemaVersion: installstate.CurrentSchemaVersion, InstallerVersion: CurrentInstallerVersion}, nil
+	}
+	if err := marker.Validate(); err != nil {
+		return inconsistentStatus(InstallationProfile{}), nil
+	}
+	installedAt := marker.InstalledAt
+	return Status{State: StateInstalled, Installed: true, SchemaVersion: marker.SchemaVersion, InstallerVersion: marker.InstallerVersion, SelectedUI: marker.SelectedUI, Mode: marker.Mode, InstalledAt: &installedAt}, nil
+}
+
+func pristineStatus() Status {
+	return Status{State: StatePristine, SchemaVersion: installstate.CurrentSchemaVersion, InstallerVersion: CurrentInstallerVersion}
+}
+
+func inconsistentStatus(profile InstallationProfile) Status {
+	return Status{State: StateInconsistent, SchemaVersion: installstate.CurrentSchemaVersion, InstallerVersion: CurrentInstallerVersion, SelectedUI: profile.SelectedUI}
+}
+
+func validProfile(profile InstallationProfile) bool {
+	switch profile.SelectedUI {
+	case installstate.UIAntd, installstate.UIEle, installstate.UINaive:
+		return true
+	default:
+		return false
+	}
 }

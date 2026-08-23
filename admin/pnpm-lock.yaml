@@ -602,6 +602,8 @@ importers:
         specifier: 'catalog:'
         version: 3.3.9(typescript@6.0.3)
 
+  apps/install: {}
+
   apps/web-antd:
     dependencies:
       '@vben/access':

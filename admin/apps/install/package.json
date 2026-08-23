@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node ./scripts/build.mjs",
-    "check": "node --check ./src/app.js && node --test ./tests/smoke.test.mjs",
-    "test": "node --test ./tests/smoke.test.mjs"
+    "build:installer": "node ./scripts/build.mjs",
+    "check:installer": "node --check ./src/app.js && node --test ./tests/smoke.test.mjs",
+    "test:installer": "node --test ./tests/smoke.test.mjs"
   },
   "engines": {
     "node": ">=20"

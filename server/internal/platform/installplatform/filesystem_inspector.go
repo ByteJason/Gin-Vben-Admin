@@ -122,11 +122,10 @@ func normalizeInstallPath(value string) (string, error) {
 }
 
 var allowlistedInstallPaths = map[string]bool{
-	"install":              true,
+	"admin/apps/install":   true,
 	"admin/apps/web-antd":  true,
 	"admin/apps/web-ele":   true,
 	"admin/apps/web-naive": true,
-	"admin/apps/web":       true,
 	".env":                 true,
 }
 

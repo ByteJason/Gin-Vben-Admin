@@ -70,8 +70,8 @@ function migrationAssets() {
 
 function installerRetryRollback() {
   const openapi = source("contracts/openapi/install-v1.yaml");
-  const client = source("install/src/app.js");
-  const smoke = run(process.execPath, ["install/tests/smoke.test.mjs"]);
+  const client = source("admin/apps/install/src/app.js");
+  const smoke = run(process.execPath, ["admin/apps/install/tests/smoke.test.mjs"]);
   if (smoke.status !== 0) {
     throw new Error(`installer smoke failed (${smoke.status ?? 1})`);
   }

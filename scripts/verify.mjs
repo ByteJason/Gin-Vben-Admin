@@ -46,9 +46,6 @@ async function run(command, commandArgs, cwd = root) {
 }
 
 const required = [
-  'admin/apps/web-antd',
-  'admin/apps/web-ele',
-  'admin/apps/web-naive',
   'server/cmd/api',
   'server/cmd/migrate',
   'server/internal/bootstrap',
@@ -59,11 +56,11 @@ const required = [
   'contracts/openapi/install-v1.yaml',
   'admin/packages/api-client/package.json',
   'admin/packages/api-client/src/generated/admin-v1.ts',
-  'install/src/index.html',
-  'install/src/app.js',
-  'install/src/styles.css',
-  'install/package.json',
-  'install/pnpm-lock.yaml',
+  'admin/apps/install/src/index.html',
+  'admin/apps/install/src/app.js',
+  'admin/apps/install/src/styles.css',
+  'admin/apps/install/package.json',
+  'admin/pnpm-lock.yaml',
   'deploy/docker-compose.yml',
   'deploy/server.Dockerfile',
   'deploy/admin.Dockerfile',
@@ -73,8 +70,6 @@ const required = [
   'LICENSES/Vue-Vben-Admin-MIT.txt',
   'NOTICE',
 ];
-const existence = await Promise.all(required.map(async (item) => [item, await exists(item)]));
-const missing = existence.filter(([, present]) => !present).map(([item]) => item);
 const allowedRootDirectories = new Set([
   '.dev-docs',
   '.git',
@@ -83,7 +78,6 @@ const allowedRootDirectories = new Set([
   '.pnpm-store',
   '.runtime',
   'LICENSES',
-  'install',
   'admin',
   'contracts',
   'deploy',
@@ -97,7 +91,21 @@ const unexpectedRootDirectories = rootEntries
   .filter((entry) => entry.isDirectory() && !allowedRootDirectories.has(entry.name))
   .map((entry) => entry.name);
 
-const supportedApps = new Set(['web-antd', 'web-ele', 'web-naive']);
+const profilePath = 'admin/.ui-profile.json';
+let expectedManagementApps = ['web-antd', 'web-ele', 'web-naive'];
+if (await exists(profilePath)) {
+  const profile = JSON.parse(await text(profilePath));
+  if (!['antd', 'ele', 'naive'].includes(profile.selectedUi) || profile.appDirectory !== `apps/web-${profile.selectedUi}` || profile.packageName !== `@vben/web-${profile.selectedUi}`) {
+    console.error('VERIFY_FAILED ui_profile=invalid');
+    process.exit(1);
+  }
+  expectedManagementApps = [`web-${profile.selectedUi}`];
+}
+for (const app of expectedManagementApps) required.push(`admin/apps/${app}`);
+const existence = await Promise.all(required.map(async (item) => [item, await exists(item)]));
+const missing = existence.filter(([, present]) => !present).map(([item]) => item);
+
+const supportedApps = new Set(['install', ...expectedManagementApps]);
 const appEntries = await readdir(path.join(root, 'admin/apps'), { withFileTypes: true });
 const unexpectedApps = appEntries
   .filter((entry) => entry.isDirectory() && !supportedApps.has(entry.name))

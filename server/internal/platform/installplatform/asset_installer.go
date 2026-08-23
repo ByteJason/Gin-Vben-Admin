@@ -33,20 +33,15 @@ type AssetInstaller struct {
 	mutex      sync.Mutex
 }
 
+// assetTransactionManifest is a rollback receipt for the selected build. UI
+// source movement belongs exclusively to admin/scripts/init.mjs; the server
+// preserves the selected package directory and package name.
 type assetTransactionManifest struct {
 	SchemaVersion int               `json:"schema_version"`
 	Reference     string            `json:"reference"`
 	SelectedUI    installstate.UI   `json:"selected_ui"`
 	Mode          installstate.Mode `json:"mode"`
 	ArtifactHash  string            `json:"artifact_hash"`
-	SelectedFrom  string            `json:"selected_from"`
-	SelectedTo    string            `json:"selected_to"`
-	Staged        []assetStagedPath `json:"staged"`
-}
-
-type assetStagedPath struct {
-	Source string `json:"source"`
-	Backup string `json:"backup"`
 }
 
 func NewAssetInstaller(root, backupRoot string, builder AssetBuilder, randomSource io.Reader) *AssetInstaller {
@@ -69,25 +64,7 @@ func (s *AssetInstaller) Prepare(ctx context.Context, plan installer.Plan) (inst
 		return installer.AssetReceipt{}, err
 	}
 	root, backupRoot, err := s.validatedRoots()
-	if err != nil {
-		return installer.AssetReceipt{}, ErrAssetInstallation
-	}
-	if !validAssetSelection(plan.SelectedUI, plan.Mode) {
-		return installer.AssetReceipt{}, ErrAssetInstallation
-	}
-	selected := "admin/apps/web-" + string(plan.SelectedUI)
-	target := "admin/apps/web"
-	staged := make([]assetStagedPath, 0, 2)
-	for _, candidate := range []string{"antd", "ele", "naive"} {
-		relative := "admin/apps/web-" + candidate
-		if err := requirePlainDirectory(filepath.Join(root, filepath.FromSlash(relative))); err != nil {
-			return installer.AssetReceipt{}, ErrAssetInstallation
-		}
-		if relative != selected {
-			staged = append(staged, assetStagedPath{Source: relative, Backup: relative})
-		}
-	}
-	if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(target))); err == nil || !errors.Is(err, os.ErrNotExist) {
+	if err != nil || !validAssetSelection(plan.SelectedUI, plan.Mode) || !selectedProfileLayout(root, plan.SelectedUI) {
 		return installer.AssetReceipt{}, ErrAssetInstallation
 	}
 
@@ -109,8 +86,11 @@ func (s *AssetInstaller) Prepare(ctx context.Context, plan installer.Plan) (inst
 		return installer.AssetReceipt{}, ErrAssetInstallation
 	}
 	manifest := assetTransactionManifest{
-		SchemaVersion: 1, Reference: reference, SelectedUI: plan.SelectedUI, Mode: plan.Mode,
-		ArtifactHash: artifactHash, SelectedFrom: selected, SelectedTo: target, Staged: staged,
+		SchemaVersion: 1,
+		Reference:     reference,
+		SelectedUI:    plan.SelectedUI,
+		Mode:          plan.Mode,
+		ArtifactHash:  artifactHash,
 	}
 	encoded, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
@@ -124,15 +104,11 @@ func (s *AssetInstaller) Prepare(ctx context.Context, plan installer.Plan) (inst
 		return installer.AssetReceipt{}, ErrAssetInstallation
 	}
 	digest := sha256.Sum256(encoded)
-	receipt := installer.AssetReceipt{
-		ArtifactHash: artifactHash, ManifestHash: hex.EncodeToString(digest[:]), Reference: reference,
-	}
-
-	if err := stageAssetTransaction(root, transactionDir, manifest); err != nil {
-		_ = restoreAssetTransaction(root, transactionDir, manifest)
-		return installer.AssetReceipt{}, ErrAssetInstallation
-	}
-	return receipt, nil
+	return installer.AssetReceipt{
+		ArtifactHash: artifactHash,
+		ManifestHash: hex.EncodeToString(digest[:]),
+		Reference:    reference,
+	}, nil
 }
 
 func (s *AssetInstaller) Rollback(ctx context.Context, receipt installer.AssetReceipt) error {
@@ -145,22 +121,30 @@ func (s *AssetInstaller) Rollback(ctx context.Context, receipt installer.AssetRe
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	root, backupRoot, err := s.validatedRoots()
+	_, backupRoot, err := s.validatedRoots()
 	if err != nil {
 		return ErrAssetInstallation
 	}
 	transactionDir := filepath.Join(backupRoot, receipt.Reference)
-	encoded, exists, err := readRegularFile(filepath.Join(transactionDir, "transaction.json"), maxAssetManifestBytes)
+	manifestPath := filepath.Join(transactionDir, "transaction.json")
+	encoded, exists, err := readRegularFile(manifestPath, maxAssetManifestBytes)
 	if err != nil || !exists || digestBytes(encoded) != receipt.ManifestHash {
 		return ErrAssetInstallation
 	}
 	var manifest assetTransactionManifest
 	decoder := json.NewDecoder(strings.NewReader(string(encoded)))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&manifest); err != nil || !validAssetManifest(manifest, receipt) {
+	if err := decoder.Decode(&manifest); err != nil || ensureJSONEnd(decoder) != nil || !validAssetManifest(manifest, receipt) {
 		return ErrAssetInstallation
 	}
-	if err := restoreAssetTransaction(root, transactionDir, manifest); err != nil {
+	entries, err := os.ReadDir(transactionDir)
+	if err != nil || len(entries) != 1 || entries[0].Name() != "transaction.json" || !entries[0].Type().IsRegular() {
+		return ErrAssetInstallation
+	}
+	if err := os.Remove(manifestPath); err != nil {
+		return ErrAssetInstallation
+	}
+	if err := os.Remove(transactionDir); err != nil {
 		return ErrAssetInstallation
 	}
 	return nil
@@ -182,70 +166,24 @@ func (s *AssetInstaller) validatedRoots() (string, string, error) {
 	return root, backupRoot, nil
 }
 
-func stageAssetTransaction(root, transactionDir string, manifest assetTransactionManifest) error {
-	for _, entry := range manifest.Staged {
-		source := filepath.Join(root, filepath.FromSlash(entry.Source))
-		backup := filepath.Join(transactionDir, filepath.FromSlash(entry.Backup))
-		if err := os.MkdirAll(filepath.Dir(backup), 0o700); err != nil {
-			return err
-		}
-		if err := os.Rename(source, backup); err != nil {
-			return err
-		}
+func selectedProfileLayout(root string, selected installstate.UI) bool {
+	selectedPath := filepath.Join(root, "admin", "apps", "web-"+string(selected))
+	if err := requirePlainDirectory(selectedPath); err != nil {
+		return false
 	}
-	return os.Rename(
-		filepath.Join(root, filepath.FromSlash(manifest.SelectedFrom)),
-		filepath.Join(root, filepath.FromSlash(manifest.SelectedTo)),
-	)
-}
-
-func restoreAssetTransaction(root, transactionDir string, manifest assetTransactionManifest) error {
-	selectedFrom := filepath.Join(root, filepath.FromSlash(manifest.SelectedFrom))
-	selectedTo := filepath.Join(root, filepath.FromSlash(manifest.SelectedTo))
-	if err := restoreRenamedDirectory(selectedTo, selectedFrom); err != nil {
-		return err
-	}
-	for index := len(manifest.Staged) - 1; index >= 0; index-- {
-		entry := manifest.Staged[index]
-		backup := filepath.Join(transactionDir, filepath.FromSlash(entry.Backup))
-		source := filepath.Join(root, filepath.FromSlash(entry.Source))
-		if err := restoreRenamedDirectory(backup, source); err != nil {
-			return err
+	for _, candidate := range []installstate.UI{installstate.UIAntd, installstate.UIEle, installstate.UINaive} {
+		if candidate == selected {
+			continue
+		}
+		_, err := os.Lstat(filepath.Join(root, "admin", "apps", "web-"+string(candidate)))
+		if err == nil || !errors.Is(err, os.ErrNotExist) {
+			return false
 		}
 	}
-	if err := os.Remove(filepath.Join(transactionDir, "transaction.json")); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
+	if _, err := os.Lstat(filepath.Join(root, "admin", "apps", "web")); err == nil || !errors.Is(err, os.ErrNotExist) {
+		return false
 	}
-	if err := os.RemoveAll(transactionDir); err != nil {
-		return err
-	}
-	return nil
-}
-
-func restoreRenamedDirectory(from, to string) error {
-	fromInfo, fromErr := os.Lstat(from)
-	toInfo, toErr := os.Lstat(to)
-	fromExists := fromErr == nil
-	toExists := toErr == nil
-	if fromExists && (!fromInfo.IsDir() || fromInfo.Mode()&os.ModeSymlink != 0) {
-		return errors.New("restore source is not a plain directory")
-	}
-	if toExists && (!toInfo.IsDir() || toInfo.Mode()&os.ModeSymlink != 0) {
-		return errors.New("restore target is not a plain directory")
-	}
-	switch {
-	case fromExists && !toExists:
-		if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
-			return err
-		}
-		return os.Rename(from, to)
-	case !fromExists && toExists:
-		return nil
-	case fromExists && toExists:
-		return errors.New("both restore source and target exist")
-	default:
-		return errors.New("both restore source and target are missing")
-	}
+	return true
 }
 
 func requirePlainDirectory(path string) error {
@@ -274,21 +212,10 @@ func validAssetSelection(ui installstate.UI, mode installstate.Mode) bool {
 }
 
 func validAssetManifest(manifest assetTransactionManifest, receipt installer.AssetReceipt) bool {
-	if manifest.SchemaVersion != 1 || manifest.Reference != receipt.Reference || manifest.ArtifactHash != receipt.ArtifactHash || !validAssetSelection(manifest.SelectedUI, manifest.Mode) {
-		return false
-	}
-	expectedSelected := "admin/apps/web-" + string(manifest.SelectedUI)
-	if manifest.SelectedFrom != expectedSelected || manifest.SelectedTo != "admin/apps/web" || len(manifest.Staged) != 2 {
-		return false
-	}
-	allowed := map[string]bool{"admin/apps/web-antd": true, "admin/apps/web-ele": true, "admin/apps/web-naive": true}
-	for _, entry := range manifest.Staged {
-		if !allowed[entry.Source] || entry.Backup != entry.Source || entry.Source == expectedSelected {
-			return false
-		}
-		delete(allowed, entry.Source)
-	}
-	return true
+	return manifest.SchemaVersion == 1 &&
+		manifest.Reference == receipt.Reference &&
+		manifest.ArtifactHash == receipt.ArtifactHash &&
+		validAssetSelection(manifest.SelectedUI, manifest.Mode)
 }
 
 func validAssetReference(value string) bool {

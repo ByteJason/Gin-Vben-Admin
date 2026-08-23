@@ -120,7 +120,7 @@ func RegisterRoutes(router gin.IRouter, handler *Handler) {
 		}
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 8<<10)
 		var request installer.PlanRequest
-		if err := c.ShouldBindJSON(&request); err != nil {
+		if !decodePlanRequest(c, &request) {
 			response.Error(c, http.StatusBadRequest, 10000, "invalid installation plan")
 			return
 		}
@@ -264,6 +264,12 @@ func decodeApplyRequest(c *gin.Context, request *installer.ApplyRequest) bool {
 		request.LocaleMode = string(platformi18n.ModeSingle)
 	}
 	return true
+}
+
+func decodePlanRequest(c *gin.Context, request *installer.PlanRequest) bool {
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	return decoder.Decode(request) == nil && jsonDocumentEnded(decoder)
 }
 
 func decodeRollbackRequest(c *gin.Context, request *installer.RollbackRequest) bool {

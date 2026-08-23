@@ -200,6 +200,7 @@ redis:
   ping_timeout: 4s
 install:
   state_dir: ./yaml-install-state
+  workspace_root: ./yaml-workspace
 `)
 	t.Setenv("SERVER_ADDR", "127.0.0.1:9090")
 	t.Setenv("LOGGING_LEVEL", "debug")
@@ -229,6 +230,9 @@ install:
 	}
 	if got := cfg.Install.StateDir; got == "./yaml-install-state" || !filepath.IsAbs(got) {
 		t.Fatalf("INSTALL_STATE_DIR did not override YAML: %q", got)
+	}
+	if got, want := cfg.Install.WorkspaceRoot, "./yaml-workspace"; got != want {
+		t.Fatalf("install.workspace_root = %q, want %q", got, want)
 	}
 }
 
@@ -260,10 +264,13 @@ func TestLoadReadsRootDotEnvBetweenYAMLAndProcessEnvironment(t *testing.T) {
 	}
 }
 
-func TestInstallConfigUsesRootInstallDirectoryAndSafeSummaryHidesPath(t *testing.T) {
+func TestInstallConfigSeparatesInstallerStateAndWorkspaceRoot(t *testing.T) {
 	cfg := Default()
-	if got, want := filepath.Clean(cfg.Install.StateDir), filepath.Clean("../install"); got != want {
+	if got, want := filepath.Clean(cfg.Install.StateDir), filepath.Clean("../admin/apps/install"); got != want {
 		t.Fatalf("default install.state_dir = %q, want %q", got, want)
+	}
+	if got, want := filepath.Clean(cfg.Install.WorkspaceRoot), filepath.Clean(".."); got != want {
+		t.Fatalf("default install.workspace_root = %q, want %q", got, want)
 	}
 	if got, want := cfg.Install.MarkerPath(), filepath.Join(cfg.Install.StateDir, ".installed"); got != want {
 		t.Fatalf("MarkerPath() = %q, want %q", got, want)
@@ -271,12 +278,13 @@ func TestInstallConfigUsesRootInstallDirectoryAndSafeSummaryHidesPath(t *testing
 
 	privatePath := filepath.Join(t.TempDir(), "private-state")
 	cfg.Install.StateDir = privatePath
+	cfg.Install.WorkspaceRoot = filepath.Join(t.TempDir(), "private-workspace")
 	encoded, err := json.Marshal(cfg.SafeSummary())
 	if err != nil {
 		t.Fatalf("marshal SafeSummary() = %v", err)
 	}
-	if strings.Contains(string(encoded), privatePath) {
-		t.Fatalf("SafeSummary leaked install state path: %s", encoded)
+	if strings.Contains(string(encoded), privatePath) || strings.Contains(string(encoded), cfg.Install.WorkspaceRoot) {
+		t.Fatalf("SafeSummary leaked install path: %s", encoded)
 	}
 }
 
@@ -290,6 +298,11 @@ func TestInstallConfigRejectsEmptyAndFilesystemRoot(t *testing.T) {
 		cfg.Install.StateDir = stateDir
 		if err := cfg.Validate(); err == nil {
 			t.Fatalf("Validate() with install.state_dir %q error = nil", stateDir)
+		}
+		cfg = Default()
+		cfg.Install.WorkspaceRoot = stateDir
+		if err := cfg.Validate(); err == nil {
+			t.Fatalf("Validate() with install.workspace_root %q error = nil", stateDir)
 		}
 	}
 }

@@ -371,10 +371,27 @@ h1 {
   gap: 7px;
 }
 
-.form-field label {
+.form-field label,
+.field-label {
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 700;
+}
+
+.readonly-field {
+  align-content: start;
+}
+
+.readonly-summary {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 12px;
+  color: var(--ink);
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--line));
+  border-radius: 10px;
+  font-weight: 750;
 }
 
 .form-field select,

@@ -87,6 +87,10 @@ func New(cfg config.Config) (*App, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("validate runtime configuration: %w", err)
 	}
+	profiles, err := installplatform.NewFileProfileProvider(cfg.Install.WorkspaceRoot)
+	if err != nil {
+		return nil, fmt.Errorf("configure installation UI profile: %w", err)
+	}
 
 	app := &App{config: cfg}
 	observability, err := observabilityplatform.NewManager(cfg.Observability)
@@ -95,7 +99,8 @@ func New(cfg config.Config) (*App, error) {
 	}
 	app.observability = observability
 	app.closers = append(app.closers, observability)
-	app.install = installer.NewStatusService(installplatform.NewFileMarkerStore(cfg.Install.MarkerPath()))
+	markers := installplatform.NewFileMarkerStore(cfg.Install.MarkerPath())
+	app.install = installer.NewStatusServiceWithProfile(markers, profiles)
 	cleanupOnError := func(cause error) (*App, error) {
 		_ = closeResources(app.closers)
 		return nil, cause
@@ -283,9 +288,9 @@ func New(cfg config.Config) (*App, error) {
 	}
 	var installPlan installer.PlanProvider
 	var applyService *installer.ApplyService
-	if workspaceRoot, err := installWorkspaceRoot(cfg.Install.StateDir); err == nil {
+	if workspaceRoot, err := filepath.Abs(cfg.Install.WorkspaceRoot); err == nil {
 		if inspector, inspectorErr := installplatform.NewFileSystemInspector(workspaceRoot); inspectorErr == nil {
-			installPlan = installer.NewPlanService(inspector)
+			installPlan = installer.NewPlanServiceWithProfile(inspector, profiles)
 			if _, scriptErr := os.Stat(filepath.Join(workspaceRoot, "scripts", "build.mjs")); scriptErr == nil {
 				envStore := installplatform.NewAtomicEnvStore(
 					filepath.Join(workspaceRoot, ".env"),
@@ -313,6 +318,7 @@ func New(cfg config.Config) (*App, error) {
 	if applyService != nil {
 		app.applyJobs = installer.NewApplyJobService(applyService)
 		app.closers = append(app.closers, app.applyJobs)
+		app.install = installer.NewStatusServiceWithProfile(markers, installer.NewActivityProfileProvider(profiles, app.applyJobs))
 	}
 	var captchaProvider appauth.CaptchaProvider
 	var captchaRisk appauth.CaptchaRiskStore
@@ -322,14 +328,6 @@ func New(cfg config.Config) (*App, error) {
 	}
 	app.http = newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasksAndRunsAndImportExport(cfg, app.readiness, app.auth, limiter, app.iam, recovery, app.install, installPlan, installplatform.NewSystemDependencyProbe(), applyService, app.applyJobs, app.settings, app.audit, captchaProvider, captchaRisk, app.files, app.mail, app.monitor, app.dictionary, app.tasks, app.taskRuns, app.importExport, app.observability)
 	return app, nil
-}
-
-func installWorkspaceRoot(stateDir string) (string, error) {
-	abs, err := filepath.Abs(stateDir)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Dir(abs), nil
 }
 
 // Config returns a copy of the validated runtime configuration.

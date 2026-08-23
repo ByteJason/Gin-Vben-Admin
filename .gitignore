@@ -146,15 +146,19 @@ __debug_bin*
 /server/configs/*.local.*
 
 # Installation workspace runtime state and generated assets
-/install/.installed
-/install/.installed.lock
-/install/.install-state/
-/install/.install-backup/
-/install/.env-backup/
-/install/.dist-staging-*/
-/install/dist/
+/admin/apps/install/.install-state/
+/admin/apps/install/.install-backup/
+/admin/apps/install/.env-backup/
+/admin/apps/install/.dist-staging-*/
 /server/internal/platform/webassets/.dist-staging-*/
 /server/internal/platform/webassets/.dist-backup-*/
+
+# Admin UI initialization state and reversible template transaction.
+/admin/.ui-init-transaction.json
+/admin/.ui-init-receipt.json
+/admin/.ui-init-runtime.json
+/admin/apps/install/.installed
+/admin/apps/install/.installed.lock
 
 # Local Docker overrides and volumes
 compose.override.yaml

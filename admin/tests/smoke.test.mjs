@@ -4,14 +4,17 @@ import { resolve } from 'node:path';
 import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '..');
-const requiredApps = ['web-antd', 'web-ele', 'web-naive'];
+const profilePath = resolve(root, '.ui-profile.json');
+const requiredApps = existsSync(profilePath)
+  ? [`web-${JSON.parse(readFileSync(profilePath, 'utf8')).selectedUi}`]
+  : ['web-antd', 'web-ele', 'web-naive'];
 
 test('workspace exposes the supported UI templates', () => {
   const apps = readdirSync(resolve(root, 'apps'), { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
     .sort();
-  assert.deepEqual(apps, [...requiredApps].sort());
+  assert.deepEqual(apps, ['install', ...requiredApps].sort());
 });
 
 test('workspace has the expected package layout', () => {

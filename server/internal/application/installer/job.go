@@ -29,7 +29,7 @@ const (
 type ApplyJob struct {
 	ID          string            `json:"id"`
 	State       JobState          `json:"state"`
-	SelectedUI  installstate.UI   `json:"selectedUi"`
+	SelectedUI  installstate.UI   `json:"selectedUi,omitempty"`
 	Mode        installstate.Mode `json:"mode"`
 	CurrentStep string            `json:"currentStep"`
 	Progress    int               `json:"progress"`
@@ -101,7 +101,7 @@ func (s *ApplyJobService) Start(ctx context.Context, request ApplyRequest) (Appl
 	if err := ctx.Err(); err != nil {
 		return ApplyJob{}, err
 	}
-	ui, mode, err := validateApplyRequest(request)
+	mode, err := validateApplyRequest(request)
 	if err != nil {
 		return ApplyJob{}, err
 	}
@@ -125,7 +125,7 @@ func (s *ApplyJobService) Start(ctx context.Context, request ApplyRequest) (Appl
 	}
 	now := s.now().UTC()
 	job := ApplyJob{
-		ID: id, State: JobRunning, SelectedUI: ui, Mode: mode,
+		ID: id, State: JobRunning, Mode: mode,
 		CurrentStep: "queued", Progress: 0, LastUpdated: now,
 	}
 	s.jobs[id] = job
@@ -157,6 +157,19 @@ func (s *ApplyJobService) Progress(ctx context.Context, id string) (ApplyJob, er
 		return ApplyJob{}, ErrJobNotFound
 	}
 	return cloneApplyJob(job), nil
+}
+
+// InstallationActive reports whether an apply job currently owns the first-
+// install transaction. It is a credential-free status seam used by the public
+// five-state installation summary.
+func (s *ApplyJobService) InstallationActive() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	job, ok := s.jobs[s.active]
+	return ok && job.State == JobRunning
 }
 
 func (s *ApplyJobService) Retry(ctx context.Context, id string, request ApplyRequest) (ApplyJob, error) {

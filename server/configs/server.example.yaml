@@ -22,9 +22,10 @@ observability:
   otlp_api_key: ""
 
 install:
-  # Source development resolves this from server/ to the root install/ workspace.
+  # Installer state is separate from the repository workspace.
   # Container deployments should set INSTALL_STATE_DIR to a persistent volume.
-  state_dir: ../install
+  state_dir: ../admin/apps/install
+  workspace_root: ..
 
 tenant:
   # single keeps the default tenant boundary; multi requires X-Tenant-ID on

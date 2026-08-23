@@ -11,15 +11,12 @@ import (
 type PlanAction string
 
 const (
-	ActionKeep   PlanAction = "keep"
-	ActionRemove PlanAction = "remove"
-	ActionCreate PlanAction = "create"
-	ActionWrite  PlanAction = "write"
+	ActionKeep  PlanAction = "keep"
+	ActionWrite PlanAction = "write"
 )
 
 type PlanRequest struct {
-	SelectedUI string `json:"selectedUi"`
-	Mode       string `json:"mode"`
+	Mode string `json:"mode"`
 }
 
 type PathPermission struct {
@@ -61,30 +58,39 @@ type PlanProvider interface {
 
 type PlanService struct {
 	inspector PathInspector
+	profiles  ProfileProvider
 }
 
 func NewPlanService(inspector PathInspector) *PlanService {
 	return &PlanService{inspector: inspector}
 }
 
+// NewPlanServiceWithProfile takes UI selection from the read-only initializer
+// profile; clients provide only a requested runtime mode.
+func NewPlanServiceWithProfile(inspector PathInspector, profiles ProfileProvider) *PlanService {
+	return &PlanService{inspector: inspector, profiles: profiles}
+}
+
 func (s *PlanService) Plan(ctx context.Context, request PlanRequest) (Plan, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	selectedUI, mode, err := validatePlanRequest(request)
+	mode, err := validatePlanRequest(request)
 	if err != nil {
 		return Plan{}, err
 	}
-	if s == nil || s.inspector == nil {
+	if s == nil || s.inspector == nil || s.profiles == nil {
 		return Plan{}, errors.New("installation path inspector is not configured")
 	}
+	profile, exists, err := s.profiles.Profile(ctx)
+	if err != nil || !exists || !validProfile(profile) || profile.Installing {
+		return Plan{}, errors.New("installation UI profile is not ready")
+	}
+	selectedUI := profile.SelectedUI
 
 	paths := []string{
-		"install",
-		"admin/apps/web-antd",
-		"admin/apps/web-ele",
-		"admin/apps/web-naive",
-		"admin/apps/web",
+		"admin/apps/install",
+		"admin/apps/web-" + string(selectedUI),
 		".env",
 	}
 	selectedPath := "admin/apps/web-" + string(selectedUI)
@@ -111,23 +117,13 @@ func (s *PlanService) Plan(ctx context.Context, request PlanRequest) (Plan, erro
 		plan.Entries = append(plan.Entries, entry)
 
 		switch action {
-		case ActionRemove:
-			if !permission.CanRead || !permission.CanRename || !permission.CanDelete {
-				plan.CanCleanup = false
-				plan.Reasons = appendPlanReasons(plan.Reasons, path, permission.Reasons, "cleanup_not_available")
-			}
-		case ActionCreate:
-			if !permission.CanCreate || !permission.CanRename {
-				plan.CanCleanup = false
-				plan.Reasons = appendPlanReasons(plan.Reasons, path, permission.Reasons, "target_not_writable")
-			}
 		case ActionWrite:
 			if !permission.CanWrite || !permission.CanCreate || !permission.CanRename {
 				plan.CanWriteEnv = false
 				plan.Reasons = appendPlanReasons(plan.Reasons, path, permission.Reasons, "configuration_not_writable")
 			}
 		case ActionKeep:
-			if (path == "install" || path == selectedPath) && !permission.CanRead {
+			if (path == "admin/apps/install" || path == selectedPath) && !permission.CanRead {
 				plan.CanBuild = false
 				plan.Reasons = appendPlanReasons(plan.Reasons, path, permission.Reasons, "build_input_not_readable")
 			}
@@ -136,32 +132,22 @@ func (s *PlanService) Plan(ctx context.Context, request PlanRequest) (Plan, erro
 	return plan, nil
 }
 
-func validatePlanRequest(request PlanRequest) (installstate.UI, installstate.Mode, error) {
-	ui := installstate.UI(request.SelectedUI)
-	switch ui {
-	case installstate.UIAntd, installstate.UIEle, installstate.UINaive:
-	default:
-		return "", "", fmt.Errorf("unsupported management UI %q", request.SelectedUI)
-	}
+func validatePlanRequest(request PlanRequest) (installstate.Mode, error) {
 	mode := installstate.Mode(request.Mode)
 	switch mode {
 	case installstate.ModeEmbedded, installstate.ModeStandalone, installstate.ModeAPIOnly, installstate.ModeDev:
 	default:
-		return "", "", fmt.Errorf("unsupported UI mode %q", request.Mode)
+		return "", fmt.Errorf("unsupported UI mode %q", request.Mode)
 	}
-	return ui, mode, nil
+	return mode, nil
 }
 
 func actionForPath(path, selectedPath string) PlanAction {
 	switch {
-	case path == "install" || path == selectedPath:
-		return ActionKeep
-	case path == "admin/apps/web":
-		return ActionCreate
 	case path == ".env":
 		return ActionWrite
 	default:
-		return ActionRemove
+		return ActionKeep
 	}
 }
 

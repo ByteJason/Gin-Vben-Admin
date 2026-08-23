@@ -345,7 +345,7 @@ components:
       properties:
         state:
           type: string
-          enum: [uninstalled, installed]
+          enum: [pristine, ui_prepared, installing, installed, inconsistent]
         installed:
           type: boolean
         schemaVersion:
@@ -356,6 +356,7 @@ components:
         selectedUi:
           type: string
           enum: [antd, ele, naive]
+          readOnly: true
         mode:
           type: string
           enum: [embedded, standalone, api_only, dev]
@@ -386,12 +387,9 @@ components:
           type: string
     PlanRequest:
       type: object
-      required: [selectedUi, mode]
+      required: [mode]
       additionalProperties: false
       properties:
-        selectedUi:
-          type: string
-          enum: [antd, ele, naive]
         mode:
           type: string
           enum: [embedded, standalone, api_only, dev]
@@ -423,6 +421,7 @@ components:
           enum: [embedded, standalone, api_only, dev]
         canCleanup:
           type: boolean
+          description: 已由命令行初始化完成的模板暂存状态，保留以兼容安装计划摘要。
         canBuild:
           type: boolean
         canWriteEnv:
@@ -445,7 +444,7 @@ components:
           type: string
         action:
           type: string
-          enum: [keep, remove, create, write]
+          enum: [keep, write]
         permission:
           $ref: '#/components/schemas/PathPermission'
     PathPermission:
@@ -616,11 +615,8 @@ components:
     ApplyRequest:
       type: object
       additionalProperties: false
-      required: [selectedUi, mode, database, redis, admin, confirmCleanup]
+      required: [mode, database, redis, admin]
       properties:
-        selectedUi:
-          type: string
-          enum: [antd, ele, naive]
         mode:
           type: string
           enum: [embedded, standalone, api_only, dev]
@@ -640,9 +636,6 @@ components:
           $ref: '#/components/schemas/RedisConnection'
         admin:
           $ref: '#/components/schemas/AdminAccount'
-        confirmCleanup:
-          type: boolean
-          const: true
     AdminAccount:
       type: object
       additionalProperties: false
@@ -692,7 +685,7 @@ components:
           $ref: '#/components/schemas/ResponseMeta'
     ApplyJob:
       type: object
-      required: [id, state, selectedUi, mode, currentStep, progress, steps, canRetry, canRollback, lastUpdated]
+      required: [id, state, mode, currentStep, progress, steps, canRetry, canRollback, lastUpdated]
       properties:
         id:
           type: string
@@ -702,6 +695,7 @@ components:
         selectedUi:
           type: string
           enum: [antd, ele, naive]
+          readOnly: true
         mode:
           type: string
           enum: [embedded, standalone, api_only, dev]

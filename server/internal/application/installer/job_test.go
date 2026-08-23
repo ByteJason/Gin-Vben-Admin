@@ -50,14 +50,22 @@ func TestApplyJobRejectsConcurrentStart(t *testing.T) {
 		return ApplyResult{State: StateInstalled}, nil
 	}}
 	service := NewApplyJobService(runner)
-	if _, err := service.Start(context.Background(), validApplyRequest()); err != nil {
+	job, err := service.Start(context.Background(), validApplyRequest())
+	if err != nil {
 		t.Fatalf("first Start() error = %v", err)
 	}
 	<-started
+	if !service.InstallationActive() {
+		t.Fatal("InstallationActive() = false while runner is blocked")
+	}
 	if _, err := service.Start(context.Background(), validApplyRequest()); !errors.Is(err, ErrApplyBusy) {
 		t.Fatalf("second Start() error = %v, want ErrApplyBusy", err)
 	}
 	close(release)
+	waitForJob(t, service, job.ID, JobCompleted)
+	if service.InstallationActive() {
+		t.Fatal("InstallationActive() = true after runner completed")
+	}
 }
 
 func TestApplyJobRetryRequiresFailedJob(t *testing.T) {

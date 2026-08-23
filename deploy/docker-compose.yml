@@ -83,7 +83,7 @@ services:
       context: ..
       dockerfile: deploy/admin.Dockerfile
       args:
-        UI_APP: ${UI_APP:-web-antd}
+        ADMIN_UI: ${ADMIN_UI:-}
     restart: unless-stopped
     ports:
       - "${ADMIN_PORT:-5173}:80"

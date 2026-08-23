@@ -11,7 +11,8 @@ test.beforeEach(async ({ page }) => {
           installed: false,
           installerVersion: '0.4.0-dev',
           schemaVersion: 1,
-          state: 'uninstalled',
+          selectedUi: 'naive',
+          state: 'ui_prepared',
         }
       : pathname.endsWith('/capabilities')
         ? {
@@ -41,6 +42,8 @@ test('critical page is keyboard reachable, responsive, and axe clean', async ({
   if (installer) {
     await expect(page.locator('#status-title')).toHaveText('安装服务已就绪');
     await expect(page.locator('#selection-panel')).toBeVisible();
+    await expect(page.locator('#selected-ui-summary')).toHaveText('Naive UI');
+    await expect(page.locator('#ui-choice')).toHaveCount(0);
   } else {
     await expect(page.locator('input')).not.toHaveCount(0);
   }

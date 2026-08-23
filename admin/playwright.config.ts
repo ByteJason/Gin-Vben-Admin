@@ -59,7 +59,7 @@ export default defineConfig({
     },
     {
       command:
-        'node ./tests/e2e/static-server.mjs --root ../install/dist --mount /install --port 4176',
+        'node ./tests/e2e/static-server.mjs --root ./apps/install/dist --mount /install --port 4176',
       url: 'http://127.0.0.1:4176/install',
       reuseExistingServer: !process.env.CI,
     },

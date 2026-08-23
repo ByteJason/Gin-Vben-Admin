@@ -18,6 +18,7 @@ export default defineConfig({
     exclude: [
       ...configDefaults.exclude,
       '**/e2e/**',
+      '**/*.test.mjs',
       '**/dist/**',
       '**/.{idea,git,cache,output,temp}/**',
       '**/node_modules/**',

@@ -36,7 +36,7 @@ func NewEnvironmentInstaller(store *AtomicEnvStore, stateDir string, randomSourc
 	}
 }
 
-func (s *EnvironmentInstaller) Publish(ctx context.Context, request installer.ApplyRequest, _ installer.AssetReceipt) (installer.EnvironmentReceipt, error) {
+func (s *EnvironmentInstaller) Publish(ctx context.Context, request installer.ApplyRequest, _ installer.AssetReceipt, plan installer.Plan) (installer.EnvironmentReceipt, error) {
 	if s == nil || s.store == nil || s.random == nil || s.stateDir == "" {
 		return installer.EnvironmentReceipt{}, ErrEnvironmentInstallation
 	}
@@ -46,7 +46,7 @@ func (s *EnvironmentInstaller) Publish(ctx context.Context, request installer.Ap
 	if err := ctx.Err(); err != nil {
 		return installer.EnvironmentReceipt{}, err
 	}
-	if !validEnvironmentSelection(request.SelectedUI, request.Mode) {
+	if !validEnvironmentSelection(string(plan.SelectedUI), string(plan.Mode)) || request.Mode != string(plan.Mode) {
 		return installer.EnvironmentReceipt{}, ErrEnvironmentInstallation
 	}
 	locale := strings.TrimSpace(request.Locale)
@@ -79,8 +79,8 @@ func (s *EnvironmentInstaller) Publish(ctx context.Context, request installer.Ap
 	}
 
 	values := map[string]string{
-		"APP_UI_ACTIVE":                request.SelectedUI,
-		"APP_UI_MODE":                  request.Mode,
+		"APP_UI_ACTIVE":                string(plan.SelectedUI),
+		"APP_UI_MODE":                  string(plan.Mode),
 		"I18N_MODE":                    localeMode,
 		"I18N_DEFAULT_LOCALE":          locale,
 		"I18N_SUPPORTED_LOCALES":       strings.Join(localeConfig.SupportedLocales, ","),

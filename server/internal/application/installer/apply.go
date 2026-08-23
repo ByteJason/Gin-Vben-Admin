@@ -27,14 +27,12 @@ type AdminAccount struct {
 }
 
 type ApplyRequest struct {
-	SelectedUI     string             `json:"selectedUi"`
-	Mode           string             `json:"mode"`
-	Locale         string             `json:"locale,omitempty"`
-	LocaleMode     string             `json:"localeMode,omitempty"`
-	Database       DatabaseConnection `json:"database"`
-	Redis          RedisConnection    `json:"redis"`
-	Admin          AdminAccount       `json:"admin"`
-	ConfirmCleanup bool               `json:"confirmCleanup"`
+	Mode       string             `json:"mode"`
+	Locale     string             `json:"locale,omitempty"`
+	LocaleMode string             `json:"localeMode,omitempty"`
+	Database   DatabaseConnection `json:"database"`
+	Redis      RedisConnection    `json:"redis"`
+	Admin      AdminAccount       `json:"admin"`
 }
 
 type StepStatus string
@@ -101,7 +99,7 @@ type IdentityInstaller interface {
 }
 
 type EnvironmentInstaller interface {
-	Publish(context.Context, ApplyRequest, AssetReceipt) (EnvironmentReceipt, error)
+	Publish(context.Context, ApplyRequest, AssetReceipt, Plan) (EnvironmentReceipt, error)
 	Rollback(context.Context, EnvironmentReceipt) error
 }
 
@@ -160,7 +158,7 @@ func (s *ApplyService) apply(ctx context.Context, request ApplyRequest, report f
 	if err := ctx.Err(); err != nil {
 		return ApplyResult{}, err
 	}
-	ui, mode, err := validateApplyRequest(request)
+	mode, err := validateApplyRequest(request)
 	if err != nil {
 		return ApplyResult{}, err
 	}
@@ -171,8 +169,8 @@ func (s *ApplyService) apply(ctx context.Context, request ApplyRequest, report f
 	}
 
 	steps := make([]ApplyStep, 0, 8)
-	plan, err := s.plans.Plan(ctx, PlanRequest{SelectedUI: string(ui), Mode: string(mode)})
-	if err != nil || plan.SelectedUI != ui || plan.Mode != mode || !plan.CanCleanup || !plan.CanBuild || !plan.CanWriteEnv {
+	plan, err := s.plans.Plan(ctx, PlanRequest{Mode: string(mode)})
+	if err != nil || !validProfile(InstallationProfile{SelectedUI: plan.SelectedUI}) || plan.Mode != mode || !plan.CanCleanup || !plan.CanBuild || !plan.CanWriteEnv {
 		return ApplyResult{}, ErrPreflightFailed
 	}
 	steps = appendCompleted(steps, "plan")
@@ -224,7 +222,7 @@ func (s *ApplyService) apply(ctx context.Context, request ApplyRequest, report f
 	}
 	steps = appendCompleted(steps, "identity")
 	reportApplyStep(report, "identity")
-	environmentReceipt, err := s.environment.Publish(ctx, request, assetReceipt)
+	environmentReceipt, err := s.environment.Publish(ctx, request, assetReceipt, plan)
 	if environmentReceipt != (EnvironmentReceipt{}) {
 		s.pending.environment = &environmentReceipt
 	}
@@ -243,7 +241,7 @@ func (s *ApplyService) apply(ctx context.Context, request ApplyRequest, report f
 		SchemaVersion:    installstate.CurrentSchemaVersion,
 		InstallerVersion: CurrentInstallerVersion,
 		InstalledAt:      installedAt,
-		SelectedUI:       ui,
+		SelectedUI:       plan.SelectedUI,
 		Mode:             mode,
 		ArtifactHash:     assetReceipt.ArtifactHash,
 		ManifestHash:     assetReceipt.ManifestHash,
@@ -266,7 +264,7 @@ func (s *ApplyService) apply(ctx context.Context, request ApplyRequest, report f
 	steps = appendCompleted(steps, "lock")
 	reportApplyStep(report, "lock")
 	s.pending = nil
-	return ApplyResult{State: StateInstalled, SelectedUI: ui, Mode: mode, InstalledAt: installedAt, Steps: steps}, nil
+	return ApplyResult{State: StateInstalled, SelectedUI: plan.SelectedUI, Mode: mode, InstalledAt: installedAt, Steps: steps}, nil
 }
 
 // CanRollback reports whether a failed transaction left compensatable
@@ -364,16 +362,16 @@ func receiptPointer[T comparable](receipt T) *T {
 	return &receipt
 }
 
-func validateApplyRequest(request ApplyRequest) (installstate.UI, installstate.Mode, error) {
-	ui, mode, err := validatePlanRequest(PlanRequest{SelectedUI: request.SelectedUI, Mode: request.Mode})
-	if err != nil || !request.ConfirmCleanup {
-		return "", "", ErrInvalidApply
+func validateApplyRequest(request ApplyRequest) (installstate.Mode, error) {
+	mode, err := validatePlanRequest(PlanRequest{Mode: request.Mode})
+	if err != nil {
+		return "", ErrInvalidApply
 	}
 	if err := validateDatabaseConnection(request.Database); err != nil {
-		return "", "", ErrInvalidApply
+		return "", ErrInvalidApply
 	}
 	if err := validateRedisConnection(request.Redis); err != nil {
-		return "", "", ErrInvalidApply
+		return "", ErrInvalidApply
 	}
 	localeMode := request.LocaleMode
 	if localeMode == "" {
@@ -385,14 +383,14 @@ func validateApplyRequest(request ApplyRequest) (installstate.UI, installstate.M
 	}
 	localeConfig := platformi18n.Config{Mode: platformi18n.Mode(localeMode), DefaultLocale: locale, SupportedLocales: []string{platformi18n.LocaleZhCN, platformi18n.LocaleEnUS}}
 	if err := localeConfig.Validate(); err != nil {
-		return "", "", ErrInvalidApply
+		return "", ErrInvalidApply
 	}
 	username := strings.TrimSpace(request.Admin.Username)
 	passwordBytes := len([]byte(request.Admin.Password))
 	if len(username) < 3 || len(username) > 64 || strings.ContainsAny(username, "\x00\r\n") || passwordBytes < 12 || passwordBytes > 128 || strings.ContainsAny(request.Admin.Password, "\x00\r\n") {
-		return "", "", ErrInvalidApply
+		return "", ErrInvalidApply
 	}
-	return ui, mode, nil
+	return mode, nil
 }
 
 func appendCompleted(steps []ApplyStep, id string) []ApplyStep {

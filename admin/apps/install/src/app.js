@@ -14,13 +14,13 @@ const message = document.querySelector('#status-message');
 const details = document.querySelector('#status-details');
 const installerVersion = document.querySelector('#installer-version');
 const selectedUi = document.querySelector('#selected-ui');
+const selectedUiSummary = document.querySelector('#selected-ui-summary');
 const selectedMode = document.querySelector('#selected-mode');
 const retryButton = document.querySelector('#retry-button');
 const platformSummary = document.querySelector('#platform-summary');
 const capabilityList = document.querySelector('#capability-list');
 const selectionPanel = document.querySelector('#selection-panel');
 const planForm = document.querySelector('#plan-form');
-const uiChoice = document.querySelector('#ui-choice');
 const modeChoice = document.querySelector('#mode-choice');
 const localeMode = document.querySelector('#locale-mode');
 const localeChoice = document.querySelector('#locale-choice');
@@ -45,7 +45,6 @@ const adminForm = document.querySelector('#admin-form');
 const adminUsername = document.querySelector('#admin-username');
 const adminPassword = document.querySelector('#admin-password');
 const adminPasswordConfirm = document.querySelector('#admin-password-confirm');
-const confirmCleanup = document.querySelector('#confirm-cleanup');
 const applyButton = document.querySelector('#apply-button');
 const applyResult = document.querySelector('#apply-result');
 const rollbackButton = document.querySelector('#rollback-button');
@@ -149,8 +148,9 @@ function renderStatus(status) {
     title.textContent = '系统已完成安装';
     badge.textContent = '已安装';
     badge.dataset.tone = 'success';
-    message.textContent = '当前实例已锁定安装流程，可以前往管理端登录。';
+    message.textContent = '安装已完成。请在运行 pnpm run init 的终端按 Ctrl+C 结束 init，重启 Go 服务，然后在 admin/ 执行 pnpm run dev 或 pnpm run build。';
     selectedUi.textContent = uiLabels[status.selectedUi] || status.selectedUi || '—';
+    selectedUiSummary.textContent = selectedUi.textContent;
     selectedMode.textContent = modeLabels[status.mode] || status.mode || '—';
     selectionPanel.hidden = true;
     connectionPanel.hidden = true;
@@ -159,6 +159,31 @@ function renderStatus(status) {
     redisCheckPassed = false;
     lastFailedJobId = null;
     rollbackButton.hidden = true;
+    title.focus();
+    return;
+  }
+
+  if (status.state === 'installing') {
+    title.textContent = '安装任务正在执行';
+    badge.textContent = '安装中';
+    badge.dataset.tone = 'pending';
+    message.textContent = '安装事务仍由本机临时服务持有，请保持 init 终端运行并稍后重新检查。';
+    selectedUi.textContent = uiLabels[status.selectedUi] || status.selectedUi || '—';
+    selectedUiSummary.textContent = selectedUi.textContent;
+    selectedMode.textContent = '安装中';
+    selectionPanel.hidden = true;
+    connectionPanel.hidden = true;
+    currentPlan = null;
+    databaseCheckPassed = false;
+    redisCheckPassed = false;
+    lastFailedJobId = null;
+    retryButton.hidden = false;
+    title.focus();
+    return;
+  }
+
+  if (status.state === 'inconsistent' || status.state === 'pristine') {
+    renderError('初始化状态不一致，请返回终端运行 pnpm run init -- --check 查看 checkpoint。');
     return;
   }
 
@@ -166,7 +191,8 @@ function renderStatus(status) {
   badge.textContent = '待安装';
   badge.dataset.tone = 'ready';
   message.textContent = '本机安装状态可用，接下来将检查运行环境和目录权限。';
-  selectedUi.textContent = '尚未选择';
+  selectedUi.textContent = uiLabels[status.selectedUi] || status.selectedUi || '—';
+  selectedUiSummary.textContent = selectedUi.textContent;
   selectedMode.textContent = '尚未选择';
   selectionPanel.hidden = false;
   connectionPanel.hidden = true;
@@ -176,18 +202,20 @@ function renderStatus(status) {
   lastFailedJobId = null;
   rollbackButton.hidden = true;
   updateApplyButton();
+  title.focus();
 }
 
-function renderError() {
+function renderError(detail = '请确认服务已启动，然后重新检查。') {
   title.textContent = '安装服务暂不可用';
   badge.textContent = '检查失败';
   badge.dataset.tone = 'error';
-  message.textContent = '请确认服务已启动，然后重新检查。';
+  message.textContent = detail;
   message.setAttribute('aria-live', 'assertive');
   details.hidden = true;
   retryButton.hidden = false;
   selectionPanel.hidden = true;
   connectionPanel.hidden = true;
+  title.focus();
 }
 
 function renderCapabilities(capabilities) {
@@ -227,7 +255,6 @@ async function requestPlan(event) {
   planMessage.dataset.tone = 'pending';
   planPanel.hidden = true;
   try {
-    const selectedUi = uiChoice.value;
     const mode = modeChoice.value;
     const response = await fetch(planEndpoint, {
       method: 'POST',
@@ -237,7 +264,7 @@ async function requestPlan(event) {
         'Accept-Language': browserLanguageHeader(),
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ selectedUi, mode }),
+      body: JSON.stringify({ mode }),
     });
     const envelope = await response.json();
     if (!response.ok || envelope.code !== 0 || !envelope.data) {
@@ -247,6 +274,7 @@ async function requestPlan(event) {
   } catch {
     planMessage.textContent = '目录预检未完成，请检查服务与目录权限后重试。';
     planMessage.dataset.tone = 'error';
+    planMessage.focus();
   } finally {
     planButton.disabled = false;
     planButton.textContent = '检查目录权限';
@@ -341,11 +369,11 @@ async function requestDependencyCheck(event, endpoint, resultElement) {
 }
 
 function updateApplyButton() {
-  applyButton.disabled = !currentPlan || !currentPlan.canBuild || !currentPlan.canWriteEnv || !currentPlan.canCleanup || !databaseCheckPassed || !redisCheckPassed || !confirmCleanup.checked;
+  applyButton.disabled = !currentPlan || !currentPlan.canBuild || !currentPlan.canWriteEnv || !currentPlan.canCleanup || !databaseCheckPassed || !redisCheckPassed;
 }
 
-function invalidatePlanIfSelectionChanged() {
-  if (currentPlan && (currentPlan.selectedUi !== uiChoice.value || currentPlan.mode !== modeChoice.value)) {
+function invalidatePlanIfModeChanged() {
+  if (currentPlan && currentPlan.mode !== modeChoice.value) {
     currentPlan = null;
     databaseCheckPassed = false;
     redisCheckPassed = false;
@@ -372,10 +400,10 @@ function dependencyFormValues() {
 }
 
 function renderApplyResult(result) {
-  applyProgress.value = 100;
-  applyProgress.textContent = '100%';
-  applyResult.textContent = '安装已完成。请按提示重启服务后进入管理端。';
+  setProgress(100, '安装完成');
+  applyResult.textContent = '安装已完成。请按 Ctrl+C 结束 init，重启 Go 服务，然后运行 pnpm run dev 或 pnpm run build。';
   applyResult.dataset.tone = 'success';
+  applyResult.focus();
   applySteps.replaceChildren();
   for (const step of Array.isArray(result.steps) ? result.steps : []) {
     const item = document.createElement('li');
@@ -387,8 +415,7 @@ function renderApplyResult(result) {
 function renderJobProgress(job) {
   const progress = Math.max(0, Math.min(100, Number(job.progress || 0)));
   const step = stepLabels[job.currentStep] || '正在执行安装任务';
-  applyProgress.value = progress;
-  applyProgress.textContent = `${progress}%`;
+  setProgress(progress, `${step}，${progress}%`);
   applyResult.textContent = `${step}（${progress}%）`;
   applyResult.dataset.tone = job.state === 'failed' ? 'error' : job.state === 'completed' ? 'success' : 'pending';
   rollbackButton.hidden = !(job.state === 'failed' && job.canRollback);
@@ -398,6 +425,12 @@ function renderJobProgress(job) {
     item.textContent = `${stepLabels[completed.id] || completed.id}：已完成`;
     applySteps.append(item);
   }
+}
+
+function setProgress(value, description) {
+  applyProgress.value = value;
+  applyProgress.textContent = `${value}%`;
+  applyProgress.setAttribute('aria-valuetext', description);
 }
 
 function wait(milliseconds) {
@@ -431,8 +464,7 @@ function applyErrorMessage(status) {
 
 async function requestInstallation(event) {
   event.preventDefault();
-  applyProgress.value = 0;
-  applyProgress.textContent = '0%';
+  setProgress(0, '准备安装');
   if (!currentPlan || !databaseCheckPassed || !redisCheckPassed) {
     applyResult.textContent = '请先完成目录、数据库和 Redis 检查。';
     applyResult.dataset.tone = 'error';
@@ -463,14 +495,12 @@ async function requestInstallation(event) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        selectedUi: uiChoice.value,
         mode: modeChoice.value,
         localeMode: localeMode.value,
         locale: localeChoice.value,
         database: dependencies.database,
         redis: dependencies.redis,
         admin: { username: adminUsername.value.trim(), password: adminPassword.value },
-        confirmCleanup: confirmCleanup.checked,
       }),
     });
     const envelope = await response.json();
@@ -495,12 +525,9 @@ async function requestInstallation(event) {
     }
     lastFailedJobId = null;
     renderApplyResult(result);
-    renderStatus({
-      installed: true,
-      installerVersion: 'current',
-      selectedUi: result.selectedUi,
-      mode: result.mode,
-    });
+    const completedStatus = { installed: true, installerVersion: 'current', mode: result.mode };
+    completedStatus.selectedUi = result.selectedUi;
+    renderStatus(completedStatus);
     currentPlan = { ...currentPlan, installed: true };
   } catch {
     applyResult.textContent = '安装请求未完成，请确认服务仍在运行后重试。';
@@ -569,9 +596,7 @@ adminForm.addEventListener('submit', requestInstallation);
 rollbackButton.addEventListener('click', requestRollback);
 databaseForm.addEventListener('input', () => { databaseCheckPassed = false; updateApplyButton(); });
 redisForm.addEventListener('input', () => { redisCheckPassed = false; updateApplyButton(); });
-uiChoice.addEventListener('change', invalidatePlanIfSelectionChanged);
-modeChoice.addEventListener('change', invalidatePlanIfSelectionChanged);
-confirmCleanup.addEventListener('change', updateApplyButton);
+modeChoice.addEventListener('change', invalidatePlanIfModeChanged);
 databaseDriver.addEventListener('change', () => {
   databasePort.value = databaseDriver.value === 'postgres' ? '5432' : '3306';
 });

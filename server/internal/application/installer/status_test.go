@@ -18,7 +18,7 @@ func TestStatusServiceReportsUninstalledState(t *testing.T) {
 		t.Fatalf("Status() error = %v", err)
 	}
 	if got.Installed || got.State != StateUninstalled {
-		t.Fatalf("Status() = %#v, want uninstalled", got)
+		t.Fatalf("Status() = %#v, want legacy uninstalled", got)
 	}
 	if got.SchemaVersion != installstate.CurrentSchemaVersion || got.InstallerVersion != CurrentInstallerVersion {
 		t.Fatalf("Status() version metadata = %#v", got)
@@ -66,6 +66,75 @@ func TestStatusServiceDoesNotHideMarkerReadFailures(t *testing.T) {
 	}
 }
 
+func TestStatusServiceDerivesReadOnlyProfileStates(t *testing.T) {
+	for _, testCase := range []struct {
+		name      string
+		marker    markerReaderStub
+		profile   profileProviderStub
+		want      State
+		installed bool
+		ui        installstate.UI
+	}{
+		{name: "pristine", want: StatePristine},
+		{name: "ui prepared", profile: profileProviderStub{profile: InstallationProfile{SelectedUI: installstate.UIAntd}, exists: true}, want: StateUIPrepared, ui: installstate.UIAntd},
+		{name: "installing", profile: profileProviderStub{profile: InstallationProfile{SelectedUI: installstate.UIEle, Installing: true}, exists: true}, want: StateInstalling, ui: installstate.UIEle},
+		{name: "installed", marker: markerReaderStub{marker: validMarker(installstate.UINaive), installed: true}, profile: profileProviderStub{profile: InstallationProfile{SelectedUI: installstate.UINaive}, exists: true}, want: StateInstalled, installed: true, ui: installstate.UINaive},
+		{name: "damaged marker", marker: markerReaderStub{installed: true}, profile: profileProviderStub{profile: InstallationProfile{SelectedUI: installstate.UIAntd}, exists: true}, want: StateInconsistent, ui: installstate.UIAntd},
+		{name: "mismatched marker and profile", marker: markerReaderStub{marker: validMarker(installstate.UINaive), installed: true}, profile: profileProviderStub{profile: InstallationProfile{SelectedUI: installstate.UIAntd}, exists: true}, want: StateInconsistent, ui: installstate.UIAntd},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			service := NewStatusServiceWithProfile(testCase.marker, testCase.profile)
+			got, err := service.Status(context.Background())
+			if err != nil {
+				t.Fatalf("Status() error = %v", err)
+			}
+			if got.State != testCase.want || got.Installed != testCase.installed || got.SelectedUI != testCase.ui {
+				t.Fatalf("Status() = %#v, want state=%q installed=%v ui=%q", got, testCase.want, testCase.installed, testCase.ui)
+			}
+		})
+	}
+}
+
+func TestStatusServiceKeepsAValidPublishedMarkerInstallingUntilTheJobFinishes(t *testing.T) {
+	service := NewStatusServiceWithProfile(
+		markerReaderStub{marker: validMarker(installstate.UIAntd), installed: true},
+		profileProviderStub{profile: InstallationProfile{SelectedUI: installstate.UIAntd, Installing: true}, exists: true},
+	)
+
+	got, err := service.Status(context.Background())
+	if err != nil {
+		t.Fatalf("Status() error = %v", err)
+	}
+	if got.State != StateInstalling || got.Installed || got.SelectedUI != installstate.UIAntd {
+		t.Fatalf("Status() = %#v, want transient installing state", got)
+	}
+}
+
+func TestActivityProfileProviderDecoratesTheReadOnlyProfile(t *testing.T) {
+	base := profileProviderStub{profile: InstallationProfile{SelectedUI: installstate.UIEle}, exists: true}
+	provider := NewActivityProfileProvider(base, activityStub{active: true})
+
+	got, exists, err := provider.Profile(context.Background())
+	if err != nil {
+		t.Fatalf("Profile() error = %v", err)
+	}
+	if !exists || got.SelectedUI != installstate.UIEle || !got.Installing {
+		t.Fatalf("Profile() = (%#v, %t), want active ele profile", got, exists)
+	}
+}
+
+func validMarker(ui installstate.UI) installstate.Marker {
+	return installstate.Marker{
+		SchemaVersion:    installstate.CurrentSchemaVersion,
+		InstallerVersion: CurrentInstallerVersion,
+		InstalledAt:      time.Date(2026, time.August, 24, 0, 0, 0, 0, time.UTC),
+		SelectedUI:       ui,
+		Mode:             installstate.ModeEmbedded,
+		ArtifactHash:     strings.Repeat("a", 64),
+		ManifestHash:     strings.Repeat("b", 64),
+	}
+}
+
 type markerReaderStub struct {
 	marker    installstate.Marker
 	installed bool
@@ -75,3 +144,17 @@ type markerReaderStub struct {
 func (s markerReaderStub) Load(context.Context) (installstate.Marker, bool, error) {
 	return s.marker, s.installed, s.err
 }
+
+type profileProviderStub struct {
+	profile InstallationProfile
+	exists  bool
+	err     error
+}
+
+func (s profileProviderStub) Profile(context.Context) (InstallationProfile, bool, error) {
+	return s.profile, s.exists, s.err
+}
+
+type activityStub struct{ active bool }
+
+func (s activityStub) InstallationActive() bool { return s.active }

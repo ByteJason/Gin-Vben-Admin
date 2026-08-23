@@ -20,7 +20,7 @@ func TestStatusEndpointReturnsCredentialFreeInstallationState(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	RegisterRoutes(router, NewHandler(statusProviderStub{status: installer.Status{
-		State:            installer.StateUninstalled,
+		State:            installer.StatePristine,
 		Installed:        false,
 		SchemaVersion:    1,
 		InstallerVersion: "0.4.0-dev",
@@ -41,7 +41,7 @@ func TestStatusEndpointReturnsCredentialFreeInstallationState(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if body.Code != 0 || body.Data.Installed || body.Data.State != installer.StateUninstalled {
+	if body.Code != 0 || body.Data.Installed || body.Data.State != installer.StatePristine {
 		t.Fatalf("unexpected status response: %#v", body)
 	}
 	for _, forbidden := range []string{"password", "secret", "dsn", "token"} {
@@ -140,7 +140,7 @@ func TestPlanEndpointReturnsAllowlistedPermissionSummary(t *testing.T) {
 		RequiresRestart: true,
 		Entries: []installer.PlanEntry{{
 			Path:   "admin/apps/web-ele",
-			Action: installer.ActionRemove,
+			Action: installer.ActionKeep,
 			Permission: installer.PathPermission{
 				CanRead: true, CanWrite: true, CanCreate: true, CanRename: true, CanDelete: true,
 			},
@@ -149,7 +149,7 @@ func TestPlanEndpointReturnsAllowlistedPermissionSummary(t *testing.T) {
 	provider := &planProviderStub{plan: want}
 	RegisterRoutes(router, NewHandlerWithComponents(statusProviderStub{}, capabilityProviderStub{}, provider))
 
-	request := httptest.NewRequest(http.MethodPost, "/api/system/install/v1/plan", bytes.NewBufferString(`{"selectedUi":"antd","mode":"embedded"}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/system/install/v1/plan", bytes.NewBufferString(`{"mode":"embedded"}`))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
@@ -167,13 +167,36 @@ func TestPlanEndpointReturnsAllowlistedPermissionSummary(t *testing.T) {
 	if body.Code != 0 || body.Data.SelectedUI != want.SelectedUI || len(body.Data.Entries) != 1 {
 		t.Fatalf("unexpected plan response: %#v", body)
 	}
-	if provider.request.SelectedUI != "antd" || provider.request.Mode != "embedded" {
+	if provider.request.Mode != "embedded" {
 		t.Fatalf("provider request = %#v", provider.request)
 	}
 	for _, forbidden := range []string{"/private/", "c:\\users", "password", "secret", "dsn"} {
 		if strings.Contains(strings.ToLower(response.Body.String()), forbidden) {
 			t.Fatalf("plan response leaked %q: %s", forbidden, response.Body.String())
 		}
+	}
+}
+
+func TestPlanEndpointAcceptsOnlyModeAndRejectsLegacySelection(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	provider := &planProviderStub{plan: installer.Plan{SelectedUI: "antd", Mode: "embedded"}}
+	router := gin.New()
+	RegisterRoutes(router, NewHandlerWithComponents(statusProviderStub{}, nil, provider))
+
+	request := httptest.NewRequest(http.MethodPost, "/api/system/install/v1/plan", bytes.NewBufferString(`{"mode":"embedded"}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || provider.request.Mode != "embedded" {
+		t.Fatalf("mode-only plan = %d %s; request=%#v", response.Code, response.Body.String(), provider.request)
+	}
+
+	legacy := httptest.NewRecorder()
+	legacyRequest := httptest.NewRequest(http.MethodPost, "/api/system/install/v1/plan", bytes.NewBufferString(`{"mode":"embedded","selectedUi":"antd"}`))
+	legacyRequest.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(legacy, legacyRequest)
+	if legacy.Code != http.StatusBadRequest {
+		t.Fatalf("legacy selection status = %d, want 400; body=%s", legacy.Code, legacy.Body.String())
 	}
 }
 
@@ -186,7 +209,7 @@ func TestPlanEndpointRejectsMalformedRequestAndHidesProviderFailure(t *testing.T
 		status   int
 	}{
 		{name: "malformed", body: `{"selectedUi":`, provider: &planProviderStub{}, status: http.StatusBadRequest},
-		{name: "provider", body: `{"selectedUi":"antd","mode":"embedded"}`, provider: &planProviderStub{err: errors.New("/private/root password=fixture")}, status: http.StatusBadRequest},
+		{name: "provider", body: `{"mode":"embedded"}`, provider: &planProviderStub{err: errors.New("/private/root password=fixture")}, status: http.StatusBadRequest},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			router := gin.New()
@@ -271,7 +294,7 @@ func TestApplyEndpointReturnsCredentialFreeResult(t *testing.T) {
 	router := gin.New()
 	RegisterRoutes(router, NewHandlerWithApply(statusProviderStub{}, nil, nil, nil, provider))
 
-	body := `{"selectedUi":"antd","mode":"embedded","confirmCleanup":true,"database":{"driver":"mysql","mode":"single","host":"db","port":3306,"database":"app","username":"root","password":"database-secret"},"redis":{"mode":"single","addr":"redis:6379","password":"redis-secret"},"admin":{"username":"admin","password":"administrator-secret"}}`
+	body := `{"mode":"embedded","database":{"driver":"mysql","mode":"single","host":"db","port":3306,"database":"app","username":"root","password":"database-secret"},"redis":{"mode":"single","addr":"redis:6379","password":"redis-secret"},"admin":{"username":"admin","password":"administrator-secret"}}`
 	request := httptest.NewRequest(http.MethodPost, "/api/system/install/v1/apply", bytes.NewBufferString(body))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
@@ -305,7 +328,7 @@ func TestApplyEndpointDerivesLocaleSuggestionFromAcceptLanguage(t *testing.T) {
 	provider := &applyProviderStub{result: installer.ApplyResult{State: "installed", SelectedUI: "antd", Mode: "embedded"}}
 	router := gin.New()
 	RegisterRoutes(router, NewHandlerWithApply(statusProviderStub{}, nil, nil, nil, provider))
-	body := `{"selectedUi":"antd","mode":"embedded","confirmCleanup":true,"database":{"driver":"mysql","mode":"single","host":"db","port":3306,"database":"app","username":"root","password":"database-secret"},"redis":{"mode":"single","addr":"redis:6379"},"admin":{"username":"admin","password":"administrator-secret"}}`
+	body := `{"mode":"embedded","database":{"driver":"mysql","mode":"single","host":"db","port":3306,"database":"app","username":"root","password":"database-secret"},"redis":{"mode":"single","addr":"redis:6379"},"admin":{"username":"admin","password":"administrator-secret"}}`
 	request := httptest.NewRequest(http.MethodPost, "/api/system/install/v1/apply", bytes.NewBufferString(body))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept-Language", "en-GB,en;q=0.8")
@@ -336,7 +359,7 @@ func TestApplyEndpointMapsStableErrorsWithoutLeakingCause(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			router := gin.New()
 			RegisterRoutes(router, NewHandlerWithApply(statusProviderStub{}, nil, nil, nil, &applyProviderStub{err: testCase.err}))
-			request := httptest.NewRequest(http.MethodPost, "/api/system/install/v1/apply", bytes.NewBufferString(`{"selectedUi":"antd"}`))
+			request := httptest.NewRequest(http.MethodPost, "/api/system/install/v1/apply", bytes.NewBufferString(`{"mode":"embedded"}`))
 			request.Header.Set("Content-Type", "application/json")
 			response := httptest.NewRecorder()
 			router.ServeHTTP(response, request)
@@ -361,18 +384,24 @@ func TestApplyEndpointMapsStableErrorsWithoutLeakingCause(t *testing.T) {
 
 func TestApplyEndpointRejectsUnknownFieldsBeforeCallingService(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	provider := &applyProviderStub{}
-	router := gin.New()
-	RegisterRoutes(router, NewHandlerWithApply(statusProviderStub{}, nil, nil, nil, provider))
-	request := httptest.NewRequest(http.MethodPost, "/api/system/install/v1/apply", bytes.NewBufferString(`{"selectedUi":"antd","unexpected":true}`))
-	request.Header.Set("Content-Type", "application/json")
-	response := httptest.NewRecorder()
-	router.ServeHTTP(response, request)
-	if response.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body=%s", response.Code, response.Body.String())
-	}
-	if provider.calls != 0 {
-		t.Fatalf("apply service calls = %d, want 0", provider.calls)
+	for _, body := range []string{
+		`{"mode":"embedded","selectedUi":"antd"}`,
+		`{"mode":"embedded","confirmCleanup":true}`,
+		`{"mode":"embedded","unexpected":true}`,
+	} {
+		provider := &applyProviderStub{}
+		router := gin.New()
+		RegisterRoutes(router, NewHandlerWithApply(statusProviderStub{}, nil, nil, nil, provider))
+		request := httptest.NewRequest(http.MethodPost, "/api/system/install/v1/apply", bytes.NewBufferString(body))
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("body=%s status = %d, want 400; response=%s", body, response.Code, response.Body.String())
+		}
+		if provider.calls != 0 {
+			t.Fatalf("body=%s apply service calls = %d, want 0", body, provider.calls)
+		}
 	}
 }
 
@@ -381,7 +410,7 @@ func TestAsyncApplyEndpointReturnsCredentialFreeJob(t *testing.T) {
 	jobProvider := &jobProviderStub{job: installer.ApplyJob{ID: "install-job-1", State: installer.JobRunning, CurrentStep: "queued"}}
 	router := gin.New()
 	RegisterRoutes(router, NewHandlerWithApplyAndJobs(statusProviderStub{}, nil, nil, nil, nil, jobProvider))
-	body := `{"selectedUi":"antd","mode":"embedded","confirmCleanup":true,"database":{"driver":"mysql","mode":"single","dsn":"user:secret@tcp(db:3306)/app"},"redis":{"mode":"single","addr":"redis:6379"},"admin":{"username":"admin","password":"administrator-secret"}}`
+	body := `{"mode":"embedded","database":{"driver":"mysql","mode":"single","dsn":"user:secret@tcp(db:3306)/app"},"redis":{"mode":"single","addr":"redis:6379"},"admin":{"username":"admin","password":"administrator-secret"}}`
 	request := httptest.NewRequest(http.MethodPost, "/api/system/install/v1/apply", bytes.NewBufferString(body))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
@@ -409,7 +438,7 @@ func TestInstallationProgressAndRetryEndpointsUseJobProvider(t *testing.T) {
 		t.Fatalf("progress response = %d %s", progress.Code, progress.Body.String())
 	}
 
-	body := `{"selectedUi":"antd","mode":"embedded","confirmCleanup":true,"database":{"driver":"mysql","mode":"single","dsn":"user:secret@tcp(db:3306)/app"},"redis":{"mode":"single","addr":"redis:6379"},"admin":{"username":"admin","password":"administrator-secret"}}`
+	body := `{"mode":"embedded","database":{"driver":"mysql","mode":"single","dsn":"user:secret@tcp(db:3306)/app"},"redis":{"mode":"single","addr":"redis:6379"},"admin":{"username":"admin","password":"administrator-secret"}}`
 	retry := httptest.NewRecorder()
 	retryRequest := httptest.NewRequest(http.MethodPost, "/api/system/install/v1/retry/install-job-1", bytes.NewBufferString(body))
 	retryRequest.Header.Set("Content-Type", "application/json")

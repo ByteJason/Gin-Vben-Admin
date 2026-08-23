@@ -42,7 +42,7 @@
           <div class="status-card__header">
             <div>
               <p class="section-label">实例状态</p>
-              <h2 id="status-title">正在检查安装状态</h2>
+              <h2 id="status-title" tabindex="-1">正在检查安装状态</h2>
             </div>
             <span id="status-badge" class="status-badge" data-tone="pending">检查中</span>
           </div>
@@ -78,17 +78,14 @@
 
           <section id="selection-panel" class="selection-panel" aria-labelledby="selection-title">
             <div class="capability-panel__heading">
-              <h3 id="selection-title">选择界面与运行方式</h3>
+              <h3 id="selection-title">确认界面与运行方式</h3>
               <span>先检查，再继续</span>
             </div>
             <form id="plan-form" class="plan-form">
-              <div class="form-field">
-                <label for="ui-choice">管理界面</label>
-                <select id="ui-choice" name="selectedUi" required>
-                  <option value="antd">Ant Design Vue</option>
-                  <option value="ele">Element Plus</option>
-                  <option value="naive">Naive UI</option>
-                </select>
+              <div class="form-field readonly-field">
+                <span class="field-label">管理界面</span>
+                <output id="selected-ui-summary" class="readonly-summary" aria-live="polite">读取命令行选择中</output>
+                <span class="field-help">管理界面已由命令行 <code>pnpm run init</code> 选择，此处仅显示结果。</span>
               </div>
               <div class="form-field">
                 <label for="mode-choice">运行方式</label>
@@ -118,7 +115,7 @@
                 检查目录权限
               </button>
             </form>
-            <div id="plan-message" class="plan-message" role="status" aria-live="polite"></div>
+            <div id="plan-message" class="plan-message" role="status" aria-live="polite" tabindex="-1"></div>
             <div id="plan-panel" class="plan-result" hidden aria-labelledby="plan-result-title">
               <h4 id="plan-result-title">预检结果</h4>
               <dl class="plan-summary">
@@ -212,17 +209,13 @@
                 <label for="admin-password-confirm">确认密码</label>
                 <input id="admin-password-confirm" type="password" minlength="12" maxlength="128" autocomplete="new-password" required />
               </div>
-              <label class="confirm-field" for="confirm-cleanup">
-                <input id="confirm-cleanup" type="checkbox" required />
-                <span>我已查看预检清单，并确认按所选方式执行安装与模板整理。</span>
-              </label>
               <button id="apply-button" class="primary-button" type="submit" disabled>开始安装</button>
-              <div id="apply-result" class="connection-result" role="status" aria-live="polite"></div>
+              <div id="apply-result" class="connection-result" role="status" aria-live="polite" tabindex="-1"></div>
               <button id="rollback-button" class="secondary-button" type="button" hidden>
                 回滚本次失败的安装
               </button>
               <label class="progress-label" for="apply-progress">安装进度</label>
-              <progress id="apply-progress" max="100" value="0">0%</progress>
+              <progress id="apply-progress" max="100" value="0" aria-valuetext="尚未开始">0%</progress>
               <ol id="apply-steps" class="apply-steps" aria-live="polite"></ol>
             </form>
           </section>

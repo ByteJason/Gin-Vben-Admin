@@ -149,7 +149,8 @@ type FileConfig struct {
 }
 
 type InstallConfig struct {
-	StateDir string `mapstructure:"state_dir" yaml:"state_dir"`
+	StateDir      string `mapstructure:"state_dir" yaml:"state_dir"`
+	WorkspaceRoot string `mapstructure:"workspace_root" yaml:"workspace_root"`
 }
 
 // TenantConfig controls the request tenant boundary. Multi-tenant mode still
@@ -325,7 +326,10 @@ func Default() Config {
 			Root:     filepath.FromSlash("../.runtime/files"),
 			MaxBytes: 100 << 20,
 		},
-		Install: InstallConfig{StateDir: filepath.FromSlash("../install")},
+		Install: InstallConfig{
+			StateDir:      filepath.FromSlash("../admin/apps/install"),
+			WorkspaceRoot: filepath.FromSlash(".."),
+		},
 		Tenant: TenantConfig{
 			Enabled:            true,
 			Mode:               "single",
@@ -448,16 +452,21 @@ func (cfg FileConfig) validate() error {
 }
 
 func (cfg InstallConfig) validate() error {
-	if strings.TrimSpace(cfg.StateDir) == "" {
-		return errors.New("state_dir is required")
-	}
-	clean := filepath.Clean(cfg.StateDir)
-	root := string(filepath.Separator)
-	if volume := filepath.VolumeName(clean); volume != "" {
-		root = volume + string(filepath.Separator)
-	}
-	if clean == root {
-		return errors.New("state_dir must not be a filesystem root")
+	for _, item := range []struct{ value, label string }{
+		{cfg.StateDir, "state_dir"},
+		{cfg.WorkspaceRoot, "workspace_root"},
+	} {
+		if strings.TrimSpace(item.value) == "" {
+			return fmt.Errorf("%s is required", item.label)
+		}
+		clean := filepath.Clean(item.value)
+		root := string(filepath.Separator)
+		if volume := filepath.VolumeName(clean); volume != "" {
+			root = volume + string(filepath.Separator)
+		}
+		if clean == root {
+			return fmt.Errorf("%s must not be a filesystem root", item.label)
+		}
 	}
 	return nil
 }
@@ -833,6 +842,7 @@ func newViper() *viper.Viper {
 	v.SetDefault("mail.selection", cfg.Mail.Selection)
 	v.SetDefault("mail.accounts", cfg.Mail.Accounts)
 	v.SetDefault("install.state_dir", cfg.Install.StateDir)
+	v.SetDefault("install.workspace_root", cfg.Install.WorkspaceRoot)
 	v.SetDefault("tenant.enabled", cfg.Tenant.Enabled)
 	v.SetDefault("tenant.mode", cfg.Tenant.Mode)
 	v.SetDefault("tenant.default_id", cfg.Tenant.DefaultID)
@@ -917,6 +927,7 @@ var environmentBindings = map[string]string{
 	"mail.start_tls":                 "MAIL_START_TLS",
 	"mail.selection":                 "MAIL_SELECTION",
 	"install.state_dir":              "INSTALL_STATE_DIR",
+	"install.workspace_root":         "INSTALL_WORKSPACE_ROOT",
 	"tenant.enabled":                 "TENANT_ENABLED",
 	"tenant.mode":                    "TENANT_MODE",
 	"tenant.default_id":              "TENANT_DEFAULT_ID",

@@ -11,23 +11,20 @@ import (
 
 func TestPlanServiceReturnsAllowlistedActionsForSelectedUI(t *testing.T) {
 	inspector := inspectorStub{permissions: map[string]PathPermission{
-		"install":              {CanRead: true, CanWrite: true, CanCreate: true, CanRename: true, CanDelete: true},
-		"admin/apps/web-antd":  {CanRead: true, CanWrite: true, CanCreate: true, CanRename: true, CanDelete: true},
-		"admin/apps/web-ele":   {CanRead: true, CanWrite: true, CanCreate: true, CanRename: true, CanDelete: true},
-		"admin/apps/web-naive": {CanRead: true, CanWrite: true, CanCreate: true, CanRename: true, CanDelete: true},
-		"admin/apps/web":       {CanRead: true, CanWrite: true, CanCreate: true, CanRename: true, CanDelete: true},
-		".env":                 {CanRead: false, CanWrite: true, CanCreate: true, CanRename: true, CanDelete: false},
+		"admin/apps/install":  {CanRead: true, CanWrite: true, CanCreate: true, CanRename: true, CanDelete: true},
+		"admin/apps/web-antd": {CanRead: true, CanWrite: true, CanCreate: true, CanRename: true, CanDelete: true},
+		".env":                {CanRead: false, CanWrite: true, CanCreate: true, CanRename: true, CanDelete: false},
 	}}
-	service := NewPlanService(&inspector)
+	service := NewPlanServiceWithProfile(&inspector, profileProviderStub{profile: InstallationProfile{SelectedUI: installstate.UIAntd}, exists: true})
 
-	got, err := service.Plan(context.Background(), PlanRequest{SelectedUI: "antd", Mode: "embedded"})
+	got, err := service.Plan(context.Background(), PlanRequest{Mode: "embedded"})
 	if err != nil {
 		t.Fatalf("Plan() error = %v", err)
 	}
 	if got.SelectedUI != installstate.UIAntd || got.Mode != installstate.ModeEmbedded || !got.CanCleanup || !got.CanBuild || !got.CanWriteEnv || !got.RequiresRestart {
 		t.Fatalf("plan summary = %#v", got)
 	}
-	wantPaths := []string{"install", "admin/apps/web-antd", "admin/apps/web-ele", "admin/apps/web-naive", "admin/apps/web", ".env"}
+	wantPaths := []string{"admin/apps/install", "admin/apps/web-antd", ".env"}
 	var paths []string
 	for _, entry := range got.Entries {
 		paths = append(paths, entry.Path)
@@ -35,7 +32,7 @@ func TestPlanServiceReturnsAllowlistedActionsForSelectedUI(t *testing.T) {
 	if !reflect.DeepEqual(paths, wantPaths) {
 		t.Fatalf("plan paths = %#v, want %#v", paths, wantPaths)
 	}
-	if got.Entries[1].Action != ActionKeep || got.Entries[2].Action != ActionRemove || got.Entries[5].Action != ActionWrite {
+	if got.Entries[0].Action != ActionKeep || got.Entries[1].Action != ActionKeep || got.Entries[2].Action != ActionWrite {
 		t.Fatalf("plan actions = %#v", got.Entries)
 	}
 	if !reflect.DeepEqual(inspector.seen, wantPaths) {
@@ -45,36 +42,70 @@ func TestPlanServiceReturnsAllowlistedActionsForSelectedUI(t *testing.T) {
 
 func TestPlanServiceBlocksCleanupWhenPermissionIsMissing(t *testing.T) {
 	service := NewPlanService(&inspectorStub{permissions: map[string]PathPermission{
-		"install":              {CanRead: true, CanWrite: true, CanCreate: true, CanRename: true, CanDelete: true},
-		"admin/apps/web-antd":  {CanRead: true, CanWrite: true, CanCreate: true, CanRename: true, CanDelete: true},
-		"admin/apps/web-ele":   {CanRead: true, CanWrite: true, CanCreate: true, CanRename: false, CanDelete: false, Reasons: []string{"rename_or_delete_not_available"}},
-		"admin/apps/web-naive": {CanRead: true, CanWrite: true, CanCreate: true, CanRename: true, CanDelete: true},
-		"admin/apps/web":       {CanRead: true, CanWrite: true, CanCreate: true, CanRename: true, CanDelete: true},
-		".env":                 {CanRead: false, CanWrite: true, CanCreate: true, CanRename: true, CanDelete: false},
+		"admin/apps/install":  {CanRead: true, CanWrite: true, CanCreate: true, CanRename: true, CanDelete: true},
+		"admin/apps/web-antd": {CanRead: true, CanWrite: true, CanCreate: true, CanRename: true, CanDelete: true},
+		".env":                {CanRead: false, CanWrite: true, CanCreate: true, CanRename: true, CanDelete: false},
 	}})
+	service.profiles = profileProviderStub{profile: InstallationProfile{SelectedUI: installstate.UIAntd}, exists: true}
 
-	got, err := service.Plan(context.Background(), PlanRequest{SelectedUI: "antd", Mode: "standalone"})
+	got, err := service.Plan(context.Background(), PlanRequest{Mode: "standalone"})
 	if err != nil {
 		t.Fatalf("Plan() error = %v", err)
 	}
-	if got.CanCleanup {
-		t.Fatal("CanCleanup = true, want false when an unselected template cannot be removed")
-	}
-	if len(got.Reasons) == 0 {
-		t.Fatalf("plan reasons = %#v, want actionable reason", got)
+	if !got.CanCleanup {
+		t.Fatal("CanCleanup = false, want true because CLI already staged unselected templates")
 	}
 }
 
 func TestPlanServiceRejectsUnknownUIOrModeBeforeInspectingPaths(t *testing.T) {
 	inspector := inspectorStub{}
-	service := NewPlanService(&inspector)
-	for _, request := range []PlanRequest{{SelectedUI: "web-antdv-next", Mode: "embedded"}, {SelectedUI: "antd", Mode: "shell"}} {
+	service := NewPlanServiceWithProfile(&inspector, profileProviderStub{profile: InstallationProfile{SelectedUI: installstate.UIAntd}, exists: true})
+	for _, request := range []PlanRequest{{Mode: "shell"}} {
 		if _, err := service.Plan(context.Background(), request); err == nil {
 			t.Fatalf("Plan(%#v) error = nil, want validation error", request)
 		}
 	}
 	if len(inspector.seen) != 0 {
 		t.Fatalf("invalid request inspected paths: %#v", inspector.seen)
+	}
+}
+
+func TestPlanServiceUsesReadOnlyProfileSelection(t *testing.T) {
+	inspector := &inspectorStub{permissions: map[string]PathPermission{
+		"admin/apps/install":  {CanRead: true},
+		"admin/apps/web-antd": {CanRead: true, CanWrite: true, CanCreate: true, CanRename: true, CanDelete: true},
+		"admin/apps/web-ele":  {CanRead: true, CanWrite: true, CanCreate: true, CanRename: true, CanDelete: true},
+		".env":                {CanWrite: true, CanCreate: true, CanRename: true},
+	}}
+	service := NewPlanServiceWithProfile(inspector, profileProviderStub{profile: InstallationProfile{SelectedUI: installstate.UIEle}, exists: true})
+
+	got, err := service.Plan(context.Background(), PlanRequest{Mode: "embedded"})
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if got.SelectedUI != installstate.UIEle {
+		t.Fatalf("Plan().SelectedUI = %q, want profile selection", got.SelectedUI)
+	}
+	paths := []string{got.Entries[0].Path, got.Entries[1].Path, got.Entries[2].Path}
+	if want := []string{"admin/apps/install", "admin/apps/web-ele", ".env"}; !reflect.DeepEqual(paths, want) {
+		t.Fatalf("Plan() paths = %#v, want %#v", paths, want)
+	}
+}
+
+func TestPlanServiceRequiresTheAdminInstallerWorkspaceToBeReadable(t *testing.T) {
+	inspector := &inspectorStub{permissions: map[string]PathPermission{
+		"admin/apps/install":  {CanRead: false},
+		"admin/apps/web-antd": {CanRead: true},
+		".env":                {CanWrite: true, CanCreate: true, CanRename: true},
+	}}
+	service := NewPlanServiceWithProfile(inspector, profileProviderStub{profile: InstallationProfile{SelectedUI: installstate.UIAntd}, exists: true})
+
+	got, err := service.Plan(context.Background(), PlanRequest{Mode: "embedded"})
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if got.CanBuild {
+		t.Fatalf("Plan().CanBuild = true with unreadable admin/apps/install: %#v", got)
 	}
 }
 

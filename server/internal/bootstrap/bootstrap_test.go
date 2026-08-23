@@ -25,7 +25,9 @@ import (
 
 func TestNewBuildsConfiguredHTTPServerAndKeepsDependenciesOptional(t *testing.T) {
 	cfg := config.Default()
-	cfg.Install.StateDir = t.TempDir()
+	workspaceRoot := t.TempDir()
+	cfg.Install.StateDir = filepath.Join(workspaceRoot, "admin", "apps", "install")
+	cfg.Install.WorkspaceRoot = workspaceRoot
 	cfg.Server.Addr = "127.0.0.1:0"
 	cfg.Server.ReadTimeout = 123 * time.Millisecond
 	cfg.Server.WriteTimeout = 234 * time.Millisecond
@@ -71,7 +73,7 @@ func TestNewBuildsConfiguredHTTPServerAndKeepsDependenciesOptional(t *testing.T)
 	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
 		t.Fatalf("decode installation status: %v", err)
 	}
-	if body.Code != 0 || body.Data.Installed || body.Data.State != "uninstalled" {
+	if body.Code != 0 || body.Data.Installed || body.Data.State != "pristine" {
 		t.Fatalf("installation status body = %#v", body)
 	}
 
@@ -108,15 +110,19 @@ func TestNewBuildsConfiguredHTTPServerAndKeepsDependenciesOptional(t *testing.T)
 	}
 }
 
-func TestNewWiresInstallerPlanAgainstStateDirectoryParent(t *testing.T) {
+func TestNewWiresInstallerPlanAgainstConfiguredWorkspaceRoot(t *testing.T) {
 	root := t.TempDir()
-	for _, relative := range []string{"install", "admin/apps/web-antd", "admin/apps/web-ele", "admin/apps/web-naive"} {
+	for _, relative := range []string{"admin/apps/install", "admin/apps/web-naive"} {
 		if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(relative)), 0o755); err != nil {
 			t.Fatalf("MkdirAll(%q) error = %v", relative, err)
 		}
 	}
+	if err := os.WriteFile(filepath.Join(root, "admin", ".ui-profile.json"), []byte(`{"schema":1,"selectedUi":"naive","packageName":"@vben/web-naive","appDirectory":"apps/web-naive"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	cfg := config.Default()
-	cfg.Install.StateDir = filepath.Join(root, "install")
+	cfg.Install.StateDir = filepath.Join(root, "admin", "apps", "install")
+	cfg.Install.WorkspaceRoot = root
 	cfg.Server.Addr = "127.0.0.1:0"
 
 	app, err := New(cfg)
@@ -125,7 +131,7 @@ func TestNewWiresInstallerPlanAgainstStateDirectoryParent(t *testing.T) {
 	}
 	defer app.Close()
 
-	request := httptest.NewRequest(http.MethodPost, "/api/system/install/v1/plan", bytes.NewBufferString(`{"selectedUi":"naive","mode":"standalone"}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/system/install/v1/plan", bytes.NewBufferString(`{"mode":"standalone"}`))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	app.HTTPServer().Handler.ServeHTTP(response, request)
@@ -152,16 +158,20 @@ func TestNewWiresInstallerPlanAgainstStateDirectoryParent(t *testing.T) {
 
 func TestNewWiresApplyServiceForSourceWorkspace(t *testing.T) {
 	root := t.TempDir()
-	for _, relative := range []string{"install", "admin/apps/web-antd", "admin/apps/web-ele", "admin/apps/web-naive", "scripts"} {
+	for _, relative := range []string{"admin/apps/install", "admin/apps/web-antd", "scripts"} {
 		if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(relative)), 0o755); err != nil {
 			t.Fatalf("MkdirAll(%q) error = %v", relative, err)
 		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "admin", ".ui-profile.json"), []byte(`{"schema":1,"selectedUi":"antd","packageName":"@vben/web-antd","appDirectory":"apps/web-antd"}`), 0o600); err != nil {
+		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "scripts", "build.mjs"), []byte("// fixture"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfg := config.Default()
-	cfg.Install.StateDir = filepath.Join(root, "install")
+	cfg.Install.StateDir = filepath.Join(root, "admin", "apps", "install")
+	cfg.Install.WorkspaceRoot = root
 	cfg.Server.Addr = "127.0.0.1:0"
 
 	app, err := New(cfg)

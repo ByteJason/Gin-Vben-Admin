@@ -1,17 +1,22 @@
-FROM node:22-alpine AS build
+FROM node:24-alpine AS build
 
-WORKDIR /workspace
-RUN corepack enable
-COPY admin/package.json admin/pnpm-workspace.yaml admin/pnpm-lock.yaml ./
-COPY admin/apps ./apps
-COPY admin/packages ./packages
-COPY admin/internal ./internal
-COPY admin/scripts ./scripts
-ARG UI_APP=web-antd
-RUN pnpm install --frozen-lockfile --ignore-scripts \
-    && pnpm run build --filter=@vben/${UI_APP} \
-    && mkdir -p /out \
-    && cp -R apps/${UI_APP}/dist/. /out/
+WORKDIR /workspace/admin
+
+# Copying the bounded admin workspace makes tracked admin/.ui-profile.json
+# available when present. ADMIN_UI remains the explicit pristine-CI seam; the
+# resolver exits with UI_PROFILE_MISMATCH when both authorities disagree.
+COPY admin/ ./
+ARG ADMIN_UI=""
+ARG NPM_REGISTRY=https://registry.npmjs.org
+RUN --mount=type=cache,id=gin-vben-corepack,target=/root/.cache/node/corepack \
+    --mount=type=cache,id=gin-vben-pnpm,target=/pnpm/store \
+    corepack enable \
+    && pnpm config set store-dir /pnpm/store \
+    && pnpm config set registry "${NPM_REGISTRY}" --location=project \
+    && pnpm config set fetch-timeout 600000 --location=project \
+    && pnpm install --frozen-lockfile --ignore-scripts \
+    && pnpm -r run --if-present stub \
+    && node ./scripts/docker-build-ui.mjs --ui "${ADMIN_UI}" --out /out
 
 FROM nginx:1.27-alpine
 COPY admin/nginx.conf /etc/nginx/conf.d/default.conf
