@@ -5,9 +5,9 @@ import (
 	"errors"
 	"strings"
 
-	installer "example.com/gin-vben-admin/server/internal/application/installer"
-	"example.com/gin-vben-admin/server/internal/platform/migration"
-	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
+	installer "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/installer"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/migration"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/persistence/gormdb"
 )
 
 var ErrSchemaInstallation = errors.New("database schema installation failed")

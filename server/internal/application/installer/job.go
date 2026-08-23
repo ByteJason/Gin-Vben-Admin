@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	installstate "example.com/gin-vben-admin/server/internal/domain/installstate"
+	installstate "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/installstate"
 )
 
 var (

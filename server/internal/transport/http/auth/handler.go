@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	appauth "example.com/gin-vben-admin/server/internal/application/auth"
-	"example.com/gin-vben-admin/server/internal/config"
-	"example.com/gin-vben-admin/server/internal/domain/authdomain"
-	httpmiddleware "example.com/gin-vben-admin/server/internal/transport/http/middleware"
-	"example.com/gin-vben-admin/server/internal/transport/http/response"
+	appauth "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/auth"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/config"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/authdomain"
+	httpmiddleware "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/middleware"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/response"
 	"github.com/gin-gonic/gin"
 )
 

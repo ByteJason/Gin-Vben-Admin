@@ -3,18 +3,18 @@ package admin
 import (
 	"github.com/gin-gonic/gin"
 
-	audithttp "example.com/gin-vben-admin/server/internal/transport/http/audit"
-	authhttp "example.com/gin-vben-admin/server/internal/transport/http/auth"
-	dictionaryhttp "example.com/gin-vben-admin/server/internal/transport/http/dictionary"
-	filehttp "example.com/gin-vben-admin/server/internal/transport/http/file"
-	iamhttp "example.com/gin-vben-admin/server/internal/transport/http/iam"
-	importexporthttp "example.com/gin-vben-admin/server/internal/transport/http/importexport"
-	mailhttp "example.com/gin-vben-admin/server/internal/transport/http/mail"
-	httpmiddleware "example.com/gin-vben-admin/server/internal/transport/http/middleware"
-	monitorhttp "example.com/gin-vben-admin/server/internal/transport/http/monitor"
-	"example.com/gin-vben-admin/server/internal/transport/http/response"
-	settingshttp "example.com/gin-vben-admin/server/internal/transport/http/settings"
-	taskshttp "example.com/gin-vben-admin/server/internal/transport/http/tasks"
+	audithttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/audit"
+	authhttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/auth"
+	dictionaryhttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/dictionary"
+	filehttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/file"
+	iamhttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/iam"
+	importexporthttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/importexport"
+	mailhttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/mail"
+	httpmiddleware "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/middleware"
+	monitorhttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/monitor"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/response"
+	settingshttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/settings"
+	taskshttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/tasks"
 )
 
 // AuxiliaryRoutes contains optional B6 management capabilities. Keeping this

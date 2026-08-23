@@ -12,14 +12,14 @@ import (
 	"testing"
 	"time"
 
-	"example.com/gin-vben-admin/server/internal/bootstrap"
-	"example.com/gin-vben-admin/server/internal/config"
-	domain "example.com/gin-vben-admin/server/internal/domain/iam"
-	"example.com/gin-vben-admin/server/internal/domain/tenant"
-	"example.com/gin-vben-admin/server/internal/platform/authplatform"
-	"example.com/gin-vben-admin/server/internal/platform/cache/redis"
-	"example.com/gin-vben-admin/server/internal/platform/iamplatform"
-	"example.com/gin-vben-admin/server/internal/platform/migration"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/bootstrap"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/config"
+	domain "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/iam"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/authplatform"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/cache/redis"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/iamplatform"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/migration"
 )
 
 func TestRBACHTTPIntegration(t *testing.T) {

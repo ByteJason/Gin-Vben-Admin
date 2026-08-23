@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"example.com/gin-vben-admin/server/internal/application/jobs"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/application/jobs"
 )
 
 func TestSchedulerEnqueuesDueCronInDefinitionTimezoneAndIsIdempotent(t *testing.T) {

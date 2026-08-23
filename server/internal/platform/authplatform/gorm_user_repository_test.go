@@ -14,9 +14,9 @@ import (
 	"time"
 	"unsafe"
 
-	"example.com/gin-vben-admin/server/internal/domain/authdomain"
-	"example.com/gin-vben-admin/server/internal/domain/tenant"
-	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/authdomain"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/persistence/gormdb"
 	gormmysql "gorm.io/driver/mysql"
 	gormpostgres "gorm.io/driver/postgres"
 	"gorm.io/gorm"

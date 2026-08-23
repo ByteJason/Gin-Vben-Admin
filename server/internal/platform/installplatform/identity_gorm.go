@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"strings"
 
-	installer "example.com/gin-vben-admin/server/internal/application/installer"
-	"example.com/gin-vben-admin/server/internal/domain/authdomain"
-	"example.com/gin-vben-admin/server/internal/platform/authplatform"
-	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
+	installer "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/installer"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/authdomain"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/authplatform"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/persistence/gormdb"
 	"gorm.io/gorm"
 )
 

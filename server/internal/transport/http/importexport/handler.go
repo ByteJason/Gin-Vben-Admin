@@ -10,10 +10,10 @@ import (
 	"net/http"
 	"strings"
 
-	importsapp "example.com/gin-vben-admin/server/internal/application/imports"
-	authdomain "example.com/gin-vben-admin/server/internal/domain/authdomain"
-	"example.com/gin-vben-admin/server/internal/domain/tenant"
-	"example.com/gin-vben-admin/server/internal/transport/http/response"
+	importsapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/imports"
+	authdomain "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/authdomain"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/response"
 	"github.com/gin-gonic/gin"
 )
 

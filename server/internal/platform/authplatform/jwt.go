@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"example.com/gin-vben-admin/server/internal/domain/authdomain"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/authdomain"
 )
 
 var ErrJWTSecret = errors.New("jwt secret must not be empty")

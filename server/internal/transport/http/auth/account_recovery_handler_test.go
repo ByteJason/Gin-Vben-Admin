@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	appauth "example.com/gin-vben-admin/server/internal/application/auth"
-	"example.com/gin-vben-admin/server/internal/config"
-	"example.com/gin-vben-admin/server/internal/domain/authdomain"
+	appauth "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/auth"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/config"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/authdomain"
 	"github.com/gin-gonic/gin"
 )
 

@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	appauth "example.com/gin-vben-admin/server/internal/application/auth"
-	iamapp "example.com/gin-vben-admin/server/internal/application/iam"
-	"example.com/gin-vben-admin/server/internal/domain/authdomain"
-	domain "example.com/gin-vben-admin/server/internal/domain/iam"
-	httpmiddleware "example.com/gin-vben-admin/server/internal/transport/http/middleware"
+	appauth "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/auth"
+	iamapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/iam"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/authdomain"
+	domain "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/iam"
+	httpmiddleware "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/middleware"
 	"github.com/gin-gonic/gin"
 )
 

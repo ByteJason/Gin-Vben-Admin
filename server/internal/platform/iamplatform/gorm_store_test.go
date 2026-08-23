@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"example.com/gin-vben-admin/server/internal/domain/authdomain"
-	domain "example.com/gin-vben-admin/server/internal/domain/iam"
-	"example.com/gin-vben-admin/server/internal/domain/tenant"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/authdomain"
+	domain "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/iam"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
 )
 
 func TestGORMStoreNilDependencyReturnsStableErrors(t *testing.T) {

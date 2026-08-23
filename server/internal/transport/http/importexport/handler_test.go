@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	importsapp "example.com/gin-vben-admin/server/internal/application/imports"
-	"example.com/gin-vben-admin/server/internal/domain/tenant"
+	importsapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/imports"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
 	"github.com/gin-gonic/gin"
 )
 

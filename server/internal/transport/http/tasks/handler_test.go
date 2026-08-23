@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"example.com/gin-vben-admin/server/internal/application/jobs"
-	tasksapp "example.com/gin-vben-admin/server/internal/application/tasks"
-	"example.com/gin-vben-admin/server/internal/domain/tenant"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/application/jobs"
+	tasksapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/tasks"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
 	"github.com/gin-gonic/gin"
 )
 

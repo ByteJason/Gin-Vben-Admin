@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	domain "example.com/gin-vben-admin/server/internal/domain/iam"
-	"example.com/gin-vben-admin/server/internal/domain/tenant"
-	"example.com/gin-vben-admin/server/internal/platform/iamplatform"
-	"example.com/gin-vben-admin/server/internal/platform/migration"
-	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
+	domain "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/iam"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/iamplatform"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/migration"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/persistence/gormdb"
 )
 
 func TestTenantIsolationAcrossIAMPersistence(t *testing.T) {

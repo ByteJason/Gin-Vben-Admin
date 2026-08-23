@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	domain "example.com/gin-vben-admin/server/internal/domain/iam"
+	domain "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/iam"
 )
 
 type fakeDecisionCache struct {

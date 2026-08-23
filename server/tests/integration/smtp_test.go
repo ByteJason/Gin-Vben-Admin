@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"testing"
 
-	appnotification "example.com/gin-vben-admin/server/internal/application/notification"
-	notificationplatform "example.com/gin-vben-admin/server/internal/platform/notification"
+	appnotification "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/notification"
+	notificationplatform "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/notification"
 )
 
 // TestSMTPMailpitFixture is opt-in so the default integration suite remains

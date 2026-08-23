@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	appjobs "example.com/gin-vben-admin/server/internal/application/jobs"
-	rediscache "example.com/gin-vben-admin/server/internal/platform/cache/redis"
+	appjobs "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/jobs"
+	rediscache "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/cache/redis"
 )
 
 var ErrRedisQueueUnavailable = errors.New("redis task queue is unavailable")

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	settingsapp "example.com/gin-vben-admin/server/internal/application/settings"
+	settingsapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/settings"
 	"github.com/gin-gonic/gin"
 )
 

@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
-	"example.com/gin-vben-admin/server/internal/config"
-	"example.com/gin-vben-admin/server/internal/platform/migration"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/config"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/migration"
 )
 
 func main() {

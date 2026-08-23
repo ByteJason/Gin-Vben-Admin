@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	installstate "example.com/gin-vben-admin/server/internal/domain/installstate"
-	"example.com/gin-vben-admin/server/internal/platform/installplatform"
+	installstate "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/installstate"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/installplatform"
 )
 
 func TestFileMarkerStoreCreatesAndLoadsInstallationMarker(t *testing.T) {

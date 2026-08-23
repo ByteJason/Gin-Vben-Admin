@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"strings"
 
-	dictionaryapp "example.com/gin-vben-admin/server/internal/application/dictionary"
-	"example.com/gin-vben-admin/server/internal/domain/tenant"
-	"example.com/gin-vben-admin/server/internal/transport/http/response"
+	dictionaryapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/dictionary"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/response"
 	"github.com/gin-gonic/gin"
 )
 

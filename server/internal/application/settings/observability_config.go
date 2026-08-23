@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	domainobs "example.com/gin-vben-admin/server/internal/domain/observability"
+	domainobs "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/observability"
 )
 
 var observabilitySettingKeys = []string{

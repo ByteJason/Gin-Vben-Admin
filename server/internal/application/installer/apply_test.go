@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	installstate "example.com/gin-vben-admin/server/internal/domain/installstate"
-	platformi18n "example.com/gin-vben-admin/server/internal/platform/i18n"
+	installstate "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/installstate"
+	platformi18n "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/i18n"
 )
 
 func TestApplyServiceCompletesInstallationInSafeOrder(t *testing.T) {

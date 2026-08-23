@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"example.com/gin-vben-admin/server/internal/application/auth"
-	"example.com/gin-vben-admin/server/internal/domain/authdomain"
-	"example.com/gin-vben-admin/server/internal/platform/authplatform"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/application/auth"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/authdomain"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/authplatform"
 )
 
 type auditSink struct {

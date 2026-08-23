@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	importsapp "example.com/gin-vben-admin/server/internal/application/imports"
-	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
+	importsapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/imports"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/persistence/gormdb"
 	"gorm.io/gorm"
 )
 

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	"example.com/gin-vben-admin/server/internal/domain/authdomain"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/authdomain"
 )
 
 // AccountProvisioner owns writes to the users credential record. It is kept

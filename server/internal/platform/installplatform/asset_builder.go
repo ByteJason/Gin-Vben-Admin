@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	installstate "example.com/gin-vben-admin/server/internal/domain/installstate"
+	installstate "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/installstate"
 )
 
 type assetCommandRunner func(context.Context, string, ...string) ([]byte, error)

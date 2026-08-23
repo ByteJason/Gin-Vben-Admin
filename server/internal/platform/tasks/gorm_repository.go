@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	tasksapp "example.com/gin-vben-admin/server/internal/application/tasks"
-	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
+	tasksapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/tasks"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/persistence/gormdb"
 	"gorm.io/gorm"
 )
 

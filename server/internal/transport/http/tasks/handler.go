@@ -8,10 +8,10 @@ import (
 	"net/http"
 	"strings"
 
-	"example.com/gin-vben-admin/server/internal/application/tasks"
-	taskdomain "example.com/gin-vben-admin/server/internal/domain/task"
-	"example.com/gin-vben-admin/server/internal/domain/tenant"
-	"example.com/gin-vben-admin/server/internal/transport/http/response"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/application/tasks"
+	taskdomain "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/task"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/response"
 	"github.com/gin-gonic/gin"
 )
 

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"example.com/gin-vben-admin/server/internal/domain/observability"
-	platformi18n "example.com/gin-vben-admin/server/internal/platform/i18n"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/observability"
+	platformi18n "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/i18n"
 	"github.com/spf13/viper"
 )
 

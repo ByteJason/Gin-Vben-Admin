@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"example.com/gin-vben-admin/server/internal/domain/authdomain"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/authdomain"
 )
 
 type MemoryTokenStore struct {

@@ -10,10 +10,10 @@ import (
 	"strings"
 	"sync"
 
-	installer "example.com/gin-vben-admin/server/internal/application/installer"
-	installstate "example.com/gin-vben-admin/server/internal/domain/installstate"
-	platformi18n "example.com/gin-vben-admin/server/internal/platform/i18n"
-	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
+	installer "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/installer"
+	installstate "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/installstate"
+	platformi18n "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/i18n"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/persistence/gormdb"
 )
 
 var ErrEnvironmentInstallation = errors.New("installation environment publication failed")

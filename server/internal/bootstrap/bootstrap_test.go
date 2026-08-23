@@ -14,13 +14,13 @@ import (
 	"testing"
 	"time"
 
-	appauth "example.com/gin-vben-admin/server/internal/application/auth"
-	monitorapp "example.com/gin-vben-admin/server/internal/application/monitor"
-	settingsapp "example.com/gin-vben-admin/server/internal/application/settings"
-	"example.com/gin-vben-admin/server/internal/config"
-	"example.com/gin-vben-admin/server/internal/domain/authdomain"
-	domainobs "example.com/gin-vben-admin/server/internal/domain/observability"
-	observabilityplatform "example.com/gin-vben-admin/server/internal/platform/observability"
+	appauth "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/auth"
+	monitorapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/monitor"
+	settingsapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/settings"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/config"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/authdomain"
+	domainobs "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/observability"
+	observabilityplatform "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/observability"
 )
 
 func TestNewBuildsConfiguredHTTPServerAndKeepsDependenciesOptional(t *testing.T) {

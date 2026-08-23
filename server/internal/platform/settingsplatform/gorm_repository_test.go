@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"example.com/gin-vben-admin/server/internal/application/settings"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/application/settings"
 )
 
 func TestStoredSettingMappingCopiesValueAndMetadata(t *testing.T) {

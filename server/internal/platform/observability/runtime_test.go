@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	domainobs "example.com/gin-vben-admin/server/internal/domain/observability"
+	domainobs "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/observability"
 	collectortrace "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	"google.golang.org/grpc"
 )

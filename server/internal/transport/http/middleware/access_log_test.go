@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	observabilityplatform "example.com/gin-vben-admin/server/internal/platform/observability"
+	observabilityplatform "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/observability"
 	"github.com/gin-gonic/gin"
 )
 

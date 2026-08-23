@@ -7,15 +7,15 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	installer "example.com/gin-vben-admin/server/internal/application/installer"
-	"example.com/gin-vben-admin/server/internal/transport/http/admin"
-	authhttp "example.com/gin-vben-admin/server/internal/transport/http/auth"
-	"example.com/gin-vben-admin/server/internal/transport/http/client"
-	"example.com/gin-vben-admin/server/internal/transport/http/health"
-	iamhttp "example.com/gin-vben-admin/server/internal/transport/http/iam"
-	installhttp "example.com/gin-vben-admin/server/internal/transport/http/install"
-	"example.com/gin-vben-admin/server/internal/transport/http/middleware"
-	"example.com/gin-vben-admin/server/internal/transport/http/staticui"
+	installer "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/installer"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/admin"
+	authhttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/auth"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/client"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/health"
+	iamhttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/iam"
+	installhttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/install"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/middleware"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/staticui"
 )
 
 // NewRouter builds the public HTTP seam without binding to a port or external services.

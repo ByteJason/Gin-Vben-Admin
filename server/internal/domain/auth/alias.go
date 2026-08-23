@@ -3,7 +3,7 @@
 // concrete platform package name.
 package auth
 
-import base "example.com/gin-vben-admin/server/internal/domain/authdomain"
+import base "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/authdomain"
 
 type User = base.User
 type Session = base.Session

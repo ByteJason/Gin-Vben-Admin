@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	domain "example.com/gin-vben-admin/server/internal/domain/iam"
-	rediscache "example.com/gin-vben-admin/server/internal/platform/cache/redis"
+	domain "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/iam"
+	rediscache "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/cache/redis"
 )
 
 func TestDecisionDigestIsIndependentOfRoleOrder(t *testing.T) {

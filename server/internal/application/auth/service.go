@@ -8,8 +8,8 @@ import (
 	"errors"
 	"time"
 
-	"example.com/gin-vben-admin/server/internal/domain/authdomain"
-	"example.com/gin-vben-admin/server/internal/domain/tenant"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/authdomain"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
 )
 
 type Service struct {

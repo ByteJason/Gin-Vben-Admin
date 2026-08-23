@@ -6,9 +6,9 @@ import (
 	"errors"
 	"strings"
 
-	"example.com/gin-vben-admin/server/internal/domain/organization"
-	"example.com/gin-vben-admin/server/internal/domain/tenant"
-	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/organization"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/persistence/gormdb"
 	"gorm.io/gorm"
 )
 

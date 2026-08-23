@@ -5,9 +5,9 @@ import (
 	"errors"
 	"net/http"
 
-	monitorapp "example.com/gin-vben-admin/server/internal/application/monitor"
-	"example.com/gin-vben-admin/server/internal/domain/tenant"
-	"example.com/gin-vben-admin/server/internal/transport/http/response"
+	monitorapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/monitor"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/response"
 	"github.com/gin-gonic/gin"
 )
 

@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	installer "example.com/gin-vben-admin/server/internal/application/installer"
+	installer "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/installer"
 	"github.com/gin-gonic/gin"
 )
 

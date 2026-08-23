@@ -7,7 +7,7 @@ import (
 	"errors"
 	"time"
 
-	rediscache "example.com/gin-vben-admin/server/internal/platform/cache/redis"
+	rediscache "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/cache/redis"
 )
 
 var ErrRateLimiterUnavailable = errors.New("redis rate limiter is not initialized")

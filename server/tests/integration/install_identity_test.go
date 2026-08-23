@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	installer "example.com/gin-vben-admin/server/internal/application/installer"
-	"example.com/gin-vben-admin/server/internal/platform/installplatform"
-	"example.com/gin-vben-admin/server/internal/platform/migration"
+	installer "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/installer"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/installplatform"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/migration"
 )
 
 func TestInstallerIdentityTransactionIntegration(t *testing.T) {

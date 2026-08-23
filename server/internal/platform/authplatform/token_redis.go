@@ -5,8 +5,8 @@ import (
 	"errors"
 	"time"
 
-	"example.com/gin-vben-admin/server/internal/domain/authdomain"
-	rediscache "example.com/gin-vben-admin/server/internal/platform/cache/redis"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/authdomain"
+	rediscache "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/cache/redis"
 )
 
 type RedisTokenStore struct{ cache *rediscache.Client }

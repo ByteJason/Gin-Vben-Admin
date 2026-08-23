@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	installer "example.com/gin-vben-admin/server/internal/application/installer"
-	"example.com/gin-vben-admin/server/internal/platform/migration"
+	installer "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/installer"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/migration"
 )
 
 func TestSchemaInstallerRunsEmbeddedMigrationsAgainstWriteEndpoint(t *testing.T) {

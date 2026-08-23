@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"example.com/gin-vben-admin/server/internal/domain/authdomain"
-	"example.com/gin-vben-admin/server/internal/domain/tenant"
-	"example.com/gin-vben-admin/server/internal/platform/authplatform"
-	rediscache "example.com/gin-vben-admin/server/internal/platform/cache/redis"
-	"example.com/gin-vben-admin/server/internal/platform/migration"
-	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/authdomain"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/authplatform"
+	rediscache "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/cache/redis"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/migration"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/persistence/gormdb"
 )
 
 func TestTenantIsolationAcrossDurableAuthSessions(t *testing.T) {

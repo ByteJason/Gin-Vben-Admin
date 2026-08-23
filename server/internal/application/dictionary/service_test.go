@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"example.com/gin-vben-admin/server/internal/domain/tenant"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
 )
 
 func dictionaryContext(t *testing.T, tenantID, orgID string) context.Context {

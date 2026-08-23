@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	platformhealth "example.com/gin-vben-admin/server/internal/platform/health"
+	platformhealth "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/health"
 )
 
 type readinessDependency struct {

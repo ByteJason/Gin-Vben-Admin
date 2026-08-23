@@ -5,9 +5,9 @@ import (
 	"strconv"
 	"time"
 
-	dictionaryapp "example.com/gin-vben-admin/server/internal/application/dictionary"
-	"example.com/gin-vben-admin/server/internal/domain/tenant"
-	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
+	dictionaryapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/dictionary"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/persistence/gormdb"
 )
 
 type auditRecord struct {

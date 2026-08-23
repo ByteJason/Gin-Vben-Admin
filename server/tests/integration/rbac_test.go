@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	iamapp "example.com/gin-vben-admin/server/internal/application/iam"
-	domain "example.com/gin-vben-admin/server/internal/domain/iam"
-	"example.com/gin-vben-admin/server/internal/domain/tenant"
-	"example.com/gin-vben-admin/server/internal/platform/iamplatform"
-	"example.com/gin-vben-admin/server/internal/platform/migration"
-	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
+	iamapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/iam"
+	domain "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/iam"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/iamplatform"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/migration"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/persistence/gormdb"
 )
 
 func TestRBACPersistenceSingleNode(t *testing.T) {

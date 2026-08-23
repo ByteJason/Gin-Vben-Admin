@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	installstate "example.com/gin-vben-admin/server/internal/domain/installstate"
+	installstate "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/installstate"
 )
 
 const CurrentInstallerVersion = "0.4.0-dev"

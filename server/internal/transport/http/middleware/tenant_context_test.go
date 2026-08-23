@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	authdomain "example.com/gin-vben-admin/server/internal/domain/authdomain"
-	"example.com/gin-vben-admin/server/internal/domain/tenant"
+	authdomain "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/authdomain"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
 	"github.com/gin-gonic/gin"
 )
 

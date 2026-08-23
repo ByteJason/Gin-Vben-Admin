@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	rediscache "example.com/gin-vben-admin/server/internal/platform/cache/redis"
+	rediscache "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/cache/redis"
 )
 
 func TestRedisRateLimiterIntegration(t *testing.T) {

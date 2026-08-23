@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"example.com/gin-vben-admin/server/internal/domain/authdomain"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/authdomain"
 )
 
 // PasswordResetDelivery receives a newly generated token and is responsible

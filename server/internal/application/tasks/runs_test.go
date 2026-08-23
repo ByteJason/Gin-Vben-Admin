@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"example.com/gin-vben-admin/server/internal/application/jobs"
-	"example.com/gin-vben-admin/server/internal/domain/tenant"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/application/jobs"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
 )
 
 func runContext(t *testing.T, tenantID, orgID string) context.Context {

@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	domainobs "example.com/gin-vben-admin/server/internal/domain/observability"
+	domainobs "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/observability"
 )
 
 var ErrManagerClosed = errors.New("observability manager is closed")

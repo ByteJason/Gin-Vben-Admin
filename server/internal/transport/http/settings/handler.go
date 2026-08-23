@@ -9,9 +9,9 @@ import (
 	"net/http"
 	"strings"
 
-	settingsapp "example.com/gin-vben-admin/server/internal/application/settings"
-	authdomain "example.com/gin-vben-admin/server/internal/domain/authdomain"
-	"example.com/gin-vben-admin/server/internal/transport/http/response"
+	settingsapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/settings"
+	authdomain "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/authdomain"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/response"
 	"github.com/gin-gonic/gin"
 )
 

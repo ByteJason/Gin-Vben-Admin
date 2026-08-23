@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	domain "example.com/gin-vben-admin/server/internal/domain/task"
-	"example.com/gin-vben-admin/server/internal/domain/tenant"
+	domain "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/task"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
 )
 
 type TaskDefinition = domain.TaskDefinition

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"example.com/gin-vben-admin/server/internal/application/audit"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/application/audit"
 )
 
 func TestGORMAuditRepositoryExposesPagePortWithoutDatabase(t *testing.T) {

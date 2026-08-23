@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"example.com/gin-vben-admin/server/internal/application/settings"
-	"example.com/gin-vben-admin/server/internal/bootstrap"
-	"example.com/gin-vben-admin/server/internal/config"
-	"example.com/gin-vben-admin/server/internal/domain/tenant"
-	"example.com/gin-vben-admin/server/internal/platform/migration"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/application/settings"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/bootstrap"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/config"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/migration"
 )
 
 // TestPersistedObservabilityLoadsOnRestart proves that a setting written by

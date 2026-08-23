@@ -3,7 +3,7 @@ package client
 import (
 	"github.com/gin-gonic/gin"
 
-	"example.com/gin-vben-admin/server/internal/transport/http/response"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/response"
 )
 
 func RegisterRoutes(r gin.IRouter) {

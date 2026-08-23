@@ -10,9 +10,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	installer "example.com/gin-vben-admin/server/internal/application/installer"
-	platformi18n "example.com/gin-vben-admin/server/internal/platform/i18n"
-	"example.com/gin-vben-admin/server/internal/transport/http/response"
+	installer "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/installer"
+	platformi18n "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/i18n"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/response"
 )
 
 type StatusProvider interface {

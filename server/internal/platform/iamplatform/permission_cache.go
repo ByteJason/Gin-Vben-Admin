@@ -10,9 +10,9 @@ import (
 	"strconv"
 	"time"
 
-	iamapp "example.com/gin-vben-admin/server/internal/application/iam"
-	domain "example.com/gin-vben-admin/server/internal/domain/iam"
-	rediscache "example.com/gin-vben-admin/server/internal/platform/cache/redis"
+	iamapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/iam"
+	domain "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/iam"
+	rediscache "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/cache/redis"
 )
 
 var ErrPermissionCacheUnavailable = errors.New("iam permission cache is unavailable")

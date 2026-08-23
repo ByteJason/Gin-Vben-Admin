@@ -18,13 +18,13 @@ import (
 	"testing"
 	"time"
 
-	"example.com/gin-vben-admin/server/internal/bootstrap"
-	"example.com/gin-vben-admin/server/internal/config"
-	installstate "example.com/gin-vben-admin/server/internal/domain/installstate"
-	"example.com/gin-vben-admin/server/internal/domain/tenant"
-	"example.com/gin-vben-admin/server/internal/platform/authplatform"
-	rediscache "example.com/gin-vben-admin/server/internal/platform/cache/redis"
-	"example.com/gin-vben-admin/server/internal/platform/migration"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/bootstrap"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/config"
+	installstate "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/installstate"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/authplatform"
+	rediscache "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/cache/redis"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/migration"
 )
 
 const authIntegrationSecret = "integration-auth-secret-012345678901234567890123"

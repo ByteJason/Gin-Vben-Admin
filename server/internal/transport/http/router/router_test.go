@@ -8,11 +8,11 @@ import (
 	"testing"
 	"testing/fstest"
 
-	settingsapp "example.com/gin-vben-admin/server/internal/application/settings"
-	domainobs "example.com/gin-vben-admin/server/internal/domain/observability"
-	observabilityplatform "example.com/gin-vben-admin/server/internal/platform/observability"
-	adminhttp "example.com/gin-vben-admin/server/internal/transport/http/admin"
-	settingshttp "example.com/gin-vben-admin/server/internal/transport/http/settings"
+	settingsapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/settings"
+	domainobs "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/observability"
+	observabilityplatform "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/observability"
+	adminhttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/admin"
+	settingshttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/settings"
 	"github.com/gin-gonic/gin"
 )
 

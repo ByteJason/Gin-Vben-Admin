@@ -8,7 +8,7 @@ import (
 	"net/url"
 	"strings"
 
-	"example.com/gin-vben-admin/server/migrations"
+	"github.com/ByteJason/Gin-Vben-Admin/server/migrations"
 
 	migrate "github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database"

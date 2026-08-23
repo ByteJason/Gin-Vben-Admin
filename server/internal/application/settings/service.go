@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	platformi18n "example.com/gin-vben-admin/server/internal/platform/i18n"
+	platformi18n "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/i18n"
 )
 
 const maskedValue = "[REDACTED]"

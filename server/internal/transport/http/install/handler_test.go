@@ -13,7 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	installer "example.com/gin-vben-admin/server/internal/application/installer"
+	installer "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/installer"
 )
 
 func TestStatusEndpointReturnsCredentialFreeInstallationState(t *testing.T) {

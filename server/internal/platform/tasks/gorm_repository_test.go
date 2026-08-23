@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	tasksapp "example.com/gin-vben-admin/server/internal/application/tasks"
+	tasksapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/tasks"
 )
 
 func TestGORMRepositoryRequiresConfiguredStore(t *testing.T) {

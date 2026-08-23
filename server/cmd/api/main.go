@@ -8,8 +8,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"example.com/gin-vben-admin/server/internal/bootstrap"
-	"example.com/gin-vben-admin/server/internal/config"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/bootstrap"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/config"
 )
 
 func main() {

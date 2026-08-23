@@ -6,7 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	appjobs "example.com/gin-vben-admin/server/internal/application/jobs"
+	appjobs "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/jobs"
 )
 
 func TestRedisQueueRequiresConfiguredCache(t *testing.T) {

@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	mailapp "example.com/gin-vben-admin/server/internal/application/mail"
-	appnotification "example.com/gin-vben-admin/server/internal/application/notification"
-	"example.com/gin-vben-admin/server/internal/domain/tenant"
+	mailapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/mail"
+	appnotification "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/notification"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
 	"github.com/gin-gonic/gin"
 )
 

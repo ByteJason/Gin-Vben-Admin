@@ -13,8 +13,8 @@ import (
 	"strings"
 	"sync"
 
-	installer "example.com/gin-vben-admin/server/internal/application/installer"
-	installstate "example.com/gin-vben-admin/server/internal/domain/installstate"
+	installer "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/installer"
+	installstate "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/installstate"
 )
 
 var ErrAssetInstallation = errors.New("management UI asset installation failed")

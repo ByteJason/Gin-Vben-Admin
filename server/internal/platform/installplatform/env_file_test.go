@@ -9,7 +9,7 @@ import (
 	"runtime"
 	"testing"
 
-	"example.com/gin-vben-admin/server/internal/platform/installplatform"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/installplatform"
 )
 
 func TestAtomicEnvStoreWritesDeterministicPrivateConfiguration(t *testing.T) {

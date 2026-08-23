@@ -3,7 +3,7 @@ package auditplatform
 import (
 	"testing"
 
-	"example.com/gin-vben-admin/server/internal/application/audit"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/application/audit"
 )
 
 func TestLoginFilterUsesPersistedAuthEventType(t *testing.T) {

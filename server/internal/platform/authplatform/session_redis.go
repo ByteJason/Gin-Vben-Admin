@@ -5,9 +5,9 @@ import (
 	"errors"
 	"time"
 
-	"example.com/gin-vben-admin/server/internal/domain/authdomain"
-	"example.com/gin-vben-admin/server/internal/domain/tenant"
-	rediscache "example.com/gin-vben-admin/server/internal/platform/cache/redis"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/authdomain"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
+	rediscache "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/cache/redis"
 )
 
 // RedisSessionStore persists refresh-session state using the existing namespaced

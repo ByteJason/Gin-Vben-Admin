@@ -18,7 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	appnotification "example.com/gin-vben-admin/server/internal/application/notification"
+	appnotification "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/notification"
 )
 
 // SMTPMailer sends application messages over a single SMTP connection. It

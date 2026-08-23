@@ -9,8 +9,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	fileapp "example.com/gin-vben-admin/server/internal/application/file"
-	httpmiddleware "example.com/gin-vben-admin/server/internal/transport/http/middleware"
+	fileapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/file"
+	httpmiddleware "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/middleware"
 	"github.com/gin-gonic/gin"
 )
 

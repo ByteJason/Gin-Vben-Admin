@@ -1,4 +1,4 @@
-module example.com/gin-vben-admin/server
+module github.com/ByteJason/Gin-Vben-Admin/server
 
 go 1.24
 

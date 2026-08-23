@@ -8,7 +8,7 @@ import (
 	"strings"
 	"unicode"
 
-	installer "example.com/gin-vben-admin/server/internal/application/installer"
+	installer "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/installer"
 )
 
 type CommandRunner interface {

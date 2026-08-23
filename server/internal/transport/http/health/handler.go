@@ -5,8 +5,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	platformhealth "example.com/gin-vben-admin/server/internal/platform/health"
-	"example.com/gin-vben-admin/server/internal/transport/http/response"
+	platformhealth "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/health"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/response"
 )
 
 type ReadinessChecker interface {

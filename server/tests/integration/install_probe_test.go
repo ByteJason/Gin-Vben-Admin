@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	installer "example.com/gin-vben-admin/server/internal/application/installer"
-	"example.com/gin-vben-admin/server/internal/platform/installplatform"
+	installer "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/installer"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/installplatform"
 )
 
 func TestInstallerDependencyChecksIntegration(t *testing.T) {

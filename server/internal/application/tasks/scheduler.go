@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"example.com/gin-vben-admin/server/internal/domain/tenant"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
 )
 
 var ErrSchedulerUnavailable = errors.New("task scheduler unavailable")

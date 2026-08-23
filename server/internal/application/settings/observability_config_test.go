@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	domainobs "example.com/gin-vben-admin/server/internal/domain/observability"
+	domainobs "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/observability"
 )
 
 func TestResolveObservabilityConfigOverlaysOnlyAllowedPersistedValues(t *testing.T) {

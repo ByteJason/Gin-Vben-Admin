@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	domainobs "example.com/gin-vben-admin/server/internal/domain/observability"
+	domainobs "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/observability"
 )
 
 func TestManagerReloadsCollectorsWithoutChangingRouterReference(t *testing.T) {

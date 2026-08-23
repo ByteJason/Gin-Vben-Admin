@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	appauth "example.com/gin-vben-admin/server/internal/application/auth"
-	"example.com/gin-vben-admin/server/internal/domain/authdomain"
-	"example.com/gin-vben-admin/server/internal/domain/tenant"
+	appauth "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/auth"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/authdomain"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
 	mysqldriver "github.com/go-sql-driver/mysql"
 )
 

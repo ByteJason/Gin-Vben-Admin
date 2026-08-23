@@ -6,7 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"example.com/gin-vben-admin/server/internal/transport/http/response"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/response"
 )
 
 const installationRequiredCode = 10008

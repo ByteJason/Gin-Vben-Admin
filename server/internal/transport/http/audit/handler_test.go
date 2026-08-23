@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	auditapp "example.com/gin-vben-admin/server/internal/application/audit"
+	auditapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/audit"
 	"github.com/gin-gonic/gin"
 )
 

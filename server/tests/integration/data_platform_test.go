@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	rediscache "example.com/gin-vben-admin/server/internal/platform/cache/redis"
-	"example.com/gin-vben-admin/server/internal/platform/migration"
-	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
+	rediscache "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/cache/redis"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/migration"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/persistence/gormdb"
 	"gorm.io/gorm"
 )
 

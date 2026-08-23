@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	auditapp "example.com/gin-vben-admin/server/internal/application/audit"
-	"example.com/gin-vben-admin/server/internal/domain/tenant"
-	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
+	auditapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/audit"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/persistence/gormdb"
 )
 
 type GORMRepository struct{ db *gormdb.Store }

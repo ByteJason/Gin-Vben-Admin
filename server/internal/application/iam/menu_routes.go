@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	domain "example.com/gin-vben-admin/server/internal/domain/iam"
+	domain "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/iam"
 )
 
 // MenuRoute is the transport-neutral route record consumed by all three UI

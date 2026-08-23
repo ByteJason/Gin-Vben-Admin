@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	appbackup "example.com/gin-vben-admin/server/internal/application/backup"
+	appbackup "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/backup"
 	mysqldriver "github.com/go-sql-driver/mysql"
 )
 

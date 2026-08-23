@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"example.com/gin-vben-admin/server/internal/domain/tenant"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
 )
 
 // MemoryRepository is used by unit tests and the dependency-free local

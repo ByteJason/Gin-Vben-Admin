@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	auditapp "example.com/gin-vben-admin/server/internal/application/audit"
-	iamapp "example.com/gin-vben-admin/server/internal/application/iam"
-	"example.com/gin-vben-admin/server/internal/domain/authdomain"
-	domain "example.com/gin-vben-admin/server/internal/domain/iam"
+	auditapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/audit"
+	iamapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/iam"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/authdomain"
+	domain "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/iam"
 	"github.com/gin-gonic/gin"
 )
 

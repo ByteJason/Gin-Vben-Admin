@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	installer "example.com/gin-vben-admin/server/internal/application/installer"
-	rediscache "example.com/gin-vben-admin/server/internal/platform/cache/redis"
-	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
+	installer "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/installer"
+	rediscache "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/cache/redis"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/persistence/gormdb"
 )
 
 func TestDependencyProbeBuildsStructuredMySQLAndPostgresOptions(t *testing.T) {

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"example.com/gin-vben-admin/server/internal/domain/organization"
-	"example.com/gin-vben-admin/server/internal/domain/tenant"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/organization"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
 )
 
 func TestGORMRepositoryRequiresTenantContext(t *testing.T) {

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	auditapp "example.com/gin-vben-admin/server/internal/application/audit"
-	"example.com/gin-vben-admin/server/internal/transport/http/response"
+	auditapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/audit"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/response"
 	"github.com/gin-gonic/gin"
 )
 

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	appauth "example.com/gin-vben-admin/server/internal/application/auth"
-	rediscache "example.com/gin-vben-admin/server/internal/platform/cache/redis"
+	appauth "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/auth"
+	rediscache "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/cache/redis"
 )
 
 var ErrLoginAttemptStoreUnavailable = errors.New("redis login attempt store is not initialized")

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	domain "example.com/gin-vben-admin/server/internal/domain/iam"
-	"example.com/gin-vben-admin/server/internal/domain/tenant"
+	domain "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/iam"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
 )
 
 func TestServiceAuthorizesRolePolicyAndScopes(t *testing.T) {

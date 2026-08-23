@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	importsapp "example.com/gin-vben-admin/server/internal/application/imports"
+	importsapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/imports"
 )
 
 func TestGORMRepositoryMapsJobWithoutPayloadOrSecrets(t *testing.T) {

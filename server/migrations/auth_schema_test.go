@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"example.com/gin-vben-admin/server/migrations"
+	"github.com/ByteJason/Gin-Vben-Admin/server/migrations"
 )
 
 func TestSecondMigrationCreatesAuthTables(t *testing.T) {

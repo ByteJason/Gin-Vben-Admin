@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	appbackup "example.com/gin-vben-admin/server/internal/application/backup"
+	appbackup "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/backup"
 )
 
 func TestLocalArtifactStoreEncryptsAndRestoresArtifact(t *testing.T) {

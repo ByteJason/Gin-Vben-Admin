@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	appnotification "example.com/gin-vben-admin/server/internal/application/notification"
+	appnotification "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/notification"
 )
 
 // TestSMTPRuntimeFixtureAcceptance is opt-in. It consumes only runtime

@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	"example.com/gin-vben-admin/server/internal/domain/tenant"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
 )
 
 var ErrPermissionDenied = errors.New("monitor permission denied")

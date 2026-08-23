@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"example.com/gin-vben-admin/server/internal/domain/organization"
-	"example.com/gin-vben-admin/server/internal/domain/tenant"
-	"example.com/gin-vben-admin/server/internal/platform/migration"
-	organizationplatform "example.com/gin-vben-admin/server/internal/platform/organizationplatform"
-	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/organization"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/migration"
+	organizationplatform "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/organizationplatform"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/persistence/gormdb"
 )
 
 func TestTenantOrganizationTreeIsolation(t *testing.T) {

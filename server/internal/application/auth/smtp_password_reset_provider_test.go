@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	appauth "example.com/gin-vben-admin/server/internal/application/auth"
-	appnotification "example.com/gin-vben-admin/server/internal/application/notification"
-	"example.com/gin-vben-admin/server/internal/domain/authdomain"
+	appauth "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/auth"
+	appnotification "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/notification"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/authdomain"
 )
 
 type resetRecordingMailer struct {

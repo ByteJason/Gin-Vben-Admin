@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	mailapp "example.com/gin-vben-admin/server/internal/application/mail"
-	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
+	mailapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/mail"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/persistence/gormdb"
 	"gorm.io/gorm"
 )
 

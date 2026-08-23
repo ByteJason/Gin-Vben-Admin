@@ -8,15 +8,15 @@ import (
 	"testing"
 	"time"
 
-	auditapp "example.com/gin-vben-admin/server/internal/application/audit"
-	settingsapp "example.com/gin-vben-admin/server/internal/application/settings"
-	"example.com/gin-vben-admin/server/internal/domain/authdomain"
-	"example.com/gin-vben-admin/server/internal/domain/tenant"
-	auditplatform "example.com/gin-vben-admin/server/internal/platform/auditplatform"
-	authplatform "example.com/gin-vben-admin/server/internal/platform/authplatform"
-	"example.com/gin-vben-admin/server/internal/platform/migration"
-	"example.com/gin-vben-admin/server/internal/platform/persistence/gormdb"
-	settingsplatform "example.com/gin-vben-admin/server/internal/platform/settingsplatform"
+	auditapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/audit"
+	settingsapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/settings"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/authdomain"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
+	auditplatform "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/auditplatform"
+	authplatform "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/authplatform"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/migration"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/persistence/gormdb"
+	settingsplatform "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/settingsplatform"
 )
 
 func TestTenantIsolationAcrossSettingsAndAuditPersistence(t *testing.T) {

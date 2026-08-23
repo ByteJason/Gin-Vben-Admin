@@ -9,7 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"example.com/gin-vben-admin/server/internal/domain/authdomain"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/authdomain"
 )
 
 var (
