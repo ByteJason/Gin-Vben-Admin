@@ -49,26 +49,29 @@
 │   ├── apps/web-antd/
 │   ├── apps/web-ele/
 │   ├── apps/web-naive/
+│   ├── apps/install/                  # 首次安装静态页面
 │   ├── packages/
 │   ├── internal/
 │   ├── scripts/
-│   ├── tests/contract/
+│   ├── tests/
 │   ├── package.json
 │   ├── pnpm-workspace.yaml
-│   ├── pnpm-lock.yaml
-│   └── Dockerfile
+│   └── pnpm-lock.yaml
 ├── server/                             # Gin HTTP 服务
 │   ├── cmd/api/
+│   ├── cmd/init/                      # 仅 pnpm run init 使用的临时服务
 │   ├── cmd/migrate/
 │   ├── configs/server.example.yaml
 │   ├── internal/bootstrap/
 │   ├── internal/config/
 │   ├── internal/transport/http/
 │   ├── go.mod
-│   ├── go.sum
-│   └── Dockerfile
+│   └── go.sum
 ├── contracts/                          # OpenAPI、错误码、响应 schema
-├── deploy/                             # Docker Compose 配置
+├── deploy/                             # 单机 Compose 与两份 Alpine Dockerfile
+│   ├── docker-compose.yml
+│   ├── admin.Dockerfile
+│   └── server.Dockerfile
 ├── scripts/                            # 跨平台 Node.js 脚本
 ├── tests/contract/                     # 根级契约测试
 ├── docs/                               # 公开文档
@@ -113,21 +116,29 @@ cd Gin-Vben-Admin
 ### 初始化与源码运行
 
 ```text
-node ./scripts/bootstrap.mjs --ui antd --database mysql --skip-install
 pnpm --dir admin install --frozen-lockfile
 go -C server mod download
 ```
 
-启动管理端：
+首次启动必须在 `admin/` 内选择并初始化一套 UI：
 
 ```text
-pnpm --dir admin run dev:antd
+cd admin
+pnpm run init
 ```
 
-启动服务端：
+命令会让你选择 Ant Design Vue、Element Plus 或 Naive UI，先只读预检目录权限并展示保留/暂存清单；确认后保留所选应用，将另外两套暂存到根目录 `.runtime/init-backup/`，写入可提交的 `.ui-profile.json`，构建并启动仅监听 `127.0.0.1` 的临时安装服务。安装页只读显示命令行选择，不再重复选择 UI。完成网页安装后，按页面提示在终端按 `Ctrl+C` 结束 init。
+
+可先用 `pnpm run init -- --check` 只读检查状态；网页安装完成前需要重新选择时，使用 `pnpm run init -- --reset --confirm-reset` 恢复三套模板。初始化前直接运行 `pnpm run dev`、`pnpm run build` 或 `pnpm run preview` 会提示先执行 init。
+
+安装完成后，分别在两个终端启动服务端和已选管理端：
 
 ```text
+# 仓库根目录，终端 1
 go -C server run ./cmd/api
+
+# admin/，终端 2
+pnpm run dev
 ```
 
 编辑本地 `server/configs/server.yaml` 或设置环境变量后，使用显式命令管理数据库迁移：
@@ -142,7 +153,7 @@ go -C server run ./cmd/migrate down --steps 1
 
 启用管理端认证时，在本地配置中填写至少 32 字节的 `auth.jwt_secret`（或设置 `AUTH_JWT_SECRET`），并同时启用数据库与 Redis。登录、刷新和登出接口见 `contracts/openapi/admin-v1.yaml`；refresh token 只保存在 HttpOnly Cookie。
 
-选择其他 UI 模板时，将 `antd` 替换为 `ele` 或 `naive`。
+所选 UI 的稳定信息位于 `admin/.ui-profile.json`；该文件随 Git 协作，安装 receipt、运行 receipt、marker 和备份目录只保留在本机。
 
 ### 源码部署
 
@@ -150,10 +161,11 @@ go -C server run ./cmd/migrate down --steps 1
 
 ```text
 pnpm --dir admin install --frozen-lockfile
-pnpm --dir admin run build:antd
+cd admin
+pnpm run build
 ```
 
-构建结果位于 `admin/apps/web-antd/dist/`，可交给 Nginx 或其他静态文件服务。服务端构建：
+构建结果位于 `.ui-profile.json` 中 `appDirectory` 对应应用的 `dist/`，可交给 Nginx 或其他静态文件服务。服务端构建：
 
 ```text
 go -C server build -o ./bin/server-api ./cmd/api
@@ -167,10 +179,12 @@ go -C server build -o ./bin/server-api ./cmd/api
 单机部署（服务端、管理端、单机 MySQL、单机 Redis）：
 
 ```text
-docker compose -f deploy/docker-compose.yml up -d --build
+ADMIN_UI=antd docker compose -f deploy/docker-compose.yml up -d --build
 docker compose -f deploy/docker-compose.yml ps
 docker compose -f deploy/docker-compose.yml run --rm migrate status
 ```
+
+全新、尚未提交 `.ui-profile.json` 的 CI/clone 通过 `ADMIN_UI=antd|ele|naive` 显式选择构建模板；已提交 profile 后可以省略该变量，也可以传入相同值。显式值与 profile 不一致时构建以 `UI_PROFILE_MISMATCH` 停止，不会静默构建另一套 UI。
 
 生产 `deploy/` 只保留这一份 Compose 入口和两份 Alpine Dockerfile；服务端迁移服务会在 API 前启动，服务端使用本地配置或环境变量中的 `database.driver` 与 DSN。
 
