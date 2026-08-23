@@ -55,6 +55,19 @@ test('init requires an explicit UI when stdin is not a terminal', () => {
   }
 });
 
+test('init accepts the pnpm argument separator used by documented commands', () => {
+  const root = fixture();
+  try {
+    const result = run(root, 'init.mjs', ['--', '--check']);
+    assert.equal(result.status, 0, output(result));
+    assert.match(output(result), /INIT_STATE=pristine/);
+    assert.match(output(result), /INIT_NEXT=CHECK_COMPLETE/);
+    assert.match(output(result), /INIT_ERROR=NONE/);
+  } finally {
+    dispose(root);
+  }
+});
+
 test('init stages non-selected templates, writes the fixed profile schema, and is idempotent', () => {
   const root = fixture();
   try {

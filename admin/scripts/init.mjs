@@ -13,6 +13,7 @@ function parseArgs(argv) {
   const options = { selectedUi: '', check: false, reset: false, confirmCleanup: false, confirmReset: false, noOpen: false, port: 8080 };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
+    if (argument === '--' && index === 0) continue;
     if (argument === '--ui') options.selectedUi = argv[++index] ?? '';
     else if (argument === '--port') options.port = Number(argv[++index]);
     else if (argument === '--check') options.check = true;
