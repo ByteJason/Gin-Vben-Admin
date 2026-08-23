@@ -82,3 +82,19 @@ test('INIT-100 public clone and acceptance docs use init before public dev/build
   assert.match(acceptance, /只读/);
   assert.doesNotMatch(acceptance, /选择 UI=`antd`/);
 });
+
+test('INIT-100 documents automatic first-start recovery without hidden-file troubleshooting', () => {
+  const rootReadme = read('README.md');
+  const adminReadme = read('admin/README.md');
+  const acceptance = read('docs/manual-acceptance/1.0.0-dev-end-to-end.md');
+
+  for (const document of [rootReadme, adminReadme]) {
+    assert.match(document, /自动恢复/);
+    assert.match(document, /\.runtime\/init-recovery/);
+    assert.match(document, /INIT_REASON/);
+    assert.match(document, /INIT_ACTION/);
+  }
+  assert.match(acceptance, /孤儿.*receipt|残留.*runtime/);
+  assert.match(acceptance, /INIT_RECOVERY=completed/);
+  assert.doesNotMatch(acceptance, /for %F|Get-Content.*ui-init/);
+});

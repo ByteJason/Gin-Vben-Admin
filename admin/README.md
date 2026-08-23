@@ -21,10 +21,12 @@ pnpm run init
 
 `pnpm run init` 必须在本目录执行。它会交互选择 `antd`、`ele` 或 `naive`，先以 `INIT_PREFLIGHT=ok` 展示只读权限预检和保留/暂存清单；确认后保留所选应用，将另外两套移动到仓库根目录 `.runtime/init-backup/<transaction>/`，并写入可提交的 `.ui-profile.json`。安装页面只读显示该选择；网页安装完成后，按提示结束 init 进程并重启 Go 服务。
 
+首次选择 UI 前若进程中断并遗留本机 receipt/runtime，而三套模板仍完整且没有 profile、transaction 或安装 marker，下一次 `pnpm run init` 会自动恢复：程序把遗留记录可逆备份到 `.runtime/init-recovery/<id>/` 后继续本次初始化。普通用户不需要枚举或删除隐藏文件；`INIT_REASON` 和 `INIT_ACTION` 分别给出稳定原因与下一动作。无法安全判定的状态保持原样，仅需把状态代码提供给维护者。
+
 状态和恢复命令：
 
 ```text
-pnpm run init -- --check
+pnpm run init -- --check                 # 严格只读，显示 INIT_REASON/INIT_ACTION
 pnpm run init -- --reset --confirm-reset  # 仅网页安装完成前
 ```
 

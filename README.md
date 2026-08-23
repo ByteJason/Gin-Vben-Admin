@@ -129,7 +129,9 @@ pnpm run init
 
 命令会让你选择 Ant Design Vue、Element Plus 或 Naive UI，先只读预检目录权限并展示保留/暂存清单；确认后保留所选应用，将另外两套暂存到根目录 `.runtime/init-backup/`，写入可提交的 `.ui-profile.json`，构建并启动仅监听 `127.0.0.1` 的临时安装服务。安装页只读显示命令行选择，不再重复选择 UI。完成网页安装后，按页面提示在终端按 `Ctrl+C` 结束 init。
 
-可先用 `pnpm run init -- --check` 只读检查状态；网页安装完成前需要重新选择时，使用 `pnpm run init -- --reset --confirm-reset` 恢复三套模板。初始化前直接运行 `pnpm run dev`、`pnpm run build` 或 `pnpm run preview` 会提示先执行 init。
+如果上次运行在选择 UI 前意外中断，仅留下本机 receipt 或 runtime 记录，而三套模板、profile 和安装 marker 仍是首次启动布局，再次执行 `pnpm run init` 会自动恢复：旧记录先可逆备份到 `.runtime/init-recovery/<id>/`，随后在同一次命令中继续选择 UI，不要求用户检查隐藏文件。输出中的 `INIT_REASON` 说明状态原因，`INIT_ACTION` 给出下一动作；证据不足时保持现场并只显示可提交给维护者的状态代码。
+
+可先用 `pnpm run init -- --check` 只读检查状态；该命令不会触发自动恢复。网页安装完成前需要重新选择时，使用 `pnpm run init -- --reset --confirm-reset` 恢复三套模板。初始化前直接运行 `pnpm run dev`、`pnpm run build` 或 `pnpm run preview` 会提示先执行 init。
 
 安装完成后，分别在两个终端启动服务端和已选管理端：
 
