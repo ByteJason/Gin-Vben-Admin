@@ -1,0 +1,669 @@
+diff --git a/README.md b/README.md
+index 661d602..b96ada8 100644
+--- a/README.md
++++ b/README.md
+@@ -205,0 +206,2 @@ docker compose -f deploy/docker-compose.yml down
++从全新 clone、首次安装到每个产品功能与边界数据的逐项人工检查，见 [`docs/manual-acceptance/1.0.0-dev-end-to-end.md`](docs/manual-acceptance/1.0.0-dev-end-to-end.md)。
++
+diff --git a/docs/README.md b/docs/README.md
+index 4483ee9..6bbf3d0 100644
+--- a/docs/README.md
++++ b/docs/README.md
+@@ -3,0 +4 @@
++- [1.0.0-dev 全功能手工验收手册](manual-acceptance/1.0.0-dev-end-to-end.md)
+diff --git a/docs/manual-acceptance/1.0.0-dev-end-to-end.md b/docs/manual-acceptance/1.0.0-dev-end-to-end.md
+new file mode 100644
+index 0000000..802ed89
+--- /dev/null
++++ b/docs/manual-acceptance/1.0.0-dev-end-to-end.md
+@@ -0,0 +1,650 @@
++# Gin-Vben-Admin 1.0.0-dev 全功能手工验收手册
++
++> 基线：`main@1a62ab0`（2026-08-23）<br>
++> 适用范围：从新 clone、首次安装、登录，到所有产品菜单、边界数据、隔离、部署与回滚的手工验收。<br>
++> 本文是**执行清单**，不是已执行通过报告；每条用例必须填写实际结果和证据后才可判定。
++
++## 1. 如何使用这份手册
++
++### 1.1 状态标记
++
++| 标记 | 含义 | 如何判定 |
++|---|---|---|
++| `P` | 本版应通过 | 实际结果、HTTP 状态、持久化结果均符合预期 |
++| `C` | 条件验收 | 需要 SMTP、PostgreSQL、对象存储、Prometheus 等外部夹具 |
++| `R` | 当前预期红灯 | 本版已有明确缺口；记录证据并进入版本门禁 |
++| `D` | 模板/演示页 | 只做视觉、路由和交互冒烟，不当作业务数据能力 |
++
++结果只写 `PASS / FAIL / BLOCKED / NOT-RUN`。`BLOCKED` 必须附阻塞条件；`FAIL` 必须附 `requestId`、截图或日志。
++
++### 1.2 一次完整验收的交付物
++
++为每轮创建目录（目录保持在可丢弃 clone 外，且不提交凭据）：
++
++```text
++UAT-YYYYMMDD-HHMM/
++├── 00-environment.txt
++├── 01-install/
++├── 02-auth/
++├── 03-iam/
++├── 04-system/
++├── 05-boundary/
++├── 06-three-ui/
++├── 07-deploy-rollback/
++├── browser.har
++└── result.md
++```
++
++每条用例记录：
++
++```text
++用例 ID：
++执行人/时间：
++代码提交：
++UI / 浏览器 / 屏幕宽度：
++前置数据：
++实际步骤：
++实际结果：
++结果：PASS | FAIL | BLOCKED | NOT-RUN
++HTTP 状态 / requestId：
++截图 / HAR / 日志路径：
++清理结果：
++```
++
++### 1.3 固定角色与测试数据
++
++| 代号 | 身份和范围 | 用途 |
++|---|---|---|
++| `P0` | 未登录访客 | 401、安装门禁和公开健康检查 |
++| `PA` | 平台管理员 | 运维监控、受控邮件正文详情 |
++| `A1` | 租户 A / 组织 A1 管理员 | 主流程 CRUD |
++| `A2` | 租户 A / 组织 A2 管理员 | 组织隔离 |
++| `A-MEMBER` | 租户 A 普通成员 | 最小权限 |
++| `B1` | 租户 B 管理员 | 租户隔离 |
++| `LOCKED` | 连续登录失败账户 | 锁定、解锁与限流 |
++
++所有业务数据统一使用 `UAT-YYYYMMDD-模块-序号` 前缀。邮箱使用隔离域，电话号码使用保留测试号段；SMTP 账号、密码仅以 `SMTP_FIXTURE_*` 运行时变量注入，不写入本文、Git、截图标题、命令历史或验收报告。
++
++### 1.4 普通用户菜单地图
++
++| 菜单/入口 | 路由 | 本手册用例 | 当前定位 |
++|---|---|---|---|
++| 登录 | `/auth/login` | UAT-AUTH-001/002 | 产品功能 |
++| 分析页 | `/dashboard/analytics` | UAT-SHELL-001 | 演示数据 |
++| 工作台 | `/dashboard/workspace` | UAT-SHELL-001 | 演示数据 |
++| 个人中心 | `/profile` | UAT-AUTH-003/004、UAT-SHELL-001 | 部分模板，含红灯 |
++| 用户管理 | `/iam/users` | UAT-IAM-USER | 产品功能 |
++| 角色管理 | `/iam/roles` | UAT-IAM-ROLE | 部分产品功能 |
++| 菜单管理 | `/iam/menus` | UAT-IAM-MENU | 产品功能 |
++| 权限列表 | `/iam/permissions` | UAT-IAM-AUTHZ | 读取为主 |
++| 策略列表 | `/iam/policies` | UAT-IAM-AUTHZ | 读取为主 |
++| 数据范围 | `/iam/data-scopes` | UAT-IAM-AUTHZ | 读取为主 |
++| 设置中心 | `/system/settings` | UAT-SETTINGS | 产品功能 |
++| 可观测设置 | `/system/observability` | UAT-OBS | 产品功能/条件验收 |
++| 审计日志 | `/system/audit` | UAT-AUDIT | 产品功能 |
++| 文件中心 | `/system/files` | UAT-FILE | 产品功能/含红灯 |
++| 字典管理 | `/system/dictionary` | UAT-DICT | 产品功能 |
++| SMTP 与邮件 | `/system/mail` | UAT-MAIL | 产品功能/条件验收 |
++| 任务管理 | `/system/tasks` | UAT-TASK | 产品功能/含红灯 |
++| 导入导出 | `/system/import-export` | UAT-IMPORT | 产品功能/含红灯 |
++| 运维监控 | `/system/monitor` | UAT-MONITOR | 平台管理员功能 |
++
++Vben 示例/组件/图表等 demo 路由统一按 UAT-SHELL-001 的 `D` 类冒烟，不计入业务功能通过率。
++
++## 2. 总流程与停止条件
++
++按顺序执行，前一阶段的关键门禁通过后再进入下一阶段：
++
++1. 环境与仓库基线。
++2. Docker 一键部署冒烟。
++3. 可丢弃 clone 中执行首次安装。
++4. 登录、会话和全局框架。
++5. 用户、角色、菜单、权限和范围隔离。
++6. 设置、审计、文件、字典、邮件、任务、导入导出、监控。
++7. 三套 UI 等价、响应式、键盘和双语。
++8. 数据持久性、故障降级、升级和回滚。
++9. 汇总发布门禁。
++
++立即暂停并写 checkpoint 的情形：生产环境写入、非可丢弃数据删除、未确认的数据库降级、凭据出现在响应/日志/HAR、租户越权、回滚校验失败、预期外的迁移变更。
++
++## 3. 阶段 0：从 clone 建立验收基线
++
++### UAT-ENV-001 新 clone 和工具版本（P）
++
++```bash
++git clone REPOSITORY_URL Gin-Vben-Admin-UAT
++cd Gin-Vben-Admin-UAT
++git status --short --branch
++git rev-parse HEAD
++node --version
++corepack pnpm --version
++go version
++docker version
++docker compose version
++```
++
++预期：
++
++- 工作树干净，提交号已写入 `00-environment.txt`。
++- Node.js 为 `^22.18.0 || ^24.12.0`，pnpm 为 `11.16.0`，Go 为 `>=1.24`，Docker Compose 为 v2。
++- 任一工具版本不满足时，本轮结果为 `BLOCKED`，先修正验收机环境。
++
++### UAT-ENV-002 静态自检与依赖安装（P）
++
++```bash
++node ./scripts/bootstrap.mjs --check
++node ./scripts/bootstrap.mjs --ui antd --database mysql --skip-install
++pnpm --dir admin install --frozen-lockfile
++go -C server mod download
++node scripts/build.mjs --mode embedded --ui antd --check
++```
++
++预期：`BOOTSTRAP_CHECK_OK`、`BUILD_CHECK_OK`，锁文件未变化。本流程只在可丢弃 clone 内执行，避免首次安装整理模板时影响开发工作树。
++
++### UAT-ENV-003 非法引导参数（P）
++
++分别执行：
++
++```bash
++node ./scripts/bootstrap.mjs --ui unknown --database mysql --skip-install
++node ./scripts/bootstrap.mjs --ui antd --database sqlite --skip-install
++node scripts/build.mjs --mode unknown --ui antd --check
++```
++
++预期：均以非 0 退出，输出稳定错误，未生成半成品配置。
++
++## 4. 阶段 1：Docker 一键部署冒烟
++
++### UAT-DEPLOY-001 构建并启动（P：基础设施；R：首次登录闭环）
++
++```bash
++docker compose -f deploy/docker-compose.yml config --quiet
++docker compose -f deploy/docker-compose.yml up -d --build
++docker compose -f deploy/docker-compose.yml ps
++docker compose -f deploy/docker-compose.yml run --rm migrate status
++curl -i http://127.0.0.1:8080/health/live
++curl -i http://127.0.0.1:8080/health/ready
++curl -i http://127.0.0.1:8080/api/admin/v1/ping
++```
++
++浏览器打开 `http://127.0.0.1:5173`，记录首页、Network 和 Console。
++
++预期：
++
++- MySQL、Redis 健康；`migrate` 成功结束；server、admin 运行；live、ready 返回 200。
++- **当前红灯**：安装 marker 不存在时，ping 被安装门禁拦截并返回 423，而不是 README 所写的 200。
++- **当前红灯**：Compose 默认 `AUTH_ENABLED=false`，没有初始管理员输入；admin Nginx 未转发 `/install/`，server 镜像也未带 `embed` 安装资源。因此“单机 Compose → 首次安装 → 管理员登录”尚未形成闭环。将基础设施冒烟和用户首登分别判定，不把前者代替后者。
++
++### UAT-DEPLOY-002 重启和卷持久性（P）
++
++1. 记录 `docker compose ps` 和卷名。
++2. 执行 `docker compose stop`，再执行 `docker compose start`。
++3. 重查 health、ping、迁移状态。
++4. 保留命名卷时，数据库和 Redis 数据应保留。
++
++只在可丢弃项目执行最终清理：
++
++```bash
++docker compose -f deploy/docker-compose.yml down
++```
++
++`down -v` 会删除验收卷，需在清理记录中再次确认项目名和备份状态后单独执行。
++
++## 5. 阶段 2：首次安装完整主线
++
++Docker 首装当前为红灯，完整功能验收使用**新的可丢弃 clone + embedded 构建**。安装会整理未选 UI，antd、ele、naive 各用一个 clone。
++
++### UAT-INSTALL-001 启动本地依赖和安装器（P）
++
++```bash
++# 仓库根目录
++MYSQL_PORT=13306 REDIS_PORT=16379 \
++  docker compose -f deploy/docker-compose.yml up -d mysql redis
++
++node ./scripts/bootstrap.mjs --ui antd --database mysql --skip-install
++pnpm --dir admin install --frozen-lockfile
++go -C server mod download
++node scripts/build.mjs --mode embedded --ui antd
++
++cd server
++../.runtime/build/embedded/server-api
++```
++
++打开 `http://127.0.0.1:8080/install`。业务 API 在安装完成前应返回 423 和安装必需错误；health 与安装 API 保持可访问。
++
++### UAT-INSTALL-002 安装向导正向流程（P）
++
++1. 确认页面显示 OS、架构、Node、pnpm、Go 等能力，不泄露环境密钥。
++2. 选择 UI=`antd`、运行方式=`embedded`、语言模式=`multi`、默认语言=`zh-CN`。
++3. 点“检查目录权限”，逐条审阅保留、创建、写入、待移除清单。
++4. 数据库填写：MySQL、`127.0.0.1:13306`、Compose 数据库/用户和验收密码；点连接测试。
++5. Redis 填写 `127.0.0.1:16379`、DB 0；点连接测试。
++6. 初始管理员填写 `UAT-admin` 和 12–128 字符的唯一验收密码，再次输入确认。
++7. 勾选清理确认，开始安装；记录每一步、百分比和 `jobId`。
++8. 安装完成后停止 server，再从 `server/` 目录启动同一二进制。
++9. `/install` 应显示已安装状态；业务首页替代安装页；再次 apply 应得到冲突且不重写配置。
++
++核对产物：根目录 `.env` 权限和内容、安装状态文件、迁移状态、初始管理员、Super Administrator 角色、通配策略、`must_change_password=true`。报告只记录“已配置/未配置”和摘要，不复制密钥或 DSN。
++
++### UAT-INSTALL-003 安装边界和失败恢复（P）
++
++| 输入/操作 | 边界 | 预期 |
++|---|---:|---|
++| 管理员用户名 | 2 / 3 / 64 / 65 字符 | 3、64 接受；2、65 拒绝 |
++| 管理员密码 | 11 / 12 / 128 / 129 字符 | 12、128 接受；11、129 拒绝 |
++| 确认密码 | 与密码不同 | 前端阻止提交，服务端也拒绝 |
++| DB/Redis 端口 | 0 / 1 / 65535 / 65536 | 1–65535 进入连接阶段；越界拒绝 |
++| DB 密码/DSN | 错误值 | 连接失败信息脱敏，不改变安装状态 |
++| Redis 地址 | 空、错误端口、不可达 | 连接检查失败，开始安装按钮保持禁用 |
++| UI/mode | 非枚举值 | 400，未执行目录变更 |
++| 重复提交 | 快速双击或并发 apply | 只产生一个作业；另一请求为冲突 |
++| 中途失败 | 使用可控失败夹具 | 已完成步骤可见；retry/rollback 只针对该作业 |
++
++### UAT-INSTALL-004 三种 UI 和两种数据库（C）
++
++- 在三个独立 clone 中分别选择 `antd`、`ele`、`naive`，重复 UAT-INSTALL-001/002。
++- PostgreSQL 使用独立 clone 与 `.runtime/compose/postgres.yaml`，重复连接、迁移、首登和 CRUD 冒烟。
++- 安装后的工作树变化必须与预检清单一致；用户预先存在的文件内容应保留或在计划中明确列出。
++
++## 6. 阶段 3：认证、会话和全局框架
++
++### UAT-AUTH-001 登录、刷新和登出（P）
++
++1. 以初始管理员登录；用户名和邮箱两种标识各测一次。
++2. 查看 Network：access token 只用于授权头，refresh token 为 HttpOnly Cookie。
++3. 保持页面超过 access TTL（默认 30 分钟）或用可控时钟触发刷新；请求应续期且旧 refresh token 失效。
++4. 登出；回退浏览器、刷新页面、重放旧 token，均应进入登录页或得到 401。
++5. P0 直接访问任一 `/api/admin/v1/*` 受保护资源，应得到 401。
++
++边界：密码 8/128 字节接受，7/129 字节拒绝；登录只接受用户名或邮箱，手机号登录当前应返回无效凭据。
++
++### UAT-AUTH-002 限流、锁定和验证码（P/C）
++
++- 同一账户连续输错 4 次仍可继续，第 5 次触发默认 15 分钟锁定；正确密码在锁定期也被拒绝。
++- 默认每账户/IP 每分钟最多 10 次，超过后返回 429；其他账户不应被连带锁定。
++- 验证码启用时，风险阈值默认为 3、窗口 15 分钟、挑战 TTL 2 分钟；验证码只能成功消费一次，过期、重放、服务故障均应失败关闭。
++- 错误信息不区分“账号不存在”和“密码错误”，日志不含密码/token。
++
++### UAT-AUTH-003 会话设备（P：API；R：普通 UI）
++
++- 分别用桌面浏览器、隐私窗口、移动浏览器建立会话；默认最多 10 个活动设备。
++- 通过会话 API 列表、撤销单设备、撤销其他设备；被撤销端下一请求得到 401。
++- **当前红灯**：已有会话 API 客户端但没有普通用户会话管理页面。
++
++### UAT-AUTH-004 注册、找回密码和首次改密（R）
++
++- 注册默认关闭；开启时验证邮箱大小写/空白归一化、同租户唯一、密码 8–128 字节。
++- **当前红灯**：注册页、忘记密码页、验证码登录和二维码登录仍是空处理或模板入口。
++- **当前红灯**：初始管理员标记 `must_change_password=true`，但个人中心改密按钮只显示成功提示，缺少真实请求和强制改密闭环。
++
++### UAT-SHELL-001 全局框架（P/D）
++
++1. 登录后检查侧栏、面包屑、多标签、全屏、主题、消息、用户菜单、404/403 页。
++2. 刷新深层 URL，路由不应丢失；无权限菜单不展示，直接 URL 仍由服务端拒绝。
++3. `/dashboard/analytics`、`/dashboard/workspace` 为演示数据，按 `D` 做加载、布局、图表和 Console 冒烟。
++4. `/profile` 的头像、基础资料、安全页多为模板/模拟数据，真实保存和改密按 `R` 记录。
++5. `vben`/demo 目录页面只做路由和视觉冒烟，不纳入业务数据通过率。
++
++## 7. 阶段 4：IAM 与范围隔离
++
++### UAT-IAM-USER 用户管理（P）
++
++1. A1 新建 `UAT-user-01`：用户名、邮箱、E.164 电话、状态、组织、角色。
++2. 按用户名/邮箱/状态分页查询；编辑名称、邮箱、电话、状态；刷新确认持久化。
++3. 批量启用/停用 1、100 个用户；101 个应拒绝。
++4. 软删除后默认列表隐藏；读取/修改已删除 ID 应按约定返回 404/冲突。
++5. A2、B1 查询 A1 用户，验证组织/租户隔离。
++
++边界矩阵：
++
++| 字段 | 接受 | 拒绝/冲突 |
++|---|---|---|
++| 用户名 | 合法最短值、Unicode/ASCII 正常值 | 空白、超长、同租户 trim/case 归一化重复 |
++| 邮箱 | 合法地址、大小写归一化 | 非法格式、同租户大小写重复 |
++| 电话 | `+` 后 8–15 位数字，首位 1–9 | 无 `+`、首位 0、7 位、16 位、字母 |
++| 密码 | 8、128 字节 | 7、129 字节 |
++| pageSize | 1、100 | 0、101 |
++| 批量 ID | 1、100 | 0、101、重复/不存在 ID 的原子性 |
++
++### UAT-IAM-ROLE 角色管理（P/R）
++
++1. 新建角色，边界：ID 最长 128，名称最长 191；重复 ID/名称按租户规则冲突。
++2. 为角色绑定 0/1/100 个用户，101 个拒绝。
++3. 绑定 0/1/200 个权限，201 个拒绝；保存后重新进入核对。
++4. 绑定最多 50 条数据范围，每条最多 200 个 scope ID，resource 最长 191。
++5. 普通成员尝试绑定高权限，应由服务端拒绝并写审计。
++6. **当前红灯**：UI/API 支持角色创建和关系更新，但没有完整的角色详情编辑、删除 API 闭环。
++
++### UAT-IAM-MENU 菜单管理（P）
++
++1. 新建目录 → 菜单 → 按钮三级结构；指定图标、路由、组件、排序、权限码。
++2. 编辑名称/路由、启停、软删除叶子，再刷新登录态确认动态菜单变化。
++3. 拖拽重排并刷新；最多一次 500 项。
++4. 输入自身为父、形成循环、未知组件、非目录缺组件、重复路由，均应拒绝。
++
++边界：ID 最长 64；名称最长 191；path/component/redirect 最长 255；sort 在 `-1000000..1000000`；类型只接受 directory/menu/button；组件只能来自服务端 allowlist。
++
++### UAT-IAM-AUTHZ 权限、策略和数据范围（P：读取/API；R：UI 治理）
++
++1. 分别打开权限、策略、数据范围列表，验证分页、筛选、空态和错误态。
++2. 用 API 创建 policy/data-scope，绑定角色，使用 A1/A2/A-MEMBER 验证 allow/deny 和组织范围。
++3. 删除或停用绑定后，旧会话下一请求应立即服从服务端判定。
++4. **当前红灯**：权限、策略、数据范围页面以只读列表为主，普通管理员缺少完整表单治理闭环。
++
++### UAT-SCOPE-001 租户/组织隔离（P：API；R：切换 UI）
++
++对用户、字典、SMTP、任务、导入导出、文件逐个重复：
++
++| 操作 | 预期 |
++|---|---|
++| A1 创建，A1 同范围读取 | 200，数据一致 |
++| A2 查询 A1 的组织级资源 | 空列表或 403/404 |
++| B1 读取/修改/删除 A 的 ID | 403/404，不泄露资源属性 |
++| multi 模式缺 `X-Tenant-ID` | 400 |
++| 非平台用户伪造其他租户头 | 拒绝，身份不提升 |
++| 客户端伪造平台身份头 | 拒绝，服务端主体为准 |
++
++**当前红灯**：三 UI 没有真实租户选择器，也没有把偏好页 tenantMode 自动写入 API header；UI 点选切租户流程尚未交付。
++
++## 8. 阶段 5：系统功能
++
++### UAT-SETTINGS 设置中心（P）
++
++1. 依次查看 basic、security、mail、file、captcha、i18n、observability 分类。
++2. 修改非敏感值，保存并刷新；版本应递增。
++3. 两个浏览器标签同时打开同一 key：标签 A 保存，标签 B 用旧版本保存；B 应得到版本冲突，刷新后再提交。
++4. 查看历史，回滚旧版本；回滚产生新版本而非删除历史。
++5. 密钥字段保存后只显示“已配置/掩码”，留空编辑保留旧值；当前值、历史、响应、HAR、日志均不回显明文。
++6. 环境变量/`.env`/YAML 覆盖数据库值时，页面应展示有效来源；标记 restart-required 的设置重启后再验证。
++
++边界：JWT secret 至少 32 字节；TTL 为有效正时长；JSON 配置必须是合法 JSON；枚举只接受定义值；file max size/quota 为非负有效范围；并发旧版本写入应冲突。
++
++### UAT-OBS 可观测设置（P/C）
++
++| 用例 | 输入/步骤 | 预期 |
++|---|---|---|
++| 默认值 | 首次打开 | metrics/tracing 默认关闭，不建立外部连接 |
++| Metrics | 开启并填合法 `http(s)` endpoint，保存、重启 | 有效配置生效；启用时 `/metrics` 可访问 |
++| Endpoint 边界 | 空、无 scheme、`ftp://` | 前后端均拒绝 |
++| Tracing | `grpc`、`http/protobuf`；TLS verify 开/关 | 两种协议可保存，枚举外值拒绝 |
++| 采样率 | 0、0.5、1；-0.01、1.01、NaN | 前三项接受，后三项拒绝 |
++| API key | 保存夹具值后刷新/历史/回滚 | 任何出口都不回显明文 |
++| 外部故障 | 指向隔离不可达 endpoint | 主业务保持响应，记录观测降级 |
++
++Prometheus/OTLP/Grafana 和告警闭环为 `C`；当前 Grafana dashboard/真实告警证据尚未完成。
++
++### UAT-AUDIT 审计日志（P）
++
++1. 先执行一次成功登录、失败登录、用户编辑、设置变更、文件删除，再打开审计页。
++2. 在 login/operation/system 分类中按 actor、action、resource、outcome、requestId、from/to 查询。
++3. 点击详情，requestId 应能与 HAR/服务日志关联。
++4. 导出 CSV 和 JSON；用文本工具搜索 `password|secret|token|authorization|api_key`，值应被遮蔽。
++5. 保留策略先用 dry-run：边界 1、180、3650 天；0、3651 拒绝。对当前版本不执行正式物理清理。
++6. P0/A-MEMBER 访问审计接口应得到 401/403。
++
++分页默认 50；跨页不重复、不漏项；CSV 需验证逗号、引号、换行和公式前缀字符的安全处理。
++
++### UAT-FILE 文件中心（P/R）
++
++正向步骤：上传 → 列表 → 预览 → 下载 → 生成签名 URL → ACL 切换 → 删除 → cleanup dry-run。
++
++| 边界 | 输入 | 预期 |
++|---|---|---|
++| 文件大小 | 0 B、普通文件、100 MiB、100 MiB+1 B | 上限内按 MIME 规则处理；超 1 B 返回 413 |
++| MIME | allowlist 内/外、扩展名与内容不一致 | 服务端以实际规则判定，外值拒绝 |
++| 文件名 | 中文、空格、引号、逗号、CR/LF、超长 | 展示/下载头安全，无 header 注入 |
++| ACL | private、public-read | private 跨用户/组织/租户访问为 403/404 |
++| 列表 limit | 1、200；0、201 | 1–200 接受，越界拒绝 |
++| offset | 0、1000000；-1、1000001 | 范围内接受，越界拒绝 |
++| 签名 TTL | 1、900、86400；0、-1、86401 | 0 使用默认 900；负值和超上限拒绝 |
++| cleanup age | 1 秒、10 年；0、超 10 年 | 范围内 dry-run，越界拒绝 |
++
++**当前红灯**：本地 provider 的文件元数据仍在内存，服务重启后列表恢复存在缺口；远程对象存储、多段续传、病毒扫描、配额闭环尚未交付。
++
++### UAT-DICT 字典与双语（P/R）
++
++1. 新建类型 `UAT_STATUS`：中英文名、描述、sort=0；编辑 sort=1。
++2. 同 code 再建一次，应 409 且只有一条。
++3. 新建 item `ready`，填写双语 label、tag、sort、enabled；停用后默认隐藏，勾选“包含已停用”后出现。
++4. 同 type 下重复 value 应冲突。
++5. 批量 JSON 导入 2 条；再导入“一条合法 + 一条非法”，整批失败且前者也不写入。
++6. multi 模式切换 `zh-CN/en-US`，缺翻译时验证回退；single 模式重启后语言开关隐藏。
++7. A/B 租户复用同 code，数据仍隔离。
++
++边界：type code 1–128；本地化名称 1–191；描述 0–512；item value 1–191；label 1–191；tag 0–64；sort>=0；批量导入 1、500 接受，0、501 拒绝。
++
++**当前红灯**：新安装没有系统预置字典，因此 `systemOwned` 只读保护需测试夹具才能执行。
++
++### UAT-MAIL SMTP 账户池与投递记录（P/C/R）
++
++#### 账户配置和连接测试
++
++1. 通过运行时安全渠道准备四个 `SMTP_FIXTURE_ACCOUNT_1..4`，先全部设为 disabled。
++2. 逐个新增：账号名称、主机、端口、用户名、权重、密码、发件人邮箱、发件人名称、隐式 TLS。
++3. 列表只显示“密码已配置”，编辑其他字段并把密码留空，原密码应保留。
++4. 用户名变更且密码留空应拒绝，避免把旧密码绑定到新用户名。
++5. 逐个点击“测试连接”：只执行 DNS/TCP/TLS/EHLO/AUTH，邮件记录总数不增加；结果显示阶段、稳定错误和 requestId。
++6. 启用账户 1，再逐个启用其余账户；disabled 账户永远不参与发送选择。
++
++边界：名称 1–128；port 1–65535；weight 1–1000000；fromEmail 合法；CR/LF 输入拒绝；同租户 `(account_name)` 和 `(host,port,username)` 冲突，跨租户独立。
++
++TLS：465 保存后使用 implicit TLS；587 保持 implicit TLS 关闭并在服务器声明时 STARTTLS；有凭据但安全连接未建立时应失败关闭。
++
++#### 轮询、加权、失败和发送记录
++
++1. round-robin：四账户权重均为 1，向隔离收件箱发送 8 封，期望顺序循环且 disabled 被跳过。
++2. weighted-random：权重设为 `1:2:3:4`，发送足量夹具邮件，记录分布；仅验证明显偏向和每条实际 accountId，不用小样本要求精确比例。
++3. 将一个账户设为不可达：当前请求每个候选最多尝试一次，最多 3 次；失败账户进入约 30 秒 cooldown，期间被跳过。
++4. 全部禁用或全部失败：API 返回失败，数据库仍有 `failed` 消息记录、attempt 和脱敏错误。
++5. 相同 idempotencyKey 连续提交两次，只产生一条消息记录。
++6. 列表不含 body；平台管理员受控详情 `includeBody=true` 才显示解密正文；其他角色为 403 或没有 body。
++7. 抽查消息记录：有主键、senderId、smtpAccountId、收件人、subject、status、attemptCount、messageId/sentAt、createdAt/updatedAt/deletedAt；正文只以 ciphertext+digest 落库，失败错误不含账号密码。
++
++发送边界：收件人 1–100，重复地址按小写去重；0、101、非法地址、含换行拒绝；subject 1–998；body 最大 10 MiB；正文数据库字段为密文+digest；失败最多 3 次，退避约 1/2/4 秒。
++
++真实 SMTP 用例为 `C`，报告只记录 fixture 代号、阶段和 messageId。**当前红灯**：普通 UI 有账户 CRUD、连接测试和投递记录，没有即时写信/发送入口，也没有正文详情入口；即时发送需通过邮件 API 或认证通知流程补充验收。
++
++### UAT-TASK 任务管理（P/R）
++
++1. 新建 `UAT-task-manual`：type=manual、timezone=UTC、payload schema=`{"type":"object"}`、并发 1、超时 30、重试 3。
++2. 编辑、停用、软删除并刷新；同 tenant/org 重名应 409，跨范围不冲突。
++3. 新建 cron=`*/5 * * * *`、timezone=`Asia/Shanghai` 的定时任务，观察一个周期。
++4. 点立即执行先取消 confirm，再确认；取消时无 run，确认时 POST 返回 202。
++5. 相同 idempotencyKey 两次 run，返回同一个 run。
++6. pending 时取消，再次取消应状态冲突；failed/dead-letter 时重试，检查 attempt、错误码和日志。
++7. A 任务由 B 读取、执行、取消，应为 403/404。
++
++边界：name 1–191；type 仅 manual/http/webhook；payload schema 必须为 JSON object；cron 为支持的 5–7 段；timezone 必须存在；concurrency>=1；timeout>=1；maxAttempts 1–10；policy 仅 allow/forbid/replace；idempotencyKey<=191。
++
++**当前红灯**：worker/scheduler 跟随 API 单进程运行；已注册 handler 只有 import/export。UI 创建的 manual/http/webhook 可完成定义和入队，但通用任务执行会进入 handler-not-found 路径，run 状态闭环也有缺口；多节点 leader/lease 和独立 worker 尚未交付。
++
++### UAT-IMPORT 导入导出（P/R）
++
++1. 下载 CSV/XLSX 模板，核对 MIME、后缀、列名和 XLSX 可打开性。
++2. 上传 `name,email` 两行合法文件；预览显示 header、总行数、最多 100 行、SHA-256、过期时间。
++3. 提交导入，记录 `previewId/jobId`，观察 pending→running→succeeded/failed。
++4. 同 previewId + idempotencyKey 提交两次，只产生一个 job。
++5. 含错误行时下载 CSV，列应为 `row,column,code,messageKey`。
++6. 导出 preview，检查 allowlist 和敏感列；跨租户读取 job/errors/download 均拒绝。
++7. 在合法状态测试取消和重试；不合法状态应冲突。
++
++| 边界 | 输入 | 预期 |
++|---|---|---|
++| 格式 | CSV、XLSX | 接受 |
++| 非法格式 | 伪 XLSX、损坏 zip、未知扩展、MIME 不匹配 | 拒绝，不创建 preview/job |
++| 体积 | 50 MiB、50 MiB+1 B | 上限接受；超限 413 |
++| 行数 | 1、100000、100001 | 前两项接受；100001 超限 |
++| 内容 | 空文件、仅 header、重复 header、未知列、缺必填、坏 email/type | 对应稳定错误；不静默丢列 |
++| 预览 | 99、100、101 行 | 页面最多显示 100，totalRows 保持真实值 |
++| 过期 | 15 分钟前后 | 过期后 preview/产物链接失效 |
++
++**当前红灯**：UI 固定 `name,email` 且没有通用列映射；导出只处理预览行，页面无完整产物下载闭环；上传/解析读入整文件；preview、payload、artifact 仍有内存状态，重启恢复、真正队列取消/重投、流式 50 MiB、病毒扫描和远程对象存储尚未形成发布级闭环。
++
++### UAT-MONITOR 运维监控（P/C）
++
++1. PA 打开 `/system/monitor`，记录 CPU cores/load/utilization、内存 used/total、磁盘 used/total、DB 状态/延迟/连接池、Redis 状态/延迟/keyspace、uptime/version/采集时间。
++2. 等待 15 秒自动刷新，再点手动刷新；时间更新，页面无闪烁性错误。
++3. A1/A-MEMBER 访问页面和 `GET /api/admin/v1/ops/monitor` 应为 403。
++4. 检查 DOM/HAR/JSON，不含 DSN、密码、token、原始命令。
++5. 仅在可丢弃本地环境，分别暂停 DB、Redis 后刷新：受影响组件显示 degraded/unavailable，其余快照仍返回；恢复服务后页面恢复。
++6. 模拟网络离线/500，再恢复并手动刷新；错误态清晰且旧敏感数据不残留。
++
++指标范围是 server 容器/进程视角；宿主机全局指标需要 node-exporter 类外部组件，记为 `C`。
++
++## 9. 阶段 6：三 UI、双语、响应式和无障碍
++
++三个独立 clone 分别执行，避免安装器整理模板相互影响：
++
++```text
++web-antd  → Ant Design Vue
++web-ele   → Element Plus
++web-naive → Naive UI
++```
++
++### UAT-UI-001 等价矩阵（P）
++
++每套 UI 至少对登录、用户、角色、菜单、设置、审计、文件、字典、邮件、任务、导入导出、监控执行：
++
++1. 一个正常新增/保存或查询。
++2. 一个非法输入。
++3. 一个 401/403 或跨租户用例。
++4. 空态、加载态、错误态、成功提示。
++5. 比较请求 method/path/payload/status 和最终数据，三 UI 语义一致。
++
++### UAT-UI-002 视口和交互（P）
++
++在 375、768、1024、1440 px 宽度逐页截图；验证：
++
++- 无横向遮挡关键按钮，表格有明确滚动/折叠策略。
++- 弹窗在小屏可滚动，确认/取消始终可达。
++- Tab、Shift+Tab、Enter、Space、Escape 完成登录、表单、菜单、弹窗操作。
++- 焦点可见，错误后焦点落到摘要或首个错误字段。
++- 开启 `prefers-reduced-motion` 后没有强制大幅动画。
++- 浏览器缩放 200% 时核心操作仍可完成。
++
++### UAT-UI-003 国际化（P/R）
++
++1. multi 模式切换 zh-CN/en-US，刷新和重新登录后偏好保持。
++2. 表格日期、数字、空态、校验错误、API messageKey 均切换或有稳定回退。
++3. single 模式重启后隐藏语言选择器。
++4. **当前红灯**：mail、monitor 和部分新页面仍有硬编码中英文文本；逐页截图并列入 i18n 缺口。
++
++## 10. 阶段 7：跨模块边界与耐久性
++
++### UAT-X-001 通用字符集和注入边界（P）
++
++对所有名称、描述、主题、文件名字段使用：
++
++- 前后空格、全角字符、Emoji、组合字符、中文/英文混合。
++- 单引号、双引号、反斜杠、`<script>`、HTML 实体。
++- CR、LF、CRLF、Tab、逗号、CSV 公式前缀 `= + - @`。
++- 最小长度、最大长度、最大值+1；空字符串、仅空白、null、缺字段。
++
++预期：按字段规则归一化或拒绝；页面不执行 HTML；响应头无注入；CSV 打开时不执行公式；错误带稳定 code/messageKey/requestId。
++
++### UAT-X-002 并发、幂等和分页（P）
++
++- 两标签同时编辑同资源，验证 expectedVersion 冲突。
++- 对支持幂等的 mail/task/import 重放相同 key，数据库只有一个逻辑资源。
++- 对列表在新增/删除前后翻页，检查稳定排序、无重复、无越界 pageSize。
++- 快速双击提交、刷新确认页、浏览器后退重提，不产生重复副作用。
++
++### UAT-X-003 重启持久性（P/R）
++
++在记录当前状态后重启 server，逐项核对：用户、角色、菜单、设置历史、审计、字典、SMTP 账户、邮件记录、任务定义/run、导入 job、文件列表。
++
++- 数据库持久化资源应恢复，`created_at/updated_at/deleted_at` 语义保持。
++- 当前已知红灯：本地文件元数据、导入预览/payload/artifact、部分队列运行态依赖内存，重启恢复预期失败。
++- 任何凭据在重启日志中仍应脱敏。
++
++### UAT-X-004 数据库字段通则（P）
++
++抽查每个本版新表：有主键、`created_at`、`updated_at`、`deleted_at`；软删除后默认查询隐藏，唯一索引与软删除复用规则符合当前 schema。邮件账户的租户+账号名唯一，发送记录使用独立幂等键，不按收件人/主题误判重复。
++
++## 11. 阶段 8：开发/验收拓扑、升级与回滚
++
++### UAT-TOPOLOGY-001 生成临时拓扑（P：shape；C：真实故障切换）
++
++```bash
++node scripts/prepare-runtime-compose.mjs
++docker compose -f .runtime/compose/dev.yaml config --quiet
++docker compose -f .runtime/compose/postgres.yaml config --quiet
++docker compose -f .runtime/compose/read-write.yaml config --quiet
++docker compose -f .runtime/compose/ha.yaml config --quiet
++docker compose -f .runtime/compose/observability.yaml config --quiet
++```
++
++预期：临时文件只在 `.runtime/compose/`；正式 `deploy/` 仅有单机 Compose 和两份 Dockerfile。
++
++当前真实门禁：MySQL/PostgreSQL read-write、Redis Sentinel/Cluster 生成文件以结构验证为主，复制/选主/故障切换尚无完整运行证据；Prometheus/Grafana/Mail fixture 也需外部条件验收。
++
++### UAT-UPGRADE-001 可丢弃环境升级（C）
++
++1. 在独立 Compose project/volume 启动基线，记录提交、镜像 digest、迁移状态、health 和业务 smoke。
++2. 导出数据库备份并校验 SHA-256。
++3. 切到候选提交，重新 build/up，确认 migrate 成功。
++4. 重跑：登录、用户、字典、SMTP 列表、任务列表、导入模板、PA monitor、health。
++5. 比较迁移前后行数、唯一索引、时间字段、软删除数据和审计。
++
++### UAT-ROLLBACK-001 回滚演练（C）
++
++1. 停止候选 server，保存候选日志和 migration status。
++2. 执行对应版本化 rollback 脚本；数据库 down 只用于已有可验证备份的可丢弃环境。
++3. 恢复旧代码/镜像和数据，启动旧 server。
++4. 重跑旧版 health、登录、只读列表和关键数据摘要。
++5. 归档前后提交、镜像 digest、备份 hash、脚本退出码和 literal output。
++
++可参考仓库中的版本化脚本：
++
++- `.dev-docs/current/scripts/rollback-v1.0-b12-dictionary-i18n.sh`
++- `.dev-docs/current/scripts/rollback-v1.0-b13-task.sh`
++- `.dev-docs/current/scripts/rollback-v1.0-b14-import-export.sh`
++- `.dev-docs/current/scripts/rollback-v1.0-b18a-deploy.sh`
++- `.dev-docs/current/scripts/rollback-v1.0.0-dev.sh`
++
++当前发布级红灯：真实对象存储、HA/灾备、三 UI 真实后端 E2E、SBOM/签名/provenance 和 B1.5–B1.8 最终发布门禁尚未收敛。
++
++## 12. 最终验收汇总
++
++### 12.1 必过清单
++
++- [ ] 新 clone、版本、依赖和静态自检有证据。
++- [ ] 首次安装、初始管理员、重启、安装锁有证据。
++- [ ] 登录/刷新/登出、锁定、401/403 有证据。
++- [ ] 用户、角色关系、菜单、设置、审计、字典的主流程和边界通过。
++- [ ] 文件、SMTP、任务、导入导出的当前可交付部分通过，红灯未被误记为通过。
++- [ ] 租户/组织跨范围读写均被拒绝。
++- [ ] 三 UI 的关键业务语义一致，375–1440 px 和键盘路径通过。
++- [ ] 密码、token、DSN、SMTP 密钥未出现在 UI、HAR、日志、导出和提交中。
++- [ ] 服务重启、依赖降级、升级/回滚有实际输出。
++
++### 12.2 当前基线必须保留的红灯
++
++| 门禁 | 当前预期 |
++|---|---|
++| Docker 一键部署后的首次安装/管理员登录 | 红灯 |
++| 首次管理员强制改密和真实个人资料保存 | 红灯 |
++| 注册、忘记密码、验证码/二维码登录 UI | 红灯 |
++| 会话设备管理 UI | 红灯 |
++| 角色完整编辑/删除、策略/数据范围 UI 治理 | 红灯 |
++| 普通用户租户切换 UI | 红灯 |
++| 本地文件元数据重启恢复及远程对象存储 | 红灯 |
++| 通用 manual/http/webhook 任务成功执行、独立 worker/leader | 红灯 |
++| 通用列映射、全量导出下载、流式大文件、导入重启恢复 | 红灯 |
++| Mail/Monitor 等新页完整 i18n | 红灯 |
++| 真实数据库/Redis HA 故障切换、告警闭环 | 红灯 |
++| B1.7/B1.8 真实 E2E 和正式制品供应链门禁 | 红灯 |
++
++任何红灯转绿时，应新增独立用例、实际执行记录、修复提交和回滚验证；不要直接改写历史结果。
++
++## 13. 建议的七天普通用户验收节奏
++
++| 天 | 工作 | 退出标准 |
++|---|---|---|
++| Day 1 | clone、工具、Docker 冒烟、source installer | 安装证据齐全，已知 Docker 红灯登记 |
++| Day 2 | auth、shell、用户、角色、菜单 | 401/403、锁定和 IAM 边界完成 |
++| Day 3 | settings、observability、audit、file | 密钥脱敏和文件边界完成 |
++| Day 4 | dictionary/i18n、SMTP 四账户 | 双语、连接阶段、轮询/权重、失败记录完成 |
++| Day 5 | tasks、import/export、monitor | 当前可交付闭环和预期红灯均有证据 |
++| Day 6 | ele/naive 等价、响应式、键盘、跨租户 | 三 UI 矩阵和隔离矩阵完成 |
++| Day 7 | 重启、降级、升级/回滚、汇总 | result.md、HAR、截图、日志和发布结论齐全 |

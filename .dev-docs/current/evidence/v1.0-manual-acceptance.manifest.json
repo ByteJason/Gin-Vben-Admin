@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "slice": "v1.0-manual-acceptance",
+  "baselineCommit": "1a62ab0c0aeaaba44e9da45f631f1c4f7f665795",
+  "generatedAt": "2026-08-23T08:27:37+08:00",
+  "files": {
+    "README.md": "aedbaceb82d9f3b6c2b8e38b8c39557969a189a164f207c6ffbb2c5be1f96fce",
+    "docs/README.md": "570755ab234fce8d7474dc95cf933b7155cba24a8e40510fc5423e9c5cca1d88",
+    "docs/manual-acceptance/1.0.0-dev-end-to-end.md": "3ac681578786ba8b5be31b3c209ab59f9cf530fd33b930bb82a729c4d42fb652",
+    ".dev-docs/current/evidence/v1.0-manual-acceptance-baseline-files/README.md": "6f281c61973268de081472fb2d4f85dfb6bb1fb643b93458f7675d37ad53b8d8",
+    ".dev-docs/current/evidence/v1.0-manual-acceptance-baseline-files/docs-README.md": "e8e1b1b4ec92e9dc73bab8fae43c04650e116c6484526245f7f11ceeb9d0f622",
+    ".dev-docs/current/evidence/v1.0-manual-acceptance-baseline-files/guide.absent.txt": "ca7e6c7aaea19c442af7f1e76c8822e7f21b48bd31af335e78b31a1c5be9da75",
+    ".dev-docs/current/evidence/v1.0-manual-acceptance.patch": "22e5109cda9f08f79f017c8478aad4f72af790977d8923593d28fdcc7a223f18",
+    ".dev-docs/current/evidence/v1.0-manual-acceptance.patch.sha256": "6e82aeef61197c4f4b24789d2ebb9d314ac1f467ae509f7751ffc2590d9f9f51",
+    ".dev-docs/current/evidence/v1.0-manual-acceptance-verification-record.md": "c5334c90e126dc0df0ca5783193a4e545c391525fdf00fff1ef2a2a002baee6b",
+    ".dev-docs/current/scripts/rollback-v1.0-manual-acceptance.sh": "baaccaa7a873994a92309b49b11c9f800ea3eb03dcc6a82c124d324f22c001bb"
+  }
+}

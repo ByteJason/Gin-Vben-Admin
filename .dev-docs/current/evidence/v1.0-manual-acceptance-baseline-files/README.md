@@ -203,8 +203,6 @@ docker compose -f deploy/docker-compose.yml down
 
 候选版本运行手册见 [`docs/release/0.9.0-rc-runbook.md`](docs/release/0.9.0-rc-runbook.md)。贡献、安全、变更和第三方归属文件分别见 [`CONTRIBUTING.md`](CONTRIBUTING.md)、[`SECURITY.md`](SECURITY.md)、[`CHANGELOG.md`](CHANGELOG.md) 和 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
 
-从全新 clone、首次安装到每个产品功能与边界数据的逐项人工检查，见 [`docs/manual-acceptance/1.0.0-dev-end-to-end.md`](docs/manual-acceptance/1.0.0-dev-end-to-end.md)。
-
 ## 验证
 
 ```text
