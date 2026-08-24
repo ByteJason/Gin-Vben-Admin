@@ -65,7 +65,7 @@ a {
 }
 
 .page-shell {
-  width: min(1180px, calc(100% - 48px));
+  width: min(1400px, calc(100% - 48px));
   min-height: 100vh;
   margin: 0 auto;
   display: grid;
@@ -115,10 +115,16 @@ a {
 
 .install-layout {
   display: grid;
-  grid-template-columns: minmax(0, 0.9fr) minmax(420px, 1.1fr);
-  gap: clamp(40px, 7vw, 96px);
-  align-items: center;
+  grid-template-columns: minmax(300px, 0.7fr) minmax(680px, 1.3fr);
+  gap: clamp(48px, 6vw, 96px);
+  align-items: start;
   padding: 48px 0 80px;
+}
+
+.intro {
+  position: sticky;
+  top: 40px;
+  padding-top: clamp(32px, 8vh, 96px);
 }
 
 .eyebrow,
@@ -196,7 +202,8 @@ h1 {
 }
 
 .status-card {
-  padding: clamp(28px, 4vw, 48px);
+  min-width: 0;
+  padding: clamp(28px, 3.2vw, 44px);
   background: var(--surface);
   border: 1px solid rgb(219 227 238 / 85%);
   border-radius: 24px;
@@ -363,7 +370,28 @@ h1 {
 .plan-form {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  gap: 16px;
+}
+
+.plan-group {
+  min-width: 0;
+  margin: 0;
+  padding: 18px;
+  background: var(--canvas);
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  border-radius: 14px;
+}
+
+.plan-group legend {
+  padding: 0 7px;
+  color: var(--ink);
+  font-size: 0.84rem;
+  font-weight: 750;
+}
+
+.plan-group__fields {
+  display: grid;
+  gap: 16px;
 }
 
 .form-field {
@@ -422,13 +450,17 @@ h1 {
 }
 
 .primary-button {
-  grid-column: 1 / -1;
+  width: 100%;
   color: #ffffff;
   background: var(--accent);
   border-color: var(--accent);
   cursor: pointer;
   font-weight: 750;
   transition: filter 160ms ease, opacity 160ms ease;
+}
+
+.plan-form > .primary-button {
+  grid-column: 1 / -1;
 }
 
 .primary-button:hover {
@@ -441,11 +473,17 @@ h1 {
 }
 
 .plan-message {
-  min-height: 26px;
-  margin-top: 14px;
+  margin-top: 12px;
   color: var(--muted);
   font-size: 0.82rem;
   line-height: 1.55;
+}
+
+.plan-message:not(:empty) {
+  min-height: 44px;
+  padding: 11px 13px;
+  background: var(--canvas);
+  border-radius: 10px;
 }
 
 .plan-message[data-tone="success"] {
@@ -536,30 +574,52 @@ h1 {
   border-top: 1px solid var(--line);
 }
 
-.connection-form {
-  margin-top: 14px;
-  padding: 16px;
+.connection-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: 16px;
+}
+
+.connection-form {
+  min-width: 0;
+  margin: 0;
+  padding: 20px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  align-content: start;
   background: var(--canvas);
-  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  border-radius: 14px;
 }
 
-.connection-form + .connection-form {
-  margin-top: 12px;
+.connection-form--admin {
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.connection-form h4,
+.connection-form__heading,
 .connection-form .advanced-fields,
 .connection-form .primary-button,
-.connection-result {
+.connection-result,
+.install-action {
   grid-column: 1 / -1;
 }
 
-.connection-form h4 {
+.connection-form__heading {
+  min-height: 48px;
+}
+
+.connection-form__heading h4 {
+  margin: 0 0 5px;
+  font-size: 0.92rem;
+}
+
+.connection-form__heading p {
   margin: 0;
-  font-size: 0.88rem;
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.45;
 }
 
 .advanced-fields {
@@ -580,17 +640,38 @@ h1 {
 }
 
 .connection-result {
-  min-height: 22px;
   color: var(--muted);
   font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.connection-result:not(:empty) {
+  min-height: 44px;
+  padding: 11px 13px;
+  display: flex;
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
 }
 
 .connection-result[data-tone="success"] {
   color: var(--accent);
 }
 
+.connection-result[data-tone="success"]:not(:empty) {
+  background: color-mix(in srgb, var(--accent-soft) 68%, var(--surface));
+  border-color: color-mix(in srgb, var(--accent) 26%, var(--line));
+}
+
 .connection-result[data-tone="error"] {
   color: var(--danger);
+}
+
+.connection-result[data-tone="error"]:not(:empty) {
+  background: color-mix(in srgb, var(--danger-soft) 72%, var(--surface));
+  border-color: color-mix(in srgb, var(--danger) 24%, var(--line));
+  font-weight: 650;
 }
 
 .confirm-field {
@@ -622,7 +703,7 @@ h1 {
 
 .progress-label {
   display: block;
-  margin-top: 12px;
+  margin: 0;
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 650;
@@ -636,13 +717,32 @@ h1 {
   accent-color: var(--accent);
 }
 
+.install-action {
+  margin-top: 2px;
+  padding-top: 18px;
+  display: grid;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.install-feedback {
+  font-size: 0.84rem;
+}
+
+.progress-panel {
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
 .connection-result[data-tone="pending"] {
   color: var(--muted);
 }
 
 .secondary-button {
   min-height: 44px;
-  margin-top: 24px;
+  margin-top: 0;
   padding: 0 18px;
   color: var(--ink);
   background: transparent;
@@ -693,11 +793,20 @@ footer {
   font-size: 0.82rem;
 }
 
-@media (max-width: 820px) {
+@media (max-width: 1120px) {
   .install-layout {
     grid-template-columns: 1fr;
     gap: 44px;
     align-items: start;
+  }
+
+  .intro {
+    position: static;
+    padding-top: 0;
+  }
+
+  .intro-copy {
+    max-width: 70ch;
   }
 
   .steps {
@@ -709,9 +818,21 @@ footer {
   }
 }
 
+@media (max-width: 720px) {
+  .plan-form,
+  .connection-grid,
+  .connection-form--admin {
+    grid-template-columns: 1fr;
+  }
+
+  .connection-form--admin {
+    grid-column: auto;
+  }
+}
+
 @media (max-width: 480px) {
   .page-shell {
-    width: min(100% - 28px, 1180px);
+    width: min(100% - 28px, 1400px);
   }
 
   .site-header {

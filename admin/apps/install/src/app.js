@@ -75,7 +75,8 @@ const stepLabels = {
 let currentPlan = null;
 let databaseCheckPassed = false;
 let redisCheckPassed = false;
-let lastFailedJobId = null;
+let retryJobId = null;
+let rollbackJobId = null;
 let statusRefreshTimer = null;
 
 function browserLanguageHeader() {
@@ -162,8 +163,7 @@ function renderStatus(status) {
     currentPlan = null;
     databaseCheckPassed = false;
     redisCheckPassed = false;
-    lastFailedJobId = null;
-    rollbackButton.hidden = true;
+    clearFailedJobActions();
     nextSteps.hidden = false;
     title.focus();
     return;
@@ -182,7 +182,7 @@ function renderStatus(status) {
     currentPlan = null;
     databaseCheckPassed = false;
     redisCheckPassed = false;
-    lastFailedJobId = null;
+    clearFailedJobActions();
     retryButton.hidden = false;
     scheduleStatusRefresh();
     title.focus();
@@ -200,7 +200,7 @@ function renderStatus(status) {
     currentPlan = null;
     databaseCheckPassed = false;
     redisCheckPassed = false;
-    lastFailedJobId = null;
+    clearFailedJobActions();
     retryButton.hidden = false;
     scheduleStatusRefresh();
     title.focus();
@@ -208,7 +208,7 @@ function renderStatus(status) {
   }
 
   if (status.state === 'inconsistent') {
-    renderError('初始化状态不一致，请返回终端运行 pnpm run init -- --check 查看 checkpoint。');
+    renderError('初始化尚未完成，请返回终端重新运行 pnpm run init 继续恢复；需要先查看 checkpoint 时可运行 pnpm run init -- --check。');
     return;
   }
 
@@ -224,8 +224,7 @@ function renderStatus(status) {
   currentPlan = null;
   databaseCheckPassed = false;
   redisCheckPassed = false;
-  lastFailedJobId = null;
-  rollbackButton.hidden = true;
+  clearFailedJobActions();
   updateApplyButton();
   title.focus();
 }
@@ -274,7 +273,7 @@ async function requestPlan(event) {
   currentPlan = null;
   databaseCheckPassed = false;
   redisCheckPassed = false;
-  lastFailedJobId = null;
+  clearFailedJobActions();
   updateApplyButton();
   planButton.disabled = true;
   planButton.textContent = '正在检查';
@@ -312,7 +311,7 @@ function renderPlan(plan) {
   currentPlan = plan;
   databaseCheckPassed = false;
   redisCheckPassed = false;
-  lastFailedJobId = null;
+  clearFailedJobActions();
   planCleanup.textContent = yesNo(plan.canCleanup);
   planBuild.textContent = yesNo(plan.canBuild);
   planEnv.textContent = yesNo(plan.canWriteEnv);
@@ -399,12 +398,42 @@ function updateApplyButton() {
   applyButton.disabled = !currentPlan || !currentPlan.canBuild || !currentPlan.canWriteEnv || !currentPlan.canCleanup || !databaseCheckPassed || !redisCheckPassed;
 }
 
+function invalidateDependencyCheck(resultElement) {
+  if (resultElement === databaseResult) databaseCheckPassed = false;
+  if (resultElement === redisResult) redisCheckPassed = false;
+  resultElement.textContent = '配置已变化，请重新测试。';
+  resultElement.dataset.tone = 'pending';
+  updateApplyButton();
+}
+
+function invalidateDependencyChecks() {
+  databaseCheckPassed = false;
+  redisCheckPassed = false;
+  for (const result of [databaseResult, redisResult]) {
+    result.textContent = '连接配置需要重新验证，请重新测试。';
+    result.dataset.tone = 'pending';
+  }
+  updateApplyButton();
+}
+
+function clearFailedJobActions() {
+  retryJobId = null;
+  rollbackJobId = null;
+  rollbackButton.hidden = true;
+}
+
+function setFailedJobActions(job) {
+  retryJobId = job.canRetry ? job.id : null;
+  rollbackJobId = job.canRollback ? job.id : null;
+  rollbackButton.hidden = !rollbackJobId;
+}
+
 function invalidatePlanIfModeChanged() {
   if (currentPlan && currentPlan.mode !== modeChoice.value) {
     currentPlan = null;
     databaseCheckPassed = false;
     redisCheckPassed = false;
-    lastFailedJobId = null;
+    clearFailedJobActions();
     planPanel.hidden = true;
     connectionPanel.hidden = true;
     planMessage.textContent = '选择已变更，请重新检查目录权限。';
@@ -430,6 +459,8 @@ function renderApplyResult(result) {
   setProgress(100, '安装完成');
   applyResult.textContent = '安装已完成。请重启服务端，然后依次运行 pnpm run build 和 pnpm run dev。';
   applyResult.dataset.tone = 'success';
+  applyResult.setAttribute('role', 'status');
+  applyResult.setAttribute('aria-live', 'polite');
   applyResult.focus();
   applySteps.replaceChildren();
   for (const step of Array.isArray(result.steps) ? result.steps : []) {
@@ -501,17 +532,33 @@ function applyErrorMessage(status) {
   return '安装未完成，服务端已保留可回滚状态，请检查后重试。';
 }
 
+function installationFailureMessage(job) {
+  if (job?.errorKey === 'installation_running') {
+    return '检测到另一项初始化或安装任务正在执行。若终端中的 pnpm run init 已结束，请重新运行 pnpm run init 继续恢复，完成后重新测试连接。';
+  }
+  if (job?.canRetry) {
+    return '安装未完成，敏感字段已清空。请重新输入凭据，并重新测试数据库与 Redis 连接后重试。';
+  }
+  return '安装未完成，请检查实例状态和失败步骤后再继续。';
+}
+
+function announceApplyError(detail) {
+  applyResult.textContent = detail;
+  applyResult.dataset.tone = 'error';
+  applyResult.setAttribute('role', 'alert');
+  applyResult.setAttribute('aria-live', 'assertive');
+  applyResult.focus();
+}
+
 async function requestInstallation(event) {
   event.preventDefault();
   setProgress(0, '准备安装');
   if (!currentPlan || !databaseCheckPassed || !redisCheckPassed) {
-    applyResult.textContent = '请先完成目录、数据库和 Redis 检查。';
-    applyResult.dataset.tone = 'error';
+    announceApplyError('请先完成目录、数据库和 Redis 检查。');
     return;
   }
   if (adminPassword.value !== adminPasswordConfirm.value) {
-    applyResult.textContent = '两次输入的管理员密码不一致。';
-    applyResult.dataset.tone = 'error';
+    announceApplyError('两次输入的管理员密码不一致。');
     adminPasswordConfirm.focus();
     return;
   }
@@ -520,10 +567,12 @@ async function requestInstallation(event) {
   applyButton.textContent = '安装中';
   applyResult.textContent = '服务端正在按顺序执行迁移、管理员初始化、配置写入和安装锁定。';
   applyResult.dataset.tone = 'pending';
+  applyResult.setAttribute('role', 'status');
+  applyResult.setAttribute('aria-live', 'polite');
   try {
     const dependencies = dependencyFormValues();
-    const targetEndpoint = lastFailedJobId
-      ? `${retryEndpoint}/${encodeURIComponent(lastFailedJobId)}`
+    const targetEndpoint = retryJobId
+      ? `${retryEndpoint}/${encodeURIComponent(retryJobId)}`
       : applyEndpoint;
     const response = await fetch(targetEndpoint, {
       method: 'POST',
@@ -544,8 +593,7 @@ async function requestInstallation(event) {
     });
     const envelope = await response.json();
     if (!response.ok || envelope.code !== 0 || !envelope.data) {
-      applyResult.textContent = applyErrorMessage(response.status);
-      applyResult.dataset.tone = 'error';
+      announceApplyError(applyErrorMessage(response.status));
       return;
     }
     let result = envelope.data;
@@ -554,41 +602,36 @@ async function requestInstallation(event) {
       renderJobProgress(result);
       result = await pollInstallation(result.id);
       if (result.state === 'failed') {
-        lastFailedJobId = result.canRetry || result.canRollback ? result.id : null;
-        applyResult.textContent = result.canRetry
-          ? '安装未完成，已自动回滚本次副作用。请重新输入凭据后重试。'
-          : '安装未完成，请检查实例状态后再继续。';
-        applyResult.dataset.tone = 'error';
+        setFailedJobActions(result);
+        announceApplyError(installationFailureMessage(result));
         return;
       }
     }
-    lastFailedJobId = null;
+    clearFailedJobActions();
     renderApplyResult(result);
     const completedStatus = { installed: true, installerVersion: 'current', mode: result.mode };
     completedStatus.selectedUi = result.selectedUi;
     renderStatus(completedStatus);
     currentPlan = { ...currentPlan, installed: true };
   } catch {
-    applyResult.textContent = '安装请求未完成，请确认服务仍在运行后重试。';
-    applyResult.dataset.tone = 'error';
+    announceApplyError('安装请求未完成，请确认服务仍在运行，并重新完成连接测试后重试。');
   } finally {
     clearInstallSecrets();
     if (!currentPlan || !currentPlan.installed) {
-      applyButton.disabled = false;
-      applyButton.textContent = lastFailedJobId ? '重新尝试安装' : '开始安装';
-      updateApplyButton();
+      applyButton.textContent = retryJobId ? '重新尝试安装' : '开始安装';
+      invalidateDependencyChecks();
     }
   }
 }
 
 async function requestRollback() {
-  if (!lastFailedJobId) return;
+  if (!rollbackJobId) return;
   rollbackButton.disabled = true;
   rollbackButton.textContent = '正在回滚';
   applyResult.textContent = '正在按安装清单恢复本次失败事务。';
   applyResult.dataset.tone = 'pending';
   try {
-    const response = await fetch(`${rollbackEndpoint}/${encodeURIComponent(lastFailedJobId)}`, {
+    const response = await fetch(`${rollbackEndpoint}/${encodeURIComponent(rollbackJobId)}`, {
       method: 'POST',
       credentials: 'same-origin',
       headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
@@ -602,7 +645,8 @@ async function requestRollback() {
     applyResult.textContent = '本次失败事务已回滚，可以重新输入配置后重试。';
     applyResult.dataset.tone = 'success';
     rollbackButton.hidden = true;
-    lastFailedJobId = envelope.data.canRetry ? envelope.data.jobId : null;
+    rollbackJobId = null;
+    retryJobId = envelope.data.canRetry ? envelope.data.jobId : null;
   } catch {
     applyResult.textContent = '回滚未完成，请保留当前安装目录并使用离线恢复流程。';
     applyResult.dataset.tone = 'error';
@@ -633,8 +677,8 @@ databaseForm.addEventListener('submit', (event) => requestDependencyCheck(event,
 redisForm.addEventListener('submit', (event) => requestDependencyCheck(event, redisCheckEndpoint, redisResult));
 adminForm.addEventListener('submit', requestInstallation);
 rollbackButton.addEventListener('click', requestRollback);
-databaseForm.addEventListener('input', () => { databaseCheckPassed = false; updateApplyButton(); });
-redisForm.addEventListener('input', () => { redisCheckPassed = false; updateApplyButton(); });
+databaseForm.addEventListener('input', () => invalidateDependencyCheck(databaseResult));
+redisForm.addEventListener('input', () => invalidateDependencyCheck(redisResult));
 modeChoice.addEventListener('change', invalidatePlanIfModeChanged);
 databaseDriver.addEventListener('change', () => {
   databasePort.value = databaseDriver.value === 'postgres' ? '5432' : '3306';

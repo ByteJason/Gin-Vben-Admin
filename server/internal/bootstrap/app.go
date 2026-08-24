@@ -86,7 +86,7 @@ func New(cfg config.Config) (*App, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("validate runtime configuration: %w", err)
 	}
-	profiles, err := installplatform.NewFileProfileProvider(cfg.Install.WorkspaceRoot)
+	profiles, err := installplatform.NewFileProfileProviderWithStateDirectory(cfg.Install.WorkspaceRoot, cfg.Install.StateDir)
 	if err != nil {
 		return nil, fmt.Errorf("configure installation UI profile: %w", err)
 	}

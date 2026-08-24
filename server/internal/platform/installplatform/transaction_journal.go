@@ -216,14 +216,18 @@ func (s *FileTransactionJournal) AcquireApply(ctx context.Context) (func() error
 		return nil, fmt.Errorf("acquire installation apply lease: %w", err)
 	}
 	// The dependency-free Node initializer owns admin-init.lock and only checks
-	// apply.lock after publishing that lease. Checking its lease while we own
-	// apply.lock closes both acquisition orders without asking Node to emulate
-	// this package's flock/LockFileEx process.guard protocol.
-	if _, statErr := os.Lstat(filepath.Join(stateDir, "admin-init.lock")); statErr == nil || !errors.Is(statErr, os.ErrNotExist) {
+	// apply.lock after publishing that lease. Reconcile only a strictly parsed,
+	// exact receipt whose process is confirmed gone; every active, malformed or
+	// uninspectable owner remains busy. This closes both acquisition orders while
+	// also recovering a final Node lease that survived process exit on Windows.
+	if adminErr := reconcileStaleAdminInitLease(filepath.Join(stateDir, "admin-init.lock")); adminErr != nil {
 		if releaseErr := release(); releaseErr != nil {
 			return nil, fmt.Errorf("release installation apply lease after admin init collision: %w", releaseErr)
 		}
-		return nil, installer.ErrApplyBusy
+		if errors.Is(adminErr, errProcessLeaseBusy) {
+			return nil, installer.ErrApplyBusy
+		}
+		return nil, fmt.Errorf("reconcile admin init lease: %w", adminErr)
 	}
 	return release, nil
 }

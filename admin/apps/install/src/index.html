@@ -78,41 +78,53 @@
 
           <section id="selection-panel" class="selection-panel" aria-labelledby="selection-title">
             <div class="capability-panel__heading">
-              <h3 id="selection-title">确认界面与运行方式</h3>
-              <span>先检查，再继续</span>
+              <h3 id="selection-title">确认安装方案</h3>
+              <span>确认选择后检查目录权限</span>
             </div>
             <form id="plan-form" class="plan-form">
-              <div class="form-field readonly-field">
-                <span class="field-label">管理界面</span>
-                <output id="selected-ui-summary" class="readonly-summary" aria-live="polite">读取命令行选择中</output>
-                <span class="field-help">管理界面已由命令行 <code>pnpm run init</code> 选择，此处仅显示结果。</span>
-              </div>
-              <div class="form-field">
-                <label for="mode-choice">运行方式</label>
-                <select id="mode-choice" name="mode" required>
-                  <option value="dev" selected>开发调试（推荐）</option>
-                  <optgroup label="高级部署选项">
-                    <option value="embedded">嵌入式单包</option>
-                    <option value="standalone">静态资源独立部署</option>
-                    <option value="api_only">仅 API</option>
-                  </optgroup>
-                </select>
-              </div>
-              <div class="form-field">
-                <label for="locale-mode">语言模式</label>
-                <select id="locale-mode" name="localeMode" required>
-                  <option value="single">单语言</option>
-                  <option value="multi">双语切换</option>
-                </select>
-              </div>
-              <div class="form-field">
-                <label for="locale-choice">默认语言</label>
-                <select id="locale-choice" name="locale" required>
-                  <option value="zh-CN">简体中文（zh-CN）</option>
-                  <option value="en-US">English (en-US)</option>
-                </select>
-                <span id="locale-suggestion" class="field-help" aria-live="polite"></span>
-              </div>
+              <fieldset class="plan-group plan-group--runtime">
+                <legend>界面与运行方式</legend>
+                <div class="plan-group__fields">
+                  <div class="form-field readonly-field">
+                    <span class="field-label">管理界面</span>
+                    <output id="selected-ui-summary" class="readonly-summary" aria-live="polite">读取命令行选择中</output>
+                    <span class="field-help">已由命令行 <code>pnpm run init</code> 选定，安装页仅确认结果。</span>
+                  </div>
+                  <div class="form-field">
+                    <label for="mode-choice">运行方式</label>
+                    <select id="mode-choice" name="mode" required>
+                      <option value="dev" selected>开发调试（推荐）</option>
+                      <optgroup label="高级部署选项">
+                        <option value="embedded">嵌入式单包</option>
+                        <option value="standalone">静态资源独立部署</option>
+                        <option value="api_only">仅 API</option>
+                      </optgroup>
+                    </select>
+                    <span class="field-help">本地首次安装建议保持开发调试，部署时再选择高级模式。</span>
+                  </div>
+                </div>
+              </fieldset>
+              <fieldset class="plan-group plan-group--locale">
+                <legend>语言偏好</legend>
+                <div class="plan-group__fields">
+                  <div class="form-field">
+                    <label for="locale-mode">语言模式</label>
+                    <select id="locale-mode" name="localeMode" required>
+                      <option value="single">单语言</option>
+                      <option value="multi">双语切换</option>
+                    </select>
+                    <span class="field-help">单语言更精简；双语模式允许用户在界面内切换。</span>
+                  </div>
+                  <div class="form-field">
+                    <label for="locale-choice">默认语言</label>
+                    <select id="locale-choice" name="locale" required>
+                      <option value="zh-CN">简体中文（zh-CN）</option>
+                      <option value="en-US">English (en-US)</option>
+                    </select>
+                    <span id="locale-suggestion" class="field-help" aria-live="polite"></span>
+                  </div>
+                </div>
+              </fieldset>
               <button id="plan-button" class="primary-button" type="submit">
                 检查目录权限
               </button>
@@ -135,8 +147,12 @@
               <h3 id="connection-title">配置服务连接</h3>
               <span>敏感值不写入恢复日志</span>
             </div>
-            <form id="database-form" class="connection-form">
-              <h4>数据库</h4>
+            <div class="connection-grid">
+            <form id="database-form" class="connection-form connection-form--database">
+              <div class="connection-form__heading">
+                <h4>数据库</h4>
+                <p>填写业务数据库连接并完成即时验证。</p>
+              </div>
               <div class="form-field">
                 <label for="database-driver">类型</label>
                 <select id="database-driver" name="driver" required>
@@ -172,11 +188,14 @@
                 </div>
               </details>
               <button class="primary-button" type="submit">测试数据库连接</button>
-              <div id="database-result" class="connection-result" role="status" aria-live="polite"></div>
+              <div id="database-result" class="connection-result" role="status" aria-live="polite" aria-atomic="true"></div>
             </form>
 
-            <form id="redis-form" class="connection-form">
-              <h4>Redis</h4>
+            <form id="redis-form" class="connection-form connection-form--redis">
+              <div class="connection-form__heading">
+                <h4>Redis</h4>
+                <p>验证缓存服务可访问后再提交安装。</p>
+              </div>
               <div class="form-field">
                 <label for="redis-address">地址</label>
                 <input id="redis-address" name="addr" value="localhost:6379" autocomplete="off" required />
@@ -194,11 +213,14 @@
                 <input id="redis-db" name="db" type="number" min="0" value="0" inputmode="numeric" />
               </div>
               <button class="primary-button" type="submit">测试 Redis 连接</button>
-              <div id="redis-result" class="connection-result" role="status" aria-live="polite"></div>
+              <div id="redis-result" class="connection-result" role="status" aria-live="polite" aria-atomic="true"></div>
             </form>
 
-            <form id="admin-form" class="connection-form">
-              <h4>初始管理员</h4>
+            <form id="admin-form" class="connection-form connection-form--admin">
+              <div class="connection-form__heading">
+                <h4>初始管理员</h4>
+                <p>安装成功后使用该账号首次登录，请设置独立的高强度密码。</p>
+              </div>
               <div class="form-field">
                 <label for="admin-username">账号</label>
                 <input id="admin-username" name="username" value="admin" minlength="3" maxlength="64" autocomplete="username" required />
@@ -211,15 +233,20 @@
                 <label for="admin-password-confirm">确认密码</label>
                 <input id="admin-password-confirm" type="password" minlength="12" maxlength="128" autocomplete="new-password" required />
               </div>
-              <button id="apply-button" class="primary-button" type="submit" disabled>开始安装</button>
-              <div id="apply-result" class="connection-result" role="status" aria-live="polite" tabindex="-1"></div>
-              <button id="rollback-button" class="secondary-button" type="button" hidden>
-                回滚本次失败的安装
-              </button>
-              <label class="progress-label" for="apply-progress">安装进度</label>
-              <progress id="apply-progress" max="100" value="0" aria-valuetext="尚未开始">0%</progress>
-              <ol id="apply-steps" class="apply-steps" aria-live="polite"></ol>
+              <div class="install-action">
+                <button id="apply-button" class="primary-button" type="submit" disabled>开始安装</button>
+                <div id="apply-result" class="connection-result install-feedback" role="status" aria-live="polite" aria-atomic="true" tabindex="-1"></div>
+                <button id="rollback-button" class="secondary-button" type="button" hidden>
+                  回滚本次失败的安装
+                </button>
+                <div class="progress-panel">
+                  <label class="progress-label" for="apply-progress">安装进度</label>
+                  <progress id="apply-progress" max="100" value="0" aria-valuetext="尚未开始">0%</progress>
+                  <ol id="apply-steps" class="apply-steps" aria-live="polite"></ol>
+                </div>
+              </div>
             </form>
+            </div>
           </section>
 
           <section id="next-steps" class="next-steps" aria-labelledby="next-steps-title" hidden>

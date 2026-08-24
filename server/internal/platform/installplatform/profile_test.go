@@ -2,10 +2,13 @@ package installplatform
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	installer "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/installer"
 	installstate "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/installstate"
 )
 
@@ -33,6 +36,102 @@ func TestFileProfileProviderReadsTheTrackedUIProfile(t *testing.T) {
 	}
 	if !exists || profile.SelectedUI != installstate.UINaive || profile.Installing {
 		t.Fatalf("Profile() = (%#v, %t), want naive prepared profile", profile, exists)
+	}
+}
+
+func TestFileProfileProviderDoesNotReportReadyWhileAdminInitTransactionIsPending(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	mustWriteProfileFixture(t, root, `{"schema":1,"selectedUi":"ele","packageName":"@vben/web-ele","appDirectory":"apps/web-ele"}`)
+	if err := os.MkdirAll(filepath.Join(root, "admin", "apps", "web-ele"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	transactionPath := filepath.Join(root, ".runtime", "install", "transaction.json")
+	if err := os.MkdirAll(filepath.Dir(transactionPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	pending := `{"schema":1,"owner":"admin-init","id":"12345678-1234-1234-1234-123456789abc","selectedUi":"ele","phase":"dependencies_pending","moves":[]}` + "\n"
+	if err := os.WriteFile(transactionPath, []byte(pending), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	provider, err := NewFileProfileProvider(root)
+	if err != nil {
+		t.Fatalf("NewFileProfileProvider() error = %v", err)
+	}
+	profile, exists, err := provider.Profile(context.Background())
+	if err != nil || !exists || profile.SelectedUI != "" {
+		t.Fatalf("Profile() with pending admin transaction = (%#v, %t, %v), want invalid existing profile", profile, exists, err)
+	}
+	statusService := installer.NewStatusServiceWithProfile(
+		NewFileMarkerStore(filepath.Join(root, ".runtime", "install", ".installed")),
+		provider,
+	)
+	status, err := statusService.Status(context.Background())
+	if err != nil || status.State != installer.StateInconsistent {
+		t.Fatalf("Status() with pending admin transaction = (%#v, %v), want inconsistent", status, err)
+	}
+}
+
+func TestFileProfileProviderUsesConfiguredInstallStateDirectory(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	mustWriteProfileFixture(t, root, `{"schema":1,"selectedUi":"antd","packageName":"@vben/web-antd","appDirectory":"apps/web-antd"}`)
+	if err := os.MkdirAll(filepath.Join(root, "admin", "apps", "web-antd"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stateDirectory := t.TempDir()
+	pending := `{"schema":1,"owner":"admin-init","id":"12345678-1234-1234-1234-123456789abc","selectedUi":"antd","phase":"dependencies_pending","moves":[]}` + "\n"
+	if err := os.WriteFile(filepath.Join(stateDirectory, "transaction.json"), []byte(pending), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	provider, err := NewFileProfileProviderWithStateDirectory(root, stateDirectory)
+	if err != nil {
+		t.Fatalf("NewFileProfileProviderWithStateDirectory() error = %v", err)
+	}
+	profile, exists, err := provider.Profile(context.Background())
+	if err != nil || !exists || profile.SelectedUI != "" {
+		t.Fatalf("Profile() with configured pending transaction = (%#v, %t, %v), want invalid existing profile", profile, exists, err)
+	}
+}
+
+func TestFileProfileProviderRejectsServerTransactionForDifferentUI(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	mustWriteProfileFixture(t, root, `{"schema":1,"selectedUi":"ele","packageName":"@vben/web-ele","appDirectory":"apps/web-ele"}`)
+	if err := os.MkdirAll(filepath.Join(root, "admin", "apps", "web-ele"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	transaction := installer.ApplyTransaction{
+		Schema: installer.ApplyTransactionSchema, Owner: installer.ApplyTransactionOwner,
+		ID: "install-0123456789abcdef0123456789abcdef", SelectedUI: installstate.UINaive,
+		Mode: installstate.ModeDev, DatabaseTarget: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+		Phase: installer.TransactionApplying, CurrentStep: "schema", CompletedSteps: []string{"plan", "database", "redis"},
+		UpdatedAt: time.Date(2026, time.August, 24, 10, 0, 0, 0, time.UTC),
+	}
+	encoded, err := json.Marshal(transaction)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transactionPath := filepath.Join(root, ".runtime", "install", "transaction.json")
+	if err := os.MkdirAll(filepath.Dir(transactionPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(transactionPath, append(encoded, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	provider, err := NewFileProfileProvider(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, exists, err := provider.Profile(context.Background())
+	if err != nil || !exists || profile.SelectedUI != "" {
+		t.Fatalf("Profile() with mismatched server transaction = (%#v, %t, %v), want invalid existing profile", profile, exists, err)
 	}
 }
 

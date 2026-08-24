@@ -189,6 +189,56 @@ func TestFileTransactionJournalApplyOwnershipRespectsAdminInitLease(t *testing.T
 	}
 }
 
+func TestApplyJobDoesNotFailInstallationRunningAfterAdminInitProcessExited(t *testing.T) {
+	stateDir := filepath.Join(t.TempDir(), "install")
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	adminLease := filepath.Join(stateDir, "admin-init.lock")
+	staleAdminLease := []byte(`{"schema":2,"owner":"admin-init","id":"12345678-1234-1234-1234-123456789abc","pid":99999999,"pidStartToken":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","createdAt":"2026-08-24T00:00:00.000Z"}` + "\n")
+	if err := os.WriteFile(adminLease, staleAdminLease, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	journal := installplatform.NewFileTransactionJournal(filepath.Join(stateDir, "transaction.json"))
+	jobs := installer.NewApplyJobService(&applyOwnershipRunner{journal: journal})
+	t.Cleanup(func() { _ = jobs.Close() })
+	request := installer.ApplyRequest{
+		Mode: "dev",
+		Database: installer.DatabaseConnection{
+			Driver: "postgres", Mode: "single", Host: "localhost", Port: 15432, Database: "gin_vben_admin", Username: "root",
+		},
+		Redis: installer.RedisConnection{Mode: "single", Addr: "localhost:6379"},
+		Admin: installer.AdminAccount{Username: "admin", Password: "TestAdminPassword123!"},
+	}
+	job, err := jobs.Start(context.Background(), request)
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		progress, progressErr := jobs.Progress(context.Background(), job.ID)
+		if progressErr != nil {
+			t.Fatalf("Progress() error = %v", progressErr)
+		}
+		if progress.State == installer.JobCompleted {
+			if _, statErr := os.Lstat(adminLease); !os.IsNotExist(statErr) {
+				t.Fatalf("exited admin init lease remains after apply: %v", statErr)
+			}
+			if _, statErr := os.Lstat(adminLease + ".reclaim"); !os.IsNotExist(statErr) {
+				t.Fatalf("admin init reclaim tombstone remains after apply: %v", statErr)
+			}
+			return
+		}
+		if progress.State == installer.JobFailed {
+			t.Fatalf("job changed queued -> failed: errorCode=%d errorKey=%q, want completed", progress.ErrorCode, progress.ErrorKey)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("job %s did not complete", job.ID)
+}
+
 func TestFileTransactionJournalStartupReconcileRemovesDeadApplyLeaseWithoutTouchingActiveAdminInit(t *testing.T) {
 	stateDir := filepath.Join(t.TempDir(), "install")
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
@@ -314,4 +364,21 @@ func validApplyTransaction() installer.ApplyTransaction {
 		CompletedSteps: []string{"plan", "database", "redis"},
 		UpdatedAt:      time.Date(2026, time.August, 24, 9, 0, 0, 0, time.UTC),
 	}
+}
+
+type applyOwnershipRunner struct {
+	journal *installplatform.FileTransactionJournal
+}
+
+func (r *applyOwnershipRunner) ApplyWithProgress(ctx context.Context, request installer.ApplyRequest, report func(string)) (installer.ApplyResult, error) {
+	release, err := r.journal.AcquireApply(ctx)
+	if err != nil {
+		return installer.ApplyResult{}, err
+	}
+	defer release()
+	report("plan")
+	return installer.ApplyResult{
+		State: installer.StateInstalled, SelectedUI: installstate.UIEle, Mode: installstate.Mode(request.Mode),
+		Steps: []installer.ApplyStep{{ID: "plan", Status: installer.StepCompleted}},
+	}, nil
 }

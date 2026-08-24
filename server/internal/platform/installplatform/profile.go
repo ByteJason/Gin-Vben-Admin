@@ -39,11 +39,20 @@ var uiProfileDefinitions = map[string]uiProfileDefinition{
 // exists=true with an empty profile so the public status becomes inconsistent
 // rather than leaking a local filesystem failure.
 type FileProfileProvider struct {
-	root        string
-	profilePath string
+	root            string
+	profilePath     string
+	transactionPath string
 }
 
 func NewFileProfileProvider(workspaceRoot string) (*FileProfileProvider, error) {
+	return newFileProfileProvider(workspaceRoot, "")
+}
+
+func NewFileProfileProviderWithStateDirectory(workspaceRoot, stateDirectory string) (*FileProfileProvider, error) {
+	return newFileProfileProvider(workspaceRoot, stateDirectory)
+}
+
+func newFileProfileProvider(workspaceRoot, configuredStateDirectory string) (*FileProfileProvider, error) {
 	if strings.TrimSpace(workspaceRoot) == "" {
 		return nil, ErrWorkspaceRootRequired
 	}
@@ -59,9 +68,17 @@ func NewFileProfileProvider(workspaceRoot string) (*FileProfileProvider, error) 
 	if err != nil {
 		return nil, ErrWorkspaceRootInvalid
 	}
+	stateDirectory := filepath.Join(canonical, ".runtime", "install")
+	if strings.TrimSpace(configuredStateDirectory) != "" {
+		stateDirectory, err = filepath.Abs(configuredStateDirectory)
+		if err != nil {
+			return nil, ErrWorkspaceRootInvalid
+		}
+	}
 	return &FileProfileProvider{
-		root:        filepath.Clean(canonical),
-		profilePath: filepath.Join(canonical, "admin", ".ui-profile.json"),
+		root:            filepath.Clean(canonical),
+		profilePath:     filepath.Join(canonical, "admin", ".ui-profile.json"),
+		transactionPath: filepath.Join(filepath.Clean(stateDirectory), "transaction.json"),
 	}, nil
 }
 
@@ -72,7 +89,7 @@ func (p *FileProfileProvider) Profile(ctx context.Context) (installer.Installati
 	if err := ctx.Err(); err != nil {
 		return installer.InstallationProfile{}, false, err
 	}
-	if p == nil || p.root == "" || p.profilePath == "" {
+	if p == nil || p.root == "" || p.profilePath == "" || p.transactionPath == "" {
 		return installer.InstallationProfile{}, false, ErrWorkspaceRootInvalid
 	}
 
@@ -90,6 +107,22 @@ func (p *FileProfileProvider) Profile(ctx context.Context) (installer.Installati
 	if !ok || !p.validTemplateLayout(profile) {
 		return installer.InstallationProfile{}, true, nil
 	}
+	// A CLI-owned transaction means pnpm init has not completed dependency
+	// preparation yet. Reporting ui_prepared here lets the browser enqueue an
+	// apply job that can only fail immediately with installation_running. A
+	// valid server-owned journal remains compatible with retry/recovery.
+	journal := NewFileTransactionJournal(p.transactionPath, p.root)
+	transaction, transactionExists, transactionErr := journal.Load(ctx)
+	if transactionErr != nil {
+		if ctx.Err() != nil {
+			return installer.InstallationProfile{}, false, ctx.Err()
+		}
+		return installer.InstallationProfile{}, true, nil
+	}
+	if transactionExists && transaction.SelectedUI != profile.ui {
+		return installer.InstallationProfile{}, true, nil
+	}
+	// An existing journal reaching here is a validated server-installer envelope.
 	return installer.InstallationProfile{SelectedUI: profile.ui}, true, nil
 }
 
