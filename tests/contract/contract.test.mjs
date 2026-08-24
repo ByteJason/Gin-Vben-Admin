@@ -159,7 +159,10 @@ test('installation contract exposes one credential-write-only apply operation', 
   assert.match(install, /ApplyJob/);
   const jobSchema = install.slice(install.indexOf('    ApplyJob:'), install.indexOf('    RollbackRequest:'));
   assert.match(jobSchema, /failureStep:[\s\S]*?enum: \[request, coordination, plan, database, redis, recovery, journal, schema, identity, environment, marker, lock, complete\]/);
-  assert.doesNotMatch(jobSchema, /password|dsn|secret|rawError/i);
+  assert.match(jobSchema, /failureReason:[\s\S]*?enum: \[tls_mode_mismatch, tls_configuration_failed, authentication_failed, permission_denied, database_unavailable, database_busy, schema_unavailable, schema_conflict, migration_dirty, migration_statement_failed, migration_status_failed, migration_close_failed, invalid_configuration, unknown\]/);
+  assert.match(jobSchema, /failureOperation:[\s\S]*?enum: \[connect, apply, status, close\]/);
+  assert.match(jobSchema, /databaseCode:[\s\S]*?pattern: '\^\[0-9A-Z\]\{5\}\$'/);
+  assert.doesNotMatch(jobSchema, /password|dsn|secret|rawError|errorDetail|query/i);
   assert.match(install, /AdminAccount/);
   const applySchema = install.slice(install.indexOf('    ApplyRequest:'), install.indexOf('    AdminAccount:'));
   assert.match(applySchema, /required: \[mode, database, redis, admin\]/);
@@ -549,6 +552,8 @@ test('single-node integration CI runs the explicit gated suite', () => {
   ]) {
     assert.match(workflow, new RegExp(variable));
   }
+  const postgresDSN = workflow.match(/TEST_POSTGRES_DSN:\s*([^\n]+)/)?.[1] || '';
+  assert.doesNotMatch(postgresDSN, /sslmode=/, 'Postgres integration must exercise the omitted sslmode installer path');
   assert.match(workflow, /go -C server test \.\/tests\/integration/);
 });
 

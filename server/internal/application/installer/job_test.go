@@ -179,6 +179,41 @@ func TestApplyJobFailureWritesCredentialFreeStructuredLog(t *testing.T) {
 	}
 }
 
+func TestApplyJobPublishesOnlyStructuredFailureDiagnostic(t *testing.T) {
+	var output bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&output, nil))
+	runner := &jobRunnerStub{run: func(_ context.Context, _ ApplyRequest, report func(string)) (ApplyResult, error) {
+		report("redis")
+		return ApplyResult{}, diagnosticJobError{cause: errors.New("TOP_SECRET_VALUE")}
+	}}
+	service := NewApplyJobServiceWithLogger(runner, logger)
+	job, err := service.Start(context.Background(), validApplyRequest())
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	failed := waitForJob(t, service, job.ID, JobFailed)
+	if failed.FailureReason != "tls_mode_mismatch" || failed.FailureOperation != "connect" || failed.DatabaseCode != "08006" {
+		t.Fatalf("failure diagnostic = %#v", failed)
+	}
+	encoded := output.String()
+	for _, expected := range []string{"failure_reason", "tls_mode_mismatch", "failure_operation", "connect", "database_code", "08006"} {
+		if !strings.Contains(encoded, expected) {
+			t.Fatalf("structured failure log missing %q: %s", expected, encoded)
+		}
+	}
+	if strings.Contains(encoded, "TOP_SECRET_VALUE") {
+		t.Fatalf("structured failure log leaked raw cause: %s", encoded)
+	}
+}
+
+type diagnosticJobError struct{ cause error }
+
+func (e diagnosticJobError) Error() string { return "database schema installation failed" }
+func (e diagnosticJobError) Unwrap() error { return e.cause }
+func (e diagnosticJobError) InstallationFailureDiagnostic() FailureDiagnostic {
+	return FailureDiagnostic{Reason: "tls_mode_mismatch", Operation: "connect", DatabaseCode: "08006"}
+}
+
 func TestApplyJobCloseCancelsActiveRunner(t *testing.T) {
 	started := make(chan struct{})
 	runner := &jobRunnerStub{run: func(ctx context.Context, _ ApplyRequest, _ func(string)) (ApplyResult, error) {

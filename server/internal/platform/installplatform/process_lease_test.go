@@ -348,23 +348,28 @@ func TestOldReleaseCannotRemoveReplacementWhileProcessGuardIsHeld(t *testing.T) 
 	}
 }
 
-func TestPublishProcessLeaseUsesThePreLinkIdentityWithoutASecondFallibleStat(t *testing.T) {
+func TestPublishProcessLeaseCapturesIdentityFromTheOpenTemporaryHandle(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "apply.lock")
 	contents := []byte("lease-owner\n")
 	statCalls := 0
-	acquired, err := publishProcessLeaseWithIdentityUsing(path, contents, func(target string) (os.FileInfo, error) {
+	var temporaryPath string
+	acquired, err := publishProcessLeaseWithIdentityUsing(path, contents, func(file *os.File) (os.FileInfo, error) {
 		statCalls++
-		if target == path {
-			return nil, errors.New("transient final-path lstat failure")
+		temporaryPath = file.Name()
+		if _, err := os.Lstat(temporaryPath); err != nil {
+			return nil, errors.New("temporary lease path was removed before handle identity capture")
 		}
-		return os.Lstat(target)
+		return file.Stat()
 	})
 	if err != nil {
 		t.Fatalf("publishProcessLeaseWithIdentityUsing() error = %v", err)
 	}
 	if statCalls != 1 {
-		t.Fatalf("lstat calls = %d, want only the pre-link temporary identity", statCalls)
+		t.Fatalf("open-handle stat calls = %d, want 1", statCalls)
+	}
+	if _, err := os.Lstat(temporaryPath); !os.IsNotExist(err) {
+		t.Fatalf("temporary lease path remains after publish: %v", err)
 	}
 	published, err := os.Lstat(path)
 	if err != nil {

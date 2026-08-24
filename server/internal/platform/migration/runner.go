@@ -15,6 +15,7 @@ import (
 	mysqlmigration "github.com/golang-migrate/migrate/v4/database/mysql"
 	postgresmigration "github.com/golang-migrate/migrate/v4/database/postgres"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 const (
@@ -133,13 +134,17 @@ func isSupportedDriver(driver string) bool {
 }
 
 func databaseDriver(driver, dsn string) (database.Driver, error) {
+	sqlDriver, err := migrationSQLDriver(driver)
+	if err != nil {
+		return nil, err
+	}
 	switch driver {
 	case DriverMySQL:
 		normalizedDSN, err := mysqlMigrationDSN(dsn)
 		if err != nil {
 			return nil, fmt.Errorf("normalize mysql migration DSN: %w", err)
 		}
-		db, err := sql.Open(DriverMySQL, normalizedDSN)
+		db, err := sql.Open(sqlDriver, normalizedDSN)
 		if err != nil {
 			return nil, fmt.Errorf("open mysql migration database: %w", err)
 		}
@@ -150,7 +155,7 @@ func databaseDriver(driver, dsn string) (database.Driver, error) {
 		}
 		return driver, nil
 	case DriverPostgres:
-		db, err := sql.Open(DriverPostgres, dsn)
+		db, err := sql.Open(sqlDriver, dsn)
 		if err != nil {
 			return nil, fmt.Errorf("open postgres migration database: %w", err)
 		}
@@ -162,6 +167,22 @@ func databaseDriver(driver, dsn string) (database.Driver, error) {
 		return driver, nil
 	default:
 		return nil, fmt.Errorf("unsupported migration database driver %q", driver)
+	}
+}
+
+// migrationSQLDriver keeps the schema runner on the same database/sql driver
+// as the runtime connection probe. In particular, pgx defaults an omitted
+// PostgreSQL sslmode to prefer, while lib/pq defaults it to require. Using pgx
+// for both paths prevents a successful probe from failing immediately when a
+// local PostgreSQL server does not offer TLS.
+func migrationSQLDriver(driver string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(driver)) {
+	case DriverMySQL:
+		return DriverMySQL, nil
+	case DriverPostgres:
+		return "pgx", nil
+	default:
+		return "", fmt.Errorf("unsupported migration database driver %q", driver)
 	}
 }
 

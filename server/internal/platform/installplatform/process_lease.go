@@ -168,10 +168,10 @@ func publishProcessLease(path string, encoded []byte) error {
 }
 
 func publishProcessLeaseWithIdentity(path string, encoded []byte) (os.FileInfo, error) {
-	return publishProcessLeaseWithIdentityUsing(path, encoded, os.Lstat)
+	return publishProcessLeaseWithIdentityUsing(path, encoded, (*os.File).Stat)
 }
 
-func publishProcessLeaseWithIdentityUsing(path string, encoded []byte, lstat func(string) (os.FileInfo, error)) (os.FileInfo, error) {
+func publishProcessLeaseWithIdentityUsing(path string, encoded []byte, statFile func(*os.File) (os.FileInfo, error)) (os.FileInfo, error) {
 	dir := filepath.Dir(path)
 	temporary, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
 	if err != nil {
@@ -179,12 +179,26 @@ func publishProcessLeaseWithIdentityUsing(path string, encoded []byte, lstat fun
 	}
 	temporaryPath := temporary.Name()
 	defer os.Remove(temporaryPath)
-	if err := writeAndSync(temporary, encoded); err != nil {
+	if statFile == nil {
+		_ = temporary.Close()
+		return nil, errProcessLeaseBusy
+	}
+	// Capture the identity from the still-open handle. On Windows, FileInfo
+	// returned by Lstat can resolve its file ID lazily from the pathname. The
+	// temporary name is removed after the no-clobber hard link is published, so
+	// retaining that path-backed FileInfo would make a later SameFile check fail
+	// closed and silently preserve our own lease forever.
+	acquiredInfo, err := statFile(temporary)
+	if err != nil {
+		_ = temporary.Close()
 		return nil, err
 	}
-	acquiredInfo, err := lstat(temporaryPath)
-	if err != nil || !acquiredInfo.Mode().IsRegular() {
+	if acquiredInfo == nil || !acquiredInfo.Mode().IsRegular() {
+		_ = temporary.Close()
 		return nil, errProcessLeaseBusy
+	}
+	if err := writeAndSync(temporary, encoded); err != nil {
+		return nil, err
 	}
 	if err := os.Link(temporaryPath, path); err != nil {
 		return nil, err

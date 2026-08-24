@@ -720,6 +720,18 @@ components:
           type: string
           enum: [request, coordination, plan, database, redis, recovery, journal, schema, identity, environment, marker, lock, complete]
           description: 凭据无关的失败位置，仅在 state 为 failed 时返回
+        failureReason:
+          type: string
+          enum: [tls_mode_mismatch, tls_configuration_failed, authentication_failed, permission_denied, database_unavailable, database_busy, schema_unavailable, schema_conflict, migration_dirty, migration_statement_failed, migration_status_failed, migration_close_failed, invalid_configuration, unknown]
+          description: 白名单化的失败原因，不包含驱动原文或敏感连接信息
+        failureOperation:
+          type: string
+          enum: [connect, apply, status, close]
+          description: 数据库迁移失败时对应的安全操作标识
+        databaseCode:
+          type: string
+          pattern: '^[0-9A-Z]{5}$'
+          description: 可用时返回五位 SQLSTATE；不返回数据库原始消息或语句文本
         canRetry:
           type: boolean
         canRollback:

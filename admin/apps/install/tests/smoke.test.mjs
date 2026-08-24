@@ -149,6 +149,9 @@ test('installation forms expose semantic groups and responsive installation feed
   assert.match(styles, /\.connection-result:not\(:empty\)/);
   assert.match(styles, /\.install-failure-details\s*\{/);
   assert.match(styles, /\.failure-diagnostics\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2,/);
+  assert.match(html, /id="failure-reason-key"/);
+  assert.match(html, /id="failure-operation"/);
+  assert.match(html, /id="failure-database-code"/);
   assert.match(styles, /@media\s*\(max-width:\s*1120px\)/);
   assert.match(styles, /@media\s*\(max-width:\s*720px\)/);
 });
@@ -186,8 +189,38 @@ test('failed installation preserves current input and exposes actionable diagnos
     step: '验证数据库',
     errorCode: '10001',
     errorKey: 'validation_failed',
+    reasonKey: '未提供',
+    operation: '未提供',
+    databaseCode: '—',
     jobId: 'install-job-1',
   });
+
+  const tlsFailure = Function(`
+    'use strict';
+    ${failureMessage}
+    return installationFailureMessage({
+      errorKey: 'internal_error',
+      failureStep: 'schema',
+      failureReason: 'tls_mode_mismatch',
+    });
+  `)();
+  assert.match(tlsFailure, /TLS/);
+  assert.match(tlsFailure, /数据库连接测试与迁移/);
+  assert.match(tlsFailure, /当前输入已保留/);
+
+  const classifiedReasons = [
+    'tls_configuration_failed', 'authentication_failed', 'permission_denied', 'database_unavailable', 'database_busy',
+    'schema_unavailable', 'schema_conflict', 'migration_dirty', 'migration_statement_failed',
+    'migration_status_failed', 'migration_close_failed', 'invalid_configuration', 'unknown',
+  ];
+  for (const failureReason of classifiedReasons) {
+    const message = Function(
+      'failureReason',
+      `'use strict'; ${failureMessage}; return installationFailureMessage({ errorKey: 'internal_error', failureStep: 'schema', failureReason });`,
+    )(failureReason);
+    assert.match(message, /当前输入已保留/, failureReason);
+    assert.doesNotMatch(message, /数据库结构迁移执行失败，请查看失败任务定位信息/, failureReason);
+  }
 
   const setActions = readFunction(script, 'setFailedJobActions');
   const rollbackOnly = Function(`

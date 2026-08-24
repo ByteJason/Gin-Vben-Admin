@@ -314,7 +314,7 @@ func (s *ApplyService) apply(ctx context.Context, request ApplyRequest, report f
 
 	if _, err := s.schemas.Up(ctx, request.Database); err != nil {
 		s.persistFailure(ctx, transaction, nil)
-		return ApplyResult{}, withApplyFailureStage("schema", errors.New("install database schema"))
+		return ApplyResult{}, withApplyFailureStage("schema", fmt.Errorf("%w: %w", ErrApplyFailed, err))
 	}
 	steps = appendCompleted(steps, "schema")
 	reportApplyStep(report, "schema")

@@ -28,20 +28,37 @@ const (
 )
 
 type ApplyJob struct {
-	ID          string            `json:"id"`
-	State       JobState          `json:"state"`
-	SelectedUI  installstate.UI   `json:"selectedUi,omitempty"`
-	Mode        installstate.Mode `json:"mode"`
-	CurrentStep string            `json:"currentStep"`
-	Progress    int               `json:"progress"`
-	Steps       []ApplyStep       `json:"steps"`
-	InstalledAt *time.Time        `json:"installedAt,omitempty"`
-	ErrorCode   int               `json:"errorCode,omitempty"`
-	ErrorKey    string            `json:"errorKey,omitempty"`
-	FailureStep string            `json:"failureStep,omitempty"`
-	CanRetry    bool              `json:"canRetry"`
-	CanRollback bool              `json:"canRollback"`
-	LastUpdated time.Time         `json:"lastUpdated"`
+	ID               string            `json:"id"`
+	State            JobState          `json:"state"`
+	SelectedUI       installstate.UI   `json:"selectedUi,omitempty"`
+	Mode             installstate.Mode `json:"mode"`
+	CurrentStep      string            `json:"currentStep"`
+	Progress         int               `json:"progress"`
+	Steps            []ApplyStep       `json:"steps"`
+	InstalledAt      *time.Time        `json:"installedAt,omitempty"`
+	ErrorCode        int               `json:"errorCode,omitempty"`
+	ErrorKey         string            `json:"errorKey,omitempty"`
+	FailureStep      string            `json:"failureStep,omitempty"`
+	FailureReason    string            `json:"failureReason,omitempty"`
+	FailureOperation string            `json:"failureOperation,omitempty"`
+	DatabaseCode     string            `json:"databaseCode,omitempty"`
+	CanRetry         bool              `json:"canRetry"`
+	CanRollback      bool              `json:"canRollback"`
+	LastUpdated      time.Time         `json:"lastUpdated"`
+}
+
+// FailureDiagnostic is a bounded, credential-free description of an
+// installation failure. It intentionally has no free-form driver message.
+type FailureDiagnostic struct {
+	Reason       string
+	Operation    string
+	DatabaseCode string
+}
+
+// FailureDiagnosticProvider lets platform adapters preserve useful failure
+// classification without exposing their raw driver error at an HTTP boundary.
+type FailureDiagnosticProvider interface {
+	InstallationFailureDiagnostic() FailureDiagnostic
 }
 
 // RollbackResult is the credential-free result of an explicit recovery
@@ -242,6 +259,10 @@ func (s *ApplyJobService) run(id string, request ApplyRequest) {
 		job.State = JobFailed
 		job.ErrorCode, job.ErrorKey, job.CanRetry = publicJobError(err)
 		job.FailureStep = publicJobFailureStep(err, job.CurrentStep)
+		diagnostic := publicFailureDiagnostic(err)
+		job.FailureReason = diagnostic.Reason
+		job.FailureOperation = diagnostic.Operation
+		job.DatabaseCode = diagnostic.DatabaseCode
 		job.CanRollback = false
 		if _, ok := s.runner.(RollbackRunner); ok && errors.Is(err, ErrApplyRollback) {
 			job.CanRollback = true
@@ -256,6 +277,9 @@ func (s *ApplyJobService) run(id string, request ApplyRequest) {
 		s.logger.Error("installation.job.failed",
 			"job_id", job.ID,
 			"failure_step", job.FailureStep,
+			"failure_reason", job.FailureReason,
+			"failure_operation", job.FailureOperation,
+			"database_code", job.DatabaseCode,
 			"error_code", job.ErrorCode,
 			"error_key", job.ErrorKey,
 			"can_retry", job.CanRetry,
@@ -280,6 +304,9 @@ func (s *ApplyJobService) run(id string, request ApplyRequest) {
 	job.ErrorCode = 0
 	job.ErrorKey = ""
 	job.FailureStep = ""
+	job.FailureReason = ""
+	job.FailureOperation = ""
+	job.DatabaseCode = ""
 	job.CanRetry = false
 	job.CanRollback = false
 	s.jobs[id] = job
@@ -438,6 +465,54 @@ func publicJobFailureStep(err error, lastCompleted string) string {
 		"environment": "lock",
 		"lock":        "complete",
 	}[lastCompleted]
+}
+
+func publicFailureDiagnostic(err error) FailureDiagnostic {
+	var provider FailureDiagnosticProvider
+	if !errors.As(err, &provider) {
+		return FailureDiagnostic{}
+	}
+	diagnostic := provider.InstallationFailureDiagnostic()
+	if !validFailureReason(diagnostic.Reason) {
+		diagnostic.Reason = "unknown"
+	}
+	if !validFailureOperation(diagnostic.Operation) {
+		diagnostic.Operation = ""
+	}
+	if !validDatabaseCode(diagnostic.DatabaseCode) {
+		diagnostic.DatabaseCode = ""
+	}
+	return diagnostic
+}
+
+func validFailureReason(reason string) bool {
+	switch reason {
+	case "tls_mode_mismatch", "tls_configuration_failed", "authentication_failed", "permission_denied", "database_unavailable", "database_busy", "schema_unavailable", "schema_conflict", "migration_dirty", "migration_statement_failed", "migration_status_failed", "migration_close_failed", "invalid_configuration", "unknown":
+		return true
+	default:
+		return false
+	}
+}
+
+func validFailureOperation(operation string) bool {
+	switch operation {
+	case "connect", "apply", "status", "close":
+		return true
+	default:
+		return false
+	}
+}
+
+func validDatabaseCode(code string) bool {
+	if len(code) != 5 {
+		return false
+	}
+	for _, character := range code {
+		if (character < '0' || character > '9') && (character < 'A' || character > 'Z') {
+			return false
+		}
+	}
+	return true
 }
 
 func cloneApplyJob(job ApplyJob) ApplyJob {

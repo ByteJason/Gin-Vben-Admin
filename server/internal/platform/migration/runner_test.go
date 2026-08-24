@@ -41,6 +41,18 @@ func TestMySQLDSNEnablesMultiStatements(t *testing.T) {
 	}
 }
 
+func TestPostgresMigrationsUseTheRuntimePGXSQLDriver(t *testing.T) {
+	t.Parallel()
+
+	got, err := migrationSQLDriver(DriverPostgres)
+	if err != nil {
+		t.Fatalf("migrationSQLDriver(postgres) error = %v", err)
+	}
+	if got != "pgx" {
+		t.Fatalf("migrationSQLDriver(postgres) = %q, want pgx so probe and migration share TLS defaults", got)
+	}
+}
+
 func TestDownRejectsStepsOutsideIntRange(t *testing.T) {
 	t.Parallel()
 

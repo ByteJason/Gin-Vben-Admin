@@ -168,7 +168,7 @@ jobs:
         env:
           DATA_PLATFORM_INTEGRATION: '1'
           TEST_MYSQL_DSN: root:root@tcp(127.0.0.1:3306)/gin_vben_admin?parseTime=true&charset=utf8mb4
-          TEST_POSTGRES_DSN: postgres://postgres:postgres@127.0.0.1:5432/gin_vben_admin?sslmode=disable
+          TEST_POSTGRES_DSN: postgres://postgres:postgres@127.0.0.1:5432/gin_vben_admin
           TEST_REDIS_ADDR: 127.0.0.1:6379
         run: go -C server test ./tests/integration -count=1 -v
 

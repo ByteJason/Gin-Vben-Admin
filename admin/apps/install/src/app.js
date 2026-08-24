@@ -52,6 +52,9 @@ const failureReason = document.querySelector('#failure-reason');
 const failureStep = document.querySelector('#failure-step');
 const failureErrorCode = document.querySelector('#failure-error-code');
 const failureErrorKey = document.querySelector('#failure-error-key');
+const failureReasonKey = document.querySelector('#failure-reason-key');
+const failureOperation = document.querySelector('#failure-operation');
+const failureDatabaseCode = document.querySelector('#failure-database-code');
 const failureJobId = document.querySelector('#failure-job-id');
 const rollbackButton = document.querySelector('#rollback-button');
 const applyProgress = document.querySelector('#apply-progress');
@@ -536,6 +539,23 @@ async function pollInstallation(jobId) {
 }
 
 function installationFailureMessage(job) {
+  const databaseReasons = {
+    tls_mode_mismatch: '数据库未启用 TLS，且数据库连接测试与迁移采用了不同模式；请统一 TLS 配置。当前输入已保留。',
+    tls_configuration_failed: '数据库 TLS 证书、CA 或主机名校验失败，请检查加密连接配置。当前输入已保留。',
+    authentication_failed: '数据库身份验证失败，请检查账号、密码和访问规则。当前输入已保留。',
+    permission_denied: '数据库账号缺少建表、索引或约束变更权限。当前输入已保留。',
+    database_unavailable: '数据库迁移连接不可用，请检查地址、服务状态及 TLS 模式。当前输入已保留。',
+    database_busy: '数据库当前被锁定或事务发生冲突，请等待占用结束后重试。当前输入已保留。',
+    schema_unavailable: '目标数据库 schema 不存在或当前账号不可访问。当前输入已保留。',
+    schema_conflict: '目标数据库已存在冲突的表、字段或约束，请核对现有结构。当前输入已保留。',
+    migration_dirty: '数据库迁移版本处于 dirty 状态，需要先核对失败版本再继续。当前输入已保留。',
+    migration_statement_failed: '数据库迁移语句执行失败，请按任务 ID 和数据库代码定位。当前输入已保留。',
+    migration_status_failed: '数据库迁移状态读取或校验失败，请按任务 ID 定位。当前输入已保留。',
+    migration_close_failed: '数据库迁移已经执行，但连接收尾失败，请核对迁移状态后重试。当前输入已保留。',
+    invalid_configuration: '数据库迁移配置不完整，请重新检查连接参数。当前输入已保留。',
+    unknown: '数据库迁移出现未分类故障，请按任务 ID 在服务端日志中定位。当前输入已保留。',
+  };
+  if (databaseReasons[job?.failureReason]) return databaseReasons[job.failureReason];
   if (job?.errorKey === 'installation_running') {
     return '检测到另一项初始化或安装任务正在执行。若终端中的 pnpm run init 已结束，请重新运行 pnpm run init 继续恢复。当前输入已保留。';
   }
@@ -580,6 +600,9 @@ function installationFailureDiagnostics(job) {
     step: stepLabels[stage] || stage || '未提供',
     errorCode: Number.isInteger(job?.errorCode) ? String(job.errorCode) : '—',
     errorKey: String(job?.errorKey || '未提供'),
+    reasonKey: String(job?.failureReason || '未提供'),
+    operation: String(job?.failureOperation || '未提供'),
+    databaseCode: String(job?.databaseCode || '—'),
     jobId: String(job?.id || '未提供'),
   };
 }
@@ -590,6 +613,9 @@ function renderInstallationFailure(job) {
   failureStep.textContent = diagnostics.step;
   failureErrorCode.textContent = diagnostics.errorCode;
   failureErrorKey.textContent = diagnostics.errorKey;
+  failureReasonKey.textContent = diagnostics.reasonKey;
+  failureOperation.textContent = diagnostics.operation;
+  failureDatabaseCode.textContent = diagnostics.databaseCode;
   failureJobId.textContent = diagnostics.jobId;
   installFailureDetails.hidden = false;
   installFailureDetails.focus();
@@ -597,7 +623,7 @@ function renderInstallationFailure(job) {
 
 function clearInstallationFailure() {
   installFailureDetails.hidden = true;
-  for (const output of [failureReason, failureStep, failureErrorCode, failureErrorKey, failureJobId]) {
+  for (const output of [failureReason, failureStep, failureErrorCode, failureErrorKey, failureReasonKey, failureOperation, failureDatabaseCode, failureJobId]) {
     output.textContent = '—';
   }
 }
