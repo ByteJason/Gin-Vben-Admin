@@ -18,6 +18,7 @@ export const {
 export const preferences: Preferences = getPreferences();
 
 export { preferencesManager };
+export { brandLogoUrl } from './config';
 
 export * from './constants';
 export type * from './types';

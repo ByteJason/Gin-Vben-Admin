@@ -42,7 +42,8 @@ function defineApplicationConfig(userConfigPromise?: DefineApplicationOptions) {
       mode,
       print: !isBuild,
       printInfoMap: {
-        'Vben Admin Docs': 'https://doc.vben.pro',
+        'Gin-Vben-Admin': 'https://github.com/ByteJason/Gin-Vben-Admin',
+        'Vue Vben Admin Docs (upstream)': 'https://doc.vben.pro',
       },
       pwa: true,
       pwaOptions: getDefaultPwaOptions(appTitle),

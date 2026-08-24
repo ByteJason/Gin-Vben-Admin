@@ -1,27 +1,26 @@
 {
-  "name": "vben-admin-monorepo",
+  "name": "gin-vben-admin-monorepo",
   "version": "5.7.0",
   "private": true,
   "keywords": [
     "monorepo",
     "turbo",
-    "vben",
-    "vben admin",
-    "vben pro",
+    "gin",
+    "go",
+    "gin-vben-admin",
+    "gin vben admin",
     "vue",
     "vue admin",
     "vue vben admin",
-    "vue vben admin pro",
     "vue3"
   ],
-  "homepage": "https://github.com/vbenjs/vue-vben-admin",
-  "bugs": "https://github.com/vbenjs/vue-vben-admin/issues",
-  "repository": "vbenjs/vue-vben-admin.git",
+  "homepage": "https://github.com/ByteJason/Gin-Vben-Admin",
+  "bugs": "https://github.com/ByteJason/Gin-Vben-Admin/issues",
+  "repository": "ByteJason/Gin-Vben-Admin.git",
   "license": "MIT",
   "author": {
-    "name": "vben",
-    "email": "ann.vben@gmail.com",
-    "url": "https://github.com/anncwb"
+    "name": "Gin-Vben-Admin contributors",
+    "url": "https://github.com/ByteJason/Gin-Vben-Admin"
   },
   "type": "module",
   "scripts": {

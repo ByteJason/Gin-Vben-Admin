@@ -84,7 +84,7 @@ const [Form, formApi] = useVbenForm({
 
 function setFormValues() {
   formApi.setValues({
-    projectName: 'Vben Admin',
+    projectName: 'Gin Vben Admin',
     members: [
       { name: '张三', age: 28, role: 'fe', joinDate: Date.now(), active: true },
       {

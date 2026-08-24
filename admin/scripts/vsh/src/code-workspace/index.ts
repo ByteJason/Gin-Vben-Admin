@@ -13,7 +13,7 @@ import {
   toPosixPath,
 } from '@vben/node-utils';
 
-const CODE_WORKSPACE_FILE = join('vben-admin.code-workspace');
+const CODE_WORKSPACE_FILE = join('gin-vben-admin.code-workspace');
 
 interface CodeWorkspaceCommandOptions {
   autoCommit?: boolean;

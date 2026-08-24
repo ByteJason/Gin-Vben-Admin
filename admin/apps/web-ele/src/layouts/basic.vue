@@ -5,7 +5,11 @@ import { computed, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 
 import { AuthenticationLoginExpiredModal } from '@vben/common-ui';
-import { VBEN_DOC_URL, VBEN_GITHUB_URL } from '@vben/constants';
+import {
+  GIN_VBEN_ADMIN_GITHUB_URL,
+  GIN_VBEN_ADMIN_ISSUES_URL,
+  VBEN_DOC_URL,
+} from '@vben/constants';
 import { useWatermark } from '@vben/hooks';
 import { BookOpenText, CircleHelp, SvgGithubIcon } from '@vben/icons';
 import {
@@ -70,8 +74,8 @@ const notifications = ref<NotificationItem[]>([
     date: '1天前',
     isRead: false,
     message: '描述信息描述信息描述信息',
-    title: '跳转外部链接示例',
-    link: 'https://doc.vben.pro',
+    title: '跳转上游前端文档示例',
+    link: VBEN_DOC_URL,
   },
 ]);
 
@@ -100,20 +104,20 @@ const menus = computed(() => [
       });
     },
     icon: BookOpenText,
-    text: $t('ui.widgets.document'),
+    text: `Vue Vben Admin ${$t('ui.widgets.document')}`,
   },
   {
     handler: () => {
-      openWindow(VBEN_GITHUB_URL, {
+      openWindow(GIN_VBEN_ADMIN_GITHUB_URL, {
         target: '_blank',
       });
     },
     icon: SvgGithubIcon,
-    text: 'GitHub',
+    text: 'Gin-Vben-Admin GitHub',
   },
   {
     handler: () => {
-      openWindow(`${VBEN_GITHUB_URL}/issues`, {
+      openWindow(GIN_VBEN_ADMIN_ISSUES_URL, {
         target: '_blank',
       });
     },
@@ -228,7 +232,7 @@ watch(
         :avatar
         :menus
         :text="userStore.userInfo?.realName"
-        description="ann.vben@gmail.com"
+        :description="preferences.app.name"
         tag-text="Pro"
         @clear-preferences-and-logout="handleLogout"
         @logout="handleLogout"

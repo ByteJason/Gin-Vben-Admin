@@ -67,8 +67,17 @@ const routes: RouteRecordRaw[] = [
     ],
   },
   {
-    name: 'VbenAbout',
+    name: 'VbenAboutLegacy',
     path: '/vben-admin/about',
+    redirect: '/gin-vben-admin/about',
+    meta: {
+      hideInMenu: true,
+      title: $t('demos.vben.about'),
+    },
+  },
+  {
+    name: 'VbenAbout',
+    path: '/gin-vben-admin/about',
     component: () => import('#/views/_core/about/index.vue'),
     meta: {
       icon: 'lucide:copyright',

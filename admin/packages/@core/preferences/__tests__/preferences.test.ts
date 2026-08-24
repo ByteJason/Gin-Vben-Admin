@@ -86,6 +86,90 @@ describe('preferences', () => {
     expect(preferenceManager.getPreferences()).toEqual(expected);
   });
 
+  it('migrates legacy default branding without overwriting user preferences', async () => {
+    vi.mocked(localStorage.getItem).mockImplementation((key) => {
+      if (key !== 'brand-migration-preferences') return null;
+      return JSON.stringify({
+        value: {
+          app: {
+            locale: 'en-US',
+            name: 'Vben Admin',
+          },
+          copyright: {
+            companyName: 'Vben',
+            companySiteLink: 'https://www.vben.pro',
+          },
+          logo: {
+            showText: false,
+            source:
+              'https://unpkg.com/@vbenjs/static-source@0.1.7/source/logo-v1.webp',
+          },
+        },
+      });
+    });
+
+    await preferenceManager.initPreferences({
+      namespace: 'brand-migration',
+      overrides: {
+        app: { name: 'Gin Vben Admin' },
+        copyright: {
+          companyName: 'Gin Vben Admin',
+          companySiteLink: 'https://github.com/ByteJason/Gin-Vben-Admin',
+        },
+        logo: {
+          source: '/gin-vben-admin-logo.png',
+          sourceDark: '/gin-vben-admin-logo.png',
+        },
+      },
+    });
+
+    const preferences = preferenceManager.getPreferences();
+    expect(preferences.app.name).toBe('Gin Vben Admin');
+    expect(preferences.app.locale).toBe('en-US');
+    expect(preferences.copyright.companyName).toBe('Gin Vben Admin');
+    expect(preferences.copyright.companySiteLink).toBe(
+      'https://github.com/ByteJason/Gin-Vben-Admin',
+    );
+    expect(preferences.logo.source).toBe('/gin-vben-admin-logo.png');
+    expect(preferences.logo.sourceDark).toBe('/gin-vben-admin-logo.png');
+    expect(preferences.logo.showText).toBe(false);
+  });
+
+  it('preserves explicitly customized branding from the preference cache', async () => {
+    vi.mocked(localStorage.getItem).mockImplementation((key) => {
+      if (key !== 'custom-brand-preferences') return null;
+      return JSON.stringify({
+        value: {
+          app: { name: 'Custom Console' },
+          copyright: {
+            companyName: 'Custom Company',
+            companySiteLink: 'https://example.com',
+          },
+          logo: { source: '/custom-logo.png' },
+        },
+      });
+    });
+
+    await preferenceManager.initPreferences({
+      namespace: 'custom-brand',
+      overrides: {
+        app: { name: 'Gin Vben Admin' },
+        copyright: {
+          companyName: 'Gin Vben Admin',
+          companySiteLink: 'https://github.com/ByteJason/Gin-Vben-Admin',
+        },
+        logo: { source: '/gin-vben-admin-logo.png' },
+      },
+    });
+
+    const preferences = preferenceManager.getPreferences();
+    expect(preferences.app.name).toBe('Custom Console');
+    expect(preferences.copyright.companyName).toBe('Custom Company');
+    expect(preferences.copyright.companySiteLink).toBe('https://example.com');
+    expect(preferences.logo.source).toBe('/custom-logo.png');
+    expect(preferences.logo.sourceDark).toBe('/custom-logo.png');
+  });
+
   it('updates theme mode correctly', () => {
     preferenceManager.updatePreferences({
       theme: {

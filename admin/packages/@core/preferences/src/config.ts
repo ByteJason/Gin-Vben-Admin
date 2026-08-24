@@ -1,5 +1,7 @@
 import type { Preferences } from './types';
 
+const brandLogoUrl = `${import.meta.env.BASE_URL}gin-vben-admin-logo.png`;
+
 const defaultPreferences: Preferences = {
   app: {
     accessMode: 'frontend',
@@ -28,7 +30,7 @@ const defaultPreferences: Preferences = {
     layout: 'sidebar-nav',
     locale: 'zh-CN',
     loginExpiredMode: 'page',
-    name: 'Vben Admin',
+    name: 'Gin Vben Admin',
     preferencesButtonPosition: 'auto',
     timezone: 'Asia/Shanghai',
     watermark: false,
@@ -43,8 +45,8 @@ const defaultPreferences: Preferences = {
     styleType: 'normal',
   },
   copyright: {
-    companyName: 'Vben',
-    companySiteLink: 'https://www.vben.pro',
+    companyName: 'Gin Vben Admin',
+    companySiteLink: 'https://github.com/ByteJason/Gin-Vben-Admin',
     date: '2024',
     enable: true,
     icp: '闽ICP备19024351号',
@@ -67,7 +69,8 @@ const defaultPreferences: Preferences = {
   logo: {
     enable: true,
     fit: 'contain',
-    source: 'https://unpkg.com/@vbenjs/static-source@0.1.7/source/logo-v1.webp',
+    source: brandLogoUrl,
+    sourceDark: brandLogoUrl,
     showText: true,
     logoMode: 'icon',
   },
@@ -169,4 +172,4 @@ const defaultPreferences: Preferences = {
   },
 };
 
-export { defaultPreferences };
+export { brandLogoUrl, defaultPreferences };

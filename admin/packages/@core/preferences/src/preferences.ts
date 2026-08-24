@@ -33,6 +33,14 @@ const STORAGE_KEYS = {
   THEME: 'preferences-theme',
 } as const;
 
+const LEGACY_BRAND_DEFAULTS = {
+  appName: 'Vben Admin',
+  companyName: 'Vben',
+  companySiteLink: 'https://www.vben.pro',
+  logoSource:
+    'https://unpkg.com/@vbenjs/static-source@0.1.7/source/logo-v1.webp',
+} as const;
+
 class PreferenceManager {
   private cache: StorageManager;
   private customPreferencesExtension: null | PreferencesExtension<any> = null;
@@ -141,6 +149,7 @@ class PreferenceManager {
     // 在每次 updatePreferences 时被 concat 追加，膨胀到几十/上百条重复 key。
     // 这里在加载缓存后做一次去重，保留首次出现的 key。
     this.sanitizeCachedArray(cachedPreferences, 'widget', 'order');
+    this.migrateLegacyBrandDefaults(cachedPreferences);
     const mergedPreference = mergeWithArrayOverride(
       {},
       cachedPreferences, // 用户缓存的设置优先
@@ -395,6 +404,41 @@ class PreferenceManager {
     });
     if (deduped.length !== node.length) {
       cached[group][field] = deduped;
+    }
+  }
+
+  /**
+   * 清除缓存中的旧项目品牌默认值，让当前应用配置补齐新品牌。
+   * 只处理已知旧默认值，用户主动设置的名称、链接与 Logo 保持不变。
+   */
+  private migrateLegacyBrandDefaults(cached: Record<string, any>) {
+    if (cached.app?.name === LEGACY_BRAND_DEFAULTS.appName) {
+      Reflect.deleteProperty(cached.app, 'name');
+    }
+
+    if (cached.copyright?.companyName === LEGACY_BRAND_DEFAULTS.companyName) {
+      Reflect.deleteProperty(cached.copyright, 'companyName');
+    }
+    if (
+      cached.copyright?.companySiteLink ===
+      LEGACY_BRAND_DEFAULTS.companySiteLink
+    ) {
+      Reflect.deleteProperty(cached.copyright, 'companySiteLink');
+    }
+
+    const cachedLogoSource = cached.logo?.source;
+    if (cachedLogoSource === LEGACY_BRAND_DEFAULTS.logoSource) {
+      Reflect.deleteProperty(cached.logo, 'source');
+    }
+    if (
+      typeof cachedLogoSource === 'string' &&
+      cachedLogoSource !== LEGACY_BRAND_DEFAULTS.logoSource &&
+      (cached.logo?.sourceDark === undefined ||
+        cached.logo.sourceDark === LEGACY_BRAND_DEFAULTS.logoSource)
+    ) {
+      cached.logo.sourceDark = cachedLogoSource;
+    } else if (cached.logo?.sourceDark === LEGACY_BRAND_DEFAULTS.logoSource) {
+      Reflect.deleteProperty(cached.logo, 'sourceDark');
     }
   }
 

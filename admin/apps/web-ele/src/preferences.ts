@@ -1,5 +1,6 @@
 import {
   appCopyrightPreferences,
+  brandLogoUrl,
   defineOverridesPreferences,
 } from '@vben/preferences';
 
@@ -14,4 +15,8 @@ export const overridesPreferences = defineOverridesPreferences({
     name: import.meta.env.VITE_APP_TITLE,
   },
   copyright: appCopyrightPreferences,
+  logo: {
+    source: brandLogoUrl,
+    sourceDark: brandLogoUrl,
+  },
 });
