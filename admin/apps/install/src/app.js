@@ -7,6 +7,7 @@ const applyEndpoint = '/api/system/install/v1/apply';
 const progressEndpoint = '/api/system/install/v1/progress';
 const retryEndpoint = '/api/system/install/v1/retry';
 const rollbackEndpoint = '/api/system/install/v1/rollback';
+const installationCompletedMessage = '安装已完成。请停止旧服务端，回到仓库根目录，并按下方两个终端命令分别重启服务端和启动管理端；管理端先运行 pnpm install，再运行 pnpm run dev。';
 
 const title = document.querySelector('#status-title');
 const badge = document.querySelector('#status-badge');
@@ -175,7 +176,7 @@ function renderStatus(status) {
     title.textContent = '系统已完成安装';
     badge.textContent = '已安装';
     badge.dataset.tone = 'success';
-    message.textContent = '安装已完成。请停止并重新启动服务端，然后在 admin/ 依次运行 pnpm run build 和 pnpm run dev。';
+    message.textContent = installationCompletedMessage;
     selectedUi.textContent = uiLabels[status.selectedUi] || status.selectedUi || '—';
     selectedUiSummary.textContent = selectedUi.textContent;
     selectedMode.textContent = modeLabels[status.mode] || status.mode || '—';
@@ -469,7 +470,7 @@ function dependencyFormValues() {
 
 function renderApplyResult(result) {
   setProgress(100, '安装完成');
-  applyResult.textContent = '安装已完成。请重启服务端，然后依次运行 pnpm run build 和 pnpm run dev。';
+  applyResult.textContent = installationCompletedMessage;
   applyResult.dataset.tone = 'success';
   applyResult.setAttribute('role', 'status');
   applyResult.setAttribute('aria-live', 'polite');

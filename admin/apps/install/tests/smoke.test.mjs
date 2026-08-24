@@ -66,9 +66,17 @@ test('installation shell is independent and exposes an accessible status region'
   assert.match(html, /id="rollback-button"/);
   assert.match(html, /id="apply-progress"/);
   assert.match(html, /id="next-steps"/);
+  assert.match(html, /回到仓库根目录/);
+  assert.match(html, /class="terminal-grid"/);
+  assert.match(html, /终端 1：服务端/);
+  assert.match(html, /终端 2：管理端/);
   assert.match(html, /go run \.\/cmd\/api\/main\.go/);
-  assert.match(html, /pnpm run build/);
+  assert.match(html, /pnpm install/);
   assert.match(html, /pnpm run dev/);
+  assert.doesNotMatch(html, /pnpm run build/);
+  const nextSteps = html.match(/<section id="next-steps"[\s\S]*?<\/section>/)?.[0] ?? '';
+  assert.match(nextSteps, /终端 1：[\s\S]*?cd server[\s\S]*?go run \.\/cmd\/api\/main\.go[\s\S]*?终端 2：[\s\S]*?cd admin[\s\S]*?pnpm install[\s\S]*?pnpm run dev/);
+  assert.doesNotMatch(nextSteps, /pnpm run build/);
   assert.match(html, /aria-valuetext="尚未开始"/);
   assert.match(html, /autocomplete="new-password"/);
   assert.match(html, /aria-current="step"/);
@@ -118,7 +126,10 @@ test('installation shell is independent and exposes an accessible status region'
   assert.match(script, /安装任务正在执行/);
   assert.doesNotMatch(script, /Ctrl\+C/);
   assert.match(script, /pnpm run dev/);
-  assert.match(script, /pnpm run build/);
+  assert.match(script, /pnpm install/);
+  assert.match(script, /const installationCompletedMessage\s*=/);
+  assert.equal(script.match(/installationCompletedMessage/g)?.length, 3);
+  assert.doesNotMatch(script, /pnpm run build/);
   assert.doesNotMatch(script, /构建并暂存界面资源/);
   assert.doesNotMatch(script, /innerHTML/);
   assert.doesNotMatch(script, /localStorage|sessionStorage/);
@@ -154,6 +165,9 @@ test('installation forms expose semantic groups and responsive installation feed
   assert.match(html, /id="failure-database-code"/);
   assert.match(styles, /@media\s*\(max-width:\s*1120px\)/);
   assert.match(styles, /@media\s*\(max-width:\s*720px\)/);
+  assert.match(styles, /\.terminal-card pre\s*\{[\s\S]*?white-space:\s*pre-wrap;[\s\S]*?overflow-wrap:\s*anywhere;/);
+  const compactLayout = styles.match(/@media\s*\(max-width:\s*720px\)\s*\{[\s\S]*?\n\}/)?.[0] ?? '';
+  assert.match(compactLayout, /\.terminal-grid[\s\S]*?grid-template-columns:\s*1fr;/);
 });
 
 test('failed installation preserves current input and exposes actionable diagnostics', () => {

@@ -94,6 +94,70 @@ function profileFor(selectedUi) {
   return entry ? { schema: 1, selectedUi, ...entry } : null;
 }
 
+const RUNTIME_ENV_MODES = Object.freeze(['development', 'production']);
+
+/**
+ * Materialize the selected UI's ignored runtime env files from tracked,
+ * non-secret examples. Existing local configuration always wins. The writes
+ * are atomic so an interrupted init or dispatch can safely retry.
+ */
+export async function ensureSelectedUIRuntimeEnv(root, profile, options = {}) {
+  const expected = profileFor(profile?.selectedUi);
+  if (
+    !expected
+    || profile?.appDirectory !== expected.appDirectory
+    || profile?.packageName !== expected.packageName
+  ) {
+    throw new Error('RUNTIME_ENV_PROFILE_INVALID');
+  }
+  const appDirectory = join(root, expected.appDirectory);
+  if (!plainDirectory(appDirectory)) throw new Error('RUNTIME_ENV_APP_INVALID');
+  const publish = options.publish ?? publishExclusive;
+
+  for (const mode of RUNTIME_ENV_MODES) {
+    const template = join(appDirectory, `.env.${mode}.example`);
+    const target = join(appDirectory, `.env.${mode}`);
+    if (!plainFile(template)) throw new Error('RUNTIME_ENV_TEMPLATE_INVALID');
+    let templateContents;
+    try {
+      templateContents = readFileSync(template, 'utf8');
+    } catch {
+      throw new Error('RUNTIME_ENV_TEMPLATE_INVALID');
+    }
+    const targetState = strictPathState(target);
+    if (targetState.kind === 'error') throw new Error('RUNTIME_ENV_TARGET_INVALID');
+    if (targetState.kind === 'present') {
+      if (!targetState.stat.isFile() || targetState.stat.isSymbolicLink()) {
+        throw new Error('RUNTIME_ENV_TARGET_INVALID');
+      }
+      try {
+        readFileSync(target);
+      } catch {
+        throw new Error('RUNTIME_ENV_TARGET_INVALID');
+      }
+      continue;
+    }
+    try {
+      await publish(target, templateContents, 'runtime-env');
+    } catch (error) {
+      if (error?.code !== 'EEXIST') throw new Error('RUNTIME_ENV_TARGET_INVALID');
+      const racedTarget = strictPathState(target);
+      if (
+        racedTarget.kind !== 'present'
+        || !racedTarget.stat.isFile()
+        || racedTarget.stat.isSymbolicLink()
+      ) {
+        throw new Error('RUNTIME_ENV_TARGET_INVALID');
+      }
+      try {
+        readFileSync(target);
+      } catch {
+        throw new Error('RUNTIME_ENV_TARGET_INVALID');
+      }
+    }
+  }
+}
+
 function parseJSON(file) {
   try {
     const stat = lstatSync(file);
@@ -1805,6 +1869,20 @@ export function preflightInitialization(root, selectedUi) {
     for (const entry of Object.values(UI_PROFILES)) {
       accessSync(join(root, entry.appDirectory), fsConstants.R_OK | fsConstants.X_OK);
     }
+    const selectedDirectory = join(root, profile.appDirectory);
+    assertWritableDirectory(selectedDirectory);
+    for (const mode of RUNTIME_ENV_MODES) {
+      const template = join(selectedDirectory, `.env.${mode}.example`);
+      if (!plainFile(template)) throw new Error('PREFLIGHT_FAILED');
+      accessSync(template, fsConstants.R_OK);
+      const target = join(selectedDirectory, `.env.${mode}`);
+      const targetState = strictPathState(target);
+      if (targetState.kind === 'error') throw new Error('PREFLIGHT_FAILED');
+      if (targetState.kind === 'present') {
+        if (!targetState.stat.isFile() || targetState.stat.isSymbolicLink()) throw new Error('PREFLIGHT_FAILED');
+        readFileSync(target);
+      }
+    }
     assertBackupRootAvailable(root, location.backupRoot);
   } catch (error) {
     if (error instanceof Error && error.message === 'TEMPLATE_LAYOUT_INVALID') throw error;
@@ -1933,6 +2011,7 @@ export async function initialize(root, selectedUi) {
       throw new Error('SOURCE_MOVE_STATE_INVALID');
     }
   }
+  await ensureSelectedUIRuntimeEnv(root, profile);
   await atomicWrite(location.profile, `${JSON.stringify(profile, null, 2)}\n`);
   transaction = { ...transaction, phase: 'dependencies_pending' };
   await atomicWrite(location.transaction, `${JSON.stringify(transaction, null, 2)}\n`);

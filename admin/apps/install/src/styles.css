@@ -867,13 +867,49 @@ h1 {
   margin: 0 0 12px;
 }
 
-.next-steps pre {
+.terminal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.terminal-card {
+  min-width: 0;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--line));
+  border-radius: 10px;
+}
+
+.terminal-card header {
+  min-height: 44px;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.terminal-card header span {
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.terminal-card header strong {
+  font-size: 0.82rem;
+}
+
+.terminal-card pre {
   margin: 0;
   padding: 14px;
-  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   color: var(--ink);
-  background: var(--surface);
-  border-radius: 9px;
+  background: transparent;
   line-height: 1.6;
 }
 
@@ -911,7 +947,8 @@ footer {
 @media (max-width: 720px) {
   .plan-form,
   .connection-grid,
-  .connection-form--admin {
+  .connection-form--admin,
+  .terminal-grid {
     grid-template-columns: 1fr;
   }
 

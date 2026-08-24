@@ -8,6 +8,7 @@ import test from 'node:test';
 import {
   acquireAdminInitLease,
   acquireDependencyInstallLease,
+  ensureSelectedUIRuntimeEnv,
   ensureInstallerApplyIdle,
   migrateLegacyPreparedState,
   recoverSafeLocalState,
@@ -50,6 +51,16 @@ function fixture() {
     const directory = join(root, 'apps', `web-${ui}`);
     mkdirSync(directory, { recursive: true });
     writeFileSync(join(directory, 'package.json'), JSON.stringify({ name: `@vben/web-${ui}` }));
+    writeFileSync(join(directory, '.env.development.example'), [
+      'VITE_APP_TITLE=Gin Vben Admin',
+      'VITE_GLOB_API_URL=/api',
+      '',
+    ].join('\n'));
+    writeFileSync(join(directory, '.env.production.example'), [
+      'VITE_APP_TITLE=Gin Vben Admin',
+      'VITE_GLOB_API_URL=/api',
+      '',
+    ].join('\n'));
   }
   mkdirSync(join(root, 'apps', 'install'), { recursive: true });
   fixtureRepositories.set(root, repository);
@@ -2820,6 +2831,25 @@ test('init completes a read-only path preflight before confirmation or source mo
   }
 });
 
+test('init rejects an invalid selected runtime env template before creating a transaction or moving UI sources', () => {
+  const root = fixture();
+  try {
+    const template = join(root, 'apps', 'web-ele', '.env.development.example');
+    rmSync(template);
+    mkdirSync(template);
+
+    const result = run(root, 'init.mjs', ['--ui', 'ele', '--confirm-cleanup', '--no-open']);
+    assert.equal(result.status, 3, output(result));
+    assert.match(output(result), /INIT_PREFLIGHT=failed/);
+    assert.match(output(result), /INIT_ERROR=PREFLIGHT_FAILED/);
+    assert.equal(existsSync(join(root, '..', '.runtime', 'install', 'transaction.json')), false);
+    assert.equal(existsSync(join(root, '.ui-profile.json')), false);
+    for (const ui of ['antd', 'ele', 'naive']) assert.equal(existsSync(join(root, 'apps', `web-${ui}`)), true);
+  } finally {
+    dispose(root);
+  }
+});
+
 test('build/dev/preview profile gate requires both a valid profile and future installer marker', () => {
   const root = fixture();
   try {
@@ -3248,6 +3278,154 @@ test('the generic build dispatches only to the selected UI package', () => {
     });
     assert.equal(result.status, 0, output(result));
     assert.equal(readFileSync(log, 'utf8'), '-F @vben/web-ele run build');
+  } finally {
+    dispose(root);
+  }
+});
+
+test('init materializes selected UI runtime env files without overwriting local values', () => {
+  const root = fixture();
+  try {
+    const selected = join(root, 'apps', 'web-ele');
+    const localDevelopment = 'VITE_APP_TITLE=Local Admin\nVITE_GLOB_API_URL=/custom-api\n';
+    writeFileSync(join(selected, '.env.development'), localDevelopment);
+
+    const result = run(root, 'init.mjs', ['--ui', 'ele', '--confirm-cleanup', '--no-open']);
+    assert.equal(result.status, 0, output(result));
+    assert.equal(readFileSync(join(selected, '.env.development'), 'utf8'), localDevelopment);
+    assert.equal(
+      readFileSync(join(selected, '.env.production'), 'utf8'),
+      readFileSync(join(selected, '.env.production.example'), 'utf8'),
+    );
+  } finally {
+    dispose(root);
+  }
+});
+
+test('selected dispatch repairs runtime env files for an already-installed legacy profile', () => {
+  const root = fixture();
+  try {
+    assert.equal(run(root, 'init.mjs', ['--ui', 'ele', '--confirm-cleanup', '--no-open']).status, 0);
+    const selected = join(root, 'apps', 'web-ele');
+    rmSync(join(selected, '.env.development'), { force: true });
+    rmSync(join(selected, '.env.production'), { force: true });
+    const stateRoot = join(root, '..', '.runtime', 'install');
+    writeFileSync(join(stateRoot, '.installed'), JSON.stringify({
+      schema_version: 1, installer_version: '0.4.0-dev', installed_at: '2026-08-24T00:00:00Z',
+      selected_ui: 'ele', mode: 'dev', artifact_hash: 'a'.repeat(64), manifest_hash: 'b'.repeat(64),
+    }));
+    const runner = join(root, 'scripts', 'record-runtime-env-dispatch.mjs');
+    writeFileSync(runner, 'process.exit(0);\n');
+
+    const result = run(root, 'selected-dispatch.mjs', ['--command', 'dev'], {
+      INIT_PNPM_COMMAND: process.execPath,
+      INIT_PNPM_PREFIX_ARGS: JSON.stringify([runner]),
+    });
+    assert.equal(result.status, 0, output(result));
+    assert.equal(
+      readFileSync(join(selected, '.env.development'), 'utf8'),
+      readFileSync(join(selected, '.env.development.example'), 'utf8'),
+    );
+    assert.equal(
+      readFileSync(join(selected, '.env.production'), 'utf8'),
+      readFileSync(join(selected, '.env.production.example'), 'utf8'),
+    );
+  } finally {
+    dispose(root);
+  }
+});
+
+test('selected dispatch leaves existing legacy runtime env files byte-for-byte unchanged', () => {
+  const root = fixture();
+  try {
+    assert.equal(run(root, 'init.mjs', ['--ui', 'antd', '--confirm-cleanup', '--no-open']).status, 0);
+    const selected = join(root, 'apps', 'web-antd');
+    const legacyDevelopment = [
+      '# legacy local settings',
+      'VITE_PORT=6999',
+      'VITE_GLOB_API_URL=/custom-api',
+      'VITE_LOCAL_ONLY=keep-me',
+      '',
+    ].join('\n');
+    const legacyProduction = 'VITE_GLOB_API_URL=https://api.example.test\n';
+    writeFileSync(join(selected, '.env.development'), legacyDevelopment);
+    writeFileSync(join(selected, '.env.production'), legacyProduction);
+    const stateRoot = join(root, '..', '.runtime', 'install');
+    writeFileSync(join(stateRoot, '.installed'), JSON.stringify({
+      schema_version: 1, installer_version: '0.4.0-dev', installed_at: '2026-08-24T00:00:00Z',
+      selected_ui: 'antd', mode: 'dev', artifact_hash: 'a'.repeat(64), manifest_hash: 'b'.repeat(64),
+    }));
+    const runner = join(root, 'scripts', 'record-runtime-env-dispatch.mjs');
+    writeFileSync(runner, 'process.exit(0);\n');
+
+    const result = run(root, 'selected-dispatch.mjs', ['--command', 'dev'], {
+      INIT_PNPM_COMMAND: process.execPath,
+      INIT_PNPM_PREFIX_ARGS: JSON.stringify([runner]),
+    });
+    assert.equal(result.status, 0, output(result));
+
+    assert.equal(readFileSync(join(selected, '.env.development'), 'utf8'), legacyDevelopment);
+    assert.equal(readFileSync(join(selected, '.env.production'), 'utf8'), legacyProduction);
+  } finally {
+    dispose(root);
+  }
+});
+
+test('selected dispatch reports a stable runtime env diagnostic without exposing file contents', () => {
+  const root = fixture();
+  try {
+    assert.equal(run(root, 'init.mjs', ['--ui', 'naive', '--confirm-cleanup', '--no-open']).status, 0);
+    const stateRoot = join(root, '..', '.runtime', 'install');
+    writeFileSync(join(stateRoot, '.installed'), JSON.stringify({
+      schema_version: 1, installer_version: '0.4.0-dev', installed_at: '2026-08-24T00:00:00Z',
+      selected_ui: 'naive', mode: 'dev', artifact_hash: 'a'.repeat(64), manifest_hash: 'b'.repeat(64),
+    }));
+    const template = join(root, 'apps', 'web-naive', '.env.development.example');
+    rmSync(template);
+    mkdirSync(template);
+
+    const result = run(root, 'selected-dispatch.mjs', ['--command', 'dev']);
+    assert.equal(result.status, 1, output(result));
+    assert.match(output(result), /RUNTIME_ENV_PREPARATION_FAILED/);
+    assert.match(output(result), /RUNTIME_ENV_ERROR=RUNTIME_ENV_TEMPLATE_INVALID/);
+    assert.doesNotMatch(output(result), /VITE_|\/custom-api|password/);
+  } finally {
+    dispose(root);
+  }
+});
+
+test('runtime env publication preserves a local file created during the no-clobber race', async () => {
+  const root = fixture();
+  try {
+    const selected = join(root, 'apps', 'web-ele');
+    const target = join(selected, '.env.development');
+    const localDevelopment = 'VITE_GLOB_API_URL=/concurrent-api\n';
+    let raced = false;
+    await ensureSelectedUIRuntimeEnv(root, {
+      schema: 1,
+      selectedUi: 'ele',
+      packageName: '@vben/web-ele',
+      appDirectory: 'apps/web-ele',
+    }, {
+      publish: async (file, contents, label) => {
+        if (!raced && file === target) {
+          raced = true;
+          writeFileSync(file, localDevelopment);
+          throw Object.assign(new Error('target appeared'), { code: 'EEXIST' });
+        }
+        const temporary = `${file}.${label}-test`;
+        writeFileSync(temporary, contents, { flag: 'wx', mode: 0o600 });
+        linkSync(temporary, file);
+        rmSync(temporary);
+      },
+    });
+
+    assert.equal(raced, true);
+    assert.equal(readFileSync(target, 'utf8'), localDevelopment);
+    assert.equal(
+      readFileSync(join(selected, '.env.production'), 'utf8'),
+      readFileSync(join(selected, '.env.production.example'), 'utf8'),
+    );
   } finally {
     dispose(root);
   }

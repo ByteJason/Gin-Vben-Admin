@@ -22,7 +22,10 @@ export function useAppConfig(
   } = config;
 
   const applicationConfig: ApplicationConfig = {
-    apiURL: VITE_GLOB_API_URL,
+    // Fresh clones materialize .env files during init. Keep the same-origin
+    // proxy as a runtime fallback so a missing local file never turns API
+    // paths into Vite SPA fallbacks.
+    apiURL: VITE_GLOB_API_URL || '/api',
     auth: {},
   };
   if (VITE_GLOB_AUTH_DINGDING_CORP_ID && VITE_GLOB_AUTH_DINGDING_CLIENT_ID) {

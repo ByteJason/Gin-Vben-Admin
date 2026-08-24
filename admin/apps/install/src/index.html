@@ -273,14 +273,21 @@
           </section>
 
           <section id="next-steps" class="next-steps" aria-labelledby="next-steps-title" hidden>
-            <h3 id="next-steps-title">重新启动并构建唯一界面</h3>
-            <p>停止旧服务端后，在两个终端依次执行：</p>
-            <pre><code>cd server
-go run ./cmd/api/main.go
-
-cd admin
-pnpm run build
+            <h3 id="next-steps-title">重新启动服务并运行管理端</h3>
+            <p>停止旧服务端并回到仓库根目录后，打开两个终端分别执行：</p>
+            <div class="terminal-grid">
+              <article class="terminal-card" aria-label="终端 1：服务端">
+                <header><span>终端 1</span><strong>服务端</strong></header>
+                <pre><code>cd server
+go run ./cmd/api/main.go</code></pre>
+              </article>
+              <article class="terminal-card" aria-label="终端 2：管理端">
+                <header><span>终端 2</span><strong>管理端</strong></header>
+                <pre><code>cd admin
+pnpm install
 pnpm run dev</code></pre>
+              </article>
+            </div>
           </section>
 
           <button id="retry-button" class="secondary-button" type="button" hidden>

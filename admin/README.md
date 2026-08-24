@@ -38,7 +38,18 @@ pnpm run build
 pnpm run preview
 ```
 
-安装成功后先重启普通 Go API，再依次运行 `pnpm run build` 和 `pnpm run dev`。
+安装成功后停止旧服务端，并在两个终端分别运行。init 已只为所选 UI 安装依赖；这里再次执行 `pnpm install` 是幂等校验和本地链接补齐，不会恢复或安装未选择的 UI：
+
+```text
+# 仓库根目录，终端 1：服务端
+cd server
+go run ./cmd/api/main.go
+
+# 仓库根目录，终端 2：管理端
+cd admin
+pnpm install
+pnpm run dev
+```
 
 以下状态由程序维护，**不要手动删除、改名或编辑**：
 
@@ -68,4 +79,4 @@ pnpm run preview
 遇到中断时重新运行 init 或重新打开安装页，让程序恢复这些状态。Docker 在已有 profile 时自动使用它；全新 CI 可显式传入 `ADMIN_UI=antd|ele|naive`，显式值与 profile 不一致时输出 `UI_PROFILE_MISMATCH`。
 若网页安装需要替换已有 `.env`，`environment-backup/` 仅在事务期间以 `0600` 权限保存原文件用于补偿，并在完成标记提交后精确清理；不要复制或提交它。
 
-首次运行时，将所选模板的 `.env.development.example` 复制为 `.env.development`，并按需调整端口。开发环境默认 API 地址为 `/api`，由 Vite 代理转发到 Gin 的 `/api` 根路径（`http://localhost:8080/api`）。普通用户与源码工作区都只使用通用的 profile 驱动命令。
+init 会使用 Node.js 内置文件 API，将所选模板的 `.env.development.example` 和 `.env.production.example` 原子复制为对应本地环境文件；已有本地文件保持原字节。所选目录的写权限、模板类型与可读性会在移动 UI 前检查。旧版本完成安装但缺少整个文件时，通用 `dev/build/preview` 分发器会在启动前自动补齐；已有旧文件缺少标题时由共享 Vite 配置提供默认值，不改写其中的自定义地址或敏感字段。开发环境默认 API 地址为 `/api`，即使本地环境文件意外缺失也会回退到同源 `/api`，再由 Vite 代理转发到 Gin 的 `/api` 根路径（`http://localhost:8080/api`）。普通用户与源码工作区都只使用通用的 profile 驱动命令。

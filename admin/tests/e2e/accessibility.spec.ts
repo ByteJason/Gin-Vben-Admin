@@ -1,35 +1,61 @@
 import AxeBuilder from '@axe-core/playwright';
+import type { Page, Route } from '@playwright/test';
 import { expect, test } from '@playwright/test';
 
-const breakpoints = [375, 768, 1024, 1440];
+const breakpoints = [320, 375, 768, 1024, 1440];
 
-test.beforeEach(async ({ page }) => {
-  await page.route('**/api/**', async (route) => {
-    const pathname = new URL(route.request().url()).pathname;
-    const data = pathname.endsWith('/status')
+async function fulfillInstallerAPI(route: Route, installed = false) {
+  const pathname = new URL(route.request().url()).pathname;
+  const data = pathname.endsWith('/status')
+    ? installed
       ? {
+          installed: true,
+          installerVersion: '0.4.0-dev',
+          mode: 'dev',
+          selectedUi: 'ele',
+          state: 'installed',
+        }
+      : {
           installed: false,
           installerVersion: '0.4.0-dev',
           schemaVersion: 1,
           selectedUi: 'naive',
           state: 'ui_prepared',
         }
-      : pathname.endsWith('/capabilities')
-        ? {
-            platform: { arch: 'test', os: 'test' },
-            tools: [{ available: true, id: 'go', version: 'test' }],
-          }
-        : null;
-    await route.fulfill({
-      body: JSON.stringify({
-        code: data ? 0 : 30000,
-        data,
-        message: data ? 'success' : 'not found',
-      }),
-      contentType: 'application/json',
-      status: data ? 200 : 404,
-    });
+    : pathname.endsWith('/capabilities')
+      ? {
+          platform: { arch: 'test', os: 'test' },
+          tools: [{ available: true, id: 'go', version: 'test' }],
+        }
+      : null;
+  await route.fulfill({
+    body: JSON.stringify({
+      code: data ? 0 : 30000,
+      data,
+      message: data ? 'success' : 'not found',
+    }),
+    contentType: 'application/json',
+    status: data ? 200 : 404,
   });
+}
+
+async function seriousAxeViolations(page: Page) {
+  const audit = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'])
+    .analyze();
+  return audit.violations
+    .filter(({ impact }) => impact === 'critical' || impact === 'serious')
+    .map(({ help, id, impact, nodes }) => ({
+      help,
+      html: nodes.map((node) => node.html),
+      id,
+      impact,
+      targets: nodes.map((node) => node.target),
+    }));
+}
+
+test.beforeEach(async ({ page }) => {
+  await page.route('**/api/**', async (route) => fulfillInstallerAPI(route));
 });
 
 test('critical page is keyboard reachable, responsive, and axe clean', async ({
@@ -81,17 +107,45 @@ test('critical page is keyboard reachable, responsive, and axe clean', async ({
     `${testInfo.project.name} visible focus`,
   ).toBeTruthy();
 
-  const audit = await new AxeBuilder({ page })
-    .withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'])
-    .analyze();
-  const serious = audit.violations
-    .filter(({ impact }) => impact === 'critical' || impact === 'serious')
-    .map(({ help, id, impact, nodes }) => ({
-      help,
-      html: nodes.map((node) => node.html),
-      id,
-      impact,
-      targets: nodes.map((node) => node.target),
-    }));
-  expect(serious).toEqual([]);
+  expect(await seriousAxeViolations(page)).toEqual([]);
+});
+
+test('installed quick start stacks both terminal cards without overflow at 320px', async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'installer');
+  await page.unroute('**/api/**');
+  await page.route('**/api/**', async (route) =>
+    fulfillInstallerAPI(route, true),
+  );
+  await page.setViewportSize({ height: 900, width: 320 });
+  await page.goto('/install', { waitUntil: 'networkidle' });
+
+  await expect(page.locator('#next-steps')).toBeVisible();
+  await expect(page.locator('.terminal-card')).toHaveCount(2);
+  await expect(page.locator('.terminal-card').nth(0)).toContainText(
+    'go run ./cmd/api/main.go',
+  );
+  await expect(page.locator('.terminal-card').nth(1)).toContainText(
+    'pnpm install',
+  );
+  await expect(page.locator('.terminal-card').nth(1)).toContainText(
+    'pnpm run dev',
+  );
+
+  const first = await page.locator('.terminal-card').nth(0).boundingBox();
+  const second = await page.locator('.terminal-card').nth(1).boundingBox();
+  expect(first).not.toBeNull();
+  expect(second).not.toBeNull();
+  expect(second!.y).toBeGreaterThanOrEqual(first!.y + first!.height - 1);
+
+  const overflow = await page.evaluate(() => ({
+    cards: [...document.querySelectorAll('.terminal-card')].map(
+      (card) => card.scrollWidth - card.clientWidth,
+    ),
+    document: document.documentElement.scrollWidth - window.innerWidth,
+  }));
+  expect(overflow.document).toBeLessThanOrEqual(1);
+  expect(overflow.cards.every((value) => value <= 1)).toBeTruthy();
+  expect(await seriousAxeViolations(page)).toEqual([]);
 });

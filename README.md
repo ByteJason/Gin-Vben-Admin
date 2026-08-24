@@ -130,7 +130,7 @@ cd admin
 pnpm run init
 ```
 
-`init` 只依赖 Node.js 内置模块，因此此时不需要 `node_modules`。它先检查 `http://127.0.0.1:8080` 的 health、安装状态和安装页面；检查通过后让用户选择 Ant Design Vue、Element Plus 或 Naive UI，原子保留所选应用，将另外两套暂存到 `.runtime/install/ui-backup/<transaction>/`，写入 `admin/.ui-profile.json`，然后对只剩一套 UI 的 workspace 自动执行 `pnpm install --frozen-lockfile` 并打开 `/install`。这样不会下载另外两套 UI 的专属依赖。
+`init` 只依赖 Node.js 内置模块，因此此时不需要 `node_modules`。它先检查 `http://127.0.0.1:8080` 的 health、安装状态和安装页面，并在移动 UI 前检查所选目录与环境模板；检查通过后让用户选择 Ant Design Vue、Element Plus 或 Naive UI，原子保留所选应用，将另外两套暂存到 `.runtime/install/ui-backup/<transaction>/`，写入 `admin/.ui-profile.json`，并从所选模板的 tracked example 原子生成 development/production 本地环境文件。已有本地文件保持原字节，旧文件缺少的新公开默认项由运行时回退提供。随后它对只剩一套 UI 的 workspace 自动执行 `pnpm install --frozen-lockfile` 并打开 `/install`。这样不会下载另外两套 UI 的专属依赖。
 
 如果 UI 移动、依赖安装或 UI 重置中断，再次执行对应的 init 命令会读取事务状态并从最小未完成步骤继续，不会要求重新选择 UI。网页安装的数据库、Redis、管理员和环境配置也使用无凭据的持久化事务记录；服务重启后恢复到可重试状态，`.installed` 始终在所有安装步骤成功后最后原子写入。
 
@@ -138,14 +138,16 @@ pnpm run init
 
 可先用 `pnpm run init -- --check` 只读检查状态。网页安装完成前需要重新选择时，使用 `pnpm run init -- --reset --confirm-reset` 恢复三套模板。初始化完成前直接运行 `pnpm run dev`、`pnpm run build` 或 `pnpm run preview` 会提示先执行 init。
 
-在网页中完成数据库、Redis、管理员和默认项配置并看到安装成功后，停止并重新启动服务端；然后构建、启动唯一保留的管理端：
+在网页中完成数据库、Redis、管理员和默认项配置并看到安装成功后，停止旧服务端，并打开两个终端分别运行。`pnpm install` 会幂等校验所选 UI 的依赖并补齐本地链接，不会恢复或安装另外两套 UI：
 
 ```text
-# server/，终端 1
+# 仓库根目录，终端 1：服务端
+cd server
 go run ./cmd/api/main.go
 
-# admin/，终端 2
-pnpm run build
+# 仓库根目录，终端 2：管理端
+cd admin
+pnpm install
 pnpm run dev
 ```
 

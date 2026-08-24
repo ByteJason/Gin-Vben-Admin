@@ -15,6 +15,30 @@ const getString = (value: string | undefined, fallback: string) =>
 const getNumber = (value: string | undefined, fallback: number) =>
   Number(value) || fallback;
 
+const DEFAULT_APP_TITLE = 'Gin Vben Admin';
+const injectedAppTitles = new WeakMap<object, string>();
+
+function withViteAppTitleDefault<T extends Record<string, string | undefined>>(
+  envConfig: T,
+  runtimeEnv: Record<string, string | undefined> = process.env,
+) {
+  const injectedTitle = injectedAppTitles.get(runtimeEnv);
+  const runtimeTitle = runtimeEnv.VITE_APP_TITLE;
+  const explicitRuntimeTitle =
+    runtimeTitle !== undefined && runtimeTitle !== injectedTitle
+      ? runtimeTitle
+      : undefined;
+  const appTitle =
+    explicitRuntimeTitle ?? envConfig.VITE_APP_TITLE ?? DEFAULT_APP_TITLE;
+  runtimeEnv.VITE_APP_TITLE = appTitle;
+  if (explicitRuntimeTitle === undefined) {
+    injectedAppTitles.set(runtimeEnv, appTitle);
+  } else {
+    injectedAppTitles.delete(runtimeEnv);
+  }
+  return { ...envConfig, VITE_APP_TITLE: appTitle };
+}
+
 /**
  * 获取当前环境下生效的配置文件名
  */
@@ -73,7 +97,7 @@ async function loadAndConvertEnv(
     port: number;
   }
 > {
-  const envConfig = await loadEnv(match, confFiles);
+  const envConfig = withViteAppTitleDefault(await loadEnv(match, confFiles));
 
   const {
     VITE_APP_TITLE,
@@ -92,7 +116,7 @@ async function loadAndConvertEnv(
     .filter((item) => item === 'brotli' || item === 'gzip');
 
   return {
-    appTitle: getString(VITE_APP_TITLE, 'Vben Admin'),
+    appTitle: getString(VITE_APP_TITLE, DEFAULT_APP_TITLE),
     archiver: getBoolean(VITE_ARCHIVER),
     base: getString(VITE_BASE, '/'),
     compress: compressTypes.length > 0,
@@ -105,4 +129,4 @@ async function loadAndConvertEnv(
   };
 }
 
-export { loadAndConvertEnv, loadEnv };
+export { loadAndConvertEnv, loadEnv, withViteAppTitleDefault };

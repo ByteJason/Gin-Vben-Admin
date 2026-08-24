@@ -57,6 +57,19 @@ test('workspace contains its frontend build closure', () => {
   }
 });
 
+test('every management template provides complete runtime environment examples', () => {
+  for (const app of requiredApps) {
+    for (const mode of ['development', 'production']) {
+      const template = readFileSync(
+        resolve(root, 'apps', app, `.env.${mode}.example`),
+        'utf8',
+      );
+      assert.match(template, /^VITE_APP_TITLE=Gin Vben Admin$/m, `${app} ${mode} title`);
+      assert.match(template, /^VITE_GLOB_API_URL=\/api$/m, `${app} ${mode} API base`);
+    }
+  }
+});
+
 test('all management templates expose equivalent observability settings', () => {
   for (const app of requiredApps) {
     const viewPath = resolve(

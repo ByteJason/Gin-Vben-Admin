@@ -87,6 +87,37 @@ test('README documents the dependency-minimal quick start and protected state', 
   assert.match(readmes, /不要手动删除/);
 });
 
+test('post-install quick start uses two terminals and installs before dev without a build prerequisite', () => {
+  const rootReadme = read('README.md');
+  const adminReadme = read('admin/README.md');
+  const acceptance = read('docs/manual-acceptance/1.0.0-dev-end-to-end.md');
+  const rootQuickStart = rootReadme.slice(
+    rootReadme.indexOf('在网页中完成数据库'),
+    rootReadme.indexOf('编辑本地 `server/configs/server.yaml`'),
+  );
+  const adminQuickStart = adminReadme.slice(
+    adminReadme.indexOf('安装成功后'),
+    adminReadme.indexOf('以下状态由程序维护'),
+  );
+  const acceptanceQuickStart = acceptance.slice(
+    acceptance.indexOf('### UAT-INSTALL-002'),
+    acceptance.indexOf('### UAT-INSTALL-003'),
+  );
+
+  for (const [name, section] of [
+    ['README', rootQuickStart],
+    ['admin README', adminQuickStart],
+    ['acceptance', acceptanceQuickStart],
+  ]) {
+    assert.match(section, /终端 1/iu, name);
+    assert.match(section, /终端 2/iu, name);
+    assert.match(section, /终端 1[\s\S]*cd server[\s\S]*go run \.\/cmd\/api\/main\.go[\s\S]*终端 2[\s\S]*cd admin[\s\S]*pnpm install[\s\S]*pnpm run dev/iu, name);
+    assert.match(section, /go run \.\/cmd\/api\/main\.go/iu, name);
+    assert.match(section, /pnpm install[\s\S]*pnpm run dev/iu, name);
+    assert.doesNotMatch(section, /pnpm run build/iu, name);
+  }
+});
+
 test('installer contract and ignore policy use only the unified runtime state', () => {
   const installContract = read('contracts/openapi/install-v1.yaml');
   const applyStep = installContract.slice(

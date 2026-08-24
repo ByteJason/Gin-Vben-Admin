@@ -33,7 +33,8 @@ test('INIT-100 web installer shows the CLI-selected UI as read-only state', () =
   assert.match(script, /JSON\.stringify\(\{\s*mode\s*\}\)/);
   assert.match(script, /重新启动|重启/);
   assert.match(script, /pnpm run dev/);
-  assert.match(script, /pnpm run build/);
+  assert.match(script, /pnpm install/);
+  assert.doesNotMatch(script, /pnpm run build/);
   assert.match(script, /\.focus\(\)/, 'state and error transitions move focus');
   assert.match(script, /aria-valuetext/);
 });
