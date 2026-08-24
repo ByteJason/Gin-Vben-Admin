@@ -428,13 +428,13 @@ func TestAsyncApplyEndpointReturnsCredentialFreeJob(t *testing.T) {
 
 func TestInstallationProgressAndRetryEndpointsUseJobProvider(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	jobProvider := &jobProviderStub{job: installer.ApplyJob{ID: "install-job-1", State: installer.JobFailed, CanRetry: true, ErrorCode: 50000}}
+	jobProvider := &jobProviderStub{job: installer.ApplyJob{ID: "install-job-1", State: installer.JobFailed, CanRetry: true, ErrorCode: 50000, ErrorKey: "internal_error", FailureStep: "schema"}}
 	router := gin.New()
 	RegisterRoutes(router, NewHandlerWithApplyAndJobs(statusProviderStub{}, nil, nil, nil, nil, jobProvider))
 
 	progress := httptest.NewRecorder()
 	router.ServeHTTP(progress, httptest.NewRequest(http.MethodGet, "/api/system/install/v1/progress/install-job-1", nil))
-	if progress.Code != http.StatusOK || !strings.Contains(progress.Body.String(), `"state":"failed"`) {
+	if progress.Code != http.StatusOK || !strings.Contains(progress.Body.String(), `"state":"failed"`) || !strings.Contains(progress.Body.String(), `"failureStep":"schema"`) {
 		t.Fatalf("progress response = %d %s", progress.Code, progress.Body.String())
 	}
 

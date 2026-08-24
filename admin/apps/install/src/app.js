@@ -47,6 +47,12 @@ const adminPassword = document.querySelector('#admin-password');
 const adminPasswordConfirm = document.querySelector('#admin-password-confirm');
 const applyButton = document.querySelector('#apply-button');
 const applyResult = document.querySelector('#apply-result');
+const installFailureDetails = document.querySelector('#install-failure-details');
+const failureReason = document.querySelector('#failure-reason');
+const failureStep = document.querySelector('#failure-step');
+const failureErrorCode = document.querySelector('#failure-error-code');
+const failureErrorKey = document.querySelector('#failure-error-key');
+const failureJobId = document.querySelector('#failure-job-id');
 const rollbackButton = document.querySelector('#rollback-button');
 const applyProgress = document.querySelector('#apply-progress');
 const applySteps = document.querySelector('#apply-steps');
@@ -61,12 +67,17 @@ const modeLabels = {
 };
 const stepLabels = {
   queued: '等待执行',
+  request: '提交安装请求',
+  coordination: '获取安装执行权',
   plan: '复核目录权限',
   database: '验证数据库',
   redis: '验证 Redis',
+  recovery: '恢复上次安装事务',
+  journal: '保存安装事务',
   schema: '执行数据库迁移',
   identity: '初始化管理员',
   environment: '写入运行配置',
+  marker: '生成安装标记',
   lock: '写入安装锁',
   complete: '安装完成',
   failed: '安装失败',
@@ -92,20 +103,27 @@ function suggestBrowserLocale() {
   localeSuggestion.textContent = `已根据浏览器语言建议 ${browserLocale}，可手动调整。`;
 }
 
+async function fetchInstallationStatus(fetcher = fetch) {
+  const response = await fetcher(endpoint, {
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json' },
+  });
+  const envelope = await response.json();
+  if (!response.ok || envelope.code !== 0 || !envelope.data) {
+    throw new Error('status request failed');
+  }
+  return envelope.data;
+}
+
 async function loadStatus() {
   setPending();
   try {
-    const response = await fetch(endpoint, {
-      credentials: 'same-origin',
-      headers: { Accept: 'application/json' },
-    });
-    const envelope = await response.json();
-    if (!response.ok || envelope.code !== 0 || !envelope.data) {
-      throw new Error('status request failed');
-    }
-    renderStatus(envelope.data);
+    const status = await fetchInstallationStatus();
+    renderStatus(status);
+    return status;
   } catch {
     renderError();
+    return null;
   }
 }
 
@@ -406,20 +424,11 @@ function invalidateDependencyCheck(resultElement) {
   updateApplyButton();
 }
 
-function invalidateDependencyChecks() {
-  databaseCheckPassed = false;
-  redisCheckPassed = false;
-  for (const result of [databaseResult, redisResult]) {
-    result.textContent = '连接配置需要重新验证，请重新测试。';
-    result.dataset.tone = 'pending';
-  }
-  updateApplyButton();
-}
-
 function clearFailedJobActions() {
   retryJobId = null;
   rollbackJobId = null;
   rollbackButton.hidden = true;
+  clearInstallationFailure();
 }
 
 function setFailedJobActions(job) {
@@ -488,6 +497,7 @@ function renderJobProgress(job) {
   setProgress(progress, `${step}，${progress}%`);
   applyResult.textContent = `${step}（${progress}%）`;
   applyResult.dataset.tone = job.state === 'failed' ? 'error' : job.state === 'completed' ? 'success' : 'pending';
+  if (job.state !== 'failed') clearInstallationFailure();
   rollbackButton.hidden = !(job.state === 'failed' && job.canRollback);
   applySteps.replaceChildren();
   for (const completed of Array.isArray(job.steps) ? job.steps : []) {
@@ -525,33 +535,130 @@ async function pollInstallation(jobId) {
   throw new Error('installation progress timed out');
 }
 
-function applyErrorMessage(status) {
-  if (status === 409) return '安装已完成或已有安装事务正在执行。';
-  if (status === 422) return '安装前置检查未通过，请返回检查目录和依赖。';
-  if (status === 503) return '安装服务暂不可用，请确认服务端处于源码安装模式。';
-  return '安装未完成，服务端已保留可回滚状态，请检查后重试。';
-}
-
 function installationFailureMessage(job) {
   if (job?.errorKey === 'installation_running') {
-    return '检测到另一项初始化或安装任务正在执行。若终端中的 pnpm run init 已结束，请重新运行 pnpm run init 继续恢复，完成后重新测试连接。';
+    return '检测到另一项初始化或安装任务正在执行。若终端中的 pnpm run init 已结束，请重新运行 pnpm run init 继续恢复。当前输入已保留。';
   }
-  if (job?.canRetry) {
-    return '安装未完成，敏感字段已清空。请重新输入凭据，并重新测试数据库与 Redis 连接后重试。';
+  if (job?.errorKey === 'installation_completed') {
+    return '服务端已存在有效安装标记，请重新检查实例状态。当前输入已保留。';
   }
-  return '安装未完成，请检查实例状态和失败步骤后再继续。';
+  if (job?.errorKey === 'invalid_request') {
+    return '安装请求校验未通过，请检查运行方式、语言和管理员配置。当前输入已保留。';
+  }
+  if (job?.errorKey === 'validation_failed') {
+    const reasons = {
+      plan: '安装方案或目录预检未通过，请重新检查目录权限。当前输入已保留。',
+      database: '数据库连接复核未通过，请检查数据库服务和当前配置。当前输入已保留。',
+      redis: 'Redis 连接复核未通过，请检查 Redis 服务和当前配置。当前输入已保留。',
+      journal: '安装事务状态校验未通过，请保留当前目录并重新检查初始化状态。当前输入已保留。',
+      coordination: '安装执行权释放或校验未完成，请稍后重试。当前输入已保留。',
+    };
+    return reasons[job?.failureStep] || '安装前置校验未通过，请根据失败位置检查配置。当前输入已保留。';
+  }
+  if (job?.errorKey === 'request_unavailable') {
+    return '安装请求或进度查询未完成，请确认服务端仍在运行。当前输入已保留。';
+  }
+  if (job?.errorKey === 'internal_error') {
+    const reasons = {
+      schema: '数据库结构迁移执行失败，请查看失败任务定位信息。当前输入已保留。',
+      identity: '初始管理员创建失败，请查看失败任务定位信息。当前输入已保留。',
+      environment: '运行配置写入失败，请检查目录权限。当前输入已保留。',
+      journal: '安装事务记录写入失败，请检查安装状态目录。当前输入已保留。',
+      marker: '安装标记生成失败，请检查安装配置。当前输入已保留。',
+      lock: '安装锁写入失败，请检查安装状态目录。当前输入已保留。',
+      recovery: '上次安装事务恢复失败，请查看服务端终端。当前输入已保留。',
+    };
+    return reasons[job?.failureStep] || '服务端安装执行失败，请查看失败任务定位信息。当前输入已保留。';
+  }
+  return '安装未完成，请根据失败位置和错误标识继续排查。当前输入已保留。';
 }
 
-function announceApplyError(detail) {
+function installationFailureDiagnostics(job) {
+  const stage = job?.failureStep || job?.currentStep || '';
+  return {
+    reason: installationFailureMessage(job),
+    step: stepLabels[stage] || stage || '未提供',
+    errorCode: Number.isInteger(job?.errorCode) ? String(job.errorCode) : '—',
+    errorKey: String(job?.errorKey || '未提供'),
+    jobId: String(job?.id || '未提供'),
+  };
+}
+
+function renderInstallationFailure(job) {
+  const diagnostics = installationFailureDiagnostics(job);
+  failureReason.textContent = diagnostics.reason;
+  failureStep.textContent = diagnostics.step;
+  failureErrorCode.textContent = diagnostics.errorCode;
+  failureErrorKey.textContent = diagnostics.errorKey;
+  failureJobId.textContent = diagnostics.jobId;
+  installFailureDetails.hidden = false;
+  installFailureDetails.focus();
+}
+
+function clearInstallationFailure() {
+  installFailureDetails.hidden = true;
+  for (const output of [failureReason, failureStep, failureErrorCode, failureErrorKey, failureJobId]) {
+    output.textContent = '—';
+  }
+}
+
+function announceApplyError(detail, diagnosticsAvailable = false) {
   applyResult.textContent = detail;
   applyResult.dataset.tone = 'error';
-  applyResult.setAttribute('role', 'alert');
-  applyResult.setAttribute('aria-live', 'assertive');
+  applyResult.setAttribute('role', diagnosticsAvailable ? 'status' : 'alert');
+  applyResult.setAttribute('aria-live', diagnosticsAvailable ? 'polite' : 'assertive');
+  if (diagnosticsAvailable) return;
   applyResult.focus();
+}
+
+async function postInstallationRequest(targetEndpoint, payload, fetcher = fetch) {
+  const response = await fetcher(targetEndpoint, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {
+      Accept: 'application/json',
+      'Accept-Language': browserLanguageHeader(),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+  const envelope = await response.json();
+  return { response, envelope };
+}
+
+async function submitInstallationRequest(payload, failedJobId, fetcher = fetch) {
+  const targetEndpoint = failedJobId
+    ? `${retryEndpoint}/${encodeURIComponent(failedJobId)}`
+    : applyEndpoint;
+  let outcome = await postInstallationRequest(targetEndpoint, payload, fetcher);
+  if (failedJobId && outcome.response.status === 404 && outcome.envelope?.code === 30000) {
+    clearFailedJobActions();
+    outcome = await postInstallationRequest(applyEndpoint, payload, fetcher);
+  }
+  return outcome;
+}
+
+function installationCompletionDetected(envelope, job) {
+  return envelope?.code === 10006 || job?.errorKey === 'installation_completed';
+}
+
+function commitCompletedInstallation(status, result) {
+  clearFailedJobActions();
+  clearInstallSecrets();
+  if (result) renderApplyResult(result);
+  renderStatus(status);
+}
+
+async function reconcileCompletedInstallation(statusReader = fetchInstallationStatus) {
+  const status = await statusReader();
+  if (!status?.installed) return false;
+  commitCompletedInstallation(status);
+  return true;
 }
 
 async function requestInstallation(event) {
   event.preventDefault();
+  clearInstallationFailure();
   setProgress(0, '准备安装');
   if (!currentPlan || !databaseCheckPassed || !redisCheckPassed) {
     announceApplyError('请先完成目录、数据库和 Redis 检查。');
@@ -569,57 +676,59 @@ async function requestInstallation(event) {
   applyResult.dataset.tone = 'pending';
   applyResult.setAttribute('role', 'status');
   applyResult.setAttribute('aria-live', 'polite');
+  let installationCompleted = false;
   try {
     const dependencies = dependencyFormValues();
-    const targetEndpoint = retryJobId
-      ? `${retryEndpoint}/${encodeURIComponent(retryJobId)}`
-      : applyEndpoint;
-    const response = await fetch(targetEndpoint, {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: {
-        Accept: 'application/json',
-        'Accept-Language': browserLanguageHeader(),
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        mode: modeChoice.value,
-        localeMode: localeMode.value,
-        locale: localeChoice.value,
-        database: dependencies.database,
-        redis: dependencies.redis,
-        admin: { username: adminUsername.value.trim(), password: adminPassword.value },
-      }),
-    });
-    const envelope = await response.json();
+    const payload = {
+      mode: modeChoice.value,
+      localeMode: localeMode.value,
+      locale: localeChoice.value,
+      database: dependencies.database,
+      redis: dependencies.redis,
+      admin: { username: adminUsername.value.trim(), password: adminPassword.value },
+    };
+    const { response, envelope } = await submitInstallationRequest(payload, retryJobId);
     if (!response.ok || envelope.code !== 0 || !envelope.data) {
-      announceApplyError(applyErrorMessage(response.status));
+      if (installationCompletionDetected(envelope)) {
+        installationCompleted = await reconcileCompletedInstallation();
+        if (installationCompleted) return;
+      }
+      const failure = {
+        id: envelope?.traceId || envelope?.meta?.requestId,
+        failureStep: 'request',
+        errorCode: Number.isInteger(envelope?.code) ? envelope.code : undefined,
+        errorKey: envelope?.code === 10007 ? 'installation_running' : envelope?.code === 10006 ? 'installation_completed' : envelope?.code === 10000 ? 'invalid_request' : 'request_unavailable',
+      };
+      announceApplyError(installationFailureMessage(failure), true);
+      renderInstallationFailure(failure);
       return;
     }
     let result = envelope.data;
     if (response.status === 202 && result.id) {
-      clearInstallSecrets();
       renderJobProgress(result);
       result = await pollInstallation(result.id);
       if (result.state === 'failed') {
+        if (installationCompletionDetected(null, result)) {
+          installationCompleted = await reconcileCompletedInstallation();
+          if (installationCompleted) return;
+        }
         setFailedJobActions(result);
-        announceApplyError(installationFailureMessage(result));
+        announceApplyError(installationFailureMessage(result), true);
+        renderInstallationFailure(result);
         return;
       }
     }
-    clearFailedJobActions();
-    renderApplyResult(result);
     const completedStatus = { installed: true, installerVersion: 'current', mode: result.mode };
     completedStatus.selectedUi = result.selectedUi;
-    renderStatus(completedStatus);
-    currentPlan = { ...currentPlan, installed: true };
+    commitCompletedInstallation(completedStatus, result);
+    installationCompleted = true;
   } catch {
-    announceApplyError('安装请求未完成，请确认服务仍在运行，并重新完成连接测试后重试。');
+    announceApplyError('安装请求未完成，请确认服务仍在运行。当前输入已保留；服务恢复后可直接重试，修改连接配置后再重新测试。', true);
+    renderInstallationFailure({ failureStep: 'request', errorKey: 'request_unavailable' });
   } finally {
-    clearInstallSecrets();
-    if (!currentPlan || !currentPlan.installed) {
+    if (!installationCompleted) {
       applyButton.textContent = retryJobId ? '重新尝试安装' : '开始安装';
-      invalidateDependencyChecks();
+      updateApplyButton();
     }
   }
 }
@@ -642,7 +751,8 @@ async function requestRollback() {
       throw new Error('rollback request failed');
     }
     renderJobProgress(envelope.data);
-    applyResult.textContent = '本次失败事务已回滚，可以重新输入配置后重试。';
+    clearInstallationFailure();
+    applyResult.textContent = '本次失败事务已回滚，当前输入仍保留，可以直接重试或修改后再测试。';
     applyResult.dataset.tone = 'success';
     rollbackButton.hidden = true;
     rollbackJobId = null;

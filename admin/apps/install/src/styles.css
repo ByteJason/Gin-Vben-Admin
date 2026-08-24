@@ -729,6 +729,96 @@ h1 {
   font-size: 0.84rem;
 }
 
+.install-failure-details {
+  padding: 16px;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--danger-soft) 72%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--danger) 26%, var(--line));
+  border-radius: 12px;
+}
+
+.install-failure-details[hidden] {
+  display: none;
+}
+
+.failure-details__heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.failure-details__heading span {
+  color: var(--danger);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.failure-details__heading h5 {
+  margin: 3px 0 0;
+  font-size: 0.95rem;
+}
+
+.failure-details__heading strong {
+  flex: none;
+  padding: 4px 8px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  font-size: 0.7rem;
+}
+
+.failure-reason {
+  margin: 12px 0;
+  color: var(--danger);
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.55;
+}
+
+.failure-diagnostics {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.failure-diagnostics div {
+  min-width: 0;
+  padding: 9px 10px;
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  border-radius: 8px;
+}
+
+.failure-diagnostics dt {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.failure-diagnostics dd {
+  min-width: 0;
+  margin: 4px 0 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.failure-diagnostics code,
+.failure-location code {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.failure-location {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1.55;
+}
+
 .progress-panel {
   padding: 14px;
   background: var(--surface);
@@ -875,8 +965,17 @@ footer {
 
   .plan-form,
   .plan-summary,
-  .connection-form {
+  .connection-form,
+  .failure-diagnostics {
     grid-template-columns: 1fr;
+  }
+
+  .failure-details__heading {
+    display: grid;
+  }
+
+  .failure-details__heading strong {
+    width: fit-content;
   }
 
   .primary-button {

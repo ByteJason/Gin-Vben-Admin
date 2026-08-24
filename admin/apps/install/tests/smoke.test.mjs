@@ -7,8 +7,9 @@ import test from 'node:test';
 const root = join(import.meta.dirname, '..');
 
 function readFunction(source, name) {
-  const start = source.indexOf(`function ${name}(`);
+  let start = source.indexOf(`function ${name}(`);
   assert.notEqual(start, -1, `${name} must exist`);
+  if (source.slice(Math.max(0, start - 6), start) === 'async ') start -= 6;
   const end = source.indexOf('\n}\n', start);
   assert.notEqual(end, -1, `${name} must have a top-level closing brace`);
   return source.slice(start, end + 2);
@@ -46,7 +47,7 @@ test('installation shell is independent and exposes an accessible status region'
   assert.match(html, /id="redis-address"[^>]*value="localhost:6379"/);
   assert.match(html, /id="redis-db"[^>]*value="0"/);
   assert.match(html, /id="admin-form"/);
-  assert.match(html, /敏感值不写入恢复日志/);
+  assert.match(html, /敏感值.*仅保留在当前页面.*不写入恢复日志/);
   assert.doesNotMatch(html, /凭据仅用于本次测试/);
   assert.match(html, /id="admin-username"/);
   assert.match(html, /id="admin-username"[^>]*value="admin"/);
@@ -55,6 +56,13 @@ test('installation shell is independent and exposes an accessible status region'
   assert.doesNotMatch(html, /id="confirm-cleanup"/);
   assert.match(html, /id="apply-button"/);
   assert.match(html, /id="apply-result"/);
+  assert.match(html, /id="install-failure-details"/);
+  assert.match(html, /id="failure-reason"/);
+  assert.match(html, /id="failure-step"/);
+  assert.match(html, /id="failure-error-code"/);
+  assert.match(html, /id="failure-error-key"/);
+  assert.match(html, /id="failure-job-id"/);
+  assert.match(html, /id="install-failure-details"[^>]*role="alert"[^>]*aria-live="assertive"[^>]*tabindex="-1"/);
   assert.match(html, /id="rollback-button"/);
   assert.match(html, /id="apply-progress"/);
   assert.match(html, /id="next-steps"/);
@@ -85,7 +93,7 @@ test('installation shell is independent and exposes an accessible status region'
   assert.match(script, /canRollback/);
   assert.match(script, /retryJobId\s*=\s*job\.canRetry\s*\?\s*job\.id\s*:\s*null/);
   assert.match(script, /rollbackJobId\s*=\s*job\.canRollback\s*\?\s*job\.id\s*:\s*null/);
-  assert.match(script, /currentPlan\s*=\s*\{\s*\.\.\.currentPlan,\s*installed:\s*true\s*\}/);
+  assert.match(script, /commitCompletedInstallation/);
   assert.doesNotMatch(script, /uiChoice|confirmCleanup/);
   assert.match(script, /requestInstallation/);
   assert.match(script, /applyButton\.disabled\s*=\s*!currentPlan/);
@@ -139,11 +147,13 @@ test('installation forms expose semantic groups and responsive installation feed
   assert.match(styles, /\.connection-form--admin\s*\{[\s\S]*?grid-template-columns:\s*repeat\(3,/);
   assert.match(styles, /\.plan-form\s*>\s*\.primary-button\s*\{[\s\S]*?grid-column:\s*1\s*\/\s*-1/);
   assert.match(styles, /\.connection-result:not\(:empty\)/);
+  assert.match(styles, /\.install-failure-details\s*\{/);
+  assert.match(styles, /\.failure-diagnostics\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2,/);
   assert.match(styles, /@media\s*\(max-width:\s*1120px\)/);
   assert.match(styles, /@media\s*\(max-width:\s*720px\)/);
 });
 
-test('failed installation feedback requires dependency rechecks and distinguishes a busy lease', () => {
+test('failed installation preserves current input and exposes actionable diagnostics', () => {
   const script = readFileSync(join(root, 'src/app.js'), 'utf8');
 
   const failureMessage = readFunction(script, 'installationFailureMessage');
@@ -152,28 +162,32 @@ test('failed installation feedback requires dependency rechecks and distinguishe
   )();
   assert.match(busyMessage, /另一项初始化或安装任务正在执行/);
   assert.match(busyMessage, /重新运行 pnpm run init/);
+  assert.match(busyMessage, /当前输入已保留/);
   assert.doesNotMatch(busyMessage, /自动回滚|副作用/);
+  assert.doesNotMatch(busyMessage, /敏感字段已清空|重新输入凭据/);
 
-  const invalidate = readFunction(script, 'invalidateDependencyChecks');
-  const invalidated = Function(`
+  const diagnosticsFunction = readFunction(script, 'installationFailureDiagnostics');
+  const diagnostics = Function(`
     'use strict';
-    let databaseCheckPassed = true;
-    let redisCheckPassed = true;
-    let updates = 0;
-    const databaseResult = { textContent: '连接成功', dataset: { tone: 'success' } };
-    const redisResult = { textContent: '连接成功', dataset: { tone: 'success' } };
-    const updateApplyButton = () => { updates += 1; };
-    ${invalidate}
-    invalidateDependencyChecks();
-    return { databaseCheckPassed, redisCheckPassed, updates, databaseResult, redisResult };
+    const stepLabels = { database: '验证数据库' };
+    ${failureMessage}
+    ${diagnosticsFunction}
+    return installationFailureDiagnostics({
+      id: 'install-job-1',
+      failureStep: 'database',
+      currentStep: 'failed',
+      errorCode: 10001,
+      errorKey: 'validation_failed',
+      canRetry: true,
+    });
   `)();
-  assert.equal(invalidated.databaseCheckPassed, false);
-  assert.equal(invalidated.redisCheckPassed, false);
-  assert.equal(invalidated.updates, 1);
-  for (const result of [invalidated.databaseResult, invalidated.redisResult]) {
-    assert.match(result.textContent, /重新测试/);
-    assert.equal(result.dataset.tone, 'pending');
-  }
+  assert.deepEqual(diagnostics, {
+    reason: '数据库连接复核未通过，请检查数据库服务和当前配置。当前输入已保留。',
+    step: '验证数据库',
+    errorCode: '10001',
+    errorKey: 'validation_failed',
+    jobId: 'install-job-1',
+  });
 
   const setActions = readFunction(script, 'setFailedJobActions');
   const rollbackOnly = Function(`
@@ -211,10 +225,189 @@ test('failed installation feedback requires dependency rechecks and distinguishe
   assert.equal(announced.attributes['aria-live'], 'assertive');
   assert.equal(announced.focused, true);
 
-  assert.match(script, /finally\s*\{[\s\S]*?clearInstallSecrets\(\);[\s\S]*?invalidateDependencyChecks\(\)/);
-  assert.match(script, /announceApplyError\(installationFailureMessage\(result\)\)/);
-  assert.match(script, /const targetEndpoint = retryJobId[\s\S]*?encodeURIComponent\(retryJobId\)/);
+  const detailedAnnouncement = Function(`
+    'use strict';
+    const attributes = {};
+    let focused = false;
+    const applyResult = {
+      textContent: '',
+      dataset: {},
+      setAttribute(name, value) { attributes[name] = value; },
+      focus() { focused = true; },
+    };
+    ${announce}
+    announceApplyError('安装冲突', true);
+    return { attributes, focused };
+  `)();
+  assert.equal(detailedAnnouncement.attributes.role, 'status');
+  assert.equal(detailedAnnouncement.attributes['aria-live'], 'polite');
+  assert.equal(detailedAnnouncement.focused, false);
+
+  assert.doesNotMatch(script, /敏感字段已清空|重新输入凭据/);
   assert.match(script, /rollbackEndpoint[\s\S]*?encodeURIComponent\(rollbackJobId\)/);
+});
+
+test('a stale retry falls back to apply exactly once and keeps the submitted credentials', async () => {
+  const script = readFileSync(join(root, 'src/app.js'), 'utf8');
+  const postRequest = readFunction(script, 'postInstallationRequest');
+  const submitRequest = readFunction(script, 'submitInstallationRequest');
+
+  const recovered = await Function(`
+    'use strict';
+    const retryEndpoint = '/api/system/install/v1/retry';
+    const applyEndpoint = '/api/system/install/v1/apply';
+    let cleared = 0;
+    const calls = [];
+    const browserLanguageHeader = () => 'zh-CN';
+    const responses = [
+      { ok: false, status: 404, envelope: { code: 30000, message: 'not found' } },
+      { ok: true, status: 202, envelope: { code: 0, data: { id: 'new-job', state: 'running' } } },
+    ];
+    const clearFailedJobActions = () => { cleared += 1; };
+    const fetcher = async (url, options) => {
+      calls.push({ url, body: JSON.parse(options.body) });
+      const next = responses.shift();
+      return { ok: next.ok, status: next.status, json: async () => next.envelope };
+    };
+    ${postRequest}
+    ${submitRequest}
+    return submitInstallationRequest({ admin: { password: 'ADMIN_SECRET' } }, 'old-job', fetcher)
+      .then((outcome) => ({ outcome, calls, cleared }));
+  `)();
+
+  assert.deepEqual(recovered.calls.map(({ url }) => url), [
+    '/api/system/install/v1/retry/old-job',
+    '/api/system/install/v1/apply',
+  ]);
+  assert.deepEqual(recovered.calls.map(({ body }) => body.admin.password), ['ADMIN_SECRET', 'ADMIN_SECRET']);
+  assert.equal(recovered.cleared, 1);
+  assert.equal(recovered.outcome.envelope.data.id, 'new-job');
+
+  const notRecovered = await Function(`
+    'use strict';
+    const retryEndpoint = '/api/system/install/v1/retry';
+    const applyEndpoint = '/api/system/install/v1/apply';
+    let cleared = 0;
+    const calls = [];
+    const browserLanguageHeader = () => 'zh-CN';
+    const clearFailedJobActions = () => { cleared += 1; };
+    const fetcher = async (url) => {
+      calls.push(url);
+      return { ok: false, status: 500, json: async () => ({ code: 50000 }) };
+    };
+    ${postRequest}
+    ${submitRequest}
+    return submitInstallationRequest({ admin: { password: 'ADMIN_SECRET' } }, 'old-job', fetcher)
+      .then((outcome) => ({ outcome, calls, cleared }));
+  `)();
+  assert.deepEqual(notRecovered.calls, ['/api/system/install/v1/retry/old-job']);
+  assert.equal(notRecovered.cleared, 0);
+});
+
+test('completed reconciliation clears secrets only after status confirms installation', async () => {
+  const script = readFileSync(join(root, 'src/app.js'), 'utf8');
+  const clearSensitive = readFunction(script, 'clearSensitiveFields');
+  const clearSecrets = readFunction(script, 'clearInstallSecrets');
+  const commitCompleted = readFunction(script, 'commitCompletedInstallation');
+  const reconcileCompleted = readFunction(script, 'reconcileCompletedInstallation');
+
+  const run = async (statusResult) => Function(`
+    'use strict';
+    const makeInput = (value) => ({ value });
+    const databaseInputs = [makeInput('DB_SECRET'), makeInput('DSN_SECRET')];
+    const redisInputs = [makeInput('REDIS_SECRET')];
+    const adminInputs = [makeInput('ADMIN_SECRET'), makeInput('ADMIN_SECRET')];
+    const makeForm = (inputs) => ({ querySelectorAll: () => inputs });
+    const databaseForm = makeForm(databaseInputs);
+    const redisForm = makeForm(redisInputs);
+    const adminForm = makeForm(adminInputs);
+    const events = [];
+    const clearFailedJobActions = () => events.push('clear-actions');
+    const renderApplyResult = () => events.push('render-result');
+    const renderStatus = (status) => events.push(status.installed ? 'render-installed' : 'render-uninstalled');
+    ${clearSensitive}
+    ${clearSecrets}
+    ${commitCompleted}
+    ${reconcileCompleted}
+    const statusResult = ${JSON.stringify(statusResult)};
+    const statusReader = async () => {
+      if (statusResult === '__throw__') throw new Error('status unavailable');
+      return statusResult;
+    };
+    return reconcileCompletedInstallation(statusReader)
+      .then((completed) => ({ completed, error: '', values: [...databaseInputs, ...redisInputs, ...adminInputs].map((input) => input.value), events }))
+      .catch((error) => ({ completed: false, error: error.message, values: [...databaseInputs, ...redisInputs, ...adminInputs].map((input) => input.value), events }));
+  `)();
+
+  const confirmed = await run({ installed: true, selectedUi: 'ele', mode: 'dev' });
+  assert.equal(confirmed.completed, true);
+  assert.deepEqual(confirmed.values, ['', '', '', '', '']);
+  assert.deepEqual(confirmed.events, ['clear-actions', 'render-installed']);
+
+  const unconfirmed = await run({ installed: false, state: 'ui_prepared' });
+  assert.equal(unconfirmed.completed, false);
+  assert.deepEqual(unconfirmed.values, ['DB_SECRET', 'DSN_SECRET', 'REDIS_SECRET', 'ADMIN_SECRET', 'ADMIN_SECRET']);
+  assert.deepEqual(unconfirmed.events, []);
+
+  const unavailable = await run('__throw__');
+  assert.equal(unavailable.completed, false);
+  assert.equal(unavailable.error, 'status unavailable');
+  assert.deepEqual(unavailable.values, ['DB_SECRET', 'DSN_SECRET', 'REDIS_SECRET', 'ADMIN_SECRET', 'ADMIN_SECRET']);
+  assert.deepEqual(unavailable.events, []);
+});
+
+test('the public installation flow wires immediate and asynchronous completed states to reconciliation', async () => {
+  const script = readFileSync(join(root, 'src/app.js'), 'utf8');
+  const completionDetected = readFunction(script, 'installationCompletionDetected');
+  const requestInstallation = readFunction(script, 'requestInstallation');
+
+  const run = async (scenario) => Function(`
+    'use strict';
+    return (async () => {
+      const scenario = ${JSON.stringify(scenario)};
+      const events = [];
+      let currentPlan = { mode: 'dev', canBuild: true, canWriteEnv: true, canCleanup: true };
+      let databaseCheckPassed = true;
+      let redisCheckPassed = true;
+      let retryJobId = null;
+      const adminPassword = { value: 'ADMIN_SECRET' };
+      const adminPasswordConfirm = { value: 'ADMIN_SECRET', focus() {} };
+      const adminUsername = { value: 'fixture_admin' };
+      const modeChoice = { value: 'dev' };
+      const localeMode = { value: 'single' };
+      const localeChoice = { value: 'zh-CN' };
+      const applyButton = { disabled: false, textContent: '' };
+      const applyResult = { textContent: '', dataset: {}, setAttribute() {}, focus() {} };
+      const clearInstallationFailure = () => events.push('clear-diagnostics');
+      const setProgress = () => events.push('progress-reset');
+      const announceApplyError = () => events.push('announce-failure');
+      const dependencyFormValues = () => ({ database: {}, redis: {} });
+      const submitInstallationRequest = async () => scenario === 'immediate'
+        ? { response: { ok: false, status: 409 }, envelope: { code: 10006, traceId: 'completed-request' } }
+        : { response: { ok: true, status: 202 }, envelope: { code: 0, data: { id: 'completed-job', state: 'running' } } };
+      const reconcileCompletedInstallation = async () => { events.push('reconcile-completed'); return true; };
+      const renderInstallationFailure = () => events.push('render-failure');
+      const renderJobProgress = () => events.push('render-progress');
+      const pollInstallation = async () => ({ id: 'completed-job', state: 'failed', errorKey: 'installation_completed' });
+      const setFailedJobActions = () => events.push('set-failed-actions');
+      const installationFailureMessage = () => 'failure';
+      const commitCompletedInstallation = () => events.push('commit-direct');
+      const updateApplyButton = () => events.push('update-button');
+      ${completionDetected}
+      ${requestInstallation}
+      await requestInstallation({ preventDefault() {} });
+      return { events, password: adminPassword.value };
+    })();
+  `)();
+
+  const immediate = await run('immediate');
+  assert.equal(immediate.events.filter((event) => event === 'reconcile-completed').length, 1);
+  assert.doesNotMatch(immediate.events.join(','), /announce-failure|render-failure|set-failed-actions/);
+
+  const asynchronous = await run('asynchronous');
+  assert.deepEqual(asynchronous.events.filter((event) => event === 'reconcile-completed'), ['reconcile-completed']);
+  assert.match(asynchronous.events.join(','), /render-progress.*reconcile-completed/);
+  assert.doesNotMatch(asynchronous.events.join(','), /announce-failure|render-failure|set-failed-actions/);
 });
 
 test('editing one dependency marks only its own successful check as stale', () => {

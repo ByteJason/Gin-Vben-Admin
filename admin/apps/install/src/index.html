@@ -145,7 +145,7 @@
           <section id="connection-panel" class="connection-panel" aria-labelledby="connection-title" hidden>
             <div class="capability-panel__heading">
               <h3 id="connection-title">配置服务连接</h3>
-              <span>敏感值不写入恢复日志</span>
+              <span>敏感值仅保留在当前页面，不写入恢复日志</span>
             </div>
             <div class="connection-grid">
             <form id="database-form" class="connection-form connection-form--database">
@@ -236,6 +236,26 @@
               <div class="install-action">
                 <button id="apply-button" class="primary-button" type="submit" disabled>开始安装</button>
                 <div id="apply-result" class="connection-result install-feedback" role="status" aria-live="polite" aria-atomic="true" tabindex="-1"></div>
+                <section id="install-failure-details" class="install-failure-details" role="alert" aria-live="assertive" aria-atomic="true" tabindex="-1" aria-labelledby="failure-details-title" hidden>
+                  <div class="failure-details__heading">
+                    <div>
+                      <span>诊断信息</span>
+                      <h5 id="failure-details-title">安装失败原因</h5>
+                    </div>
+                    <strong>输入内容已保留</strong>
+                  </div>
+                  <p id="failure-reason" class="failure-reason">—</p>
+                  <dl class="failure-diagnostics">
+                    <div><dt>失败位置</dt><dd id="failure-step">—</dd></div>
+                    <div><dt>错误码</dt><dd><code id="failure-error-code">—</code></dd></div>
+                    <div><dt>错误标识</dt><dd><code id="failure-error-key">—</code></dd></div>
+                    <div><dt>任务／请求 ID</dt><dd><code id="failure-job-id">—</code></dd></div>
+                  </dl>
+                  <p class="failure-location">
+                    当前页面直接显示公开原因；更详细的定位可在运行 <code>go run ./cmd/api/main.go</code>
+                    的服务端终端中按任务 ID 查找 <code>installation.job.failed</code>。
+                  </p>
+                </section>
                 <button id="rollback-button" class="secondary-button" type="button" hidden>
                   回滚本次失败的安装
                 </button>

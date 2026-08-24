@@ -716,6 +716,10 @@ components:
           type: integer
         errorKey:
           type: string
+        failureStep:
+          type: string
+          enum: [request, coordination, plan, database, redis, recovery, journal, schema, identity, environment, marker, lock, complete]
+          description: 凭据无关的失败位置，仅在 state 为 failed 时返回
         canRetry:
           type: boolean
         canRollback:

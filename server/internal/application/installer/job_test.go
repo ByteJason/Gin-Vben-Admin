@@ -1,8 +1,11 @@
 package installer
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -99,6 +102,80 @@ func TestApplyJobRetryRequiresFailedJob(t *testing.T) {
 	}
 	if retry.ID == job.ID || retry.State != JobRunning {
 		t.Fatalf("retry job = %#v", retry)
+	}
+}
+
+func TestApplyJobFailureReportsCredentialFreeFailureStep(t *testing.T) {
+	runner := &jobRunnerStub{run: func(_ context.Context, _ ApplyRequest, report func(string)) (ApplyResult, error) {
+		report("plan")
+		return ApplyResult{}, ErrPreflightFailed
+	}}
+	service := NewApplyJobService(runner)
+	job, err := service.Start(context.Background(), validApplyRequest())
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	failed := waitForJob(t, service, job.ID, JobFailed)
+	if failed.CurrentStep != "failed" || failed.FailureStep != "database" {
+		t.Fatalf("failed job steps = current %q failure %q, want failed/database", failed.CurrentStep, failed.FailureStep)
+	}
+	if failed.ErrorCode != 10001 || failed.ErrorKey != "validation_failed" {
+		t.Fatalf("failed job public error = %d/%q", failed.ErrorCode, failed.ErrorKey)
+	}
+}
+
+func TestApplyJobBusyFailureReportsCoordinationStep(t *testing.T) {
+	runner := &jobRunnerStub{run: func(context.Context, ApplyRequest, func(string)) (ApplyResult, error) {
+		return ApplyResult{}, ErrApplyBusy
+	}}
+	service := NewApplyJobService(runner)
+	job, err := service.Start(context.Background(), validApplyRequest())
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	failed := waitForJob(t, service, job.ID, JobFailed)
+	if failed.FailureStep != "coordination" || failed.ErrorKey != "installation_running" {
+		t.Fatalf("busy failed job = %#v", failed)
+	}
+}
+
+func TestApplyJobFailurePrefersExplicitStageOverProgressInference(t *testing.T) {
+	runner := &jobRunnerStub{run: func(_ context.Context, _ ApplyRequest, report func(string)) (ApplyResult, error) {
+		report("plan")
+		return ApplyResult{}, withApplyFailureStage("journal", ErrPreflightFailed)
+	}}
+	service := NewApplyJobService(runner)
+	job, err := service.Start(context.Background(), validApplyRequest())
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	failed := waitForJob(t, service, job.ID, JobFailed)
+	if failed.FailureStep != "journal" {
+		t.Fatalf("failure step = %q, want exact journal stage instead of inferred database", failed.FailureStep)
+	}
+}
+
+func TestApplyJobFailureWritesCredentialFreeStructuredLog(t *testing.T) {
+	var output bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&output, nil))
+	runner := &jobRunnerStub{run: func(_ context.Context, _ ApplyRequest, report func(string)) (ApplyResult, error) {
+		report("plan")
+		return ApplyResult{}, errors.New("TOP_SECRET_VALUE")
+	}}
+	service := NewApplyJobServiceWithLogger(runner, logger)
+	job, err := service.Start(context.Background(), validApplyRequest())
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	waitForJob(t, service, job.ID, JobFailed)
+	encoded := output.String()
+	for _, expected := range []string{"installation.job.failed", job.ID, "failure_step", "database", "error_code", "50000", "internal_error"} {
+		if !strings.Contains(encoded, expected) {
+			t.Fatalf("failure log missing %q: %s", expected, encoded)
+		}
+	}
+	if strings.Contains(encoded, "TOP_SECRET_VALUE") {
+		t.Fatalf("failure log exposed runner error: %s", encoded)
 	}
 }
 

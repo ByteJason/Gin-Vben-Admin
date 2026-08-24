@@ -23,6 +23,43 @@ var (
 	ErrApplyRollback    = errors.New("installation rollback failed")
 )
 
+type applyStageError struct {
+	stage string
+	err   error
+}
+
+func (e *applyStageError) Error() string {
+	return fmt.Sprintf("installation stage %s: %v", e.stage, e.err)
+}
+
+func (e *applyStageError) Unwrap() error {
+	return e.err
+}
+
+func withApplyFailureStage(stage string, err error) error {
+	if err == nil || !validApplyFailureStage(stage) {
+		return err
+	}
+	return &applyStageError{stage: stage, err: err}
+}
+
+func applyFailureStage(err error) string {
+	var staged *applyStageError
+	if errors.As(err, &staged) && validApplyFailureStage(staged.stage) {
+		return staged.stage
+	}
+	return ""
+}
+
+func validApplyFailureStage(stage string) bool {
+	switch stage {
+	case "request", "coordination", "plan", "database", "redis", "recovery", "journal", "schema", "identity", "environment", "marker", "lock", "complete":
+		return true
+	default:
+		return false
+	}
+}
+
 type AdminAccount struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
@@ -167,57 +204,57 @@ func (s *ApplyService) ApplyWithProgress(ctx context.Context, request ApplyReque
 
 func (s *ApplyService) apply(ctx context.Context, request ApplyRequest, report func(string)) (result ApplyResult, returnErr error) {
 	if s == nil || s.markers == nil || s.plans == nil || s.dependencies == nil || s.schemas == nil || s.identity == nil || s.environment == nil {
-		return ApplyResult{}, errors.New("installation apply service is not configured")
+		return ApplyResult{}, withApplyFailureStage("plan", errors.New("installation apply service is not configured"))
 	}
 	if !s.mutex.TryLock() {
-		return ApplyResult{}, ErrApplyBusy
+		return ApplyResult{}, withApplyFailureStage("coordination", ErrApplyBusy)
 	}
 	defer s.mutex.Unlock()
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
-		return ApplyResult{}, err
+		return ApplyResult{}, withApplyFailureStage("request", err)
 	}
 	mode, err := validateApplyRequest(request)
 	if err != nil {
-		return ApplyResult{}, err
+		return ApplyResult{}, withApplyFailureStage("request", err)
 	}
 	databaseTarget, err := databaseTargetDigest(request.Database)
 	if err != nil {
-		return ApplyResult{}, ErrInvalidApply
+		return ApplyResult{}, withApplyFailureStage("request", ErrInvalidApply)
 	}
 	releaseOwnership, err := s.acquireApplyOwnership(ctx)
 	if err != nil {
-		return ApplyResult{}, err
+		return ApplyResult{}, withApplyFailureStage("coordination", err)
 	}
 	defer func() {
 		if releaseErr := releaseOwnership(); releaseErr != nil {
 			result = ApplyResult{}
-			returnErr = errors.Join(returnErr, ErrPreflightFailed)
+			returnErr = errors.Join(returnErr, withApplyFailureStage("coordination", ErrPreflightFailed))
 		}
 	}()
 	_, installed, err := s.markers.Load(ctx)
 	if err != nil {
-		return ApplyResult{}, errors.New("read installation lock")
+		return ApplyResult{}, withApplyFailureStage("lock", errors.New("read installation lock"))
 	}
 	if installed {
 		_ = s.reconcileCompleted(ctx)
-		return ApplyResult{}, ErrAlreadyInstalled
+		return ApplyResult{}, withApplyFailureStage("lock", ErrAlreadyInstalled)
 	}
 	var interrupted *ApplyTransaction
 	if s.journal != nil {
 		if transaction, exists, err := s.journal.Load(ctx); err != nil {
 			if errors.Is(err, ErrApplyBusy) {
-				return ApplyResult{}, ErrApplyBusy
+				return ApplyResult{}, withApplyFailureStage("coordination", ErrApplyBusy)
 			}
-			return ApplyResult{}, ErrPreflightFailed
+			return ApplyResult{}, withApplyFailureStage("journal", ErrPreflightFailed)
 		} else if exists {
 			if err := transaction.Validate(); err != nil {
-				return ApplyResult{}, ErrPreflightFailed
+				return ApplyResult{}, withApplyFailureStage("journal", ErrPreflightFailed)
 			}
 			if transaction.DatabaseTarget != databaseTarget {
-				return ApplyResult{}, ErrPreflightFailed
+				return ApplyResult{}, withApplyFailureStage("journal", ErrPreflightFailed)
 			}
 			interrupted = &transaction
 		}
@@ -226,29 +263,29 @@ func (s *ApplyService) apply(ctx context.Context, request ApplyRequest, report f
 	steps := make([]ApplyStep, 0, 7)
 	plan, err := s.plans.Plan(ctx, PlanRequest{Mode: string(mode)})
 	if err != nil || !validProfile(InstallationProfile{SelectedUI: plan.SelectedUI}) || plan.Mode != mode || !plan.CanCleanup || !plan.CanBuild || !plan.CanWriteEnv {
-		return ApplyResult{}, ErrPreflightFailed
+		return ApplyResult{}, withApplyFailureStage("plan", ErrPreflightFailed)
 	}
 	steps = appendCompleted(steps, "plan")
 	reportApplyStep(report, "plan")
 
 	database, err := s.dependencies.CheckDatabase(ctx, request.Database)
 	if err != nil || !database.OK {
-		return ApplyResult{}, ErrPreflightFailed
+		return ApplyResult{}, withApplyFailureStage("database", ErrPreflightFailed)
 	}
 	steps = appendCompleted(steps, "database")
 	reportApplyStep(report, "database")
 	redis, err := s.dependencies.CheckRedis(ctx, request.Redis)
 	if err != nil || !redis.OK {
-		return ApplyResult{}, ErrPreflightFailed
+		return ApplyResult{}, withApplyFailureStage("redis", ErrPreflightFailed)
 	}
 	steps = appendCompleted(steps, "redis")
 	reportApplyStep(report, "redis")
 	if interrupted != nil {
 		if interrupted.SelectedUI != plan.SelectedUI {
-			return ApplyResult{}, ErrPreflightFailed
+			return ApplyResult{}, withApplyFailureStage("recovery", ErrPreflightFailed)
 		}
 		if err := s.recoverInterrupted(ctx, request.Database, interrupted); err != nil {
-			return ApplyResult{}, err
+			return ApplyResult{}, withApplyFailureStage("recovery", err)
 		}
 	}
 
@@ -256,7 +293,7 @@ func (s *ApplyService) apply(ctx context.Context, request ApplyRequest, report f
 	if s.journal != nil {
 		id, err := newJobID()
 		if err != nil {
-			return ApplyResult{}, errors.New("create installation transaction")
+			return ApplyResult{}, withApplyFailureStage("journal", errors.New("create installation transaction"))
 		}
 		transaction = &ApplyTransaction{
 			Schema: ApplyTransactionSchema, Owner: ApplyTransactionOwner, ID: id,
@@ -265,25 +302,25 @@ func (s *ApplyService) apply(ctx context.Context, request ApplyRequest, report f
 			UpdatedAt: s.now().UTC(),
 		}
 		if err := transaction.Validate(); err != nil {
-			return ApplyResult{}, ErrPreflightFailed
+			return ApplyResult{}, withApplyFailureStage("journal", ErrPreflightFailed)
 		}
 		if err := s.journal.Create(ctx, *transaction); err != nil {
 			if errors.Is(err, ErrApplyBusy) {
-				return ApplyResult{}, ErrApplyBusy
+				return ApplyResult{}, withApplyFailureStage("coordination", ErrApplyBusy)
 			}
-			return ApplyResult{}, errors.New("create installation transaction journal")
+			return ApplyResult{}, withApplyFailureStage("journal", errors.New("create installation transaction journal"))
 		}
 	}
 
 	if _, err := s.schemas.Up(ctx, request.Database); err != nil {
 		s.persistFailure(ctx, transaction, nil)
-		return ApplyResult{}, errors.New("install database schema")
+		return ApplyResult{}, withApplyFailureStage("schema", errors.New("install database schema"))
 	}
 	steps = appendCompleted(steps, "schema")
 	reportApplyStep(report, "schema")
 	if err := s.advanceTransaction(ctx, transaction, "identity", "schema"); err != nil {
 		s.persistFailure(ctx, transaction, nil)
-		return ApplyResult{}, err
+		return ApplyResult{}, withApplyFailureStage("journal", err)
 	}
 	s.pending = &pendingRollback{transaction: transaction}
 	identityReceipt := IdentityReceipt{}
@@ -297,7 +334,7 @@ func (s *ApplyService) apply(ctx context.Context, request ApplyRequest, report f
 			if err := s.journal.Update(ctx, *transaction); err != nil {
 				s.persistFailure(ctx, transaction, nil)
 				s.pending = nil
-				return ApplyResult{}, errors.New("prepare identity recovery journal")
+				return ApplyResult{}, withApplyFailureStage("journal", errors.New("prepare identity recovery journal"))
 			}
 			s.pending.identity = &identityReceipt
 			created, initializeErr := prepared.InitializeWithReference(ctx, request.Database, request.Admin, identityReceipt.Reference)
@@ -851,9 +888,9 @@ func (s *ApplyService) rollback(_ context.Context, environment *EnvironmentRecei
 
 func applyFailure(stage string, rollbackErr error) error {
 	if rollbackErr != nil {
-		return fmt.Errorf("%w at %s: %w", ErrApplyFailed, stage, ErrApplyRollback)
+		return withApplyFailureStage(stage, fmt.Errorf("%w at %s: %w", ErrApplyFailed, stage, ErrApplyRollback))
 	}
-	return fmt.Errorf("%w at %s", ErrApplyFailed, stage)
+	return withApplyFailureStage(stage, fmt.Errorf("%w at %s", ErrApplyFailed, stage))
 }
 
 func receiptPointer[T comparable](receipt T) *T {

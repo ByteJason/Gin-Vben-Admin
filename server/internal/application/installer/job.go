@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -37,6 +38,7 @@ type ApplyJob struct {
 	InstalledAt *time.Time        `json:"installedAt,omitempty"`
 	ErrorCode   int               `json:"errorCode,omitempty"`
 	ErrorKey    string            `json:"errorKey,omitempty"`
+	FailureStep string            `json:"failureStep,omitempty"`
 	CanRetry    bool              `json:"canRetry"`
 	CanRollback bool              `json:"canRollback"`
 	LastUpdated time.Time         `json:"lastUpdated"`
@@ -74,6 +76,7 @@ type RollbackAvailability interface {
 // goroutine while publishing a bounded, credential-free progress snapshot.
 type ApplyJobService struct {
 	runner ProgressApplyRunner
+	logger *slog.Logger
 	now    func() time.Time
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -87,8 +90,15 @@ type ApplyJobService struct {
 }
 
 func NewApplyJobService(runner ProgressApplyRunner) *ApplyJobService {
+	return NewApplyJobServiceWithLogger(runner, slog.Default())
+}
+
+func NewApplyJobServiceWithLogger(runner ProgressApplyRunner, logger *slog.Logger) *ApplyJobService {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &ApplyJobService{runner: runner, now: time.Now, ctx: ctx, cancel: cancel, jobs: make(map[string]ApplyJob)}
+	return &ApplyJobService{runner: runner, logger: logger, now: time.Now, ctx: ctx, cancel: cancel, jobs: make(map[string]ApplyJob)}
 }
 
 func (s *ApplyJobService) Start(ctx context.Context, request ApplyRequest) (ApplyJob, error) {
@@ -231,6 +241,7 @@ func (s *ApplyJobService) run(id string, request ApplyRequest) {
 	if err != nil {
 		job.State = JobFailed
 		job.ErrorCode, job.ErrorKey, job.CanRetry = publicJobError(err)
+		job.FailureStep = publicJobFailureStep(err, job.CurrentStep)
 		job.CanRollback = false
 		if _, ok := s.runner.(RollbackRunner); ok && errors.Is(err, ErrApplyRollback) {
 			job.CanRollback = true
@@ -242,6 +253,14 @@ func (s *ApplyJobService) run(id string, request ApplyRequest) {
 			job.CanRetry = false
 		}
 		job.CurrentStep = "failed"
+		s.logger.Error("installation.job.failed",
+			"job_id", job.ID,
+			"failure_step", job.FailureStep,
+			"error_code", job.ErrorCode,
+			"error_key", job.ErrorKey,
+			"can_retry", job.CanRetry,
+			"can_rollback", job.CanRollback,
+		)
 		s.jobs[id] = job
 		if s.active == id {
 			s.active = ""
@@ -260,6 +279,7 @@ func (s *ApplyJobService) run(id string, request ApplyRequest) {
 	}
 	job.ErrorCode = 0
 	job.ErrorKey = ""
+	job.FailureStep = ""
 	job.CanRetry = false
 	job.CanRollback = false
 	s.jobs[id] = job
@@ -394,6 +414,30 @@ func publicJobError(err error) (int, string, bool) {
 	default:
 		return 50000, "internal_error", true
 	}
+}
+
+func publicJobFailureStep(err error, lastCompleted string) string {
+	if stage := applyFailureStage(err); stage != "" {
+		return stage
+	}
+	switch {
+	case errors.Is(err, ErrApplyBusy):
+		return "coordination"
+	case errors.Is(err, ErrInvalidApply):
+		return "request"
+	case errors.Is(err, ErrAlreadyInstalled):
+		return "lock"
+	}
+	return map[string]string{
+		"queued":      "plan",
+		"plan":        "database",
+		"database":    "redis",
+		"redis":       "schema",
+		"schema":      "identity",
+		"identity":    "environment",
+		"environment": "lock",
+		"lock":        "complete",
+	}[lastCompleted]
 }
 
 func cloneApplyJob(job ApplyJob) ApplyJob {

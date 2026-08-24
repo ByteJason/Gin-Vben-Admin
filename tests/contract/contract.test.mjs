@@ -157,6 +157,9 @@ test('installation contract exposes one credential-write-only apply operation', 
   assert.match(install, /\/api\/system\/install\/v1\/progress\/{id}:/);
   assert.match(install, /\/api\/system\/install\/v1\/retry\/{id}:/);
   assert.match(install, /ApplyJob/);
+  const jobSchema = install.slice(install.indexOf('    ApplyJob:'), install.indexOf('    RollbackRequest:'));
+  assert.match(jobSchema, /failureStep:[\s\S]*?enum: \[request, coordination, plan, database, redis, recovery, journal, schema, identity, environment, marker, lock, complete\]/);
+  assert.doesNotMatch(jobSchema, /password|dsn|secret|rawError/i);
   assert.match(install, /AdminAccount/);
   const applySchema = install.slice(install.indexOf('    ApplyRequest:'), install.indexOf('    AdminAccount:'));
   assert.match(applySchema, /required: \[mode, database, redis, admin\]/);
