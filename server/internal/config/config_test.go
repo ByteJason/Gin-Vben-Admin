@@ -266,7 +266,7 @@ func TestLoadReadsRootDotEnvBetweenYAMLAndProcessEnvironment(t *testing.T) {
 
 func TestInstallConfigSeparatesInstallerStateAndWorkspaceRoot(t *testing.T) {
 	cfg := Default()
-	if got, want := filepath.Clean(cfg.Install.StateDir), filepath.Clean("../admin/apps/install"); got != want {
+	if got, want := filepath.Clean(cfg.Install.StateDir), filepath.Clean("../.runtime/install"); got != want {
 		t.Fatalf("default install.state_dir = %q, want %q", got, want)
 	}
 	if got, want := filepath.Clean(cfg.Install.WorkspaceRoot), filepath.Clean(".."); got != want {

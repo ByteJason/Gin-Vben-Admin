@@ -8,7 +8,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
@@ -168,12 +167,10 @@ func memoryMetric() HostMetric {
 }
 
 func diskMetric(path string) HostMetric {
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs(path, &stat); err != nil {
+	total, free, err := diskSpace(path)
+	if err != nil {
 		return HostMetric{Status: StatusDegraded, Message: "disk metrics unavailable"}
 	}
-	total := int64(stat.Blocks) * int64(stat.Bsize)
-	free := int64(stat.Bavail) * int64(stat.Bsize)
 	used := total - free
 	if used < 0 {
 		used = 0

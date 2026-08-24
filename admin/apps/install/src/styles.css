@@ -659,6 +659,34 @@ h1 {
   border-color: #aebbd0;
 }
 
+.next-steps {
+  margin-top: 28px;
+  padding: 20px;
+  color: var(--ink);
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+  border-radius: 12px;
+}
+
+.next-steps[hidden] {
+  display: none;
+}
+
+.next-steps h3,
+.next-steps p {
+  margin: 0 0 12px;
+}
+
+.next-steps pre {
+  margin: 0;
+  padding: 14px;
+  overflow-x: auto;
+  color: var(--ink);
+  background: var(--surface);
+  border-radius: 9px;
+  line-height: 1.6;
+}
+
 footer {
   padding: 24px 0 36px;
   color: var(--muted);

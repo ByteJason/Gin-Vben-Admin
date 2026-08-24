@@ -194,7 +194,9 @@ test('installation workspace smoke and runtime artifacts stay cross-platform', (
   const smoke = runNode('admin/apps/install/tests/smoke.test.mjs');
   assert.equal(smoke.status, 0, smoke.stdout + smoke.stderr);
   const ignore = readFileSync(join(root, '.gitignore'), 'utf8');
-  assert.match(ignore, /\/admin\/apps\/install\/\.installed/);
+  assert.match(ignore, /^\/\.runtime\/$/m);
+  const config = readFileSync(join(root, 'server/configs/server.example.yaml'), 'utf8');
+  assert.match(config, /state_dir:\s+\.\.\/\.runtime\/install/);
   assert.match(ignore, /\*\*\/dist\//);
 });
 
@@ -499,11 +501,12 @@ test('CI covers the three host platforms and core gates', () => {
 test('dev orchestrator exposes a cross-platform check mode', () => {
   const source = readFileSync(join(root, 'scripts/dev.mjs'), 'utf8');
   assert.match(source, /shell:\s*false/);
-  const check = runNode('scripts/dev.mjs', '--check', '--ui', 'antd');
+  const check = runNode('scripts/dev.mjs', '--check');
   assert.equal(check.status, 0, check.stdout + check.stderr);
   assert.match(check.stdout, /DEV_CHECK_OK/);
   assert.match(check.stdout, /go -C server run \.\/cmd\/api/);
-  assert.match(check.stdout, /pnpm --dir admin run dev:antd/);
+  assert.match(check.stdout, /pnpm --dir admin run dev/);
+  assert.doesNotMatch(check.stdout, /--filter|dev:(?:antd|ele|naive)/);
 });
 
 test('public surface documents config topologies and explicit migrations', () => {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	installstate "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/installstate"
@@ -47,6 +48,13 @@ type InstallationActivity interface {
 	InstallationActive() bool
 }
 
+// CompletionReconciler removes only transaction-owned completion artifacts
+// left after the marker commit point. Status treats failures as housekeeping
+// failures: the installation remains visible and a later attempt retries.
+type CompletionReconciler interface {
+	ReconcileCompleted(context.Context) error
+}
+
 type activityProfileProvider struct {
 	profiles ProfileProvider
 	activity InstallationActivity
@@ -85,9 +93,13 @@ type Status struct {
 }
 
 type StatusService struct {
-	markers  MarkerReader
-	profiles ProfileProvider
-	legacy   bool
+	markers    MarkerReader
+	profiles   ProfileProvider
+	reconciler CompletionReconciler
+	legacy     bool
+
+	reconcileMu       sync.Mutex
+	reconcileComplete bool
 }
 
 // NewStatusService keeps marker-only embeddings compatible. New initializer
@@ -100,6 +112,13 @@ func NewStatusServiceWithProfile(markers MarkerReader, profiles ProfileProvider)
 	return &StatusService{markers: markers, profiles: profiles}
 }
 
+// NewStatusServiceWithProfileAndReconciler enables bounded completion
+// housekeeping from the installed status path. A transient cleanup error is
+// retried without hiding the already-committed marker from callers.
+func NewStatusServiceWithProfileAndReconciler(markers MarkerReader, profiles ProfileProvider, reconciler CompletionReconciler) *StatusService {
+	return &StatusService{markers: markers, profiles: profiles, reconciler: reconciler}
+}
+
 func (s *StatusService) Status(ctx context.Context) (Status, error) {
 	if s == nil || s.markers == nil {
 		return Status{}, errors.New("installation marker reader is not configured")
@@ -107,6 +126,9 @@ func (s *StatusService) Status(ctx context.Context) (Status, error) {
 	marker, markerExists, err := s.markers.Load(ctx)
 	if err != nil {
 		return Status{}, fmt.Errorf("read installation marker: %w", err)
+	}
+	if markerExists {
+		s.reconcileCompletion(ctx)
 	}
 	if s.legacy {
 		return statusFromLegacyMarker(marker, markerExists)
@@ -150,6 +172,27 @@ func (s *StatusService) Status(ctx context.Context) (Status, error) {
 		Mode:             marker.Mode,
 		InstalledAt:      &installedAt,
 	}, nil
+}
+
+func (s *StatusService) reconcileCompletion(ctx context.Context) {
+	if s.reconciler == nil {
+		return
+	}
+	s.reconcileMu.Lock()
+	defer s.reconcileMu.Unlock()
+	if s.reconcileComplete {
+		return
+	}
+	const attempts = 3
+	for attempt := 0; attempt < attempts; attempt++ {
+		if ctx != nil && ctx.Err() != nil {
+			return
+		}
+		if err := s.reconciler.ReconcileCompleted(ctx); err == nil {
+			s.reconcileComplete = true
+			return
+		}
+	}
 }
 
 func statusFromLegacyMarker(marker installstate.Marker, exists bool) (Status, error) {

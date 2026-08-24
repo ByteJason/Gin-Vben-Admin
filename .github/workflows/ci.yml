@@ -41,7 +41,7 @@ jobs:
       - name: Run basic verification
         run: node scripts/verify.mjs --scope basic
       - name: Check dev orchestrator
-        run: node scripts/dev.mjs --check --ui antd
+        run: node scripts/dev.mjs --check
 
   contract:
     name: Contract tests
@@ -54,7 +54,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: Run root contract tests
-        run: node --test tests/contract/contract.test.mjs
+        run: node --test tests/contract/contract.test.mjs tests/contract/init_quickstart.test.mjs tests/contract/v100_admin_init_workspace.test.mjs
 
   admin:
     name: Admin UI gates
@@ -80,9 +80,9 @@ jobs:
         run: pnpm --dir admin run test:smoke
       - name: Build management UI templates
         run: |
-          pnpm --dir admin run build:antd
-          pnpm --dir admin run build:ele
-          pnpm --dir admin run build:naive
+          pnpm --dir admin --filter @vben/web-antd run build
+          pnpm --dir admin --filter @vben/web-ele run build
+          pnpm --dir admin --filter @vben/web-naive run build
       - name: Typecheck management UI templates
         run: |
           pnpm --dir admin --filter @vben/web-antd exec vue-tsc --noEmit --skipLibCheck

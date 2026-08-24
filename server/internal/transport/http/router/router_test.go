@@ -104,10 +104,42 @@ func TestRouterMountsInstallerBundleWithoutCatchingAPIRoutes(t *testing.T) {
 		{path: "/api/client/v1/ping", status: http.StatusOK},
 	} {
 		request := httptest.NewRequest(http.MethodGet, item.path, nil)
+		request.RemoteAddr = "127.0.0.1:43210"
+		request.Host = "127.0.0.1:8080"
 		response := httptest.NewRecorder()
 		router.ServeHTTP(response, request)
 		if response.Code != item.status {
 			t.Fatalf("GET %s status = %d, want %d; body=%s", item.path, response.Code, item.status, response.Body.String())
+		}
+	}
+}
+
+func TestRouterRestrictsInstallerPageAndAPIToLoopbackRequests(t *testing.T) {
+	assets := fstest.MapFS{
+		"install/index.html": &fstest.MapFile{Data: []byte("<h1>installer</h1>")},
+	}
+	router := NewRouterWithComponents(nil, nil, nil, nil, assets)
+
+	for _, path := range []string{"/install", "/api/system/install/v1/status"} {
+		remote := httptest.NewRequest(http.MethodGet, path, nil)
+		remote.RemoteAddr = "192.0.2.30:43210"
+		remote.Host = "127.0.0.1:8080"
+		remoteResponse := httptest.NewRecorder()
+		router.ServeHTTP(remoteResponse, remote)
+		if remoteResponse.Code != http.StatusForbidden {
+			t.Fatalf("remote GET %s status = %d, want 403; body=%s", path, remoteResponse.Code, remoteResponse.Body.String())
+		}
+
+		local := httptest.NewRequest(http.MethodGet, path, nil)
+		local.RemoteAddr = "127.0.0.1:43210"
+		local.Host = "127.0.0.1:8080"
+		localResponse := httptest.NewRecorder()
+		router.ServeHTTP(localResponse, local)
+		if path == "/install" && localResponse.Code != http.StatusOK {
+			t.Fatalf("local GET %s status = %d, want 200; body=%s", path, localResponse.Code, localResponse.Body.String())
+		}
+		if path != "/install" && localResponse.Code == http.StatusForbidden {
+			t.Fatalf("local GET %s was rejected as non-loopback", path)
 		}
 	}
 }

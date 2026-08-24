@@ -3,34 +3,30 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 
+import { buildPnpmCommand } from '../admin/scripts/pnpm-command.mjs';
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const allowedUi = new Set(['antd', 'ele', 'naive']);
-const value = (name, fallback) => {
-  const index = process.argv.indexOf(name);
-  return index >= 0 ? process.argv[index + 1] : fallback;
-};
-const ui = value('--ui', 'antd');
 const checkOnly = process.argv.includes('--check');
 const help = process.argv.includes('--help') || process.argv.includes('-h');
 
 if (help) {
-  console.log('Usage: node ./scripts/dev.mjs [--ui antd|ele|naive] [--check]');
+  console.log('Usage: node ./scripts/dev.mjs [--check]');
   process.exit(0);
 }
 
-if (!allowedUi.has(ui)) {
-  console.error(`unsupported --ui: ${ui}`);
+const invalid = process.argv.slice(2).find((argument) => argument !== '--check');
+if (invalid) {
+  console.error(`unsupported argument: ${invalid}`);
   process.exit(2);
 }
 
-const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
+const adminCommand = buildPnpmCommand(['--dir', 'admin', 'run', 'dev']);
 const commands = [
-  { label: 'server', command: 'go', args: ['-C', 'server', 'run', './cmd/api'] },
-  { label: 'admin', command: pnpm, args: ['--dir', 'admin', 'run', `dev:${ui}`] },
+  { label: 'server', command: 'go', args: ['-C', 'server', 'run', './cmd/api/main.go'] },
+  { label: 'admin', ...adminCommand },
 ];
 
 console.log(`DEV_ROOT=${root}`);
-console.log(`DEV_UI=${ui}`);
 console.log(`DEV_COMMANDS=${commands.map(({ command, args }) => [command, ...args].join(' ')).join(' | ')}`);
 
 if (checkOnly) {

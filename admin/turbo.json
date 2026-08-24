@@ -26,10 +26,6 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**"]
     },
-    "build:analyze": {
-      "dependsOn": ["^build"],
-      "outputs": ["dist/**"]
-    },
     "test:e2e": {},
     "dev": {
       "dependsOn": [],

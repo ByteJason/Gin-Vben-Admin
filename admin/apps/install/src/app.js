@@ -50,6 +50,7 @@ const applyResult = document.querySelector('#apply-result');
 const rollbackButton = document.querySelector('#rollback-button');
 const applyProgress = document.querySelector('#apply-progress');
 const applySteps = document.querySelector('#apply-steps');
+const nextSteps = document.querySelector('#next-steps');
 
 const uiLabels = { antd: 'Ant Design Vue', ele: 'Element Plus', naive: 'Naive UI' };
 const modeLabels = {
@@ -64,7 +65,6 @@ const stepLabels = {
   database: '验证数据库',
   redis: '验证 Redis',
   schema: '执行数据库迁移',
-  assets: '构建并暂存界面资源',
   identity: '初始化管理员',
   environment: '写入运行配置',
   lock: '写入安装锁',
@@ -76,6 +76,7 @@ let currentPlan = null;
 let databaseCheckPassed = false;
 let redisCheckPassed = false;
 let lastFailedJobId = null;
+let statusRefreshTimer = null;
 
 function browserLanguageHeader() {
   const languages = Array.isArray(navigator.languages) && navigator.languages.length
@@ -127,6 +128,7 @@ async function loadCapabilities() {
 }
 
 function setPending() {
+  clearStatusRefresh();
   title.textContent = '正在检查安装状态';
   badge.textContent = '检查中';
   badge.dataset.tone = 'pending';
@@ -135,20 +137,23 @@ function setPending() {
   details.hidden = true;
   retryButton.hidden = true;
   rollbackButton.hidden = true;
+  nextSteps.hidden = true;
 }
 
 function renderStatus(status) {
+  clearStatusRefresh();
   installerVersion.textContent = status.installerVersion || '—';
   details.hidden = false;
   retryButton.hidden = true;
   rollbackButton.hidden = true;
   message.setAttribute('aria-live', 'polite');
+  nextSteps.hidden = true;
 
   if (status.installed) {
     title.textContent = '系统已完成安装';
     badge.textContent = '已安装';
     badge.dataset.tone = 'success';
-    message.textContent = '安装已完成。请在运行 pnpm run init 的终端按 Ctrl+C 结束 init，重启 Go 服务，然后在 admin/ 执行 pnpm run dev 或 pnpm run build。';
+    message.textContent = '安装已完成。请停止并重新启动服务端，然后在 admin/ 依次运行 pnpm run build 和 pnpm run dev。';
     selectedUi.textContent = uiLabels[status.selectedUi] || status.selectedUi || '—';
     selectedUiSummary.textContent = selectedUi.textContent;
     selectedMode.textContent = modeLabels[status.mode] || status.mode || '—';
@@ -159,6 +164,7 @@ function renderStatus(status) {
     redisCheckPassed = false;
     lastFailedJobId = null;
     rollbackButton.hidden = true;
+    nextSteps.hidden = false;
     title.focus();
     return;
   }
@@ -167,7 +173,7 @@ function renderStatus(status) {
     title.textContent = '安装任务正在执行';
     badge.textContent = '安装中';
     badge.dataset.tone = 'pending';
-    message.textContent = '安装事务仍由本机临时服务持有，请保持 init 终端运行并稍后重新检查。';
+    message.textContent = '安装事务正在执行；若服务中断，重新启动服务端并在此页重新提交即可恢复。';
     selectedUi.textContent = uiLabels[status.selectedUi] || status.selectedUi || '—';
     selectedUiSummary.textContent = selectedUi.textContent;
     selectedMode.textContent = '安装中';
@@ -178,11 +184,30 @@ function renderStatus(status) {
     redisCheckPassed = false;
     lastFailedJobId = null;
     retryButton.hidden = false;
+    scheduleStatusRefresh();
     title.focus();
     return;
   }
 
-  if (status.state === 'inconsistent' || status.state === 'pristine') {
+  if (status.state === 'pristine') {
+    title.textContent = '等待选择管理界面';
+    badge.textContent = '等待初始化';
+    badge.dataset.tone = 'pending';
+    message.textContent = '等待执行 pnpm run init 并选择一个 UI；完成后此页面会自动继续。';
+    details.hidden = true;
+    selectionPanel.hidden = true;
+    connectionPanel.hidden = true;
+    currentPlan = null;
+    databaseCheckPassed = false;
+    redisCheckPassed = false;
+    lastFailedJobId = null;
+    retryButton.hidden = false;
+    scheduleStatusRefresh();
+    title.focus();
+    return;
+  }
+
+  if (status.state === 'inconsistent') {
     renderError('初始化状态不一致，请返回终端运行 pnpm run init -- --check 查看 checkpoint。');
     return;
   }
@@ -206,6 +231,7 @@ function renderStatus(status) {
 }
 
 function renderError(detail = '请确认服务已启动，然后重新检查。') {
+  clearStatusRefresh();
   title.textContent = '安装服务暂不可用';
   badge.textContent = '检查失败';
   badge.dataset.tone = 'error';
@@ -215,6 +241,7 @@ function renderError(detail = '请确认服务已启动，然后重新检查。'
   retryButton.hidden = false;
   selectionPanel.hidden = true;
   connectionPanel.hidden = true;
+  nextSteps.hidden = true;
   title.focus();
 }
 
@@ -401,7 +428,7 @@ function dependencyFormValues() {
 
 function renderApplyResult(result) {
   setProgress(100, '安装完成');
-  applyResult.textContent = '安装已完成。请按 Ctrl+C 结束 init，重启 Go 服务，然后运行 pnpm run dev 或 pnpm run build。';
+  applyResult.textContent = '安装已完成。请重启服务端，然后依次运行 pnpm run build 和 pnpm run dev。';
   applyResult.dataset.tone = 'success';
   applyResult.focus();
   applySteps.replaceChildren();
@@ -410,6 +437,18 @@ function renderApplyResult(result) {
     item.textContent = `${step.id || 'step'}：${step.status || 'completed'}`;
     applySteps.append(item);
   }
+}
+
+function clearStatusRefresh() {
+  if (statusRefreshTimer !== null) {
+    window.clearTimeout(statusRefreshTimer);
+    statusRefreshTimer = null;
+  }
+}
+
+function scheduleStatusRefresh() {
+  clearStatusRefresh();
+  statusRefreshTimer = window.setTimeout(loadStatus, 2000);
 }
 
 function renderJobProgress(job) {

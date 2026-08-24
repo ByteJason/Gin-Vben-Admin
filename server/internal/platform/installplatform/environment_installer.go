@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,8 +37,26 @@ func NewEnvironmentInstaller(store *AtomicEnvStore, stateDir string, randomSourc
 	}
 }
 
-func (s *EnvironmentInstaller) Publish(ctx context.Context, request installer.ApplyRequest, _ installer.AssetReceipt, plan installer.Plan) (installer.EnvironmentReceipt, error) {
+func (s *EnvironmentInstaller) Publish(ctx context.Context, request installer.ApplyRequest, plan installer.Plan) (installer.EnvironmentReceipt, error) {
+	if s == nil || s.random == nil {
+		return installer.EnvironmentReceipt{}, ErrEnvironmentInstallation
+	}
+	referenceSuffix, err := randomHex(s.random, 16)
+	if err != nil {
+		return installer.EnvironmentReceipt{}, ErrEnvironmentInstallation
+	}
+	return s.PublishWithReference(ctx, request, plan, "environment-"+referenceSuffix)
+}
+
+// PublishWithReference publishes a dotenv file tagged with the durable
+// transaction reference that was journaled before this call. The tag and the
+// deterministic backup name let a restarted process compensate a completed
+// write even when no in-memory receipt was returned to the application layer.
+func (s *EnvironmentInstaller) PublishWithReference(ctx context.Context, request installer.ApplyRequest, plan installer.Plan, reference string) (installer.EnvironmentReceipt, error) {
 	if s == nil || s.store == nil || s.random == nil || s.stateDir == "" {
+		return installer.EnvironmentReceipt{}, ErrEnvironmentInstallation
+	}
+	if !validPreparedEnvironmentReference(reference) {
 		return installer.EnvironmentReceipt{}, ErrEnvironmentInstallation
 	}
 	if ctx == nil {
@@ -73,11 +92,6 @@ func (s *EnvironmentInstaller) Publish(ctx context.Context, request installer.Ap
 	if err != nil {
 		return installer.EnvironmentReceipt{}, ErrEnvironmentInstallation
 	}
-	reference, err := randomHex(s.random, 16)
-	if err != nil {
-		return installer.EnvironmentReceipt{}, ErrEnvironmentInstallation
-	}
-
 	values := map[string]string{
 		"APP_UI_ACTIVE":                string(plan.SelectedUI),
 		"APP_UI_MODE":                  string(plan.Mode),
@@ -113,6 +127,7 @@ func (s *EnvironmentInstaller) Publish(ctx context.Context, request installer.Ap
 		"DATABASE_PING_TIMEOUT":        "5s",
 		"DATABASE_READ_POLICY":         string(database.ReadPolicy),
 		"INSTALL_STATE_DIR":            s.stateDir,
+		"INSTALL_TRANSACTION_ID":       reference,
 		"REDIS_DB":                     strconv.Itoa(redis.DB),
 		"REDIS_DIAL_TIMEOUT":           "5s",
 		"REDIS_ENABLED":                "true",
@@ -139,7 +154,7 @@ func (s *EnvironmentInstaller) Publish(ctx context.Context, request installer.Ap
 		}
 	}
 
-	writeReceipt, err := s.store.Write(ctx, values)
+	writeReceipt, err := s.store.WritePrepared(ctx, values, reference)
 	if err != nil {
 		return installer.EnvironmentReceipt{}, ErrEnvironmentInstallation
 	}
@@ -151,7 +166,45 @@ func (s *EnvironmentInstaller) Publish(ctx context.Context, request installer.Ap
 	}
 	s.receipts[reference] = writeReceipt
 	s.mutex.Unlock()
-	return installer.EnvironmentReceipt{Digest: writeReceipt.Digest, Reference: reference}, nil
+	backupName := ""
+	if writeReceipt.backupPath != "" {
+		backupName = filepath.Base(writeReceipt.backupPath)
+	}
+	return installer.EnvironmentReceipt{
+		Digest: writeReceipt.Digest, Reference: reference,
+		PreviousDigest: writeReceipt.PreviousDigest, BackupName: backupName, Replaced: writeReceipt.Replaced,
+	}, nil
+}
+
+// RecoverPrepared compensates a prepared publication after process restart.
+// It only touches a dotenv file or deterministic backup that proves ownership
+// through the exact transaction reference.
+func (s *EnvironmentInstaller) RecoverPrepared(ctx context.Context, reference string) error {
+	if s == nil || s.store == nil || !validPreparedEnvironmentReference(reference) {
+		return ErrEnvironmentInstallation
+	}
+	if err := s.store.RecoverPrepared(ctx, reference); err != nil {
+		return ErrEnvironmentInstallation
+	}
+	s.mutex.Lock()
+	delete(s.receipts, reference)
+	s.mutex.Unlock()
+	return nil
+}
+
+func validPreparedEnvironmentReference(reference string) bool {
+	reference = strings.TrimSpace(reference)
+	if reference == "" || len(reference) > 96 {
+		return false
+	}
+	for _, character := range reference {
+		if (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9') || character == '-' || character == '_' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func validEnvironmentSelection(ui, mode string) bool {
@@ -175,10 +228,58 @@ func (s *EnvironmentInstaller) Rollback(ctx context.Context, receipt installer.E
 	s.mutex.Lock()
 	writeReceipt, ok := s.receipts[receipt.Reference]
 	s.mutex.Unlock()
-	if !ok || writeReceipt.Digest != receipt.Digest {
+	if !ok {
+		writeReceipt = EnvWriteReceipt{
+			Digest: receipt.Digest, PreviousDigest: receipt.PreviousDigest, Replaced: receipt.Replaced,
+			targetPath: s.store.path,
+		}
+		if receipt.Replaced {
+			if receipt.BackupName != preparedEnvironmentBackupName(receipt.Reference) || filepath.Base(receipt.BackupName) != receipt.BackupName || s.store.backupDir == "" || s.store.backupDir == "." {
+				return ErrEnvironmentInstallation
+			}
+			writeReceipt.backupPath = filepath.Join(s.store.backupDir, receipt.BackupName)
+		}
+	}
+	if writeReceipt.Digest != receipt.Digest || writeReceipt.PreviousDigest != receipt.PreviousDigest || writeReceipt.Replaced != receipt.Replaced {
 		return ErrEnvironmentInstallation
 	}
 	if err := s.store.Rollback(ctx, writeReceipt); err != nil {
+		return ErrEnvironmentInstallation
+	}
+	s.mutex.Lock()
+	delete(s.receipts, receipt.Reference)
+	s.mutex.Unlock()
+	return nil
+}
+
+// Finalize commits an environment publication by deleting only its exact
+// transaction-owned pre-install backup. It is safe to call again after a
+// restart when the backup was already removed but the journal still exists.
+func (s *EnvironmentInstaller) Finalize(ctx context.Context, receipt installer.EnvironmentReceipt) error {
+	if s == nil || s.store == nil || !validPreparedEnvironmentReference(receipt.Reference) || receipt.Digest == "" {
+		return ErrEnvironmentInstallation
+	}
+	s.mutex.Lock()
+	writeReceipt, ok := s.receipts[receipt.Reference]
+	s.mutex.Unlock()
+	if !ok {
+		writeReceipt = EnvWriteReceipt{
+			Digest: receipt.Digest, PreviousDigest: receipt.PreviousDigest, Replaced: receipt.Replaced,
+			targetPath: s.store.path,
+		}
+		if receipt.Replaced {
+			if receipt.BackupName != preparedEnvironmentBackupName(receipt.Reference) || filepath.Base(receipt.BackupName) != receipt.BackupName || s.store.backupDir == "" || s.store.backupDir == "." {
+				return ErrEnvironmentInstallation
+			}
+			writeReceipt.backupPath = filepath.Join(s.store.backupDir, receipt.BackupName)
+		} else if receipt.PreviousDigest != "" || receipt.BackupName != "" {
+			return ErrEnvironmentInstallation
+		}
+	}
+	if writeReceipt.Digest != receipt.Digest || writeReceipt.PreviousDigest != receipt.PreviousDigest || writeReceipt.Replaced != receipt.Replaced {
+		return ErrEnvironmentInstallation
+	}
+	if err := s.store.Finalize(ctx, writeReceipt); err != nil {
 		return ErrEnvironmentInstallation
 	}
 	s.mutex.Lock()

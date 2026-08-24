@@ -8,7 +8,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -291,34 +290,38 @@ func New(cfg config.Config) (*App, error) {
 	if workspaceRoot, err := filepath.Abs(cfg.Install.WorkspaceRoot); err == nil {
 		if inspector, inspectorErr := installplatform.NewFileSystemInspector(workspaceRoot); inspectorErr == nil {
 			installPlan = installer.NewPlanServiceWithProfile(inspector, profiles)
-			if _, scriptErr := os.Stat(filepath.Join(workspaceRoot, "scripts", "build.mjs")); scriptErr == nil {
-				envStore := installplatform.NewAtomicEnvStore(
-					filepath.Join(workspaceRoot, ".env"),
-					filepath.Join(cfg.Install.StateDir, ".env-backup"),
-				)
-				applyService = installer.NewApplyService(
-					installplatform.NewFileMarkerStore(cfg.Install.MarkerPath()),
-					installPlan,
-					installplatform.NewSystemDependencyProbe(),
-					installplatform.NewSystemSchemaInstaller(),
-					installplatform.NewAssetInstaller(
-						workspaceRoot,
-						filepath.Join(cfg.Install.StateDir, ".install-backup"),
-						installplatform.NewSystemAssetBuilder(workspaceRoot),
-						nil,
-					),
-					installplatform.NewSystemIdentityInstaller(),
-					installplatform.NewEnvironmentInstaller(envStore, cfg.Install.StateDir, nil),
-					nil,
-				)
-			}
+			envStore := installplatform.NewAtomicEnvStore(
+				filepath.Join(workspaceRoot, ".env"),
+				filepath.Join(cfg.Install.StateDir, "environment-backup"),
+			)
+			transactionJournal := installplatform.NewFileTransactionJournal(filepath.Join(cfg.Install.StateDir, "transaction.json"), workspaceRoot)
+			_ = transactionJournal.ReconcileApplyLease(context.Background())
+			applyService = installer.NewApplyService(
+				installplatform.NewFileMarkerStore(cfg.Install.MarkerPath()),
+				installPlan,
+				installplatform.NewSystemDependencyProbe(),
+				installplatform.NewSystemSchemaInstaller(),
+				installplatform.NewSystemIdentityInstaller(),
+				installplatform.NewEnvironmentInstaller(envStore, cfg.Install.StateDir, nil),
+				transactionJournal,
+				nil,
+			)
+			// A valid marker is the final commit point. Best-effort reconciliation
+			// removes only a matching server-owned journal left by a crash between
+			// marker publication and journal cleanup; malformed or CLI-owned state
+			// stays intact for diagnosis and never prevents the ordinary API boot.
+			_ = applyService.ReconcileCompleted(context.Background())
 		}
 	}
 	app.apply = applyService
 	if applyService != nil {
 		app.applyJobs = installer.NewApplyJobService(applyService)
 		app.closers = append(app.closers, app.applyJobs)
-		app.install = installer.NewStatusServiceWithProfile(markers, installer.NewActivityProfileProvider(profiles, app.applyJobs))
+		app.install = installer.NewStatusServiceWithProfileAndReconciler(
+			markers,
+			installer.NewActivityProfileProvider(profiles, app.applyJobs),
+			applyService,
+		)
 	}
 	var captchaProvider appauth.CaptchaProvider
 	var captchaRisk appauth.CaptchaRiskStore

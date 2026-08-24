@@ -105,6 +105,80 @@ func TestFileMarkerStoreReportsUninstalledWithoutCreatingFiles(t *testing.T) {
 	}
 }
 
+func TestFileMarkerStoreReclaimsStaleLegacyLockAfterInterruptedProcess(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "install", ".installed")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	lockPath := path + ".lock"
+	if err := os.WriteFile(lockPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stale := time.Now().Add(-time.Minute)
+	if err := os.Chtimes(lockPath, stale, stale); err != nil {
+		t.Fatal(err)
+	}
+	store := installplatform.NewFileMarkerStore(path)
+	if err := store.Create(context.Background(), validTestMarker()); err != nil {
+		t.Fatalf("Create() with stale legacy lock error = %v", err)
+	}
+	if _, err := os.Lstat(lockPath); !os.IsNotExist(err) {
+		t.Fatalf("stale marker lock remains: %v", err)
+	}
+}
+
+func TestFileMarkerStoreKeepsRecentUnknownLockBusy(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "install", ".installed")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	lockPath := path + ".lock"
+	if err := os.WriteFile(lockPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store := installplatform.NewFileMarkerStore(path)
+	if err := store.Create(context.Background(), validTestMarker()); !errors.Is(err, installplatform.ErrInstallationBusy) {
+		t.Fatalf("Create() with recent unknown lock error = %v, want ErrInstallationBusy", err)
+	}
+	if _, err := os.Stat(lockPath); err != nil {
+		t.Fatalf("recent lock was removed: %v", err)
+	}
+}
+
+func TestFileMarkerStoreLoadReclaimsStalePostPublishLock(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "install", ".installed")
+	store := installplatform.NewFileMarkerStore(path)
+	if err := store.Create(context.Background(), validTestMarker()); err != nil {
+		t.Fatal(err)
+	}
+	lockPath := path + ".lock"
+	if err := os.WriteFile(lockPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stale := time.Now().Add(-time.Minute)
+	if err := os.Chtimes(lockPath, stale, stale); err != nil {
+		t.Fatal(err)
+	}
+	if _, installed, err := store.Load(context.Background()); err != nil || !installed {
+		t.Fatalf("Load() = installed:%t error:%v", installed, err)
+	}
+	if _, err := os.Lstat(lockPath); !os.IsNotExist(err) {
+		t.Fatalf("stale post-publish marker lock remains: %v", err)
+	}
+}
+
+func validTestMarker() installstate.Marker {
+	return installstate.Marker{
+		SchemaVersion: installstate.CurrentSchemaVersion, InstallerVersion: "0.4.0-dev",
+		InstalledAt: time.Date(2026, time.August, 24, 0, 0, 0, 0, time.UTC),
+		SelectedUI:  installstate.UIAntd, Mode: installstate.ModeDev,
+		ArtifactHash: strings.Repeat("a", 64), ManifestHash: strings.Repeat("b", 64),
+	}
+}
+
 func TestFileMarkerStoreRemovesOnlyTheExpectedInstallation(t *testing.T) {
 	t.Parallel()
 

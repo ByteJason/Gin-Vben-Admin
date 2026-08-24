@@ -31,7 +31,7 @@ test('INIT-100 web installer shows the CLI-selected UI as read-only state', () =
   assert.doesNotMatch(script, /uiChoice|confirmCleanup/);
   assert.doesNotMatch(script, /selectedUi\s*:/);
   assert.match(script, /JSON\.stringify\(\{\s*mode\s*\}\)/);
-  assert.match(script, /结束.*init|Ctrl\+C/);
+  assert.match(script, /重新启动|重启/);
   assert.match(script, /pnpm run dev/);
   assert.match(script, /pnpm run build/);
   assert.match(script, /\.focus\(\)/, 'state and error transitions move focus');
@@ -56,17 +56,15 @@ test('INIT-100 build, test, and deploy entrypoints use the selected profile with
   assert.doesNotMatch(dockerfile, /ARG UI_APP=web-antd/);
 });
 
-test('INIT-100 exposes a loopback-only temporary Go installer runtime', () => {
-  assert.equal(existsSync(join(root, 'server/cmd/init/main.go')), true);
-  const command = read('server/cmd/init/main.go');
-  assert.match(command, /127\.0\.0\.1/);
-  assert.match(command, /install/);
-  assert.match(command, /assets/);
-
+test('INIT-100 uses the ordinary API installer without a temporary runtime', () => {
+  assert.equal(existsSync(join(root, 'server/cmd/init')), false);
+  assert.equal(existsSync(join(root, 'admin/scripts/init-runtime.mjs')), false);
   const cli = read('admin/scripts/init.mjs');
   assert.match(cli, /--no-open/);
   assert.match(cli, /--port/);
-  assert.match(cli, /cmd\/init|init-runtime/);
+  assert.match(cli, /health\/live/);
+  assert.match(cli, /api\/system\/install\/v1\/status/);
+  assert.doesNotMatch(cli, /cmd\/init|init-runtime/);
 });
 
 test('INIT-100 public clone and acceptance docs use init before public dev/build', () => {
@@ -83,18 +81,18 @@ test('INIT-100 public clone and acceptance docs use init before public dev/build
   assert.doesNotMatch(acceptance, /选择 UI=`antd`/);
 });
 
-test('INIT-100 documents automatic first-start recovery without hidden-file troubleshooting', () => {
+test('INIT-100 documents durable automatic recovery without hidden-file troubleshooting', () => {
   const rootReadme = read('README.md');
   const adminReadme = read('admin/README.md');
   const acceptance = read('docs/manual-acceptance/1.0.0-dev-end-to-end.md');
 
   for (const document of [rootReadme, adminReadme]) {
-    assert.match(document, /自动恢复/);
-    assert.match(document, /\.runtime\/init-recovery/);
-    assert.match(document, /INIT_REASON/);
-    assert.match(document, /INIT_ACTION/);
+    assert.match(document, /中断/);
+    assert.match(document, /\.runtime\/install\/transaction\.json/);
+    assert.match(document, /重新运行|重新打开/);
+    assert.match(document, /不要手动删除/);
   }
-  assert.match(acceptance, /孤儿.*receipt|残留.*runtime/);
-  assert.match(acceptance, /INIT_RECOVERY=completed/);
+  assert.match(acceptance, /transaction\.json|持久化事务/);
+  assert.match(acceptance, /自动恢复|可重试/);
   assert.doesNotMatch(acceptance, /for %F|Get-Content.*ui-init/);
 });

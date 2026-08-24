@@ -18,7 +18,7 @@ RUN case "$UI_APP" in \
       web-antd|web-ele|web-naive) ;; \
       *) echo "Unsupported UI_APP=$UI_APP" >&2; exit 2 ;; \
     esac \
-    && pnpm run "build:${UI_APP#web-}" \
+    && pnpm --filter "@vben/${UI_APP}" run build \
     && mkdir -p /out \
     && cp -R "apps/${UI_APP}/dist/." /out/
 

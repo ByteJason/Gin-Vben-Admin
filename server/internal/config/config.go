@@ -327,7 +327,7 @@ func Default() Config {
 			MaxBytes: 100 << 20,
 		},
 		Install: InstallConfig{
-			StateDir:      filepath.FromSlash("../admin/apps/install"),
+			StateDir:      filepath.FromSlash("../.runtime/install"),
 			WorkspaceRoot: filepath.FromSlash(".."),
 		},
 		Tenant: TenantConfig{

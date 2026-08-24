@@ -795,7 +795,7 @@ components:
       properties:
         id:
           type: string
-          enum: [plan, database, redis, schema, assets, identity, environment, lock]
+          enum: [plan, database, redis, schema, identity, environment, lock]
         status:
           type: string
           const: completed

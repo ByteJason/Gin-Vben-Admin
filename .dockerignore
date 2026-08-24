@@ -11,10 +11,8 @@
 **/.vite
 **/.cache
 **/*.log
-admin/.ui-init-*
-admin/apps/install/.installed*
-admin/apps/install/.install-backup
-admin/apps/install/.env-backup
+admin/.ui-init-receipt.json
+admin/.ui-init-runtime.json
 .env
 .env.*
 server/bin

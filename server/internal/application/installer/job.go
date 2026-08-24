@@ -367,8 +367,8 @@ func newJobID() (string, error) {
 
 func stepProgress(step string) int {
 	return map[string]int{
-		"plan": 10, "database": 20, "redis": 30, "schema": 45,
-		"assets": 65, "identity": 80, "environment": 90, "lock": 100,
+		"plan": 10, "database": 20, "redis": 30, "schema": 50,
+		"identity": 70, "environment": 90, "lock": 100,
 	}[step]
 }
 

@@ -22,9 +22,9 @@ observability:
   otlp_api_key: ""
 
 install:
-  # Installer state is separate from the repository workspace.
+  # Installer state is isolated from source directories under .runtime/.
   # Container deployments should set INSTALL_STATE_DIR to a persistent volume.
-  state_dir: ../admin/apps/install
+  state_dir: ../.runtime/install
   workspace_root: ..
 
 tenant:

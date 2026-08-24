@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { STATES, formatStatus, inspectState, rootFromScript } from './init-state.mjs';
 
-const allowedCommands = new Set(['build', 'build:analyze', 'dev', 'preview']);
+const allowedCommands = new Set(['build', 'dev', 'preview']);
 const argument = process.argv.slice(2);
 const commandIndex = argument.indexOf('--command');
 const command = commandIndex >= 0 ? argument[commandIndex + 1] : '';

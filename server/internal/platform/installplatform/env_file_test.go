@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/installplatform"
 )
@@ -108,6 +109,58 @@ func TestAtomicEnvStoreBacksUpReplacementAndRollsBack(t *testing.T) {
 	if len(entries) != 0 {
 		t.Fatalf("backup artifacts remain after rollback: %v", entries)
 	}
+	if err := store.Rollback(context.Background(), receipt); err != nil {
+		t.Fatalf("second Rollback() after completed replacement error = %v", err)
+	}
+}
+
+func TestAtomicEnvStoreRollbackOfCreatedFileIsIdempotent(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), ".env")
+	store := installplatform.NewAtomicEnvStore(path)
+	receipt, err := store.Write(context.Background(), map[string]string{"SERVER_ADDR": "127.0.0.1:8080"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Rollback(context.Background(), receipt); err != nil {
+		t.Fatalf("first Rollback() error = %v", err)
+	}
+	if err := store.Rollback(context.Background(), receipt); err != nil {
+		t.Fatalf("second Rollback() after created file removal error = %v", err)
+	}
+}
+
+func TestAtomicEnvStorePreparedRecoveryCleansPrepublishBackupTempAndPreservesCurrent(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	path := filepath.Join(root, ".env")
+	backupDir := filepath.Join(root, "install", "environment-backup")
+	original := []byte("SERVER_ADDR=\"127.0.0.1:8080\"\n")
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(backupDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	reference := "install-0123456789abcdef0123456789abcdef"
+	temporary := filepath.Join(backupDir, ".env.previous-"+reference+".tmp-crash")
+	if err := os.WriteFile(temporary, []byte("truncated-backup"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	store := installplatform.NewAtomicEnvStore(path, backupDir)
+	if err := store.RecoverPrepared(context.Background(), reference); err != nil {
+		t.Fatalf("RecoverPrepared() error = %v", err)
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil || string(contents) != string(original) {
+		t.Fatalf("current .env changed: contents=%q error=%v", contents, err)
+	}
+	if _, err := os.Lstat(temporary); !os.IsNotExist(err) {
+		t.Fatalf("prepublish backup temp remains: %v", err)
+	}
 }
 
 func TestAtomicEnvStoreRejectsUnapprovedKeysAndLineInjection(t *testing.T) {
@@ -142,5 +195,42 @@ func TestAtomicEnvStoreRejectsUnapprovedKeysAndLineInjection(t *testing.T) {
 				t.Fatalf("invalid input created target: %v", err)
 			}
 		})
+	}
+}
+
+func TestAtomicEnvStoreWritePreparedRequiresMatchingTransactionTag(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), ".env")
+	store := installplatform.NewAtomicEnvStore(path)
+	_, err := store.WritePrepared(context.Background(), map[string]string{
+		"INSTALL_TRANSACTION_ID": "install-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"SERVER_ADDR":            "127.0.0.1:8080",
+	}, "install-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+	if err == nil {
+		t.Fatal("WritePrepared() error = nil for a mismatched transaction tag")
+	}
+	if _, statErr := os.Lstat(path); !os.IsNotExist(statErr) {
+		t.Fatalf("mismatched prepared write created .env: %v", statErr)
+	}
+}
+
+func TestAtomicEnvStoreReclaimsStaleLegacyWriteLock(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, ".env")
+	lockPath := path + ".install.lock"
+	if err := os.WriteFile(lockPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stale := time.Now().Add(-time.Minute)
+	if err := os.Chtimes(lockPath, stale, stale); err != nil {
+		t.Fatal(err)
+	}
+	store := installplatform.NewAtomicEnvStore(path)
+	if _, err := store.Write(context.Background(), map[string]string{"SERVER_ADDR": "127.0.0.1:8080"}); err != nil {
+		t.Fatalf("Write() with stale legacy lock error = %v", err)
+	}
+	if _, err := os.Lstat(lockPath); !os.IsNotExist(err) {
+		t.Fatalf("stale environment lock remains: %v", err)
 	}
 }

@@ -19,10 +19,36 @@ test('workspace exposes the supported UI templates', () => {
 
 test('workspace has the expected package layout', () => {
   const workspace = readFileSync(resolve(root, 'pnpm-workspace.yaml'), 'utf8');
-  const pkg = readFileSync(resolve(root, 'package.json'), 'utf8');
+  const pkg = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
   assert.match(workspace, /apps\/\*/);
-  assert.match(pkg, /"build:antd"/);
-  assert.match(pkg, /"dev:antd"/);
+  for (const command of [
+    'build:analyze',
+    'build:antd',
+    'build:ele',
+    'build:naive',
+    'dev:antd',
+    'dev:ele',
+    'dev:naive',
+  ]) {
+    assert.equal(Object.hasOwn(pkg.scripts, command), false, command);
+  }
+  for (const command of ['build', 'dev', 'preview']) {
+    assert.match(pkg.scripts[command], /profile-gate\.mjs/);
+    assert.match(pkg.scripts[command], /selected-dispatch\.mjs/);
+  }
+  assert.doesNotMatch(pkg.scripts['test:e2e:a11y'], /pnpm run build/);
+  for (const packageName of ['@vben/web-antd', '@vben/web-ele', '@vben/web-naive']) {
+    assert.match(
+      pkg.scripts['test:e2e:a11y'],
+      new RegExp(`pnpm --filter ${packageName.replace('/', '\\/')} run build`),
+    );
+  }
+  assert.match(pkg.scripts['test:e2e:a11y'], /build:installer/);
+  assert.match(pkg.scripts['test:e2e:a11y'], /playwright test/);
+  assert.equal(Object.hasOwn(pkg.scripts, 'preinstall'), false);
+  for (const command of ['preinstall', 'install', 'postinstall']) {
+    assert.doesNotMatch(pkg.scripts[command] ?? '', /\bnpx\b|only-allow/);
+  }
 });
 
 test('workspace contains its frontend build closure', () => {

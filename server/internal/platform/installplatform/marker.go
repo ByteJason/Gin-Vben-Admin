@@ -9,6 +9,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
+	"time"
 
 	installstate "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/installstate"
 )
@@ -45,18 +47,14 @@ func (s *FileMarkerStore) Remove(ctx context.Context, expected installstate.Mark
 	}
 
 	lockPath := s.path + ".lock"
-	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	if errors.Is(err, os.ErrExist) {
+	release, err := acquireProcessLease(lockPath)
+	if errors.Is(err, errProcessLeaseBusy) {
 		return ErrInstallationBusy
 	}
 	if err != nil {
 		return fmt.Errorf("acquire installation marker lock: %w", err)
 	}
-	if err := lock.Close(); err != nil {
-		_ = os.Remove(lockPath)
-		return fmt.Errorf("close installation marker lock: %w", err)
-	}
-	defer os.Remove(lockPath)
+	defer release()
 
 	current, installed, err := s.Load(ctx)
 	if err != nil {
@@ -87,6 +85,12 @@ func (s *FileMarkerStore) Load(ctx context.Context) (installstate.Marker, bool, 
 	}
 	if s == nil || s.path == "." || s.path == "" {
 		return installstate.Marker{}, false, errors.New("installation marker path is required")
+	}
+	// A crash after the atomic marker rename but before lease release must not
+	// keep build/dev gates blocked forever. Live or recent unknown leases remain
+	// untouched; only dead/expired leases are reclaimed.
+	if _, err := os.Lstat(s.path + ".lock"); err == nil {
+		_ = reclaimProcessLease(s.path+".lock", time.Now().UTC())
 	}
 
 	info, err := os.Lstat(s.path)
@@ -142,18 +146,14 @@ func (s *FileMarkerStore) Create(ctx context.Context, marker installstate.Marker
 		return fmt.Errorf("create installation state directory: %w", err)
 	}
 	lockPath := s.path + ".lock"
-	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	if errors.Is(err, os.ErrExist) {
+	release, err := acquireProcessLease(lockPath)
+	if errors.Is(err, errProcessLeaseBusy) {
 		return ErrInstallationBusy
 	}
 	if err != nil {
 		return fmt.Errorf("acquire installation marker lock: %w", err)
 	}
-	if err := lock.Close(); err != nil {
-		_ = os.Remove(lockPath)
-		return fmt.Errorf("close installation marker lock: %w", err)
-	}
-	defer os.Remove(lockPath)
+	defer release()
 
 	if _, err := os.Lstat(s.path); err == nil {
 		return ErrAlreadyInstalled
@@ -233,6 +233,23 @@ func contextError(ctx context.Context) error {
 }
 
 func syncDirectory(path string) error {
+	return syncDirectoryForPlatform(path, runtime.GOOS)
+}
+
+func syncDirectoryForPlatform(path, goos string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return errors.New("sync path is not a directory")
+	}
+	// Windows does not support FlushFileBuffers on directory handles. Atomic
+	// file replacement still provides the commit boundary there, so validating
+	// the directory is the portable best-effort equivalent.
+	if goos == "windows" {
+		return nil
+	}
 	dir, err := os.Open(path)
 	if err != nil {
 		return err

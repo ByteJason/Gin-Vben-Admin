@@ -110,6 +110,36 @@ func TestStatusServiceKeepsAValidPublishedMarkerInstallingUntilTheJobFinishes(t 
 	}
 }
 
+func TestStatusServiceRetriesCompletionReconciliationUntilHousekeepingSucceeds(t *testing.T) {
+	reconciler := &completionReconcilerStub{results: []error{
+		errors.New("temporary completion housekeeping failure"),
+		nil,
+	}}
+	service := NewStatusServiceWithProfileAndReconciler(
+		markerReaderStub{marker: validMarker(installstate.UIAntd), installed: true},
+		profileProviderStub{profile: InstallationProfile{SelectedUI: installstate.UIAntd}, exists: true},
+		reconciler,
+	)
+
+	got, err := service.Status(context.Background())
+	if err != nil {
+		t.Fatalf("Status() error = %v", err)
+	}
+	if !got.Installed || got.State != StateInstalled {
+		t.Fatalf("Status() = %#v, want installed despite housekeeping retry", got)
+	}
+	if reconciler.calls != 2 {
+		t.Fatalf("reconciliation calls = %d, want one automatic retry", reconciler.calls)
+	}
+
+	if _, err := service.Status(context.Background()); err != nil {
+		t.Fatalf("second Status() error = %v", err)
+	}
+	if reconciler.calls != 2 {
+		t.Fatalf("successful reconciliation ran again: calls=%d", reconciler.calls)
+	}
+}
+
 func TestActivityProfileProviderDecoratesTheReadOnlyProfile(t *testing.T) {
 	base := profileProviderStub{profile: InstallationProfile{SelectedUI: installstate.UIEle}, exists: true}
 	provider := NewActivityProfileProvider(base, activityStub{active: true})
@@ -158,3 +188,17 @@ func (s profileProviderStub) Profile(context.Context) (InstallationProfile, bool
 type activityStub struct{ active bool }
 
 func (s activityStub) InstallationActive() bool { return s.active }
+
+type completionReconcilerStub struct {
+	results []error
+	calls   int
+}
+
+func (s *completionReconcilerStub) ReconcileCompleted(context.Context) error {
+	resultIndex := s.calls
+	s.calls++
+	if resultIndex < len(s.results) {
+		return s.results[resultIndex]
+	}
+	return nil
+}

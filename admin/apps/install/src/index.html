@@ -90,10 +90,12 @@
               <div class="form-field">
                 <label for="mode-choice">运行方式</label>
                 <select id="mode-choice" name="mode" required>
-                  <option value="embedded">嵌入式单包（推荐）</option>
-                  <option value="standalone">静态资源独立部署</option>
-                  <option value="api_only">仅 API</option>
-                  <option value="dev">开发调试</option>
+                  <option value="dev" selected>开发调试（推荐）</option>
+                  <optgroup label="高级部署选项">
+                    <option value="embedded">嵌入式单包</option>
+                    <option value="standalone">静态资源独立部署</option>
+                    <option value="api_only">仅 API</option>
+                  </optgroup>
                 </select>
               </div>
               <div class="form-field">
@@ -131,7 +133,7 @@
           <section id="connection-panel" class="connection-panel" aria-labelledby="connection-title" hidden>
             <div class="capability-panel__heading">
               <h3 id="connection-title">配置服务连接</h3>
-              <span>凭据仅用于本次测试</span>
+              <span>敏感值不写入恢复日志</span>
             </div>
             <form id="database-form" class="connection-form">
               <h4>数据库</h4>
@@ -144,7 +146,7 @@
               </div>
               <div class="form-field">
                 <label for="database-host">主机</label>
-                <input id="database-host" name="host" value="127.0.0.1" autocomplete="off" required />
+                <input id="database-host" name="host" value="localhost" autocomplete="off" required />
               </div>
               <div class="form-field">
                 <label for="database-port">端口</label>
@@ -177,7 +179,7 @@
               <h4>Redis</h4>
               <div class="form-field">
                 <label for="redis-address">地址</label>
-                <input id="redis-address" name="addr" value="127.0.0.1:6379" autocomplete="off" required />
+                <input id="redis-address" name="addr" value="localhost:6379" autocomplete="off" required />
               </div>
               <div class="form-field">
                 <label for="redis-username">账号（可选）</label>
@@ -199,7 +201,7 @@
               <h4>初始管理员</h4>
               <div class="form-field">
                 <label for="admin-username">账号</label>
-                <input id="admin-username" name="username" minlength="3" maxlength="64" autocomplete="username" required />
+                <input id="admin-username" name="username" value="admin" minlength="3" maxlength="64" autocomplete="username" required />
               </div>
               <div class="form-field">
                 <label for="admin-password">密码（至少 12 个字符）</label>
@@ -218,6 +220,17 @@
               <progress id="apply-progress" max="100" value="0" aria-valuetext="尚未开始">0%</progress>
               <ol id="apply-steps" class="apply-steps" aria-live="polite"></ol>
             </form>
+          </section>
+
+          <section id="next-steps" class="next-steps" aria-labelledby="next-steps-title" hidden>
+            <h3 id="next-steps-title">重新启动并构建唯一界面</h3>
+            <p>停止旧服务端后，在两个终端依次执行：</p>
+            <pre><code>cd server
+go run ./cmd/api/main.go
+
+cd admin
+pnpm run build
+pnpm run dev</code></pre>
           </section>
 
           <button id="retry-button" class="secondary-button" type="button" hidden>

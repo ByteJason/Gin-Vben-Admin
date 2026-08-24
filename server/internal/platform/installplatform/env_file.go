@@ -58,6 +58,7 @@ var allowedInstallerEnvironmentKeys = map[string]struct{}{
 	"DATABASE_READ_POLICY":         {},
 	"DATABASE_REPLICA_DSNS":        {},
 	"INSTALL_STATE_DIR":            {},
+	"INSTALL_TRANSACTION_ID":       {},
 	"I18N_DEFAULT_LOCALE":          {},
 	"I18N_MODE":                    {},
 	"I18N_SUPPORTED_LOCALES":       {},
@@ -95,14 +96,19 @@ type EnvWriteReceipt struct {
 // AtomicEnvStore publishes the root environment file without exposing its
 // values through return types or logs.
 type AtomicEnvStore struct {
-	path      string
-	backupDir string
+	path         string
+	backupDir    string
+	processGuard string
 }
 
 func NewAtomicEnvStore(path string, backupDir ...string) *AtomicEnvStore {
-	store := &AtomicEnvStore{path: filepath.Clean(path)}
+	store := &AtomicEnvStore{
+		path:         filepath.Clean(path),
+		processGuard: filepath.Join(filepath.Dir(filepath.Clean(path)), "process.guard"),
+	}
 	if len(backupDir) > 0 {
 		store.backupDir = filepath.Clean(backupDir[0])
+		store.processGuard = filepath.Join(filepath.Dir(store.backupDir), "process.guard")
 	}
 	return store
 }
@@ -111,6 +117,23 @@ func NewAtomicEnvStore(path string, backupDir ...string) *AtomicEnvStore {
 // An existing file is preserved until the separate backup/rollback workflow is
 // explicitly used.
 func (s *AtomicEnvStore) Write(ctx context.Context, values map[string]string) (EnvWriteReceipt, error) {
+	return s.write(ctx, values, "")
+}
+
+// WritePrepared publishes values with a deterministic, transaction-owned
+// backup. This closes the crash window between the filesystem rename and the
+// application persisting its returned receipt.
+func (s *AtomicEnvStore) WritePrepared(ctx context.Context, values map[string]string, reference string) (EnvWriteReceipt, error) {
+	if !validPreparedEnvironmentReference(reference) {
+		return EnvWriteReceipt{}, errors.New("environment transaction reference is invalid")
+	}
+	if values["INSTALL_TRANSACTION_ID"] != reference {
+		return EnvWriteReceipt{}, errors.New("environment transaction tag does not match its prepared reference")
+	}
+	return s.write(ctx, values, preparedEnvironmentBackupName(reference))
+}
+
+func (s *AtomicEnvStore) write(ctx context.Context, values map[string]string, preparedBackupName string) (EnvWriteReceipt, error) {
 	if err := contextError(ctx); err != nil {
 		return EnvWriteReceipt{}, err
 	}
@@ -126,18 +149,14 @@ func (s *AtomicEnvStore) Write(ctx context.Context, values map[string]string) (E
 		return EnvWriteReceipt{}, fmt.Errorf("create environment directory: %w", err)
 	}
 	lockPath := s.path + ".install.lock"
-	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	if errors.Is(err, os.ErrExist) {
+	release, err := acquireProcessLeaseWithGuard(lockPath, s.processGuard)
+	if errors.Is(err, errProcessLeaseBusy) {
 		return EnvWriteReceipt{}, ErrEnvironmentBusy
 	}
 	if err != nil {
 		return EnvWriteReceipt{}, fmt.Errorf("acquire environment file lock: %w", err)
 	}
-	if err := lock.Close(); err != nil {
-		_ = os.Remove(lockPath)
-		return EnvWriteReceipt{}, fmt.Errorf("close environment file lock: %w", err)
-	}
-	defer os.Remove(lockPath)
+	defer release()
 
 	previous, exists, err := readRegularFile(s.path, maxEnvironmentBytes)
 	if err != nil {
@@ -149,7 +168,11 @@ func (s *AtomicEnvStore) Write(ctx context.Context, values map[string]string) (E
 
 	var backupPath, previousDigest string
 	if exists {
-		backupPath, previousDigest, err = createPrivateBackup(s.backupDir, previous)
+		if preparedBackupName == "" {
+			backupPath, previousDigest, err = createPrivateBackup(s.backupDir, previous)
+		} else {
+			backupPath, previousDigest, err = createPrivateNamedBackup(s.backupDir, preparedBackupName, previous)
+		}
 		if err != nil {
 			return EnvWriteReceipt{}, err
 		}
@@ -170,6 +193,73 @@ func (s *AtomicEnvStore) Write(ctx context.Context, values map[string]string) (E
 	}, nil
 }
 
+// RecoverPrepared compensates all filesystem states reachable from
+// WritePrepared. It never overwrites unrelated current contents and never
+// follows a symlink.
+func (s *AtomicEnvStore) RecoverPrepared(ctx context.Context, reference string) error {
+	if err := contextError(ctx); err != nil {
+		return err
+	}
+	if s == nil || s.path == "" || s.path == "." || !validPreparedEnvironmentReference(reference) {
+		return errors.New("environment prepared recovery is invalid")
+	}
+
+	lockPath := s.path + ".install.lock"
+	release, err := acquireProcessLeaseWithGuard(lockPath, s.processGuard)
+	if errors.Is(err, errProcessLeaseBusy) {
+		return ErrEnvironmentBusy
+	}
+	if err != nil {
+		return fmt.Errorf("acquire environment recovery lock: %w", err)
+	}
+	defer release()
+
+	current, currentExists, err := readRegularFile(s.path, maxEnvironmentBytes)
+	if err != nil {
+		return fmt.Errorf("inspect prepared environment file: %w", err)
+	}
+	backupPath := ""
+	var backup []byte
+	backupExists := false
+	if s.backupDir != "" && s.backupDir != "." {
+		backupPath = filepath.Join(s.backupDir, preparedEnvironmentBackupName(reference))
+		backup, backupExists, err = readRegularFile(backupPath, maxEnvironmentBytes)
+		if err != nil {
+			return fmt.Errorf("inspect prepared environment backup: %w", err)
+		}
+	}
+
+	ownedCurrent := currentExists && environmentContainsTransaction(current, reference)
+	switch {
+	case backupExists && (!currentExists || ownedCurrent):
+		if err := publishPrivateFile(s.path, backup); err != nil {
+			return fmt.Errorf("restore prepared environment backup: %w", err)
+		}
+		if err := removeAndSync(backupPath); err != nil {
+			return fmt.Errorf("remove prepared environment backup: %w", err)
+		}
+	case backupExists && currentExists && digestBytes(current) == digestBytes(backup):
+		// The process stopped after preparing the backup but before publishing.
+		if err := removeAndSync(backupPath); err != nil {
+			return fmt.Errorf("remove unused prepared environment backup: %w", err)
+		}
+	case backupExists:
+		return ErrEnvironmentChanged
+	case ownedCurrent:
+		if err := removeAndSync(s.path); err != nil {
+			return fmt.Errorf("remove prepared environment file: %w", err)
+		}
+	}
+
+	if err := cleanupPreparedEnvironmentTemps(s.path, reference); err != nil {
+		return err
+	}
+	if err := cleanupPreparedEnvironmentBackupTemps(s.backupDir, reference); err != nil {
+		return err
+	}
+	return nil
+}
+
 // Rollback restores the pre-installation file, or removes a file created by
 // this transaction. A digest mismatch prevents overwriting later user edits.
 func (s *AtomicEnvStore) Rollback(ctx context.Context, receipt EnvWriteReceipt) error {
@@ -181,21 +271,49 @@ func (s *AtomicEnvStore) Rollback(ctx context.Context, receipt EnvWriteReceipt) 
 	}
 
 	lockPath := s.path + ".install.lock"
-	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	if errors.Is(err, os.ErrExist) {
+	release, err := acquireProcessLeaseWithGuard(lockPath, s.processGuard)
+	if errors.Is(err, errProcessLeaseBusy) {
 		return ErrEnvironmentBusy
 	}
 	if err != nil {
 		return fmt.Errorf("acquire environment rollback lock: %w", err)
 	}
-	if err := lock.Close(); err != nil {
-		_ = os.Remove(lockPath)
-		return fmt.Errorf("close environment rollback lock: %w", err)
-	}
-	defer os.Remove(lockPath)
+	defer release()
 
 	current, exists, err := readRegularFile(s.path, maxEnvironmentBytes)
-	if err != nil || !exists || digestBytes(current) != receipt.Digest {
+	if err != nil {
+		return ErrEnvironmentChanged
+	}
+	if !exists && !receipt.Replaced {
+		return nil
+	}
+	if receipt.Replaced && (!exists || (exists && digestBytes(current) == receipt.PreviousDigest)) {
+		backup, backupExists, backupErr := readRegularFile(receipt.backupPath, maxEnvironmentBytes)
+		if backupErr != nil {
+			return errors.New("environment backup is unavailable")
+		}
+		if !backupExists {
+			if exists {
+				// The previous contents are already restored and the transaction
+				// backup was already consumed by an earlier compensation attempt.
+				return nil
+			}
+			return errors.New("environment backup is unavailable")
+		}
+		if digestBytes(backup) != receipt.PreviousDigest {
+			return errors.New("environment backup is unavailable")
+		}
+		if !exists {
+			if err := publishPrivateFile(s.path, backup); err != nil {
+				return fmt.Errorf("restore environment file: %w", err)
+			}
+		}
+		if err := removeAndSync(receipt.backupPath); err != nil {
+			return fmt.Errorf("remove environment backup: %w", err)
+		}
+		return nil
+	}
+	if !exists || digestBytes(current) != receipt.Digest {
 		return ErrEnvironmentChanged
 	}
 	if err := contextError(ctx); err != nil {
@@ -221,6 +339,54 @@ func (s *AtomicEnvStore) Rollback(ctx context.Context, receipt EnvWriteReceipt) 
 	return syncDirectory(filepath.Dir(receipt.backupPath))
 }
 
+// Finalize removes only the deterministic pre-install backup owned by a
+// committed transaction. The installed dotenv file is deliberately left
+// untouched. A missing backup is an idempotent success for restart recovery.
+func (s *AtomicEnvStore) Finalize(ctx context.Context, receipt EnvWriteReceipt) error {
+	if err := contextError(ctx); err != nil {
+		return err
+	}
+	if s == nil || receipt.targetPath != s.path || receipt.Digest == "" {
+		return errors.New("environment finalize receipt is invalid")
+	}
+	if !receipt.Replaced {
+		if receipt.PreviousDigest != "" || receipt.backupPath != "" {
+			return errors.New("environment finalize receipt is invalid")
+		}
+		return nil
+	}
+	if s.backupDir == "" || s.backupDir == "." || receipt.PreviousDigest == "" ||
+		filepath.Dir(receipt.backupPath) != s.backupDir ||
+		filepath.Base(receipt.backupPath) != preparedEnvironmentBackupName(strings.TrimPrefix(filepath.Base(receipt.backupPath), ".env.previous-")) {
+		return errors.New("environment finalize receipt is invalid")
+	}
+
+	lockPath := s.path + ".install.lock"
+	release, err := acquireProcessLeaseWithGuard(lockPath, s.processGuard)
+	if errors.Is(err, errProcessLeaseBusy) {
+		return ErrEnvironmentBusy
+	}
+	if err != nil {
+		return fmt.Errorf("acquire environment finalize lock: %w", err)
+	}
+	defer release()
+
+	backup, exists, err := readRegularFile(receipt.backupPath, maxEnvironmentBytes)
+	if err != nil {
+		return errors.New("environment backup is unavailable")
+	}
+	if !exists {
+		return nil
+	}
+	if digestBytes(backup) != receipt.PreviousDigest {
+		return errors.New("environment backup is unavailable")
+	}
+	if err := removeAndSync(receipt.backupPath); err != nil {
+		return fmt.Errorf("remove committed environment backup: %w", err)
+	}
+	return nil
+}
+
 func createPrivateBackup(dir string, contents []byte) (string, string, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", "", fmt.Errorf("create environment backup directory: %w", err)
@@ -244,6 +410,129 @@ func createPrivateBackup(dir string, contents []byte) (string, string, error) {
 	}
 	remove = false
 	return path, digestBytes(contents), nil
+}
+
+func preparedEnvironmentBackupName(reference string) string {
+	return ".env.previous-" + reference
+}
+
+func createPrivateNamedBackup(dir, name string, contents []byte) (string, string, error) {
+	if dir == "" || dir == "." || filepath.Base(name) != name || !strings.HasPrefix(name, ".env.previous-") {
+		return "", "", errors.New("prepared environment backup path is invalid")
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", "", fmt.Errorf("create environment backup directory: %w", err)
+	}
+	path := filepath.Join(dir, name)
+	file, err := os.CreateTemp(dir, name+".tmp-*")
+	if err != nil {
+		return "", "", fmt.Errorf("create temporary prepared environment backup: %w", err)
+	}
+	temporaryPath := file.Name()
+	remove := true
+	defer func() {
+		if remove {
+			_ = os.Remove(temporaryPath)
+		}
+	}()
+	if err := writeAndSync(file, contents); err != nil {
+		return "", "", fmt.Errorf("write prepared environment backup: %w", err)
+	}
+	if err := os.Link(temporaryPath, path); errors.Is(err, os.ErrExist) {
+		return "", "", ErrEnvironmentBusy
+	} else if err != nil {
+		return "", "", fmt.Errorf("publish prepared environment backup: %w", err)
+	}
+	if err := os.Remove(temporaryPath); err != nil {
+		return "", "", fmt.Errorf("remove temporary prepared environment backup: %w", err)
+	}
+	if err := syncDirectory(dir); err != nil {
+		return "", "", fmt.Errorf("sync prepared environment backup directory: %w", err)
+	}
+	remove = false
+	return path, digestBytes(contents), nil
+}
+
+func environmentContainsTransaction(contents []byte, reference string) bool {
+	want := "INSTALL_TRANSACTION_ID=" + strconv.Quote(reference)
+	scanner := bufio.NewScanner(strings.NewReader(string(contents)))
+	for scanner.Scan() {
+		if scanner.Text() == want {
+			return true
+		}
+	}
+	return false
+}
+
+func cleanupPreparedEnvironmentTemps(targetPath, reference string) error {
+	dir := filepath.Dir(targetPath)
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect prepared environment temporary files: %w", err)
+	}
+	prefix := filepath.Base(targetPath) + ".tmp-"
+	removed := false
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), prefix) {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		contents, exists, readErr := readRegularFile(path, maxEnvironmentBytes)
+		if readErr != nil || !exists || !environmentContainsTransaction(contents, reference) {
+			continue
+		}
+		if err := os.Remove(path); err != nil {
+			return fmt.Errorf("remove prepared environment temporary file: %w", err)
+		}
+		removed = true
+	}
+	if removed {
+		return syncDirectory(dir)
+	}
+	return nil
+}
+
+func cleanupPreparedEnvironmentBackupTemps(backupDir, reference string) error {
+	if backupDir == "" || backupDir == "." {
+		return nil
+	}
+	entries, err := os.ReadDir(backupDir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect prepared environment backup temporary files: %w", err)
+	}
+	prefix := preparedEnvironmentBackupName(reference) + ".tmp-"
+	removed := false
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), prefix) {
+			continue
+		}
+		path := filepath.Join(backupDir, entry.Name())
+		info, statErr := os.Lstat(path)
+		if statErr != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		if err := os.Remove(path); err != nil {
+			return fmt.Errorf("remove prepared environment backup temporary file: %w", err)
+		}
+		removed = true
+	}
+	if removed {
+		return syncDirectory(backupDir)
+	}
+	return nil
+}
+
+func removeAndSync(path string) error {
+	if err := os.Remove(path); err != nil {
+		return err
+	}
+	return syncDirectory(filepath.Dir(path))
 }
 
 func publishPrivateFile(path string, contents []byte) error {

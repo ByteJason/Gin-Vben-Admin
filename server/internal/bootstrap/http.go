@@ -141,6 +141,8 @@ func newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasksAndRunsAndImportExport
 	var staticAssets []fs.FS
 	if assets, available := webassets.Static(); available {
 		staticAssets = append(staticAssets, assets)
+	} else if assets, err := webassets.InstallerSource(cfg.Install.WorkspaceRoot); err == nil {
+		staticAssets = append(staticAssets, assets)
 	}
 	var observation httpmiddleware.ObservabilityRuntime
 	if len(observations) > 0 {

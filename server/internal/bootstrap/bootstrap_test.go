@@ -23,6 +23,21 @@ import (
 	observabilityplatform "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/observability"
 )
 
+func newLocalInstallerRequest(method, target string, body io.Reader) *http.Request {
+	request := httptest.NewRequest(method, target, body)
+	request.RemoteAddr = "127.0.0.1:49152"
+	request.Host = "127.0.0.1:8080"
+	return request
+}
+
+func isolateBootstrapRuntime(t *testing.T, cfg *config.Config) {
+	t.Helper()
+	root := t.TempDir()
+	cfg.Install.StateDir = filepath.Join(root, ".runtime", "install")
+	cfg.Install.WorkspaceRoot = root
+	cfg.File.Root = filepath.Join(root, ".runtime", "files")
+}
+
 func TestNewBuildsConfiguredHTTPServerAndKeepsDependenciesOptional(t *testing.T) {
 	cfg := config.Default()
 	workspaceRoot := t.TempDir()
@@ -57,7 +72,7 @@ func TestNewBuildsConfiguredHTTPServerAndKeepsDependenciesOptional(t *testing.T)
 		t.Fatal("readiness checker must always be constructed")
 	}
 
-	request := httptest.NewRequest(http.MethodGet, "/api/system/install/v1/status", nil)
+	request := newLocalInstallerRequest(http.MethodGet, "/api/system/install/v1/status", nil)
 	response := httptest.NewRecorder()
 	app.HTTPServer().Handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -77,7 +92,7 @@ func TestNewBuildsConfiguredHTTPServerAndKeepsDependenciesOptional(t *testing.T)
 		t.Fatalf("installation status body = %#v", body)
 	}
 
-	request = httptest.NewRequest(http.MethodGet, "/api/system/install/v1/capabilities", nil)
+	request = newLocalInstallerRequest(http.MethodGet, "/api/system/install/v1/capabilities", nil)
 	response = httptest.NewRecorder()
 	app.HTTPServer().Handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -102,11 +117,128 @@ func TestNewBuildsConfiguredHTTPServerAndKeepsDependenciesOptional(t *testing.T)
 		t.Fatalf("installation capabilities body = %#v", capabilitiesBody)
 	}
 
-	request = httptest.NewRequest(http.MethodGet, "/install", nil)
+	request = newLocalInstallerRequest(http.MethodGet, "/install", nil)
 	response = httptest.NewRecorder()
 	app.HTTPServer().Handler.ServeHTTP(response, request)
 	if response.Code != http.StatusNotFound {
 		t.Fatalf("ordinary build installation page = %d, want 404", response.Code)
+	}
+}
+
+func TestNewReconcilesStaleApplyLeaseBeforePristineInstaller(t *testing.T) {
+	cfg := config.Default()
+	isolateBootstrapRuntime(t, &cfg)
+	cfg.Server.Addr = "127.0.0.1:0"
+	if err := os.MkdirAll(cfg.Install.StateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	applyLease := filepath.Join(cfg.Install.StateDir, "apply.lock")
+	stale := `{"schema":1,"pid":99999999,"createdAt":"2026-08-23T00:00:00Z"}` + "\n"
+	if err := os.WriteFile(applyLease, []byte(stale), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	app, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer app.Close()
+
+	if _, err := os.Lstat(applyLease); !os.IsNotExist(err) {
+		t.Fatalf("stale apply lease remains after startup: %v", err)
+	}
+}
+
+func TestNewReconcilesDeadApplyLeaseButPreservesDeadAdminLeaseForNodeRecovery(t *testing.T) {
+	cfg := config.Default()
+	isolateBootstrapRuntime(t, &cfg)
+	cfg.Server.Addr = "127.0.0.1:0"
+	if err := os.MkdirAll(cfg.Install.StateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	applyLease := filepath.Join(cfg.Install.StateDir, "apply.lock")
+	if err := os.WriteFile(applyLease, []byte(`{"schema":1,"pid":99999999,"createdAt":"2026-08-23T00:00:00Z"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	adminLease := filepath.Join(cfg.Install.StateDir, "admin-init.lock")
+	adminBytes := []byte(`{"schema":2,"owner":"admin-init","id":"12345678-1234-1234-1234-123456789abc","pid":99999999,"pidStartToken":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","createdAt":"2026-08-24T00:00:00.000Z"}` + "\n")
+	if err := os.WriteFile(adminLease, adminBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	app, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer app.Close()
+
+	if _, err := os.Lstat(applyLease); !os.IsNotExist(err) {
+		t.Fatalf("dead apply lease remains after startup: %v", err)
+	}
+	if got, err := os.ReadFile(adminLease); err != nil || string(got) != string(adminBytes) {
+		t.Fatalf("dead admin lease changed during Go startup: %q error=%v", got, err)
+	}
+}
+
+func TestNewServesInstallerSourceFromConfiguredWorkspaceBeforeUISelection(t *testing.T) {
+	workspaceRoot := t.TempDir()
+	installerRoot := filepath.Join(workspaceRoot, "admin", "apps", "install", "src")
+	if err := os.MkdirAll(installerRoot, 0o755); err != nil {
+		t.Fatalf("MkdirAll(installer source) error = %v", err)
+	}
+	for name, contents := range map[string]string{
+		"index.html": "<h1>source installer</h1>",
+		"app.js":     "console.log('source installer')",
+		"styles.css": "body { color: green; }",
+	} {
+		if err := os.WriteFile(filepath.Join(installerRoot, name), []byte(contents), 0o644); err != nil {
+			t.Fatalf("WriteFile(%s) error = %v", name, err)
+		}
+	}
+
+	cfg := config.Default()
+	cfg.Install.StateDir = filepath.Join(workspaceRoot, ".runtime", "install")
+	cfg.Install.WorkspaceRoot = workspaceRoot
+	cfg.Server.Addr = "127.0.0.1:0"
+
+	app, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer app.Close()
+
+	for _, item := range []struct {
+		method      string
+		path        string
+		contentType string
+		body        string
+	}{
+		{method: http.MethodGet, path: "/install", contentType: "text/html; charset=utf-8", body: "source installer"},
+		{method: http.MethodHead, path: "/install", contentType: "text/html; charset=utf-8"},
+		{method: http.MethodGet, path: "/install/app.js", contentType: "text/javascript; charset=utf-8", body: "console.log"},
+		{method: http.MethodHead, path: "/install/app.js", contentType: "text/javascript; charset=utf-8"},
+		{method: http.MethodGet, path: "/install/styles.css", contentType: "text/css; charset=utf-8", body: "color: green"},
+		{method: http.MethodHead, path: "/install/styles.css", contentType: "text/css; charset=utf-8"},
+	} {
+		t.Run(item.method+" "+item.path, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			app.HTTPServer().Handler.ServeHTTP(response, newLocalInstallerRequest(item.method, item.path, nil))
+			if response.Code != http.StatusOK {
+				t.Fatalf("%s %s status = %d, want 200; body=%s", item.method, item.path, response.Code, response.Body.String())
+			}
+			if got := response.Header().Get("Content-Type"); got != item.contentType {
+				t.Fatalf("%s %s content-type = %q, want %q", item.method, item.path, got, item.contentType)
+			}
+			if item.body != "" && !strings.Contains(response.Body.String(), item.body) {
+				t.Fatalf("%s %s body = %q, want substring %q", item.method, item.path, response.Body.String(), item.body)
+			}
+		})
+	}
+
+	statusResponse := httptest.NewRecorder()
+	app.HTTPServer().Handler.ServeHTTP(statusResponse, newLocalInstallerRequest(http.MethodGet, "/api/system/install/v1/status", nil))
+	if statusResponse.Code != http.StatusOK {
+		t.Fatalf("installation status = %d, want 200; body=%s", statusResponse.Code, statusResponse.Body.String())
 	}
 }
 
@@ -131,7 +263,7 @@ func TestNewWiresInstallerPlanAgainstConfiguredWorkspaceRoot(t *testing.T) {
 	}
 	defer app.Close()
 
-	request := httptest.NewRequest(http.MethodPost, "/api/system/install/v1/plan", bytes.NewBufferString(`{"mode":"standalone"}`))
+	request := newLocalInstallerRequest(http.MethodPost, "/api/system/install/v1/plan", bytes.NewBufferString(`{"mode":"standalone"}`))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	app.HTTPServer().Handler.ServeHTTP(response, request)
@@ -180,7 +312,7 @@ func TestNewWiresApplyServiceForSourceWorkspace(t *testing.T) {
 	}
 	defer app.Close()
 
-	request := httptest.NewRequest(http.MethodPost, "/api/system/install/v1/apply", bytes.NewBufferString(`{"selectedUi":"antd"}`))
+	request := newLocalInstallerRequest(http.MethodPost, "/api/system/install/v1/apply", bytes.NewBufferString(`{"selectedUi":"antd"}`))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	app.HTTPServer().Handler.ServeHTTP(response, request)
@@ -235,6 +367,7 @@ func TestDependencyOptionsMapEverySupportedTopology(t *testing.T) {
 
 func TestNewConstructsEnabledDependenciesWithoutProbingNetwork(t *testing.T) {
 	cfg := config.Default()
+	isolateBootstrapRuntime(t, &cfg)
 	cfg.Server.Addr = "127.0.0.1:0"
 	cfg.Database.Enabled = true
 	cfg.Database.Driver = "mysql"
@@ -266,6 +399,7 @@ func TestNewConstructsEnabledDependenciesWithoutProbingNetwork(t *testing.T) {
 
 func TestNewWiresAuthOnlyWhenDatabaseAndRedisAreEnabled(t *testing.T) {
 	cfg := config.Default()
+	isolateBootstrapRuntime(t, &cfg)
 	cfg.Server.Addr = "127.0.0.1:0"
 	cfg.Auth.Enabled = true
 	cfg.Auth.JWTSecret = "01234567890123456789012345678901"
@@ -387,6 +521,7 @@ var _ appauth.SessionManagementService = (*bootstrapAuthSessionFake)(nil)
 
 func TestNewRejectsAuthWithoutDurableDependencies(t *testing.T) {
 	cfg := config.Default()
+	isolateBootstrapRuntime(t, &cfg)
 	cfg.Auth.Enabled = true
 	cfg.Auth.JWTSecret = "01234567890123456789012345678901"
 	if _, err := New(cfg); err == nil {
@@ -424,6 +559,7 @@ func TestReadinessTimeoutUsesEnabledDependencyBudgets(t *testing.T) {
 
 func TestShutdownClosesHTTPServerAndDependencies(t *testing.T) {
 	cfg := config.Default()
+	isolateBootstrapRuntime(t, &cfg)
 	app, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -438,6 +574,7 @@ func TestShutdownClosesHTTPServerAndDependencies(t *testing.T) {
 
 func TestHTTPServerUsesConfiguredHandler(t *testing.T) {
 	cfg := config.Default()
+	isolateBootstrapRuntime(t, &cfg)
 	app, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)

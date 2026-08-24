@@ -224,7 +224,7 @@ function selectedUis(ui) {
 function buildFrontends(ui) {
   runCommand('pnpm', ['--dir', 'admin', '--filter', '@gin-vben-admin/install', 'run', 'build:installer']);
   for (const selected of selectedUis(ui)) {
-    runCommand('pnpm', ['--dir', 'admin', 'run', `build:${selected}`]);
+    runCommand('pnpm', ['--dir', 'admin', '--filter', `@vben/web-${selected}`, 'run', 'build']);
   }
 }
 

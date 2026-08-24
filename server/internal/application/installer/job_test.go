@@ -41,6 +41,21 @@ func TestApplyJobReportsProgressAndCompletes(t *testing.T) {
 	}
 }
 
+func TestStepProgressMatchesAssetFreeInstallationTransaction(t *testing.T) {
+	want := map[string]int{
+		"plan": 10, "database": 20, "redis": 30, "schema": 50,
+		"identity": 70, "environment": 90, "lock": 100,
+	}
+	for step, expected := range want {
+		if got := stepProgress(step); got != expected {
+			t.Fatalf("stepProgress(%q) = %d, want %d", step, got, expected)
+		}
+	}
+	if got := stepProgress("assets"); got != 0 {
+		t.Fatalf("stepProgress(assets) = %d, want removed step", got)
+	}
+}
+
 func TestApplyJobRejectsConcurrentStart(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})

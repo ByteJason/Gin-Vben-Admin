@@ -70,11 +70,13 @@ func NewRouterWithRuntimeAndObservability(readinessChecker health.ReadinessCheck
 	if installStatus != nil {
 		r.Use(installhttp.InstallationGate(installStatus))
 	}
+	installerRoutes := r.Group("")
+	installerRoutes.Use(installhttp.LocalInstallerOnly())
 	if staticAssets != nil {
-		staticui.RegisterInstallerRoutes(r, staticAssets)
+		staticui.RegisterInstallerRoutes(installerRoutes, staticAssets)
 	}
 	health.RegisterRoutes(r, readinessChecker)
-	installhttp.RegisterRoutes(r, installHandler)
+	installhttp.RegisterRoutes(installerRoutes, installHandler)
 	admin.RegisterRoutesWithIAM(r, authHandler, iamHandler, auxiliary...)
 	client.RegisterRoutes(r)
 	if staticAssets != nil {

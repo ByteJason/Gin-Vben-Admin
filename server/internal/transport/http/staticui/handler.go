@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"net/http"
 	"path"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -17,8 +18,11 @@ var contentTypes = map[string]string{
 	".svg":  "image/svg+xml",
 }
 
-// RegisterInstallerRoutes mounts only the installer subtree of a generated
-// bundle. It does not register a catch-all route or expose directory listings.
+const installerContentSecurityPolicy = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
+
+// RegisterInstallerRoutes mounts only the installer subtree of an approved
+// asset filesystem. It does not register a catch-all route or expose directory
+// listings.
 func RegisterInstallerRoutes(router gin.IRoutes, assets fs.FS) {
 	if assets == nil {
 		return
@@ -75,5 +79,16 @@ func serveFile(c *gin.Context, assets fs.FS, name string) {
 		contentType = "application/octet-stream"
 	}
 	c.Header("Cache-Control", "no-cache")
+	if name == "index.html" {
+		// The global middleware intentionally uses an API-only CSP. The installer
+		// HTML needs only its same-origin module, stylesheet, and JSON endpoints.
+		c.Header("Content-Security-Policy", installerContentSecurityPolicy)
+	}
+	if c.Request.Method == http.MethodHead {
+		c.Header("Content-Type", contentType)
+		c.Header("Content-Length", strconv.Itoa(len(contents)))
+		c.Status(http.StatusOK)
+		return
+	}
 	c.Data(http.StatusOK, contentType, contents)
 }
