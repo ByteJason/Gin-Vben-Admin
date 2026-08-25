@@ -152,6 +152,8 @@ pnpm install
 pnpm run dev
 ```
 
+已初始化的工作区执行 `git pull` 时，Git 可能在未选 UI 的原路径下重新写入本次上游变更涉及的少量 tracked 文件。只要该路径没有恢复 `package.json`，它就不是 pnpm workspace，也不是第二套可运行 UI；Node 门禁与 Go 安装状态会继续读取 `.ui-profile.json` 中的唯一选择，因此无需重新执行 init，`pnpm install` 也不会安装这些残片的依赖。请保留 `.ui-profile.json`、`.runtime/install/.installed` 与初始化备份；完整的未选 UI workspace、符号链接或异常路径仍会被一致性检查拦截，并显示真实的已选 UI，而不会误报 `INIT_SELECTED_UI=none`。
+
 登录后默认进入 `/dashboard/analytics`“运行概览”。生产菜单、兼容路由、访问码与各页面职责见 [`docs/admin-information-architecture.md`](docs/admin-information-architecture.md)。
 
 编辑本地 `server/configs/server.yaml` 或设置环境变量后，使用显式命令管理数据库迁移：

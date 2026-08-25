@@ -212,6 +212,23 @@ function strictPathState(target, inspect = lstatSync) {
   }
 }
 
+// Git can re-materialize only the tracked files changed by an upstream pull
+// below a UI directory that init previously moved away. Such a partial path is
+// not a pnpm workspace unless its package manifest also exists. Keep malformed
+// paths fail-closed, but do not mistake harmless source fragments for another
+// installed UI template.
+function unselectedWorkspaceSurfacePresent(root, entry) {
+  const directory = join(root, entry.appDirectory);
+  const directoryState = strictPathState(directory);
+  if (directoryState.kind === 'missing') return false;
+  if (
+    directoryState.kind === 'error'
+    || !directoryState.stat.isDirectory()
+    || directoryState.stat.isSymbolicLink()
+  ) return true;
+  return strictPathState(join(directory, 'package.json')).kind !== 'missing';
+}
+
 function strictPathPresent(target, code, inspect = lstatSync) {
   const state = strictPathState(target, inspect);
   if (state.kind === 'error') throw new Error(code);
@@ -655,9 +672,8 @@ export function inspectState(root) {
   if (!plainDirectory(join(root, profile.appDirectory))) {
     return { state: STATES.INCONSISTENT, profile: null, reason: STATE_REASONS.SELECTED_APP_MISSING };
   }
-  if (Object.entries(UI_PROFILES).some(([ui, entry]) => ui !== profile.selectedUi && existsSync(join(root, entry.appDirectory)))) {
-    return { state: STATES.INCONSISTENT, profile: null, reason: STATE_REASONS.EXTRA_TEMPLATE_PRESENT };
-  }
+  const extraTemplatePresent = Object.entries(UI_PROFILES)
+    .some(([ui, entry]) => ui !== profile.selectedUi && unselectedWorkspaceSurfacePresent(root, entry));
   if (hasReceipt && !validReceipt(location.receipt, profile)) {
     return { state: STATES.INCONSISTENT, profile: null, reason: STATE_REASONS.RECEIPT_INVALID };
   }
@@ -668,6 +684,9 @@ export function inspectState(root) {
   }
   if (hasMarker && !validMarker(location.marker, profile)) {
     return { state: STATES.INCONSISTENT, profile: null, reason: STATE_REASONS.MARKER_INVALID };
+  }
+  if (extraTemplatePresent) {
+    return { state: STATES.INCONSISTENT, profile, reason: STATE_REASONS.EXTRA_TEMPLATE_PRESENT };
   }
   return { state: hasMarker ? STATES.INSTALLED : STATES.UI_PREPARED, profile, reason: STATE_REASONS.NONE };
 }
@@ -2279,7 +2298,7 @@ export function actionForState({ state, reason = STATE_REASONS.NONE }) {
   if (state === STATES.UI_PREPARED) return 'OPEN_INSTALLER';
   if (state === STATES.INSTALLING) return 'WAIT_FOR_INITIALIZATION';
   if (state === STATES.INSTALLED) return 'RUN_SELECTED_APP';
-  if (reason === STATE_REASONS.EXTRA_TEMPLATE_PRESENT) return 'RESUME_UI_SELECTION';
+  if (reason === STATE_REASONS.EXTRA_TEMPLATE_PRESENT) return 'REMOVE_UNSELECTED_UI_WORKSPACE';
   return 'KEEP_STATE_AND_REPORT_CODE';
 }
 

@@ -3520,9 +3520,72 @@ test('a fresh clone profile without local receipt is prepared, while invalid rec
 
     rmSync(join(root, '.ui-init-receipt.json'));
     mkdirSync(join(root, 'apps', 'web-ele'));
+    writeFileSync(join(root, 'apps', 'web-ele', 'package.json'), JSON.stringify({ name: '@vben/web-ele' }));
     const extraTemplate = run(root, 'init.mjs', ['--check']);
     assert.equal(extraTemplate.status, 3, output(extraTemplate));
     assert.match(output(extraTemplate), /INIT_STATE=inconsistent/);
+    assert.match(output(extraTemplate), /INIT_SELECTED_UI=antd/);
+    assert.match(output(extraTemplate), /INIT_REASON=EXTRA_TEMPLATE_PRESENT/);
+
+    const blocked = run(root, 'profile-gate.mjs', ['--command', 'dev']);
+    assert.equal(blocked.status, 3, output(blocked));
+    assert.match(output(blocked), /INIT_SELECTED_UI=antd/);
+    assert.match(output(blocked), /INIT_ACTION=REMOVE_UNSELECTED_UI_WORKSPACE/);
+    assert.match(output(blocked), /INIT_NEXT=REMOVE_UNSELECTED_UI_WORKSPACE/);
+    assert.match(output(blocked), /INIT_ERROR=UNSELECTED_UI_WORKSPACE_PRESENT/);
+  } finally {
+    dispose(root);
+  }
+});
+
+test('an installed selected UI remains runnable when git pull restores partial unselected template paths', () => {
+  const root = fixture();
+  try {
+    const initialized = run(root, 'init.mjs', ['--ui', 'ele', '--confirm-cleanup', '--no-open']);
+    assert.equal(initialized.status, 0, output(initialized));
+
+    const marker = join(root, '..', '.runtime', 'install', '.installed');
+    writeFileSync(marker, JSON.stringify({
+      schema_version: 1,
+      installer_version: '0.4.0-dev',
+      installed_at: '2026-08-24T00:00:00Z',
+      selected_ui: 'ele',
+      mode: 'dev',
+      artifact_hash: 'a'.repeat(64),
+      manifest_hash: 'b'.repeat(64),
+    }));
+
+    // A pull can materialize changed tracked files below the two unselected
+    // template paths without restoring their package manifests. These fragments
+    // are not pnpm workspaces and must not erase the committed UI selection.
+    for (const ui of ['antd', 'naive']) {
+      const directory = join(root, 'apps', `web-${ui}`, 'src', 'api', 'core');
+      mkdirSync(directory, { recursive: true });
+      writeFileSync(join(directory, 'pulled-update.ts'), 'export const pulledUpdate = true;\n');
+    }
+
+    const dev = run(root, 'profile-gate.mjs', ['--command', 'dev']);
+    assert.equal(dev.status, 0, output(dev));
+    assert.match(output(dev), /INIT_STATE=installed/);
+    assert.match(output(dev), /INIT_SELECTED_UI=ele/);
+    assert.match(output(dev), /INIT_REASON=NONE/);
+    assert.match(output(dev), /INIT_ACTION=RUN_SELECTED_APP/);
+    assert.match(output(dev), /INIT_NEXT=RUN_DEV/);
+    assert.match(output(dev), /INIT_ERROR=NONE/);
+
+    const runner = join(root, 'scripts', 'record-pulled-layout-dispatch.mjs');
+    const log = join(root, 'pulled-layout-dispatch.log');
+    writeFileSync(runner, [
+      'import { writeFileSync } from "node:fs";',
+      'writeFileSync(process.env.INIT_PNPM_LOG, process.argv.slice(2).join(" "));',
+    ].join('\n'));
+    const dispatch = run(root, 'selected-dispatch.mjs', ['--command', 'dev'], {
+      INIT_PNPM_COMMAND: process.execPath,
+      INIT_PNPM_PREFIX_ARGS: JSON.stringify([runner]),
+      INIT_PNPM_LOG: log,
+    });
+    assert.equal(dispatch.status, 0, output(dispatch));
+    assert.equal(readFileSync(log, 'utf8'), '-F @vben/web-ele run dev');
   } finally {
     dispose(root);
   }

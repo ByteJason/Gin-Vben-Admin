@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -169,6 +170,9 @@ func TestFileProfileProviderRejectsExtraTemplatesAndSymlinks(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
+				if err := os.WriteFile(filepath.Join(root, "admin", "apps", "web-ele", "package.json"), []byte(`{"name":"@vben/web-ele"}`), 0o600); err != nil {
+					t.Fatal(err)
+				}
 			},
 		},
 		{
@@ -200,6 +204,52 @@ func TestFileProfileProviderRejectsExtraTemplatesAndSymlinks(t *testing.T) {
 				t.Fatalf("Profile() = (%#v, %t, %v), want invalid existing profile", profile, exists, err)
 			}
 		})
+	}
+}
+
+func TestFileProfileProviderAllowsPulledFragmentsWithoutAnUnselectedPackageManifest(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	mustWriteProfileFixture(t, root, `{"schema":1,"selectedUi":"ele","packageName":"@vben/web-ele","appDirectory":"apps/web-ele"}`)
+	if err := os.MkdirAll(filepath.Join(root, "admin", "apps", "web-ele"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, ui := range []string{"antd", "naive"} {
+		directory := filepath.Join(root, "admin", "apps", "web-"+ui, "src", "api", "core")
+		if err := os.MkdirAll(directory, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(directory, "pulled_update.go.fixture"), []byte("tracked update\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	provider, err := NewFileProfileProvider(root)
+	if err != nil {
+		t.Fatalf("NewFileProfileProvider() error = %v", err)
+	}
+	profile, exists, err := provider.Profile(context.Background())
+	if err != nil || !exists || profile.SelectedUI != installstate.UIEle || profile.Installing {
+		t.Fatalf("Profile() = (%#v, %t, %v), want ele profile with harmless pulled fragments", profile, exists, err)
+	}
+
+	markerStore := NewFileMarkerStore(filepath.Join(root, ".runtime", "install", ".installed"))
+	marker := installstate.Marker{
+		SchemaVersion:    installstate.CurrentSchemaVersion,
+		InstallerVersion: installer.CurrentInstallerVersion,
+		InstalledAt:      time.Date(2026, time.August, 25, 0, 0, 0, 0, time.UTC),
+		SelectedUI:       installstate.UIEle,
+		Mode:             installstate.ModeDev,
+		ArtifactHash:     strings.Repeat("a", 64),
+		ManifestHash:     strings.Repeat("b", 64),
+	}
+	if err := markerStore.Create(context.Background(), marker); err != nil {
+		t.Fatalf("Create(marker) error = %v", err)
+	}
+	status, err := installer.NewStatusServiceWithProfile(markerStore, provider).Status(context.Background())
+	if err != nil || !status.Installed || status.State != installer.StateInstalled || status.SelectedUI != installstate.UIEle {
+		t.Fatalf("Status() = (%#v, %v), want installed ele after pull", status, err)
 	}
 }
 

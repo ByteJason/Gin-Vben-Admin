@@ -150,7 +150,16 @@ func (p *FileProfileProvider) validTemplateLayout(selected uiProfileDefinition) 
 			}
 			continue
 		}
-		if err == nil || !errors.Is(err, os.ErrNotExist) {
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return false
+		}
+		// A fast-forward pull may restore only changed tracked files below an
+		// unselected UI path. Without package.json it is not a pnpm workspace
+		// or a runnable template, so it must not invalidate the selected UI.
+		if _, manifestErr := os.Lstat(filepath.Join(path, "package.json")); !errors.Is(manifestErr, os.ErrNotExist) {
 			return false
 		}
 	}

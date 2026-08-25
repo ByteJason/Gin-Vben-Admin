@@ -55,6 +55,8 @@ pnpm install
 pnpm run dev
 ```
 
+已初始化后拉取更新时，上游改动可能让未选 UI 原路径重新出现少量 tracked 源码残片。没有 `package.json` 的残片不是 pnpm workspace；Node 命令门禁和 Go 安装状态都会继续使用 `.ui-profile.json` 的唯一选择，所以无需重新 init，也不会安装残片依赖。不要删除 `.ui-profile.json`、`.runtime/install/.installed` 或初始化备份；若完整未选 workspace 或异常路径出现，一致性检查会保留并显示真实选择后阻断运行。
+
 以下状态由程序维护，**不要手动删除、改名或编辑**：
 
 | 路径 | 作用 |
