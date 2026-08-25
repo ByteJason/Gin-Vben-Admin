@@ -68,20 +68,12 @@ async function confirm(message, explicit) {
   }
 }
 
-async function chooseUI() {
-  if (!stdin.isTTY) throw new Error('UI_REQUIRED');
-  const reader = createInterface({ input: stdin, output: stdout });
-  try {
-    const selectedUi = (await reader.question('Select UI (antd/ele/naive): ')).trim();
-    if (!UI_PROFILES[selectedUi]) throw new Error('UI_INVALID');
-    return selectedUi;
-  } finally {
-    reader.close();
-  }
-}
-
 function print(status) {
   stdout.write(`${formatStatus(status)}\n`);
+}
+
+function printStage(scope, stage) {
+  stdout.write(`INIT_STAGE=${scope}:${stage}\n`);
 }
 
 function printRecovery(recovery) {
@@ -206,6 +198,7 @@ function launchBrowser(url, noOpen) {
 }
 
 function openInstaller(prepared, options) {
+  printStage('prepare', 'complete');
   const opened = launchBrowser(installURL(options.port), options.noOpen);
   print({ ...prepared, next: opened ? 'INSTALLER_LAUNCHED' : 'OPEN_INSTALLER', port: options.port });
   return 0;
@@ -237,6 +230,11 @@ async function main() {
       print({ ...current, next: 'CHECK_COMPLETE', error: current.state === STATES.INCONSISTENT ? 'STATE_INCONSISTENT' : 'NONE', port });
       return current.state === STATES.INCONSISTENT ? 3 : 0;
     }
+    if (!options.reset && !options.selectedUi && current.state === STATES.PRISTINE) {
+      stdout.write(`请打开 ${installURL(port)}，在安装页选择管理界面并继续。\n`);
+      print({ ...current, action: 'OPEN_INSTALLER', next: 'OPEN_INSTALLER', port });
+      return 0;
+    }
     if (current.state === STATES.INSTALLED) {
       if (options.reset) throw new Error('RESET_UNAVAILABLE_INSTALLED');
       print({ ...current, next: 'ALREADY_INSTALLED', port });
@@ -245,7 +243,9 @@ async function main() {
     releaseAdminLease = await acquireAdminInitLease(root);
     ensureInstallerApplyIdle(root);
     if (options.reset) {
+      printStage('reset', 'preflight');
       await confirm('Confirm reset: restore staged templates and remove the UI profile.', options.confirmReset);
+      printStage('reset', 'workspace');
     }
     const legacyMigration = await migrateLegacyPreparedState(root);
     if (legacyMigration.migrated) {
@@ -262,6 +262,7 @@ async function main() {
     if (options.reset) {
       if (current.state === STATES.INSTALLED) throw new Error('RESET_UNAVAILABLE_INSTALLED');
       const result = await reset(root);
+      printStage('reset', 'complete');
       print({ ...result, next: 'RESET_COMPLETE', port });
       return 0;
     }
@@ -279,12 +280,17 @@ async function main() {
       STATE_REASONS.DEPENDENCIES_PENDING,
     ].includes(current.reason)) {
       await verifyOrdinaryAPI(port);
+      if (current.reason === STATE_REASONS.SOURCE_MOVE_TRANSACTION_PRESENT) {
+        printStage('prepare', 'workspace');
+      }
       const resumed = await initialize(root, current.selectedUi ?? current.profile?.selectedUi);
+      printStage('prepare', 'dependencies');
       const prepared = await ensureDependenciesPrepared(resumed.profile);
       return openInstaller({ ...prepared, profile: resumed.profile }, options);
     }
     if (current.state === STATES.UI_PREPARED) {
       await verifyOrdinaryAPI(port);
+      printStage('prepare', 'dependencies');
       const prepared = await ensureDependenciesPrepared(current.profile);
       return openInstaller(prepared, options);
     }
@@ -296,23 +302,28 @@ async function main() {
     }
 
     await verifyOrdinaryAPI(port);
-    const selectedUi = options.selectedUi || await chooseUI();
+    const selectedUi = options.selectedUi;
+    printStage('prepare', 'preflight');
     const plan = preflightInitialization(root, selectedUi);
     stdout.write(`Selected: ${selectedUi}; retain: ${plan.retain}; stage: ${plan.stage.join(', ')}\n`);
     stdout.write(`INIT_PREFLIGHT=ok\nINIT_PLAN_RETAIN=${plan.retain}\nINIT_PLAN_STAGE=${plan.stage.join(',')}\nINIT_PLAN_BACKUP=${plan.backup}\n`);
     await confirm('Confirm cleanup:', options.confirmCleanup);
+    printStage('prepare', 'workspace');
     const result = await initialize(root, selectedUi);
     if (result.state !== STATES.UI_PREPARED) {
       print({ ...result, next: 'RECOVER_INITIALIZATION', error: 'INITIALIZATION_IN_PROGRESS', port });
       return 3;
     }
+    printStage('prepare', 'dependencies');
     const prepared = await ensureDependenciesPrepared(result.profile);
     return openInstaller(prepared, options);
   } catch (error) {
-    const current = inspectState(root);
     const code = error instanceof Error ? error.message : 'INIT_FAILED';
+    const current = code === 'INSTALL_STATE_DIR_INVALID'
+      ? { state: STATES.INCONSISTENT, profile: null, reason: STATE_REASONS.INSTALL_STATE_DIR_INVALID }
+      : inspectState(root);
     if (code === 'PREFLIGHT_FAILED') stdout.write('INIT_PREFLIGHT=failed\n');
-    const argumentError = ['UI_REQUIRED', 'UI_INVALID', 'ARGUMENT_INVALID', 'PORT_INVALID', 'CLEANUP_CONFIRMATION_REQUIRED', 'RESET_CONFIRMATION_REQUIRED'].includes(code);
+    const argumentError = ['UI_INVALID', 'ARGUMENT_INVALID', 'PORT_INVALID', 'CLEANUP_CONFIRMATION_REQUIRED', 'RESET_CONFIRMATION_REQUIRED', 'INSTALL_STATE_DIR_INVALID'].includes(code);
     const stateError = code.startsWith('RESET_')
       || code === 'TEMPLATE_LAYOUT_INVALID'
       || code === 'PREFLIGHT_FAILED'

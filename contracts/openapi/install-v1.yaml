@@ -31,6 +31,134 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+  /api/system/install/v1/ui/prepare:
+    post:
+      tags: [Installation]
+      operationId: prepareInstallationUI
+      summary: 异步准备网页中确认的管理界面
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UIPrepareRequest'
+      responses:
+        '202':
+          description: UI 准备任务已接受
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UIPreparationJobEnvelope'
+        '400':
+          description: UI 或显式清理确认无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UIPreparationErrorEnvelope'
+        '409':
+          description: 已安装、已有冲突选择或另一个安装事务正在运行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UIPreparationErrorEnvelope'
+        '503':
+          description: UI 准备服务未接通
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstallServiceUnavailableEnvelope'
+        '500':
+          description: UI 准备状态不可读或命令启动失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UIPreparationErrorEnvelope'
+  /api/system/install/v1/ui/progress/{id}:
+    get:
+      tags: [Installation]
+      operationId: getInstallationUIProgress
+      summary: 查询 UI 准备或恢复任务进度
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 80
+      responses:
+        '200':
+          description: UI 准备任务进度
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UIPreparationJobEnvelope'
+        '404':
+          description: UI 准备任务不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UIPreparationErrorEnvelope'
+        '503':
+          description: UI 准备服务未接通
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstallServiceUnavailableEnvelope'
+        '500':
+          description: UI 准备状态不可读
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UIPreparationErrorEnvelope'
+  /api/system/install/v1/ui/reset:
+    post:
+      tags: [Installation]
+      operationId: resetInstallationUI
+      summary: 安装完成前异步恢复三套 UI 以便重新选择
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UIResetRequest'
+      responses:
+        '202':
+          description: UI 恢复任务已接受
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UIPreparationJobEnvelope'
+        '400':
+          description: 缺少显式恢复确认或请求无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UIPreparationErrorEnvelope'
+        '409':
+          description: 已完成安装或另一个安装事务正在运行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UIPreparationErrorEnvelope'
+        '503':
+          description: UI 准备服务未接通
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstallServiceUnavailableEnvelope'
+        '500':
+          description: UI 恢复状态不可读或命令启动失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UIPreparationErrorEnvelope'
   /api/system/install/v1/plan:
     post:
       tags: [Installation]
@@ -357,12 +485,110 @@ components:
           type: string
           enum: [antd, ele, naive]
           readOnly: true
+        phase:
+          type: string
+          enum: [ui_prepare, apply]
+          readOnly: true
+        uiAction:
+          type: string
+          enum: [prepare, reset]
+          readOnly: true
         mode:
           type: string
           enum: [embedded, standalone, api_only, dev]
         installedAt:
           type: string
           format: date-time
+    UIPrepareRequest:
+      type: object
+      additionalProperties: false
+      required: [selectedUi, confirmCleanup]
+      properties:
+        selectedUi:
+          type: string
+          enum: [antd, ele, naive]
+        confirmCleanup:
+          type: boolean
+          const: true
+    UIResetRequest:
+      type: object
+      additionalProperties: false
+      required: [confirmReset]
+      properties:
+        confirmReset:
+          type: boolean
+          const: true
+    UIPreparationJobEnvelope:
+      type: object
+      required: [code, message, data, traceId, meta]
+      properties:
+        code:
+          type: integer
+          const: 0
+        message:
+          type: string
+          enum: [accepted, success]
+        data:
+          $ref: '#/components/schemas/UIPreparationJob'
+        traceId:
+          type: string
+        meta:
+          $ref: '#/components/schemas/ResponseMeta'
+    UIPreparationJob:
+      type: object
+      required: [id, action, state, currentStep, progress, lastUpdated]
+      properties:
+        id:
+          type: string
+          minLength: 8
+          maxLength: 80
+        action:
+          type: string
+          enum: [prepare, reset]
+        state:
+          type: string
+          enum: [queued, running, succeeded, failed]
+        selectedUi:
+          type: string
+          enum: [antd, ele, naive]
+          readOnly: true
+        currentStep:
+          type: string
+          enum: [queued, preflight, workspace, dependencies, reset, complete, failed]
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        errorKey:
+          type: string
+          pattern: '^[a-z][a-z0-9_]{1,63}$'
+        logPath:
+          type: string
+          const: .runtime/install/dependency-install.log
+        lastUpdated:
+          type: string
+          format: date-time
+    UIPreparationErrorEnvelope:
+      type: object
+      required: [code, message, data, traceId, meta]
+      properties:
+        code:
+          type: integer
+          enum: [10000, 10006, 10007, 30000, 40001, 50000]
+        message:
+          type: string
+          enum:
+            - invalid UI preparation request
+            - UI preparation already running
+            - installation already completed
+            - UI preparation job not found
+            - UI preparation service unavailable
+        data:
+          type: 'null'
+        traceId:
+          type: string
+        meta:
+          $ref: '#/components/schemas/ResponseMeta'
     ErrorEnvelope:
       type: object
       required: [code, message, data, traceId, meta]

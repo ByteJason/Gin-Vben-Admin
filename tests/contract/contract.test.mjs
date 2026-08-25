@@ -100,6 +100,45 @@ test('installation contract exposes credential-free status on its own scope', ()
   assert.doesNotMatch(install, /\/api\/admin\/v1|\/api\/client\/v1/);
 });
 
+test('installation contract exposes asynchronous UI preparation without widening apply', () => {
+  const install = readFileSync(join(root, 'contracts/openapi/install-v1.yaml'), 'utf8');
+  for (const path of [
+    '/api/system/install/v1/ui/prepare:',
+    '/api/system/install/v1/ui/progress/{id}:',
+    '/api/system/install/v1/ui/reset:',
+  ]) {
+    assert.match(install, new RegExp(`\\n  ${path.replaceAll('/', '\\/')}`), path);
+    const sectionStart = install.indexOf(`  ${path}`);
+    const nextSection = install.indexOf('\n  /', sectionStart + 4);
+    const section = install.slice(sectionStart, nextSection === -1 ? undefined : nextSection);
+    assert.match(section, /'503':[\s\S]*?InstallServiceUnavailableEnvelope/, `${path} 503 schema`);
+  }
+  assert.match(install, /UIPrepareRequest/);
+  assert.match(install, /UIResetRequest/);
+  assert.match(install, /UIPreparationJob/);
+  assert.match(install, /confirmCleanup/);
+  assert.match(install, /confirmReset/);
+  assert.match(install, /enum: \[queued, running, succeeded, failed\]/);
+  assert.match(install, /enum: \[prepare, reset\]/);
+  assert.match(install, /currentStep/);
+  assert.match(install, /errorKey/);
+  assert.match(install, /logPath/);
+  assert.match(install, /phase:[\s\S]*?enum: \[ui_prepare, apply\]/);
+  assert.match(install, /uiAction:[\s\S]*?enum: \[prepare, reset\]/);
+  assert.match(
+    install,
+    /InstallServiceUnavailableEnvelope:[\s\S]*?const: installation service unavailable/,
+  );
+
+  const jobSchema = install.slice(
+    install.indexOf('    UIPreparationJob:'),
+    install.indexOf('    UIPreparationErrorEnvelope:'),
+  );
+  assert.doesNotMatch(jobSchema, /command|stdout|stderr|absolutePath|password|dsn|secret|token/i);
+  const applySchema = install.slice(install.indexOf('    ApplyRequest:'), install.indexOf('    AdminAccount:'));
+  assert.doesNotMatch(applySchema, /selectedUi|confirmCleanup|confirmReset/);
+});
+
 test('installation contract exposes a permission plan without filesystem details', () => {
   const install = readFileSync(join(root, 'contracts/openapi/install-v1.yaml'), 'utf8');
   assert.match(install, /\/api\/system\/install\/v1\/plan:/);

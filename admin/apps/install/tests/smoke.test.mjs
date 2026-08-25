@@ -27,7 +27,14 @@ test('installation shell is independent and exposes an accessible status region'
   assert.match(html, /id="capability-list"/);
   assert.match(html, /id="plan-form"/);
   assert.match(html, /id="selected-ui-summary"/);
-  assert.doesNotMatch(html, /id="ui-choice"|name="selectedUi"/);
+  assert.doesNotMatch(html, /读取命令行选择/);
+  assert.match(
+    html,
+    /<fieldset[^>]*id="ui-choice"[\s\S]*?<legend>选择管理界面<\/legend>/,
+  );
+  for (const ui of ['antd', 'ele', 'naive']) {
+    assert.match(html, new RegExp(`name="selectedUi"[^>]*value="${ui}"`));
+  }
   assert.match(html, /id="mode-choice"/);
   assert.match(html, /<option value="dev" selected>开发调试（推荐）<\/option>/);
   assert.match(html, /id="locale-mode"/);
@@ -53,7 +60,12 @@ test('installation shell is independent and exposes an accessible status region'
   assert.match(html, /id="admin-username"[^>]*value="admin"/);
   assert.match(html, /id="admin-password"/);
   assert.match(html, /id="admin-password-confirm"/);
-  assert.doesNotMatch(html, /id="confirm-cleanup"/);
+  assert.match(html, /id="confirm-cleanup"[^>]*type="checkbox"/);
+  assert.match(html, /id="prepare-ui-button"[^>]*type="submit"/);
+  assert.match(
+    html,
+    /id="ui-prepare-result"[^>]*role="status"[^>]*aria-live="polite"/,
+  );
   assert.match(html, /id="apply-button"/);
   assert.match(html, /id="apply-result"/);
   assert.match(html, /id="install-failure-details"/);
@@ -99,6 +111,9 @@ test('installation shell is independent and exposes an accessible status region'
   assert.match(script, /\/api\/system\/install\/v1\/progress/);
   assert.match(script, /\/api\/system\/install\/v1\/retry/);
   assert.match(script, /\/api\/system\/install\/v1\/rollback/);
+  assert.match(script, /\/api\/system\/install\/v1\/ui\/prepare/);
+  assert.match(script, /\/api\/system\/install\/v1\/ui\/progress/);
+  assert.match(script, /\/api\/system\/install\/v1\/ui\/reset/);
   assert.match(script, /pollInstallation/);
   assert.match(script, /let retryJobId\s*=\s*null/);
   assert.match(script, /let rollbackJobId\s*=\s*null/);
@@ -116,7 +131,10 @@ test('installation shell is independent and exposes an accessible status region'
     /rollbackJobId\s*=\s*job\.canRollback\s*\?\s*job\.id\s*:\s*null/,
   );
   assert.match(script, /commitCompletedInstallation/);
-  assert.doesNotMatch(script, /uiChoice|confirmCleanup/);
+  assert.match(script, /uiChoice/);
+  assert.match(script, /confirmCleanup/);
+  assert.match(script, /requestUIPreparation/);
+  assert.match(script, /pollUIAction/);
   assert.match(script, /requestInstallation/);
   assert.match(script, /applyButton\.disabled\s*=\s*!currentPlan/);
   assert.match(
@@ -125,7 +143,7 @@ test('installation shell is independent and exposes an accessible status region'
   );
   assert.match(script, /method:\s*'POST'/);
   assert.match(script, /selectedUi/);
-  assert.doesNotMatch(script, /selectedUi\s*:/);
+  assert.match(script, /selectedUi\s*:/);
   assert.match(script, /JSON\.stringify\(\{ mode \}\)/);
   assert.match(script, /localeMode/);
   assert.match(script, /localeChoice/);
@@ -138,7 +156,7 @@ test('installation shell is independent and exposes an accessible status region'
   assert.match(script, /aria-valuetext/);
   assert.match(script, /status\.state === 'installing'/);
   assert.match(script, /status\.state === 'pristine'/);
-  assert.match(script, /等待执行 pnpm run init/);
+  assert.doesNotMatch(script, /等待执行 pnpm run init/);
   assert.match(script, /window\.setTimeout\(loadStatus,/);
   assert.match(script, /安装任务正在执行/);
   assert.doesNotMatch(script, /Ctrl\+C/);
@@ -179,6 +197,15 @@ test('installation forms expose semantic groups and responsive installation feed
   assert.match(html, /id="apply-result"[^>]*aria-atomic="true"/);
   assert.match(html, /class="progress-panel"/);
 
+  assert.match(
+    styles,
+    /\.ui-option-grid\s*\{[\s\S]*?grid-template-columns:\s*repeat\(3,/,
+  );
+  assert.match(styles, /\.ui-option\s*\{[\s\S]*?min-height:\s*88px/);
+  assert.match(styles, /\.ui-option:has\(input:checked\)/);
+  assert.match(styles, /\.ui-option:focus-within/);
+  assert.match(styles, /\.ui-prepare-panel\[hidden\]/);
+
   assert.match(styles, /\.page-shell\s*\{[\s\S]*?width:\s*min\(1400px,/);
   assert.match(
     styles,
@@ -215,6 +242,213 @@ test('installation forms expose semantic groups and responsive installation feed
     compactLayout,
     /\.terminal-grid[\s\S]*?grid-template-columns:\s*1fr;/,
   );
+  assert.match(
+    compactLayout,
+    /\.ui-option-grid[\s\S]*?grid-template-columns:\s*1fr;/,
+  );
+});
+
+test('UI preparation announces only backend-supported job steps', () => {
+  const script = readFileSync(join(root, 'src/app.js'), 'utf8');
+  const labelsSource =
+    script.match(/const uiStepLabels = \{[\s\S]*?\n\};/)?.[0] ?? '';
+  assert.notEqual(labelsSource, '', 'uiStepLabels must be declared');
+  const labels = Function(
+    `'use strict'; ${labelsSource}; return uiStepLabels;`,
+  )();
+
+  assert.deepEqual(Object.keys(labels), [
+    'queued',
+    'preflight',
+    'workspace',
+    'dependencies',
+    'reset',
+    'complete',
+    'failed',
+  ]);
+  assert.equal(labels.workspace, '暂存模板并写入界面配置');
+});
+
+test('recoverable UI status dispatches prepare and reset actions separately', () => {
+  const html = readFileSync(join(root, 'src/index.html'), 'utf8');
+  const script = readFileSync(join(root, 'src/app.js'), 'utf8');
+  const recoverable = readFunction(script, 'renderRecoverableUIPreparation');
+
+  assert.match(
+    html,
+    /id="resume-ui-reset-button"[^>]*type="button"[^>]*hidden[^>]*>[\s\S]*?继续恢复三套模板/,
+  );
+  assert.match(recoverable, /status\.uiAction === 'reset'/);
+  assert.match(recoverable, /uiPrepareForm\.hidden\s*=\s*recoveringReset/);
+  assert.match(
+    recoverable,
+    /resumeUIResetButton\.hidden\s*=\s*!recoveringReset/,
+  );
+  assert.match(script, /resumeUIResetButton\.addEventListener\('click'/);
+  assert.match(
+    script,
+    /runUIAction\(uiResetEndpoint,\s*\{ confirmReset: true \}\)/,
+  );
+});
+
+test('a rejected UI action releases pending controls through the common failure path', async () => {
+  const script = readFileSync(join(root, 'src/app.js'), 'utf8');
+  const runAction = readFunction(script, 'runUIAction');
+  const finished = [];
+
+  const outcome = await Function(`
+    'use strict';
+    const uiResetEndpoint = '/api/system/install/v1/ui/reset';
+    const postUIActionRequest = async () => ({
+      response: { status: 409 },
+      envelope: { code: 10007, errorKey: 'ui_preparation_conflict' },
+    });
+    const pollUIAction = async () => { throw new Error('must not poll'); };
+    const renderUIActionProgress = () => {};
+    const finished = arguments[0];
+    const finishUIAction = async (job) => {
+      finished.push(job);
+      return false;
+    };
+    ${runAction}
+    return runUIAction('/api/system/install/v1/ui/prepare', {
+      selectedUi: 'naive',
+      confirmCleanup: true,
+    });
+  `)(finished);
+
+  assert.equal(outcome, false);
+  assert.deepEqual(finished, [
+    {
+      action: 'prepare',
+      currentStep: 'request',
+      errorKey: 'ui_preparation_conflict',
+      logPath: undefined,
+      selectedUi: 'naive',
+      state: 'failed',
+    },
+  ]);
+});
+
+test('a failed reset exposes a retryable reset control without showing prepare inputs', async () => {
+  const script = readFileSync(join(root, 'src/app.js'), 'utf8');
+  const finishAction = readFunction(script, 'finishUIAction');
+
+  const result = await Function(`
+    'use strict';
+    let uiSelectionLocked = true;
+    const uiPrepareForm = { hidden: false };
+    const resumeUIResetButton = { hidden: true };
+    const retryButton = { hidden: true };
+    const uiPrepareTitle = { textContent: '' };
+    const uiPrepareHint = { textContent: '' };
+    const uiPrepareResult = { focus() {} };
+    const renderUIActionProgress = () => {};
+    const completedUIAction = () => false;
+    const pending = [];
+    const setUIActionPending = (value) => pending.push(value);
+    const loadStatus = async () => {};
+    ${finishAction}
+    return finishUIAction({ action: 'reset', state: 'failed' }).then(
+      (outcome) => ({
+        formHidden: uiPrepareForm.hidden,
+        outcome,
+        pending,
+        resetHidden: resumeUIResetButton.hidden,
+        retryHidden: retryButton.hidden,
+        title: uiPrepareTitle.textContent,
+      }),
+    );
+  `)();
+
+  assert.deepEqual(result, {
+    formHidden: true,
+    outcome: false,
+    pending: [false],
+    resetHidden: false,
+    retryHidden: false,
+    title: '继续恢复三套界面模板',
+  });
+});
+
+test('UI reset disabled state has one owner and inconsistent recovery stays on install', () => {
+  const script = readFileSync(join(root, 'src/app.js'), 'utf8');
+  const renderStatusSource = readFunction(script, 'renderStatus');
+
+  assert.equal(script.match(/resetUIButton\.disabled\s*=/g)?.length, 1);
+  assert.doesNotMatch(renderStatusSource, /重新运行 pnpm run init/);
+  assert.match(
+    renderStatusSource,
+    /保留当前目录和运行现场[\s\S]*?\/install[\s\S]*?重新检查[\s\S]*?pnpm run init -- --check/,
+  );
+});
+
+test('UI action diagnostics expose stable keys and repository-relative logs only', () => {
+  const script = readFileSync(join(root, 'src/app.js'), 'utf8');
+  const safeLogPath = readFunction(script, 'safeUIActionLogPath');
+  const normalize = Function(
+    `'use strict'; ${safeLogPath}; return safeUIActionLogPath;`,
+  )();
+
+  assert.equal(
+    normalize('.runtime/install/dependency-install.log'),
+    '.runtime/install/dependency-install.log',
+  );
+  assert.equal(
+    normalize('.runtime\\install\\dependency-install.log'),
+    '.runtime/install/dependency-install.log',
+  );
+  assert.equal(normalize('/tmp/private.log'), '—');
+  assert.equal(normalize('.runtime/install/../private.log'), '—');
+  assert.equal(normalize('admin/.runtime/install/private.log'), '—');
+
+  const renderProgress = readFunction(script, 'renderUIActionProgress');
+  assert.match(
+    renderProgress,
+    /uiPrepareErrorKey\.textContent\s*=\s*String\(job\.errorKey/,
+  );
+  assert.match(
+    renderProgress,
+    /uiPrepareLogPath\.textContent\s*=\s*safeUIActionLogPath\(job\.logPath\)/,
+  );
+});
+
+test('capability re-probes disable UI actions before awaiting new results', () => {
+  const script = readFileSync(join(root, 'src/app.js'), 'utf8');
+  const loadCapabilitiesSource = readFunction(script, 'loadCapabilities');
+  const loadAllSource = readFunction(script, 'loadAll');
+  const beforeFetch = loadCapabilitiesSource.slice(
+    0,
+    loadCapabilitiesSource.indexOf('await fetch('),
+  );
+
+  assert.match(beforeFetch, /uiCapabilitiesLoaded\s*=\s*false/);
+  assert.match(beforeFetch, /requiredUIToolsAvailable\s*=\s*false/);
+  assert.match(beforeFetch, /updateUIPrepareButton\(\)/);
+  assert.match(loadAllSource, /if\s*\(uiActionPending\)\s*return/);
+});
+
+test('unchanged UI progress text does not retrigger the live region', () => {
+  const script = readFileSync(join(root, 'src/app.js'), 'utf8');
+  const showMessage = readFunction(script, 'showUIActionMessage');
+  let writes = 0;
+  let value = '准备管理界面：检查模板与目录（5%）';
+  const element = {
+    dataset: { tone: 'pending' },
+    get textContent() {
+      return value;
+    },
+    set textContent(next) {
+      writes += 1;
+      value = next;
+    },
+  };
+
+  Function(
+    'uiPrepareResult',
+    `'use strict'; ${showMessage}; showUIActionMessage('准备管理界面：检查模板与目录（5%）', 'pending');`,
+  )(element);
+  assert.equal(writes, 0);
 });
 
 test('failed installation preserves current input and exposes actionable diagnostics', () => {
@@ -225,7 +459,9 @@ test('failed installation preserves current input and exposes actionable diagnos
     `'use strict'; ${failureMessage}; return installationFailureMessage({ errorKey: 'installation_running', canRetry: true });`,
   )();
   assert.match(busyMessage, /另一项初始化或安装任务正在执行/);
-  assert.match(busyMessage, /重新运行 pnpm run init/);
+  assert.match(busyMessage, /\/install/);
+  assert.match(busyMessage, /重新检查/);
+  assert.doesNotMatch(busyMessage, /pnpm run init/);
   assert.match(busyMessage, /当前输入已保留/);
   assert.doesNotMatch(busyMessage, /自动回滚|副作用/);
   assert.doesNotMatch(busyMessage, /敏感字段已清空|重新输入凭据/);

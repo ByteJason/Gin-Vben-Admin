@@ -73,12 +73,12 @@ func newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasks(cfg config.Config, re
 }
 
 func newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasksAndRuns(cfg config.Config, readiness health.ReadinessChecker, authService appauth.AuthService, limiter appauth.RateLimiter, iamService *iamapp.Service, recovery appauth.AccountRecoveryService, installStatus *installer.StatusService, installPlan installer.PlanProvider, dependencyChecks installhttp.DependencyCheckProvider, applyService *installer.ApplyService, jobService *installer.ApplyJobService, settingsService *settingsapp.Service, auditService *auditapp.Service, captchaProvider appauth.CaptchaProvider, captchaRisk appauth.CaptchaRiskStore, fileService *fileapp.Service, mailService *mailapp.Service, monitorService *monitorapp.Service, dictionaryService *dictionaryapp.Service, taskService *tasksapp.Service, runService *tasksapp.RunService, observations ...httpmiddleware.ObservabilityRuntime) *http.Server {
-	return newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasksAndRunsAndImportExport(cfg, readiness, authService, limiter, iamService, recovery, installStatus, installPlan, dependencyChecks, applyService, jobService, settingsService, auditService, captchaProvider, captchaRisk, fileService, mailService, monitorService, dictionaryService, taskService, runService, nil, observations...)
+	return newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasksAndRunsAndImportExport(cfg, readiness, authService, limiter, iamService, recovery, installStatus, installPlan, dependencyChecks, applyService, jobService, settingsService, auditService, captchaProvider, captchaRisk, fileService, mailService, monitorService, dictionaryService, taskService, runService, nil, nil, observations...)
 }
 
 // newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasksAndRunsAndImportExport
 // extends the compatibility composition seam with the IMPORT-100 handler.
-func newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasksAndRunsAndImportExport(cfg config.Config, readiness health.ReadinessChecker, authService appauth.AuthService, limiter appauth.RateLimiter, iamService *iamapp.Service, recovery appauth.AccountRecoveryService, installStatus *installer.StatusService, installPlan installer.PlanProvider, dependencyChecks installhttp.DependencyCheckProvider, applyService *installer.ApplyService, jobService *installer.ApplyJobService, settingsService *settingsapp.Service, auditService *auditapp.Service, captchaProvider appauth.CaptchaProvider, captchaRisk appauth.CaptchaRiskStore, fileService *fileapp.Service, mailService *mailapp.Service, monitorService *monitorapp.Service, dictionaryService *dictionaryapp.Service, taskService *tasksapp.Service, runService *tasksapp.RunService, importExportService *importsapp.Service, observations ...httpmiddleware.ObservabilityRuntime) *http.Server {
+func newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasksAndRunsAndImportExport(cfg config.Config, readiness health.ReadinessChecker, authService appauth.AuthService, limiter appauth.RateLimiter, iamService *iamapp.Service, recovery appauth.AccountRecoveryService, installStatus *installer.StatusService, installPlan installer.PlanProvider, dependencyChecks installhttp.DependencyCheckProvider, applyService *installer.ApplyService, jobService *installer.ApplyJobService, settingsService *settingsapp.Service, auditService *auditapp.Service, captchaProvider appauth.CaptchaProvider, captchaRisk appauth.CaptchaRiskStore, fileService *fileapp.Service, mailService *mailapp.Service, monitorService *monitorapp.Service, dictionaryService *dictionaryapp.Service, taskService *tasksapp.Service, runService *tasksapp.RunService, importExportService *importsapp.Service, uiPreparation installhttp.UIPreparationProvider, observations ...httpmiddleware.ObservabilityRuntime) *http.Server {
 	var authHandler *authhttp.Handler
 	if authService != nil {
 		authHandler = authhttp.NewHandler(authService, cfg.Auth, limiter)
@@ -96,6 +96,7 @@ func newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasksAndRunsAndImportExport
 	var installHandler *installhttp.Handler
 	if installStatus != nil {
 		installHandler = installhttp.NewHandlerWithApplyAndJobs(installStatus, installplatform.NewSystemCapabilityProbe(), installPlan, dependencyChecks, applyService, jobService)
+		installHandler.SetUIPreparationProvider(uiPreparation)
 	}
 	auxiliary := adminhttp.AuxiliaryRoutes{IAM: iamService}
 	if settingsService != nil {

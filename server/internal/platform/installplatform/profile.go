@@ -28,6 +28,15 @@ type uiProfileDefinition struct {
 	appDirectory string
 }
 
+type adminInitTransaction struct {
+	Schema     int             `json:"schema"`
+	Owner      string          `json:"owner"`
+	ID         string          `json:"id"`
+	SelectedUI installstate.UI `json:"selectedUi"`
+	Phase      string          `json:"phase"`
+	Moves      []adminInitMove `json:"moves"`
+}
+
 var uiProfileDefinitions = map[string]uiProfileDefinition{
 	"antd":  {ui: installstate.UIAntd, packageName: "@vben/web-antd", appDirectory: "apps/web-antd"},
 	"ele":   {ui: installstate.UIEle, packageName: "@vben/web-ele", appDirectory: "apps/web-ele"},
@@ -93,8 +102,58 @@ func (p *FileProfileProvider) Profile(ctx context.Context) (installer.Installati
 		return installer.InstallationProfile{}, false, ErrWorkspaceRootInvalid
 	}
 
+	var serverTransaction *installer.ApplyTransaction
+	transactionContents, transactionExists, transactionErr := readRegularFile(p.transactionPath, maxApplyTransactionBytes)
+	if transactionErr != nil {
+		if ctx.Err() != nil {
+			return installer.InstallationProfile{}, false, ctx.Err()
+		}
+		return installer.InstallationProfile{}, true, nil
+	}
+	if transactionExists {
+		var envelope struct {
+			Owner string `json:"owner"`
+		}
+		if json.Unmarshal(transactionContents, &envelope) != nil {
+			return installer.InstallationProfile{}, true, nil
+		}
+		switch envelope.Owner {
+		case "admin-init":
+			transaction, ok := decodeAdminInitTransaction(transactionContents)
+			if !ok {
+				return installer.InstallationProfile{}, true, nil
+			}
+			action := installer.UIPreparationActionPrepare
+			if transaction.Phase == "resetting_ui" {
+				action = installer.UIPreparationActionReset
+			}
+			return installer.InstallationProfile{
+				SelectedUI: transaction.SelectedUI,
+				Installing: true, PreparingUI: true, UIAction: action,
+			}, true, nil
+		case installer.ApplyTransactionOwner:
+			journal := NewFileTransactionJournal(p.transactionPath, p.root)
+			transaction, exists, err := journal.Load(ctx)
+			if err != nil {
+				if ctx.Err() != nil {
+					return installer.InstallationProfile{}, false, ctx.Err()
+				}
+				return installer.InstallationProfile{}, true, nil
+			}
+			if !exists {
+				return installer.InstallationProfile{}, true, nil
+			}
+			serverTransaction = &transaction
+		default:
+			return installer.InstallationProfile{}, true, nil
+		}
+	}
+
 	contents, exists, err := readRegularFile(p.profilePath, maxUIProfileBytes)
 	if !exists && err == nil {
+		if serverTransaction != nil {
+			return installer.InstallationProfile{}, true, nil
+		}
 		return installer.InstallationProfile{}, false, nil
 	}
 	if err != nil {
@@ -107,23 +166,34 @@ func (p *FileProfileProvider) Profile(ctx context.Context) (installer.Installati
 	if !ok || !p.validTemplateLayout(profile) {
 		return installer.InstallationProfile{}, true, nil
 	}
-	// A CLI-owned transaction means pnpm init has not completed dependency
-	// preparation yet. Reporting ui_prepared here lets the browser enqueue an
-	// apply job that can only fail immediately with installation_running. A
-	// valid server-owned journal remains compatible with retry/recovery.
-	journal := NewFileTransactionJournal(p.transactionPath, p.root)
-	transaction, transactionExists, transactionErr := journal.Load(ctx)
-	if transactionErr != nil {
-		if ctx.Err() != nil {
-			return installer.InstallationProfile{}, false, ctx.Err()
-		}
+	if serverTransaction != nil && serverTransaction.SelectedUI != profile.ui {
 		return installer.InstallationProfile{}, true, nil
 	}
-	if transactionExists && transaction.SelectedUI != profile.ui {
-		return installer.InstallationProfile{}, true, nil
-	}
-	// An existing journal reaching here is a validated server-installer envelope.
 	return installer.InstallationProfile{SelectedUI: profile.ui}, true, nil
+}
+
+func decodeAdminInitTransaction(contents []byte) (adminInitTransaction, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(contents))
+	decoder.DisallowUnknownFields()
+	var transaction adminInitTransaction
+	if err := decoder.Decode(&transaction); err != nil || ensureJSONEnd(decoder) != nil {
+		return adminInitTransaction{}, false
+	}
+	if transaction.Schema != 1 || transaction.Owner != "admin-init" || !validAdminInitTransactionID(transaction.ID) {
+		return adminInitTransaction{}, false
+	}
+	if _, ok := uiProfileDefinitions[string(transaction.SelectedUI)]; !ok {
+		return adminInitTransaction{}, false
+	}
+	switch transaction.Phase {
+	case "moving_ui", "dependencies_pending", "resetting_ui":
+	default:
+		return adminInitTransaction{}, false
+	}
+	if !equalAdminInitMoves(transaction.Moves, expectedAdminInitMoves(transaction.SelectedUI)) {
+		return adminInitTransaction{}, false
+	}
+	return transaction, true
 }
 
 func decodeTrackedUIProfile(contents []byte) (uiProfileDefinition, bool) {

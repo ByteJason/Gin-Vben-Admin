@@ -7,6 +7,11 @@ const applyEndpoint = '/api/system/install/v1/apply';
 const progressEndpoint = '/api/system/install/v1/progress';
 const retryEndpoint = '/api/system/install/v1/retry';
 const rollbackEndpoint = '/api/system/install/v1/rollback';
+const uiPrepareEndpoint = '/api/system/install/v1/ui/prepare';
+const uiProgressEndpoint = '/api/system/install/v1/ui/progress';
+const uiResetEndpoint = '/api/system/install/v1/ui/reset';
+const missingUIToolsMessage =
+  '准备管理界面需要本机可用的 Node.js 与 pnpm；安装后重新检查运行能力。';
 const installationCompletedMessage =
   '安装已完成。请停止旧服务端，回到仓库根目录，并按下方两个终端命令分别重启服务端和启动管理端；管理端先运行 pnpm install，再运行 pnpm run dev。';
 
@@ -21,7 +26,27 @@ const selectedMode = document.querySelector('#selected-mode');
 const retryButton = document.querySelector('#retry-button');
 const platformSummary = document.querySelector('#platform-summary');
 const capabilityList = document.querySelector('#capability-list');
+const uiPreparePanel = document.querySelector('#ui-prepare-panel');
+const uiPrepareTitle = document.querySelector('#ui-prepare-title');
+const uiPrepareHint = document.querySelector('#ui-prepare-hint');
+const uiPrepareForm = document.querySelector('#ui-prepare-form');
+const uiChoice = document.querySelector('#ui-choice');
+const uiChoiceInputs = [
+  ...uiChoice.querySelectorAll('input[name="selectedUi"]'),
+];
+const confirmCleanup = document.querySelector('#confirm-cleanup');
+const prepareUIButton = document.querySelector('#prepare-ui-button');
+const resumeUIResetButton = document.querySelector('#resume-ui-reset-button');
+const uiPrepareResult = document.querySelector('#ui-prepare-result');
+const uiPrepareProgressPanel = document.querySelector(
+  '#ui-prepare-progress-panel',
+);
+const uiPrepareProgress = document.querySelector('#ui-prepare-progress');
+const uiPrepareDiagnostics = document.querySelector('#ui-prepare-diagnostics');
+const uiPrepareErrorKey = document.querySelector('#ui-prepare-error-key');
+const uiPrepareLogPath = document.querySelector('#ui-prepare-log-path');
 const selectionPanel = document.querySelector('#selection-panel');
+const resetUIButton = document.querySelector('#reset-ui-button');
 const planForm = document.querySelector('#plan-form');
 const modeChoice = document.querySelector('#mode-choice');
 const localeMode = document.querySelector('#locale-mode');
@@ -95,6 +120,15 @@ const stepLabels = {
   complete: '安装完成',
   failed: '安装失败',
 };
+const uiStepLabels = {
+  queued: '等待准备界面',
+  preflight: '检查模板与目录',
+  workspace: '暂存模板并写入界面配置',
+  dependencies: '安装所选界面依赖',
+  reset: '恢复全部界面模板',
+  complete: '界面准备完成',
+  failed: '界面准备失败',
+};
 
 let currentPlan = null;
 let databaseCheckPassed = false;
@@ -102,6 +136,10 @@ let redisCheckPassed = false;
 let retryJobId = null;
 let rollbackJobId = null;
 let statusRefreshTimer = null;
+let uiCapabilitiesLoaded = false;
+let requiredUIToolsAvailable = false;
+let uiActionPending = false;
+let uiSelectionLocked = false;
 
 function browserLanguageHeader() {
   const languages =
@@ -144,6 +182,9 @@ async function loadStatus() {
 }
 
 async function loadCapabilities() {
+  uiCapabilitiesLoaded = false;
+  requiredUIToolsAvailable = false;
+  updateUIPrepareButton();
   platformSummary.textContent = '检测中';
   capabilityList.replaceChildren(createCapabilityMessage('正在识别可用工具'));
   try {
@@ -157,10 +198,14 @@ async function loadCapabilities() {
     }
     renderCapabilities(envelope.data);
   } catch {
+    uiCapabilitiesLoaded = true;
+    requiredUIToolsAvailable = false;
     platformSummary.textContent = '未识别';
     capabilityList.replaceChildren(
       createCapabilityMessage('暂未读取到运行工具信息'),
     );
+    updateUIPrepareButton();
+    announceMissingUITools();
   }
 }
 
@@ -174,6 +219,9 @@ function setPending() {
   details.hidden = true;
   retryButton.hidden = true;
   rollbackButton.hidden = true;
+  uiPreparePanel.hidden = true;
+  selectionPanel.hidden = true;
+  connectionPanel.hidden = true;
   nextSteps.hidden = true;
 }
 
@@ -195,6 +243,9 @@ function renderStatus(status) {
       uiLabels[status.selectedUi] || status.selectedUi || '—';
     selectedUiSummary.textContent = selectedUi.textContent;
     selectedMode.textContent = modeLabels[status.mode] || status.mode || '—';
+    uiPreparePanel.hidden = true;
+    uiPrepareForm.hidden = false;
+    resumeUIResetButton.hidden = true;
     selectionPanel.hidden = true;
     connectionPanel.hidden = true;
     currentPlan = null;
@@ -207,6 +258,10 @@ function renderStatus(status) {
   }
 
   if (status.state === 'installing') {
+    if (status.phase === 'ui_prepare') {
+      renderRecoverableUIPreparation(status);
+      return;
+    }
     title.textContent = '安装任务正在执行';
     badge.textContent = '安装中';
     badge.dataset.tone = 'pending';
@@ -216,6 +271,7 @@ function renderStatus(status) {
       uiLabels[status.selectedUi] || status.selectedUi || '—';
     selectedUiSummary.textContent = selectedUi.textContent;
     selectedMode.textContent = '安装中';
+    uiPreparePanel.hidden = true;
     selectionPanel.hidden = true;
     connectionPanel.hidden = true;
     currentPlan = null;
@@ -229,27 +285,39 @@ function renderStatus(status) {
   }
 
   if (status.state === 'pristine') {
-    title.textContent = '等待选择管理界面';
-    badge.textContent = '等待初始化';
-    badge.dataset.tone = 'pending';
+    title.textContent = '选择管理界面';
+    badge.textContent = '等待选择';
+    badge.dataset.tone = 'ready';
     message.textContent =
-      '等待执行 pnpm run init 并选择一个 UI；完成后此页面会自动继续。';
+      '请选择一套管理界面。确认后仅保留并安装所选界面的依赖。';
     details.hidden = true;
+    uiPrepareTitle.textContent = '选择管理界面';
+    uiPrepareHint.textContent = '仅安装所选界面的依赖';
+    uiPreparePanel.hidden = false;
+    uiPrepareForm.hidden = false;
+    resumeUIResetButton.hidden = true;
     selectionPanel.hidden = true;
     connectionPanel.hidden = true;
     currentPlan = null;
     databaseCheckPassed = false;
     redisCheckPassed = false;
     clearFailedJobActions();
-    retryButton.hidden = false;
-    scheduleStatusRefresh();
+    retryButton.hidden = true;
+    uiSelectionLocked = false;
+    selectUIChoice('');
+    confirmCleanup.checked = false;
+    uiPrepareProgressPanel.hidden = true;
+    uiPrepareDiagnostics.hidden = true;
+    setUIActionPending(false);
+    updateUIPrepareButton();
+    announceMissingUITools();
     title.focus();
     return;
   }
 
   if (status.state === 'inconsistent') {
     renderError(
-      '初始化尚未完成，请返回终端重新运行 pnpm run init 继续恢复；需要先查看 checkpoint 时可运行 pnpm run init -- --check。',
+      '检测到未完成的初始化状态。请保留当前目录和运行现场，并在 /install 点击“重新检查”继续恢复；维护诊断可运行 pnpm run init -- --check。',
     );
     return;
   }
@@ -262,13 +330,18 @@ function renderStatus(status) {
     uiLabels[status.selectedUi] || status.selectedUi || '—';
   selectedUiSummary.textContent = selectedUi.textContent;
   selectedMode.textContent = '尚未选择';
+  uiPreparePanel.hidden = true;
+  uiPrepareForm.hidden = false;
+  resumeUIResetButton.hidden = true;
   selectionPanel.hidden = false;
   connectionPanel.hidden = true;
   currentPlan = null;
   databaseCheckPassed = false;
   redisCheckPassed = false;
   clearFailedJobActions();
+  updateUIPrepareButton();
   updateApplyButton();
+  announceMissingUITools();
   title.focus();
 }
 
@@ -281,6 +354,7 @@ function renderError(detail = '请确认服务已启动，然后重新检查。'
   message.setAttribute('aria-live', 'assertive');
   details.hidden = true;
   retryButton.hidden = false;
+  uiPreparePanel.hidden = true;
   selectionPanel.hidden = true;
   connectionPanel.hidden = true;
   nextSteps.hidden = true;
@@ -292,6 +366,10 @@ function renderCapabilities(capabilities) {
   platformSummary.textContent =
     [platform.os, platform.arch].filter(Boolean).join(' / ') || '未识别';
   const items = Array.isArray(capabilities.tools) ? capabilities.tools : [];
+  uiCapabilitiesLoaded = true;
+  requiredUIToolsAvailable = ['node', 'pnpm'].every((id) =>
+    items.some((tool) => tool.id === id && tool.available),
+  );
   const nodes = items.map((tool) => {
     const item = document.createElement('li');
     const name = document.createElement('strong');
@@ -305,6 +383,9 @@ function renderCapabilities(capabilities) {
   capabilityList.replaceChildren(
     ...(nodes.length ? nodes : [createCapabilityMessage('未返回工具信息')]),
   );
+  updateUIPrepareButton();
+  if (requiredUIToolsAvailable) clearMissingUIToolsMessage();
+  announceMissingUITools();
 }
 
 function createCapabilityMessage(value) {
@@ -312,6 +393,325 @@ function createCapabilityMessage(value) {
   item.className = 'capability-placeholder';
   item.textContent = value;
   return item;
+}
+
+function announceMissingUITools() {
+  if (!uiCapabilitiesLoaded || requiredUIToolsAvailable) return;
+  if (uiPreparePanel.hidden && selectionPanel.hidden) return;
+  retryButton.hidden = false;
+  if (uiPreparePanel.hidden) return;
+  showUIActionMessage(missingUIToolsMessage, 'error');
+}
+
+function clearMissingUIToolsMessage() {
+  if (uiPrepareResult.textContent !== missingUIToolsMessage) return;
+  uiPrepareResult.textContent = '';
+  delete uiPrepareResult.dataset.tone;
+}
+
+function selectedUIChoice() {
+  return uiChoiceInputs.find((input) => input.checked)?.value || '';
+}
+
+function selectUIChoice(value) {
+  for (const input of uiChoiceInputs) input.checked = input.value === value;
+}
+
+function updateUIPrepareButton() {
+  prepareUIButton.disabled =
+    uiActionPending ||
+    !requiredUIToolsAvailable ||
+    !selectedUIChoice() ||
+    !confirmCleanup.checked;
+  resetUIButton.disabled = uiActionPending || !requiredUIToolsAvailable;
+  resumeUIResetButton.disabled = uiActionPending || !requiredUIToolsAvailable;
+}
+
+function setUIActionPending(pending) {
+  uiActionPending = Boolean(pending);
+  for (const input of uiChoiceInputs)
+    input.disabled = uiActionPending || uiSelectionLocked;
+  confirmCleanup.disabled = uiActionPending;
+  retryButton.disabled = uiActionPending;
+  prepareUIButton.textContent = uiActionPending
+    ? '正在准备管理界面'
+    : uiSelectionLocked
+      ? '继续准备此界面'
+      : '确认并准备此界面';
+  updateUIPrepareButton();
+}
+
+function showUIActionMessage(value, tone = 'pending') {
+  if (uiPrepareResult.textContent !== value)
+    uiPrepareResult.textContent = value;
+  if (uiPrepareResult.dataset.tone !== tone)
+    uiPrepareResult.dataset.tone = tone;
+}
+
+function setUIActionProgress(value, description) {
+  const progress = Math.max(0, Math.min(100, Number(value || 0)));
+  uiPrepareProgressPanel.hidden = false;
+  uiPrepareProgress.value = progress;
+  uiPrepareProgress.textContent = `${progress}%`;
+  uiPrepareProgress.setAttribute('aria-valuetext', description);
+}
+
+function safeUIActionLogPath(value) {
+  if (typeof value !== 'string' || value.length > 240) return '—';
+  const normalized = value.replaceAll('\\', '/');
+  if (
+    !normalized.startsWith('.runtime/install/') ||
+    normalized.split('/').some((part) => part === '..' || part === '.')
+  )
+    return '—';
+  return normalized;
+}
+
+function renderUIActionProgress(job) {
+  const action = job?.action === 'reset' ? '重置管理界面' : '准备管理界面';
+  const progress = Math.max(0, Math.min(100, Number(job?.progress || 0)));
+  const step = uiStepLabels[job?.currentStep] || '正在执行界面任务';
+  const updated = job?.lastUpdated ? `；更新于 ${String(job.lastUpdated)}` : '';
+  setUIActionProgress(progress, `${action}：${step}，${progress}%`);
+  showUIActionMessage(
+    `${action}：${step}（${progress}%）${updated}`,
+    'pending',
+  );
+  if (job?.selectedUi) {
+    selectUIChoice(job.selectedUi);
+    selectedUi.textContent = uiLabels[job.selectedUi] || job.selectedUi;
+  }
+  if (job?.state === 'failed') {
+    showUIActionMessage(`${action}失败，请按错误标识处理后重试。`, 'error');
+    uiPrepareErrorKey.textContent = String(job.errorKey || 'unknown');
+    uiPrepareLogPath.textContent = safeUIActionLogPath(job.logPath);
+    uiPrepareDiagnostics.hidden = false;
+    return;
+  }
+  uiPrepareDiagnostics.hidden = true;
+  uiPrepareErrorKey.textContent = '—';
+  uiPrepareLogPath.textContent = '—';
+  if (job?.state === 'completed' || job?.state === 'succeeded') {
+    setUIActionProgress(100, `${action}完成，100%`);
+    showUIActionMessage(`${action}已完成。`, 'success');
+  }
+}
+
+function completedUIAction(job) {
+  return job?.state === 'completed' || job?.state === 'succeeded';
+}
+
+async function postUIActionRequest(target, payload, fetcher = fetch) {
+  const response = await fetcher(target, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {
+      Accept: 'application/json',
+      'Accept-Language': browserLanguageHeader(),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+  const envelope = await response.json();
+  return { response, envelope };
+}
+
+async function pollUIAction(jobId, fetcher = fetch, sleeper = wait) {
+  for (let attempt = 0; attempt < 1800; attempt += 1) {
+    if (attempt > 0) await sleeper(1000);
+    const response = await fetcher(
+      `${uiProgressEndpoint}/${encodeURIComponent(jobId)}`,
+      {
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json' },
+      },
+    );
+    const envelope = await response.json();
+    if (!response.ok || envelope.code !== 0 || !envelope.data) {
+      throw new Error('ui progress unavailable');
+    }
+    const job = envelope.data;
+    renderUIActionProgress(job);
+    if (completedUIAction(job) || job.state === 'failed') return job;
+  }
+  throw new Error('ui progress timed out');
+}
+
+async function finishUIAction(job) {
+  renderUIActionProgress(job);
+  if (job.state === 'failed') {
+    const resetting = job.action === 'reset';
+    uiSelectionLocked = !resetting && Boolean(job.selectedUi);
+    uiPrepareForm.hidden = resetting;
+    resumeUIResetButton.hidden = !resetting;
+    retryButton.hidden = false;
+    if (resetting) {
+      uiPrepareTitle.textContent = '继续恢复三套界面模板';
+      uiPrepareHint.textContent = '恢复全部界面模板并清除当前选择';
+    }
+    setUIActionPending(false);
+    uiPrepareResult.focus();
+    return false;
+  }
+  if (!completedUIAction(job)) throw new Error('ui action incomplete');
+  setUIActionPending(false);
+  await loadStatus();
+  return true;
+}
+
+async function runUIAction(target, payload) {
+  const { response, envelope } = await postUIActionRequest(target, payload);
+  const accepted = envelope?.data;
+  const jobId = accepted?.id || accepted?.jobId;
+  if (response.status !== 202 || envelope?.code !== 0 || !accepted || !jobId) {
+    const failure = {
+      action: target === uiResetEndpoint ? 'reset' : 'prepare',
+      state: 'failed',
+      selectedUi: payload.selectedUi,
+      currentStep: 'request',
+      errorKey:
+        accepted?.errorKey || envelope?.errorKey || 'request_unavailable',
+      logPath: accepted?.logPath,
+    };
+    return finishUIAction(failure);
+  }
+  renderUIActionProgress(accepted);
+  const completed = await pollUIAction(jobId);
+  return finishUIAction(completed);
+}
+
+async function requestUIPreparation(event) {
+  event.preventDefault();
+  if (uiActionPending) return;
+  const selectedUi = selectedUIChoice();
+  if (!requiredUIToolsAvailable) {
+    showUIActionMessage('请先安装并启用 Node.js 与 pnpm。', 'error');
+    uiPrepareResult.focus();
+    return;
+  }
+  if (!selectedUi || !confirmCleanup.checked) {
+    showUIActionMessage('请选择管理界面并确认模板暂存方案。', 'error');
+    uiPrepareResult.focus();
+    return;
+  }
+  uiSelectionLocked = true;
+  setUIActionPending(true);
+  uiPrepareDiagnostics.hidden = true;
+  showUIActionMessage('正在提交界面准备任务。', 'pending');
+  try {
+    await runUIAction(uiPrepareEndpoint, {
+      selectedUi: selectedUi,
+      confirmCleanup: true,
+    });
+  } catch {
+    showUIActionMessage(
+      '界面准备进度暂不可用；当前选择已保留，请重新检查后继续。',
+      'error',
+    );
+    uiPrepareErrorKey.textContent = 'request_unavailable';
+    uiPrepareLogPath.textContent = '.runtime/install/dependency-install.log';
+    uiPrepareDiagnostics.hidden = false;
+    retryButton.hidden = false;
+    setUIActionPending(false);
+    uiPrepareResult.focus();
+  }
+}
+
+async function requestUIReset(confirmFirst = true) {
+  if (uiActionPending) return;
+  if (!requiredUIToolsAvailable) {
+    showUIActionMessage('请先安装并启用 Node.js 与 pnpm。', 'error');
+    uiPrepareResult.focus();
+    return;
+  }
+  if (
+    confirmFirst &&
+    !window.confirm(
+      '确认恢复三套管理界面模板并清除当前选择？数据库安装尚未开始。',
+    )
+  )
+    return;
+  uiPrepareTitle.textContent = '重置管理界面';
+  uiPrepareHint.textContent = '恢复全部界面模板并清除当前选择';
+  uiPreparePanel.hidden = false;
+  uiPrepareForm.hidden = true;
+  resumeUIResetButton.hidden = true;
+  selectionPanel.hidden = true;
+  connectionPanel.hidden = true;
+  nextSteps.hidden = true;
+  setUIActionPending(true);
+  showUIActionMessage('正在提交界面重置任务。', 'pending');
+  uiPrepareResult.focus();
+  try {
+    await runUIAction(uiResetEndpoint, { confirmReset: true });
+  } catch {
+    showUIActionMessage(
+      '界面重置进度暂不可用，请重新检查状态后继续。',
+      'error',
+    );
+    uiPrepareErrorKey.textContent = 'request_unavailable';
+    uiPrepareLogPath.textContent = '.runtime/install/dependency-install.log';
+    uiPrepareDiagnostics.hidden = false;
+    uiPrepareTitle.textContent = '继续恢复三套界面模板';
+    uiPrepareHint.textContent = '恢复全部界面模板并清除当前选择';
+    resumeUIResetButton.hidden = false;
+    retryButton.hidden = false;
+    setUIActionPending(false);
+    uiPrepareResult.focus();
+  }
+}
+
+function renderRecoverableUIPreparation(status) {
+  clearStatusRefresh();
+  const recoveringReset = status.uiAction === 'reset';
+  title.textContent = recoveringReset
+    ? '继续恢复三套界面模板'
+    : '继续准备管理界面';
+  badge.textContent = '可恢复';
+  badge.dataset.tone = 'pending';
+  message.textContent = recoveringReset
+    ? '检测到尚未完成的界面重置任务，可继续恢复三套模板。'
+    : '检测到尚未完成的界面准备任务。当前选择已保留，可继续执行同一任务。';
+  details.hidden = false;
+  selectedUi.textContent =
+    uiLabels[status.selectedUi] || status.selectedUi || '—';
+  selectedMode.textContent = recoveringReset ? '重置界面' : '准备界面';
+  uiPrepareTitle.textContent = recoveringReset
+    ? '继续恢复三套界面模板'
+    : '继续准备管理界面';
+  uiPrepareHint.textContent = recoveringReset
+    ? '恢复全部界面模板并清除当前选择'
+    : '仅安装所选界面的依赖';
+  uiPreparePanel.hidden = false;
+  uiPrepareForm.hidden = recoveringReset;
+  resumeUIResetButton.hidden = !recoveringReset;
+  selectionPanel.hidden = true;
+  connectionPanel.hidden = true;
+  nextSteps.hidden = true;
+  retryButton.hidden = false;
+  selectUIChoice(recoveringReset ? '' : status.selectedUi);
+  confirmCleanup.checked = !recoveringReset;
+  uiSelectionLocked = !recoveringReset && Boolean(status.selectedUi);
+  setUIActionPending(false);
+  if (Number.isFinite(Number(status.progress))) {
+    renderUIActionProgress({
+      action: recoveringReset ? 'reset' : 'prepare',
+      state: 'running',
+      selectedUi: status.selectedUi,
+      currentStep: status.currentStep,
+      progress: status.progress,
+      lastUpdated: status.lastUpdated,
+    });
+  } else {
+    showUIActionMessage(
+      recoveringReset
+        ? '点击“继续恢复三套模板”恢复任务。'
+        : '点击“继续准备此界面”恢复任务。',
+      'pending',
+    );
+  }
+  announceMissingUITools();
+  title.focus();
 }
 
 async function requestPlan(event) {
@@ -628,7 +1028,7 @@ function installationFailureMessage(job) {
   if (databaseReasons[job?.failureReason])
     return databaseReasons[job.failureReason];
   if (job?.errorKey === 'installation_running') {
-    return '检测到另一项初始化或安装任务正在执行。若终端中的 pnpm run init 已结束，请重新运行 pnpm run init 继续恢复。当前输入已保留。';
+    return '检测到另一项初始化或安装任务正在执行。请保留当前输入，并在 /install 点击“重新检查”；任务结束后可直接继续。当前输入已保留。';
   }
   if (job?.errorKey === 'installation_completed') {
     return '服务端已存在有效安装标记，请重新检查实例状态。当前输入已保留。';
@@ -949,11 +1349,16 @@ function clearSensitiveFields(form) {
 }
 
 async function loadAll() {
+  if (uiActionPending) return;
   await Promise.allSettled([loadStatus(), loadCapabilities()]);
 }
 
 retryButton.addEventListener('click', loadAll);
 suggestBrowserLocale();
+uiPrepareForm.addEventListener('submit', requestUIPreparation);
+uiPrepareForm.addEventListener('change', updateUIPrepareButton);
+resetUIButton.addEventListener('click', () => requestUIReset(true));
+resumeUIResetButton.addEventListener('click', () => requestUIReset(false));
 planForm.addEventListener('submit', requestPlan);
 databaseForm.addEventListener('submit', (event) =>
   requestDependencyCheck(event, databaseCheckEndpoint, databaseResult),

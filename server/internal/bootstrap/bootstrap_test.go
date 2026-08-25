@@ -242,6 +242,39 @@ func TestNewServesInstallerSourceFromConfiguredWorkspaceBeforeUISelection(t *tes
 	if statusResponse.Code != http.StatusOK {
 		t.Fatalf("installation status = %d, want 200; body=%s", statusResponse.Code, statusResponse.Body.String())
 	}
+
+	// The source-mode composition root must attach the UI preparation service.
+	// An invalid enum is rejected before any pnpm process can start; an
+	// unattached service would return 503 instead.
+	prepareRequest := newLocalInstallerRequest(
+		http.MethodPost,
+		"/api/system/install/v1/ui/prepare",
+		bytes.NewBufferString(`{"selectedUi":"unknown","confirmCleanup":true}`),
+	)
+	prepareRequest.Header.Set("Content-Type", "application/json")
+	prepareResponse := httptest.NewRecorder()
+	app.HTTPServer().Handler.ServeHTTP(prepareResponse, prepareRequest)
+	if prepareResponse.Code != http.StatusBadRequest {
+		t.Fatalf("invalid UI prepare = %d, want 400 from wired service; body=%s", prepareResponse.Code, prepareResponse.Body.String())
+	}
+}
+
+func TestInstallerHTTPPortUsesConfiguredPortAndSafeEphemeralFallback(t *testing.T) {
+	tests := []struct {
+		address string
+		want    int
+	}{
+		{address: ":9090", want: 9090},
+		{address: "127.0.0.1:8081", want: 8081},
+		{address: "[::1]:8082", want: 8082},
+		{address: "127.0.0.1:0", want: 8080},
+		{address: "malformed", want: 8080},
+	}
+	for _, test := range tests {
+		if got := installerHTTPPort(test.address); got != test.want {
+			t.Errorf("installerHTTPPort(%q) = %d, want %d", test.address, got, test.want)
+		}
+	}
 }
 
 func TestNewWiresInstallerPlanAgainstConfiguredWorkspaceRoot(t *testing.T) {

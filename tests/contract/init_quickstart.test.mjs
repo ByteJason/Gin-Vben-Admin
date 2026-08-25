@@ -87,6 +87,35 @@ test('README documents the dependency-minimal quick start and protected state', 
   assert.match(readmes, /不要手动删除/);
 });
 
+test('fresh source quick start selects UI in the browser without an init terminal', () => {
+  const rootReadme = read('README.md');
+  const adminReadme = read('admin/README.md');
+  const acceptance = read('docs/manual-acceptance/1.0.0-dev-end-to-end.md');
+  const rootQuickStart = rootReadme.slice(
+    rootReadme.indexOf('### 初始化与源码运行'),
+    rootReadme.indexOf('在网页中完成数据库'),
+  );
+  const adminQuickStart = adminReadme.slice(
+    adminReadme.indexOf('## 初始化与验证'),
+    adminReadme.indexOf('状态和恢复命令'),
+  );
+  const acceptanceQuickStart = acceptance.slice(
+    acceptance.indexOf('### UAT-INSTALL-001'),
+    acceptance.indexOf('### UAT-INSTALL-002'),
+  );
+
+  for (const [name, section] of [
+    ['README', rootQuickStart],
+    ['admin README', adminQuickStart],
+    ['acceptance', acceptanceQuickStart],
+  ]) {
+    assert.match(section, /go run \.\/cmd\/api\/main\.go/iu, name);
+    assert.match(section, /http:\/\/127\.0\.0\.1:8080\/install/iu, name);
+    assert.match(section, /Ant Design Vue|Element Plus|Naive UI/iu, name);
+    assert.doesNotMatch(section, /^\s*pnpm run init(?:\s|$)/mu, name);
+  }
+});
+
 test('post-install quick start uses two terminals and installs before dev without a build prerequisite', () => {
   const rootReadme = read('README.md');
   const adminReadme = read('admin/README.md');

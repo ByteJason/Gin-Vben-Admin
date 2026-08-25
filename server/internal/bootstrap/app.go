@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -43,6 +44,7 @@ import (
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/persistence/gormdb"
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/settingsplatform"
 	tasksplatform "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/tasks"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/webassets"
 )
 
 // App is the composition root for the API process. Optional infrastructure is
@@ -72,6 +74,7 @@ type App struct {
 	install            *installer.StatusService
 	apply              *installer.ApplyService
 	applyJobs          *installer.ApplyJobService
+	uiPreparationJobs  *installer.UIPreparationJobService
 	readiness          *platformhealth.Checker
 	closers            []io.Closer
 
@@ -323,14 +326,42 @@ func New(cfg config.Config) (*App, error) {
 			applyService,
 		)
 	}
+	// The command-backed selector exists only for a complete source checkout.
+	// Packaged binaries may serve embedded assets without an editable admin
+	// workspace and therefore keep this optional service detached.
+	if _, sourceErr := webassets.InstallerSource(cfg.Install.WorkspaceRoot); sourceErr == nil {
+		uiInitializer, initializerErr := installplatform.NewCommandUIInitializer(
+			cfg.Install.WorkspaceRoot,
+			cfg.Install.StateDir,
+			installerHTTPPort(cfg.Server.Addr),
+		)
+		if initializerErr != nil {
+			return cleanupOnError(errors.New("configure source UI preparation service"))
+		}
+		app.uiPreparationJobs = installer.NewUIPreparationJobService(uiInitializer, profiles, markers)
+		app.closers = append(app.closers, app.uiPreparationJobs)
+	}
 	var captchaProvider appauth.CaptchaProvider
 	var captchaRisk appauth.CaptchaRiskStore
 	if cfg.Auth.Enabled && app.redis != nil {
 		captchaProvider = authplatform.NewRedisCaptchaProvider(app.redis, cfg.Auth.CaptchaKeyPrefix, cfg.Auth.CaptchaChallengeTTL)
 		captchaRisk = authplatform.NewRedisCaptchaRiskStore(app.redis, cfg.Auth.CaptchaKeyPrefix)
 	}
-	app.http = newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasksAndRunsAndImportExport(cfg, app.readiness, app.auth, limiter, app.iam, recovery, app.install, installPlan, installplatform.NewSystemDependencyProbe(), applyService, app.applyJobs, app.settings, app.audit, captchaProvider, captchaRisk, app.files, app.mail, app.monitor, app.dictionary, app.tasks, app.taskRuns, app.importExport, app.observability)
+	app.http = newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasksAndRunsAndImportExport(cfg, app.readiness, app.auth, limiter, app.iam, recovery, app.install, installPlan, installplatform.NewSystemDependencyProbe(), applyService, app.applyJobs, app.settings, app.audit, captchaProvider, captchaRisk, app.files, app.mail, app.monitor, app.dictionary, app.tasks, app.taskRuns, app.importExport, app.uiPreparationJobs, app.observability)
 	return app, nil
+}
+
+func installerHTTPPort(address string) int {
+	const defaultPort = 8080
+	_, rawPort, err := net.SplitHostPort(strings.TrimSpace(address))
+	if err != nil {
+		return defaultPort
+	}
+	port, err := strconv.Atoi(rawPort)
+	if err != nil || port < 1 || port > 65535 {
+		return defaultPort
+	}
+	return port
 }
 
 // Config returns a copy of the validated runtime configuration.

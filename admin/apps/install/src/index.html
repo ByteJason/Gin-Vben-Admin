@@ -89,9 +89,129 @@
           </section>
 
           <section
+            id="ui-prepare-panel"
+            class="ui-prepare-panel"
+            aria-labelledby="ui-prepare-title"
+            hidden
+          >
+            <div class="capability-panel__heading">
+              <h3 id="ui-prepare-title">选择管理界面</h3>
+              <span id="ui-prepare-hint">仅安装所选界面的依赖</span>
+            </div>
+            <form id="ui-prepare-form" class="ui-prepare-form">
+              <fieldset
+                id="ui-choice"
+                class="ui-choice-group"
+                aria-describedby="ui-choice-help"
+              >
+                <legend>选择管理界面</legend>
+                <p id="ui-choice-help" class="field-help">
+                  三套界面共享相同业务能力；确认后保留所选模板，并将另外两套安全暂存以便安装前重置。
+                </p>
+                <div class="ui-option-grid">
+                  <label class="ui-option">
+                    <input
+                      type="radio"
+                      name="selectedUi"
+                      value="antd"
+                      required
+                    />
+                    <span class="ui-option__copy">
+                      <strong>Ant Design Vue</strong>
+                      <small>信息密度高，适合复杂企业后台。</small>
+                    </span>
+                  </label>
+                  <label class="ui-option">
+                    <input
+                      type="radio"
+                      name="selectedUi"
+                      value="ele"
+                      required
+                    />
+                    <span class="ui-option__copy">
+                      <strong>Element Plus</strong>
+                      <small>清晰直接，适合通用管理系统。</small>
+                    </span>
+                  </label>
+                  <label class="ui-option">
+                    <input
+                      type="radio"
+                      name="selectedUi"
+                      value="naive"
+                      required
+                    />
+                    <span class="ui-option__copy">
+                      <strong>Naive UI</strong>
+                      <small>轻量现代，适合简洁工作台。</small>
+                    </span>
+                  </label>
+                </div>
+              </fieldset>
+              <label class="confirm-field ui-cleanup-confirm">
+                <input id="confirm-cleanup" type="checkbox" required />
+                <span
+                  >我已确认保留所选界面，并安全暂存另外两套模板；安装完成前仍可重置。</span
+                >
+              </label>
+              <button
+                id="prepare-ui-button"
+                class="primary-button"
+                type="submit"
+                disabled
+              >
+                确认并准备此界面
+              </button>
+            </form>
+            <button
+              id="resume-ui-reset-button"
+              class="primary-button resume-ui-reset-button"
+              type="button"
+              hidden
+            >
+              继续恢复三套模板
+            </button>
+            <div
+              id="ui-prepare-result"
+              class="connection-result ui-prepare-result"
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+              tabindex="-1"
+            ></div>
+            <div id="ui-prepare-progress-panel" class="progress-panel" hidden>
+              <label class="progress-label" for="ui-prepare-progress"
+                >界面准备进度</label
+              >
+              <progress
+                id="ui-prepare-progress"
+                max="100"
+                value="0"
+                aria-valuetext="尚未开始"
+              >
+                0%
+              </progress>
+            </div>
+            <dl
+              id="ui-prepare-diagnostics"
+              class="ui-prepare-diagnostics"
+              hidden
+            >
+              <div>
+                <dt>错误标识</dt>
+                <dd><code id="ui-prepare-error-key">—</code></dd>
+              </div>
+              <div>
+                <dt>诊断日志</dt>
+                <dd><code id="ui-prepare-log-path">—</code></dd>
+              </div>
+            </dl>
+          </section>
+
+          <section
             id="selection-panel"
             class="selection-panel"
             aria-labelledby="selection-title"
+            hidden
           >
             <div class="capability-panel__heading">
               <h3 id="selection-title">确认安装方案</h3>
@@ -107,11 +227,10 @@
                       id="selected-ui-summary"
                       class="readonly-summary"
                       aria-live="polite"
-                      >读取命令行选择中</output
+                      >读取安装页选择中</output
                     >
                     <span class="field-help"
-                      >已由命令行
-                      <code>pnpm run init</code> 选定，安装页仅确认结果。</span
+                      >安装页已完成模板准备与所选界面的依赖安装。</span
                     >
                   </div>
                   <div class="form-field">
@@ -168,6 +287,13 @@
               aria-live="polite"
               tabindex="-1"
             ></div>
+            <button
+              id="reset-ui-button"
+              class="secondary-button reset-ui-button"
+              type="button"
+            >
+              安装前重选管理界面
+            </button>
             <div
               id="plan-panel"
               class="plan-result"

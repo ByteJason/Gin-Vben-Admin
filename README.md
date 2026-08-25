@@ -124,20 +124,13 @@ go run ./cmd/api/main.go
 
 安装页面和安装 API 只接受真实 loopback 来源与 `localhost`/`127.0.0.1`/`::1` Host；不要通过局域网地址打开。浏览器写操作还必须是同源 `application/json` 请求，代理头不会扩大该边界。
 
-另开一个终端，在 `admin/` 内选择并初始化一套 UI：
+浏览器打开 [http://127.0.0.1:8080/install](http://127.0.0.1:8080/install)，直接选择 Ant Design Vue、Element Plus 或 Naive UI。确认后，Go 服务会异步调用仓库现有的 Node/pnpm 初始化事务：原子保留所选应用，将另外两套暂存到 `.runtime/install/ui-backup/<transaction>/`，写入 `admin/.ui-profile.json`，从 tracked example 生成本地环境文件，并只对缩减后的 workspace 执行 `pnpm install --frozen-lockfile`。首次源码安装不再需要第二个终端运行初始化命令，也不会下载另外两套 UI 的专属依赖。
 
-```text
-cd admin
-pnpm run init
-```
+页面会显示模板预检、工作区准备和依赖安装进度。刷新页面或重启 Go 服务后，合法的 `admin-init` 事务会显示为可恢复的 `ui_prepare` 阶段；继续同一 UI 会从最小未完成步骤幂等续跑，不同 UI 必须先在网页中确认恢复三套模板。网页安装的数据库、Redis、管理员和环境配置同样使用不含凭据的持久化事务记录，`.installed` 始终在全部步骤成功后最后原子写入。
 
-`init` 只依赖 Node.js 内置模块，因此此时不需要 `node_modules`。它先检查 `http://127.0.0.1:8080` 的 health、安装状态和安装页面，并在移动 UI 前检查所选目录与环境模板；检查通过后让用户选择 Ant Design Vue、Element Plus 或 Naive UI，原子保留所选应用，将另外两套暂存到 `.runtime/install/ui-backup/<transaction>/`，写入 `admin/.ui-profile.json`，并从所选模板的 tracked example 原子生成 development/production 本地环境文件。已有本地文件保持原字节，旧文件缺少的新公开默认项由运行时回退提供。随后它对只剩一套 UI 的 workspace 自动执行 `pnpm install --frozen-lockfile` 并打开 `/install`。这样不会下载另外两套 UI 的专属依赖。
+旧版 Windows 初始化若在构建阶段以 `INSTALLER_BUILD_FAILED` 结束，并留下严格匹配的 `.ui-profile.json`、`.ui-init-receipt.json` 与 `.runtime/init-backup/<transaction>/`，网页准备任务会通过现有 Node 事务接管：把旧备份迁入当前事务目录、可逆隔离旧 receipt，并只为已选 UI 继续安装依赖。旧状态存在冲突、符号链接、额外条目或 receipt 不匹配时，程序保持原字节并显示稳定错误标识，不会启动 pnpm。
 
-如果 UI 移动、依赖安装或 UI 重置中断，再次执行对应的 init 命令会读取事务状态并从最小未完成步骤继续，不会要求重新选择 UI。网页安装的数据库、Redis、管理员和环境配置也使用无凭据的持久化事务记录；服务重启后恢复到可重试状态，`.installed` 始终在所有安装步骤成功后最后原子写入。
-
-旧版 Windows 初始化若在构建阶段以 `INSTALLER_BUILD_FAILED` 结束，并留下严格匹配的 `.ui-profile.json`、`.ui-init-receipt.json` 与 `.runtime/init-backup/<transaction>/`，新版 `pnpm run init` 会自动接管：把旧备份迁入当前事务目录、可逆隔离旧 receipt，只为已选 UI 继续安装依赖。迁移或依赖安装再次中断时直接重跑；`INIT_LEGACY_MIGRATION=resumed|completed` 会说明本次是续跑还是完成。如需放弃该选择，可直接执行 `pnpm run init -- --reset --confirm-reset`，无需先完成依赖安装。旧状态存在冲突、符号链接、额外条目或 receipt 不匹配时，程序保持原字节并给出 `LEGACY_PREPARED_STATE_INVALID`，不会启动 pnpm。
-
-可先用 `pnpm run init -- --check` 只读检查状态。网页安装完成前需要重新选择时，使用 `pnpm run init -- --reset --confirm-reset` 恢复三套模板。初始化完成前直接运行 `pnpm run dev`、`pnpm run build` 或 `pnpm run preview` 会提示先执行 init。
+`pnpm run init -- --check` 与 `pnpm run init -- --reset --confirm-reset` 仅保留为只读诊断和恢复入口；无参数运行不再询问 UI，而是输出安装页地址。初始化完成前直接运行 `pnpm run dev`、`pnpm run build` 或 `pnpm run preview` 会提示先完成网页安装。
 
 在网页中完成数据库、Redis、管理员和默认项配置并看到安装成功后，停止旧服务端，并打开两个终端分别运行。`pnpm install` 会幂等校验所选 UI 的依赖并补齐本地链接，不会恢复或安装另外两套 UI：
 
@@ -170,14 +163,14 @@ go -C server run ./cmd/migrate down --steps 1
 
 #### 初始化状态文件
 
-以下文件或目录由初始化器和服务端共同维护，**不要手动删除、改名或编辑**。中断后直接重新运行 `pnpm run init` 或重新打开 `/install`：
+以下文件或目录由网页准备任务、Node 初始化器和服务端共同维护，**不要手动删除、改名或编辑**。中断后重新打开 `/install` 继续，或使用 CLI 只读检查：
 
 | 路径 | 作用 |
 |---|---|
 | `admin/.ui-profile.json` | 唯一 UI 的稳定声明，也是 `build/dev/preview` 的分发依据 |
 | `.runtime/install/` | 初始化事务根目录；其内部短期租约、清理墓碑、`environment-backup/` 等也全部由程序维护，请勿删除或编辑 |
 | `.runtime/install/.installed` | 所有安装步骤成功后最后写入的完成标记，也是公开构建命令的门禁 |
-| `.runtime/install/admin-init.lock` | `pnpm run init` 的 schema 2 进程租约；绑定 PID 与进程启动身份，真实 owner 即使心跳长时间暂停也不会被 TTL 误回收，崩溃或 PID 复用后由程序安全回收 |
+| `.runtime/install/admin-init.lock` | 网页 UI 准备子进程的 schema 2 租约；绑定 PID 与进程启动身份，真实 owner 即使心跳长时间暂停也不会被 TTL 误回收，崩溃或 PID 复用后由程序安全回收 |
 | `.runtime/install/admin-init.lock.reclaim` | 回收崩溃进程租约时使用的原子墓碑；可能短暂存在或在回收进程中断后保留，重跑 init 会自动恢复 |
 | `.runtime/install/admin-init-heartbeat/` | 按租约 UUID 隔离并绑定进程启动身份的一主一 owner 双 init 心跳；同步安装依赖期间持续更新，单通道异常或系统暂停不会误解锁 |
 | `.runtime/install/apply.lock` | 服务端网页安装/回滚全程持有的进程租约；与 `admin-init.lock` 双向互斥，服务端重启时会在同一 guard 下安全回收崩溃残留，请勿手动删除 |
@@ -200,7 +193,7 @@ go -C server run ./cmd/migrate down --steps 1
 
 ### 源码部署
 
-管理端构建（先完成上面的 UI 选择与网页安装；依赖已经由 `pnpm run init` 安装）：
+管理端构建（先完成上面的 UI 选择与网页安装；依赖已经由网页准备任务安装）：
 
 ```text
 cd admin

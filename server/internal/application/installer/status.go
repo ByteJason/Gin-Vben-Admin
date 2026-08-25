@@ -32,8 +32,10 @@ type MarkerReader interface {
 // InstallationProfile is the credential-free UI selection prepared by the
 // local initializer. It is read-only from the installation API boundary.
 type InstallationProfile struct {
-	SelectedUI installstate.UI
-	Installing bool
+	SelectedUI  installstate.UI     `json:"selectedUi"`
+	Installing  bool                `json:"installing"`
+	PreparingUI bool                `json:"preparingUi"`
+	UIAction    UIPreparationAction `json:"uiAction,omitempty"`
 }
 
 // ProfileProvider returns the initializer's selected UI. exists=false means
@@ -75,21 +77,30 @@ func (p activityProfileProvider) Profile(ctx context.Context) (InstallationProfi
 	if err != nil || !exists {
 		return profile, exists, err
 	}
-	profile.Installing = p.activity != nil && p.activity.InstallationActive()
+	profile.Installing = profile.Installing || p.activity != nil && p.activity.InstallationActive()
 	return profile, true, nil
 }
+
+type InstallationPhase string
+
+const (
+	InstallationPhaseUIPrepare InstallationPhase = "ui_prepare"
+	InstallationPhaseApply     InstallationPhase = "apply"
+)
 
 // Status is the public, credential-free installation summary. Artifact and
 // manifest hashes stay in the local marker and are intentionally omitted from
 // the unauthenticated status response.
 type Status struct {
-	State            State             `json:"state"`
-	Installed        bool              `json:"installed"`
-	SchemaVersion    int               `json:"schemaVersion"`
-	InstallerVersion string            `json:"installerVersion"`
-	SelectedUI       installstate.UI   `json:"selectedUi,omitempty"`
-	Mode             installstate.Mode `json:"mode,omitempty"`
-	InstalledAt      *time.Time        `json:"installedAt,omitempty"`
+	State            State               `json:"state"`
+	Installed        bool                `json:"installed"`
+	SchemaVersion    int                 `json:"schemaVersion"`
+	InstallerVersion string              `json:"installerVersion"`
+	SelectedUI       installstate.UI     `json:"selectedUi,omitempty"`
+	Mode             installstate.Mode   `json:"mode,omitempty"`
+	InstalledAt      *time.Time          `json:"installedAt,omitempty"`
+	Phase            InstallationPhase   `json:"phase,omitempty"`
+	UIAction         UIPreparationAction `json:"uiAction,omitempty"`
 }
 
 type StatusService struct {
@@ -151,7 +162,7 @@ func (s *StatusService) Status(ctx context.Context) (Status, error) {
 		if profile.Installing {
 			state = StateInstalling
 		}
-		return Status{State: state, SchemaVersion: installstate.CurrentSchemaVersion, InstallerVersion: CurrentInstallerVersion, SelectedUI: profile.SelectedUI}, nil
+		return Status{State: state, SchemaVersion: installstate.CurrentSchemaVersion, InstallerVersion: CurrentInstallerVersion, SelectedUI: profile.SelectedUI, Phase: installationPhase(profile), UIAction: installationUIAction(profile)}, nil
 	}
 	if err := marker.Validate(); err != nil {
 		return inconsistentStatus(profile), nil
@@ -160,7 +171,7 @@ func (s *StatusService) Status(ctx context.Context) (Status, error) {
 		return inconsistentStatus(profile), nil
 	}
 	if profile.Installing {
-		return Status{State: StateInstalling, SchemaVersion: installstate.CurrentSchemaVersion, InstallerVersion: CurrentInstallerVersion, SelectedUI: profile.SelectedUI}, nil
+		return Status{State: StateInstalling, SchemaVersion: installstate.CurrentSchemaVersion, InstallerVersion: CurrentInstallerVersion, SelectedUI: profile.SelectedUI, Phase: installationPhase(profile), UIAction: installationUIAction(profile)}, nil
 	}
 	installedAt := marker.InstalledAt
 	return Status{
@@ -217,8 +228,28 @@ func inconsistentStatus(profile InstallationProfile) Status {
 func validProfile(profile InstallationProfile) bool {
 	switch profile.SelectedUI {
 	case installstate.UIAntd, installstate.UIEle, installstate.UINaive:
-		return true
 	default:
 		return false
 	}
+	if profile.PreparingUI {
+		return profile.Installing && (profile.UIAction == UIPreparationActionPrepare || profile.UIAction == UIPreparationActionReset)
+	}
+	return profile.UIAction == ""
+}
+
+func installationUIAction(profile InstallationProfile) UIPreparationAction {
+	if profile.Installing && profile.PreparingUI {
+		return profile.UIAction
+	}
+	return ""
+}
+
+func installationPhase(profile InstallationProfile) InstallationPhase {
+	if !profile.Installing {
+		return ""
+	}
+	if profile.PreparingUI {
+		return InstallationPhaseUIPrepare
+	}
+	return InstallationPhaseApply
 }

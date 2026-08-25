@@ -49,14 +49,25 @@ type RollbackProvider interface {
 	Rollback(context.Context, string, bool) (installer.RollbackResult, error)
 }
 
+// UIPreparationProvider owns the asynchronous, credential-free source
+// workspace preparation that happens before the existing plan/apply flow.
+// It is deliberately separate from JobProvider so UI selection never runs
+// while ApplyService owns the installation lease.
+type UIPreparationProvider interface {
+	StartPrepare(context.Context, installer.UIPrepareRequest) (installer.UIPreparationJob, error)
+	StartReset(context.Context, installer.UIResetRequest) (installer.UIPreparationJob, error)
+	Progress(context.Context, string) (installer.UIPreparationJob, error)
+}
+
 type Handler struct {
-	status       StatusProvider
-	capabilities CapabilityProvider
-	plan         PlanProvider
-	dependencies DependencyCheckProvider
-	apply        ApplyProvider
-	jobs         JobProvider
-	rollback     RollbackProvider
+	status        StatusProvider
+	capabilities  CapabilityProvider
+	plan          PlanProvider
+	dependencies  DependencyCheckProvider
+	apply         ApplyProvider
+	jobs          JobProvider
+	rollback      RollbackProvider
+	uiPreparation UIPreparationProvider
 }
 
 func NewHandler(status StatusProvider, capabilities ...CapabilityProvider) *Handler {
@@ -87,6 +98,14 @@ func NewHandlerWithApplyAndJobs(status StatusProvider, capabilities CapabilityPr
 	return &Handler{status: status, capabilities: capabilities, plan: plan, dependencies: dependencies, apply: apply, jobs: jobs, rollback: rollback}
 }
 
+// SetUIPreparationProvider attaches the optional source-workspace preparation
+// seam without widening the established apply constructor chain.
+func (h *Handler) SetUIPreparationProvider(provider UIPreparationProvider) {
+	if h != nil {
+		h.uiPreparation = provider
+	}
+}
+
 func RegisterRoutes(router gin.IRouter, handler *Handler) {
 	group := router.Group("/api/system/install/v1")
 	group.GET("/status", func(c *gin.Context) {
@@ -112,6 +131,54 @@ func RegisterRoutes(router gin.IRouter, handler *Handler) {
 			return
 		}
 		response.OK(c, capabilities)
+	})
+	group.POST("/ui/prepare", func(c *gin.Context) {
+		if handler == nil || handler.uiPreparation == nil {
+			response.Error(c, http.StatusServiceUnavailable, 40001, "installation service unavailable")
+			return
+		}
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 8<<10)
+		var request installer.UIPrepareRequest
+		if !decodeStrictJSON(c, &request) || !request.ConfirmCleanup {
+			response.Error(c, http.StatusBadRequest, 10000, "invalid UI preparation request")
+			return
+		}
+		job, err := handler.uiPreparation.StartPrepare(c.Request.Context(), request)
+		if err != nil {
+			writeUIPreparationError(c, err)
+			return
+		}
+		response.Write(c, http.StatusAccepted, 0, "accepted", job)
+	})
+	group.GET("/ui/progress/:id", func(c *gin.Context) {
+		if handler == nil || handler.uiPreparation == nil {
+			response.Error(c, http.StatusServiceUnavailable, 40001, "installation service unavailable")
+			return
+		}
+		job, err := handler.uiPreparation.Progress(c.Request.Context(), c.Param("id"))
+		if err != nil {
+			writeUIPreparationError(c, err)
+			return
+		}
+		response.OK(c, job)
+	})
+	group.POST("/ui/reset", func(c *gin.Context) {
+		if handler == nil || handler.uiPreparation == nil {
+			response.Error(c, http.StatusServiceUnavailable, 40001, "installation service unavailable")
+			return
+		}
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 8<<10)
+		var request installer.UIResetRequest
+		if !decodeStrictJSON(c, &request) || !request.ConfirmReset {
+			response.Error(c, http.StatusBadRequest, 10000, "invalid UI preparation request")
+			return
+		}
+		job, err := handler.uiPreparation.StartReset(c.Request.Context(), request)
+		if err != nil {
+			writeUIPreparationError(c, err)
+			return
+		}
+		response.Write(c, http.StatusAccepted, 0, "accepted", job)
 	})
 	group.POST("/plan", func(c *gin.Context) {
 		if handler == nil || handler.plan == nil {
@@ -278,6 +345,12 @@ func decodeRollbackRequest(c *gin.Context, request *installer.RollbackRequest) b
 	return decoder.Decode(request) == nil && jsonDocumentEnded(decoder)
 }
 
+func decodeStrictJSON(c *gin.Context, request any) bool {
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	return decoder.Decode(request) == nil && jsonDocumentEnded(decoder)
+}
+
 func jsonDocumentEnded(decoder *json.Decoder) bool {
 	var extra any
 	return errors.Is(decoder.Decode(&extra), io.EOF)
@@ -325,5 +398,22 @@ func writeRollbackError(c *gin.Context, err error) {
 		response.Error(c, http.StatusConflict, 10007, "installation already running")
 	default:
 		response.Error(c, http.StatusInternalServerError, 50000, "installation rollback failed")
+	}
+}
+
+func writeUIPreparationError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, installer.ErrUIPreparationInvalid):
+		response.Error(c, http.StatusBadRequest, 10000, "invalid UI preparation request")
+	case errors.Is(err, installer.ErrUIPreparationConflict):
+		response.Error(c, http.StatusConflict, 10007, "UI preparation already running")
+	case errors.Is(err, installer.ErrUIPreparationInstalled):
+		response.Error(c, http.StatusConflict, 10006, "installation already completed")
+	case errors.Is(err, installer.ErrUIPreparationJobNotFound):
+		response.Error(c, http.StatusNotFound, 30000, "UI preparation job not found")
+	case errors.Is(err, installer.ErrUIPreparationServiceClosed):
+		response.Error(c, http.StatusServiceUnavailable, 40001, "installation service unavailable")
+	default:
+		response.Error(c, http.StatusInternalServerError, 50000, "UI preparation service unavailable")
 	}
 }

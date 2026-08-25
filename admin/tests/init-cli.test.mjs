@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { cpSync, existsSync, linkSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, parse } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import test from 'node:test';
 
@@ -261,14 +261,22 @@ function definitelyDeadPID() {
   throw new Error('DEAD_PID_FIXTURE_UNAVAILABLE');
 }
 
-test('init requires an explicit UI when stdin is not a terminal', () => {
+test('pristine init without a UI directs the user to the web installer without changing workspace state', () => {
   const root = fixture();
   try {
     const result = run(root, 'init.mjs', ['--no-open']);
-    assert.equal(result.status, 2, output(result));
+    assert.equal(result.status, 0, output(result));
     assert.match(output(result), /INIT_STATE=pristine/);
-    assert.match(output(result), /INIT_ERROR=UI_REQUIRED/);
+    assert.match(output(result), /INIT_ACTION=OPEN_INSTALLER/);
+    assert.match(output(result), /INIT_URL=http:\/\/127\.0\.0\.1:8080\/install/);
+    assert.match(output(result), /INIT_NEXT=OPEN_INSTALLER/);
+    assert.match(output(result), /INIT_ERROR=NONE/);
+    assert.doesNotMatch(output(result), /UI_REQUIRED|Select UI/);
     assert.equal(existsSync(join(root, '.ui-profile.json')), false);
+    assert.equal(existsSync(join(root, '..', '.runtime', 'install', 'transaction.json')), false);
+    for (const ui of ['antd', 'ele', 'naive']) {
+      assert.equal(existsSync(join(root, 'apps', `web-${ui}`)), true);
+    }
   } finally {
     dispose(root);
   }
@@ -345,6 +353,10 @@ test('init stages non-selected templates, writes the fixed profile schema, and i
     assert.match(output(first), /INIT_PLAN_RETAIN=apps\/web-ele/);
     assert.match(output(first), /INIT_PLAN_STAGE=apps\/web-antd,apps\/web-naive/);
     assert.match(output(first), /INIT_PLAN_BACKUP=\.runtime\/install\/ui-backup\/<transaction>/);
+    assert.deepEqual(
+      [...output(first).matchAll(/^INIT_STAGE=(.+)$/gm)].map((match) => match[1]),
+      ['prepare:preflight', 'prepare:workspace', 'prepare:dependencies', 'prepare:complete'],
+    );
     assert.match(output(first), /INIT_URL=http:\/\/127\.0\.0\.1:8080\/install/);
     assert.match(output(first), /INIT_NEXT=OPEN_INSTALLER/);
     assert.match(output(first), /INIT_ERROR=NONE/);
@@ -370,6 +382,137 @@ test('init stages non-selected templates, writes the fixed profile schema, and i
     assert.equal(existsSync(join(root, 'apps', 'web-ele')), true);
   } finally {
     dispose(root);
+  }
+});
+
+test('init keeps all preparation state in a controlled absolute state directory supplied by Go', () => {
+  const root = fixture();
+  try {
+    const customStateRoot = join(root, '..', '.go-runtime', 'install');
+    const runner = join(root, 'scripts', 'custom-state-pnpm.mjs');
+    const log = join(root, 'custom-state-pnpm.log');
+    writeFileSync(runner, [
+      'import { writeFileSync } from "node:fs";',
+      'writeFileSync(process.env.INIT_PNPM_LOG, process.argv.slice(2).join(" "));',
+    ].join('\n'));
+    const result = run(root, 'init.mjs', ['--ui', 'ele', '--confirm-cleanup', '--no-open'], {
+      GIN_VBEN_INSTALL_STATE_DIR: customStateRoot,
+      INIT_DEPENDENCY_INSTALL_TEST_MODE: '',
+      INIT_PNPM_COMMAND: process.execPath,
+      INIT_PNPM_PREFIX_ARGS: JSON.stringify([runner]),
+      INIT_PNPM_LOG: log,
+    });
+
+    assert.equal(result.status, 0, output(result));
+    assert.match(output(result), /INIT_SELECTED_UI=ele/);
+    assert.equal(readFileSync(log, 'utf8'), 'install --frozen-lockfile');
+    assert.equal(existsSync(join(customStateRoot, 'dependency-install.log')), true);
+    assert.equal(existsSync(join(customStateRoot, 'transaction.json')), false);
+    const backupTransactions = readdirSync(join(customStateRoot, 'ui-backup'));
+    assert.equal(backupTransactions.length, 1);
+    assert.equal(
+      existsSync(join(customStateRoot, 'ui-backup', backupTransactions[0], 'receipt.json')),
+      true,
+    );
+    assert.equal(existsSync(join(root, '..', '.runtime', 'install')), false);
+    assert.equal(existsSync(join(root, 'apps', 'web-ele')), true);
+    assert.equal(existsSync(join(root, 'apps', 'web-antd')), false);
+    assert.equal(existsSync(join(root, 'apps', 'web-naive')), false);
+  } finally {
+    dispose(root);
+  }
+});
+
+test('init accepts an absolute installation state directory outside the workspace', () => {
+  const root = fixture();
+  const external = mkdtempSync(join(tmpdir(), 'gin-vben-external-state-'));
+  try {
+    const externalStateRoot = join(external, 'install');
+    const result = run(root, 'init.mjs', ['--ui', 'naive', '--confirm-cleanup', '--no-open'], {
+      GIN_VBEN_INSTALL_STATE_DIR: externalStateRoot,
+    });
+
+    assert.equal(result.status, 0, output(result));
+    assert.match(output(result), /INIT_SELECTED_UI=naive/);
+    const backupTransactions = readdirSync(join(externalStateRoot, 'ui-backup'));
+    assert.equal(backupTransactions.length, 1);
+    assert.equal(
+      existsSync(join(externalStateRoot, 'ui-backup', backupTransactions[0], 'receipt.json')),
+      true,
+    );
+    assert.equal(existsSync(join(root, '..', '.runtime', 'install')), false);
+    assert.equal(existsSync(join(root, 'apps', 'web-naive')), true);
+    assert.equal(existsSync(join(root, 'apps', 'web-antd')), false);
+    assert.equal(existsSync(join(root, 'apps', 'web-ele')), false);
+  } finally {
+    dispose(root);
+    rmSync(external, { force: true, recursive: true });
+  }
+});
+
+test('init canonicalizes an existing state-directory symlink to an external trusted directory', () => {
+  const root = fixture();
+  const external = mkdtempSync(join(tmpdir(), 'gin-vben-external-state-target-'));
+  try {
+    const externalStateRoot = join(external, 'install');
+    mkdirSync(externalStateRoot);
+    const configuredAlias = join(root, '..', '.go-state-link');
+    symlinkSync(externalStateRoot, configuredAlias, process.platform === 'win32' ? 'junction' : 'dir');
+    const result = run(root, 'init.mjs', ['--ui', 'ele', '--confirm-cleanup', '--no-open'], {
+      GIN_VBEN_INSTALL_STATE_DIR: configuredAlias,
+    });
+
+    assert.equal(result.status, 0, output(result));
+    assert.match(output(result), /INIT_SELECTED_UI=ele/);
+    const backupTransactions = readdirSync(join(externalStateRoot, 'ui-backup'));
+    assert.equal(backupTransactions.length, 1);
+    assert.equal(
+      existsSync(join(externalStateRoot, 'ui-backup', backupTransactions[0], 'receipt.json')),
+      true,
+    );
+    assert.equal(existsSync(join(root, '..', '.runtime', 'install')), false);
+  } finally {
+    dispose(root);
+    rmSync(external, { force: true, recursive: true });
+  }
+});
+
+test('init rejects relative, root, workspace-root, and admin-source state directories before changing the workspace', () => {
+  const cases = [
+    { name: 'relative', value: () => '.go-runtime/install' },
+    { name: 'filesystem root', value: (root) => parse(root).root },
+    { name: 'workspace root', value: (root) => join(root, '..') },
+    { name: 'admin source tree', value: (root) => join(root, 'runtime-state') },
+    { name: 'UI source tree', value: (root) => join(root, 'apps', 'web-antd', '.runtime-state') },
+    {
+      name: 'symlinked admin source tree',
+      value: (root) => {
+        const alias = join(root, '..', '.admin-state-link');
+        symlinkSync(root, alias, process.platform === 'win32' ? 'junction' : 'dir');
+        return join(alias, '.runtime-state');
+      },
+    },
+  ];
+  for (const testCase of cases) {
+    const root = fixture();
+    try {
+      const result = run(root, 'init.mjs', ['--ui', 'antd', '--confirm-cleanup', '--no-open'], {
+        GIN_VBEN_INSTALL_STATE_DIR: testCase.value(root),
+      });
+
+      assert.equal(result.status, 2, `${testCase.name}: ${output(result)}`);
+      assert.match(output(result), /INIT_STATE=inconsistent/, testCase.name);
+      assert.match(output(result), /INIT_REASON=INSTALL_STATE_DIR_INVALID/, testCase.name);
+      assert.match(output(result), /INIT_NEXT=PROVIDE_INPUT/, testCase.name);
+      assert.match(output(result), /INIT_ERROR=INSTALL_STATE_DIR_INVALID/, testCase.name);
+      assert.equal(existsSync(join(root, '.ui-profile.json')), false, testCase.name);
+      assert.equal(existsSync(join(root, '..', '.runtime', 'install')), false, testCase.name);
+      for (const ui of ['antd', 'ele', 'naive']) {
+        assert.equal(existsSync(join(root, 'apps', `web-${ui}`)), true, `${testCase.name}: ${ui}`);
+      }
+    } finally {
+      dispose(root);
+    }
   }
 });
 
@@ -3203,6 +3346,10 @@ test('check is read-only and non-terminal cleanup/reset confirmations are explic
 
     const reset = run(root, 'init.mjs', ['--reset', '--confirm-reset', '--no-open']);
     assert.equal(reset.status, 0, output(reset));
+    assert.deepEqual(
+      [...output(reset).matchAll(/^INIT_STAGE=(.+)$/gm)].map((match) => match[1]),
+      ['reset:preflight', 'reset:workspace', 'reset:complete'],
+    );
     assert.match(output(reset), /INIT_STATE=pristine/);
     assert.match(output(reset), /INIT_NEXT=RESET_COMPLETE/);
     assert.equal(existsSync(join(root, '.ui-profile.json')), false);
@@ -3612,6 +3759,10 @@ test('a fresh clone with a tracked single-UI profile still installs local depend
       INIT_PNPM_LOG: log,
     });
     assert.equal(result.status, 0, output(result));
+    assert.deepEqual(
+      [...output(result).matchAll(/^INIT_STAGE=(.+)$/gm)].map((match) => match[1]),
+      ['prepare:dependencies', 'prepare:complete'],
+    );
     assert.equal(readFileSync(log, 'utf8'), 'install --frozen-lockfile');
     assert.match(output(result), /INIT_NEXT=OPEN_INSTALLER/);
   } finally {
@@ -3824,6 +3975,10 @@ test('rerun completes a UI move transaction interrupted between templates', () =
     writeFileSync(path, JSON.stringify(transaction));
     const resumed = run(root, 'init.mjs', ['--no-open']);
     assert.equal(resumed.status, 0, output(resumed));
+    assert.deepEqual(
+      [...output(resumed).matchAll(/^INIT_STAGE=(.+)$/gm)].map((match) => match[1]),
+      ['prepare:workspace', 'prepare:dependencies', 'prepare:complete'],
+    );
     assert.match(output(resumed), /INIT_STATE=ui_prepared/);
     assert.match(output(resumed), /INIT_SELECTED_UI=antd/);
     assert.equal(existsSync(path), false);

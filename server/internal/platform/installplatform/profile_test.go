@@ -52,7 +52,7 @@ func TestFileProfileProviderDoesNotReportReadyWhileAdminInitTransactionIsPending
 	if err := os.MkdirAll(filepath.Dir(transactionPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	pending := `{"schema":1,"owner":"admin-init","id":"12345678-1234-1234-1234-123456789abc","selectedUi":"ele","phase":"dependencies_pending","moves":[]}` + "\n"
+	pending := `{"schema":1,"owner":"admin-init","id":"12345678-1234-1234-1234-123456789abc","selectedUi":"ele","phase":"dependencies_pending","moves":[{"source":"apps/web-antd","backup":"apps/web-antd"},{"source":"apps/web-naive","backup":"apps/web-naive"}]}` + "\n"
 	if err := os.WriteFile(transactionPath, []byte(pending), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -62,16 +62,16 @@ func TestFileProfileProviderDoesNotReportReadyWhileAdminInitTransactionIsPending
 		t.Fatalf("NewFileProfileProvider() error = %v", err)
 	}
 	profile, exists, err := provider.Profile(context.Background())
-	if err != nil || !exists || profile.SelectedUI != "" {
-		t.Fatalf("Profile() with pending admin transaction = (%#v, %t, %v), want invalid existing profile", profile, exists, err)
+	if err != nil || !exists || profile.SelectedUI != installstate.UIEle || !profile.Installing || !profile.PreparingUI || profile.UIAction != installer.UIPreparationActionPrepare {
+		t.Fatalf("Profile() with pending admin transaction = (%#v, %t, %v), want active ele preparation", profile, exists, err)
 	}
 	statusService := installer.NewStatusServiceWithProfile(
 		NewFileMarkerStore(filepath.Join(root, ".runtime", "install", ".installed")),
 		provider,
 	)
 	status, err := statusService.Status(context.Background())
-	if err != nil || status.State != installer.StateInconsistent {
-		t.Fatalf("Status() with pending admin transaction = (%#v, %v), want inconsistent", status, err)
+	if err != nil || status.State != installer.StateInstalling || status.Phase != installer.InstallationPhaseUIPrepare || status.UIAction != installer.UIPreparationActionPrepare {
+		t.Fatalf("Status() with pending admin transaction = (%#v, %v), want preparing install status", status, err)
 	}
 }
 
@@ -84,7 +84,7 @@ func TestFileProfileProviderUsesConfiguredInstallStateDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	stateDirectory := t.TempDir()
-	pending := `{"schema":1,"owner":"admin-init","id":"12345678-1234-1234-1234-123456789abc","selectedUi":"antd","phase":"dependencies_pending","moves":[]}` + "\n"
+	pending := `{"schema":1,"owner":"admin-init","id":"12345678-1234-1234-1234-123456789abc","selectedUi":"antd","phase":"dependencies_pending","moves":[{"source":"apps/web-ele","backup":"apps/web-ele"},{"source":"apps/web-naive","backup":"apps/web-naive"}]}` + "\n"
 	if err := os.WriteFile(filepath.Join(stateDirectory, "transaction.json"), []byte(pending), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -94,8 +94,83 @@ func TestFileProfileProviderUsesConfiguredInstallStateDirectory(t *testing.T) {
 		t.Fatalf("NewFileProfileProviderWithStateDirectory() error = %v", err)
 	}
 	profile, exists, err := provider.Profile(context.Background())
-	if err != nil || !exists || profile.SelectedUI != "" {
-		t.Fatalf("Profile() with configured pending transaction = (%#v, %t, %v), want invalid existing profile", profile, exists, err)
+	if err != nil || !exists || profile.SelectedUI != installstate.UIAntd || !profile.Installing || !profile.PreparingUI || profile.UIAction != installer.UIPreparationActionPrepare {
+		t.Fatalf("Profile() with configured pending transaction = (%#v, %t, %v), want active antd preparation", profile, exists, err)
+	}
+}
+
+func TestFileProfileProviderRecognizesStrictAdminInitTransactionPhases(t *testing.T) {
+	t.Parallel()
+
+	for _, testCase := range []struct {
+		phase       string
+		withProfile bool
+		wantAction  installer.UIPreparationAction
+	}{
+		{phase: "moving_ui", wantAction: installer.UIPreparationActionPrepare},
+		{phase: "dependencies_pending", withProfile: true, wantAction: installer.UIPreparationActionPrepare},
+		{phase: "resetting_ui", withProfile: true, wantAction: installer.UIPreparationActionReset},
+	} {
+		t.Run(testCase.phase, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(root, "admin", "apps", "web-ele"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if testCase.withProfile {
+				mustWriteProfileFixture(t, root, `{"schema":1,"selectedUi":"ele","packageName":"@vben/web-ele","appDirectory":"apps/web-ele"}`)
+			}
+			mustWriteAdminInitTransactionFixture(t, filepath.Join(root, ".runtime", "install"), `{"schema":1,"owner":"admin-init","id":"12345678-1234-1234-1234-123456789abc","selectedUi":"ele","phase":"`+testCase.phase+`","moves":[{"source":"apps/web-antd","backup":"apps/web-antd"},{"source":"apps/web-naive","backup":"apps/web-naive"}]}`)
+
+			provider, err := NewFileProfileProvider(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			profile, exists, err := provider.Profile(context.Background())
+			if err != nil || !exists || profile.SelectedUI != installstate.UIEle || !profile.Installing || !profile.PreparingUI || profile.UIAction != testCase.wantAction {
+				t.Fatalf("Profile() = (%#v, %t, %v), want active %s", profile, exists, err, testCase.wantAction)
+			}
+			status, err := installer.NewStatusServiceWithProfile(
+				NewFileMarkerStore(filepath.Join(root, ".runtime", "install", ".installed")),
+				provider,
+			).Status(context.Background())
+			if err != nil || status.State != installer.StateInstalling || status.Phase != installer.InstallationPhaseUIPrepare || status.UIAction != testCase.wantAction {
+				t.Fatalf("Status() = (%#v, %v), want ui_prepare/%s", status, err, testCase.wantAction)
+			}
+		})
+	}
+}
+
+func TestFileProfileProviderRejectsMalformedAdminInitTransactions(t *testing.T) {
+	t.Parallel()
+
+	validMoves := `[{"source":"apps/web-antd","backup":"apps/web-antd"},{"source":"apps/web-naive","backup":"apps/web-naive"}]`
+	for _, testCase := range []struct {
+		name        string
+		transaction string
+	}{
+		{name: "unknown field", transaction: `{"schema":1,"owner":"admin-init","id":"12345678-1234-1234-1234-123456789abc","selectedUi":"ele","phase":"moving_ui","moves":` + validMoves + `,"command":"private"}`},
+		{name: "invalid id", transaction: `{"schema":1,"owner":"admin-init","id":"fixture","selectedUi":"ele","phase":"moving_ui","moves":` + validMoves + `}`},
+		{name: "invalid ui", transaction: `{"schema":1,"owner":"admin-init","id":"12345678-1234-1234-1234-123456789abc","selectedUi":"other","phase":"moving_ui","moves":` + validMoves + `}`},
+		{name: "invalid phase", transaction: `{"schema":1,"owner":"admin-init","id":"12345678-1234-1234-1234-123456789abc","selectedUi":"ele","phase":"complete","moves":` + validMoves + `}`},
+		{name: "wrong moves", transaction: `{"schema":1,"owner":"admin-init","id":"12345678-1234-1234-1234-123456789abc","selectedUi":"ele","phase":"moving_ui","moves":[]}`},
+		{name: "duplicate trailing value", transaction: `{"schema":1,"owner":"admin-init","id":"12345678-1234-1234-1234-123456789abc","selectedUi":"ele","phase":"moving_ui","moves":` + validMoves + `} {}`},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			root := t.TempDir()
+			mustWriteProfileFixture(t, root, `{"schema":1,"selectedUi":"ele","packageName":"@vben/web-ele","appDirectory":"apps/web-ele"}`)
+			if err := os.MkdirAll(filepath.Join(root, "admin", "apps", "web-ele"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			mustWriteAdminInitTransactionFixture(t, filepath.Join(root, ".runtime", "install"), testCase.transaction)
+			provider, err := NewFileProfileProvider(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			profile, exists, err := provider.Profile(context.Background())
+			if err != nil || !exists || profile != (installer.InstallationProfile{}) {
+				t.Fatalf("Profile() = (%#v, %t, %v), want inconsistent existing profile", profile, exists, err)
+			}
+		})
 	}
 }
 
@@ -260,6 +335,16 @@ func mustWriteProfileFixture(t *testing.T, root, contents string) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, []byte(contents+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustWriteAdminInitTransactionFixture(t *testing.T, stateDirectory, contents string) {
+	t.Helper()
+	if err := os.MkdirAll(stateDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDirectory, "transaction.json"), []byte(contents+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }

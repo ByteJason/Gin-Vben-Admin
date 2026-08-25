@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
+import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { link, open, rename, rm, rmdir } from 'node:fs/promises';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
 
@@ -16,6 +16,7 @@ const ADMIN_INIT_CLOCK_SKEW_MS = 5_000;
 const ADMIN_INIT_IDENTITY_UNAVAILABLE_MAX_AGE_MS = 86_400_000;
 const DEPENDENCY_INSTALL_OWNER = 'admin-dependency-install';
 const DEPENDENCY_IDENTITY_UNAVAILABLE_MAX_AGE_MS = 86_400_000;
+const INSTALL_STATE_DIRECTORY_ENV = 'GIN_VBEN_INSTALL_STATE_DIR';
 
 export const UI_PROFILES = Object.freeze({
   antd: { packageName: '@vben/web-antd', appDirectory: 'apps/web-antd' },
@@ -53,14 +54,62 @@ export const STATE_REASONS = Object.freeze({
   RUNTIME_MARKER_CONFLICT: 'RUNTIME_MARKER_CONFLICT',
   MARKER_INVALID: 'MARKER_INVALID',
   MARKER_LOCK_PRESENT: 'MARKER_LOCK_PRESENT',
+  INSTALL_STATE_DIR_INVALID: 'INSTALL_STATE_DIR_INVALID',
 });
 
 export function installURL(port) {
   return `http://127.0.0.1:${port}/install`;
 }
 
-export function statePaths(root) {
-  const stateRoot = resolve(root, '..', '.runtime', 'install');
+function pathInside(parent, candidate) {
+  const fromParent = relative(parent, candidate);
+  return fromParent === '' || (
+    !isAbsolute(fromParent)
+    && fromParent !== '..'
+    && !fromParent.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`)
+  );
+}
+
+function canonicalProspectivePath(target) {
+  let existing = target;
+  const missing = [];
+  while (true) {
+    try {
+      return resolve(realpathSync(existing), ...missing);
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw new Error('INSTALL_STATE_DIR_INVALID');
+      const parent = dirname(existing);
+      if (parent === existing) throw new Error('INSTALL_STATE_DIR_INVALID');
+      missing.unshift(basename(existing));
+      existing = parent;
+    }
+  }
+}
+
+function installStateRoot(root, environment = process.env) {
+  const repositoryRoot = resolve(root, '..');
+  if (!Object.hasOwn(environment, INSTALL_STATE_DIRECTORY_ENV)) {
+    return resolve(repositoryRoot, '.runtime', 'install');
+  }
+  const configured = environment[INSTALL_STATE_DIRECTORY_ENV];
+  if (typeof configured !== 'string' || configured.trim() === '' || !isAbsolute(configured)) {
+    throw new Error('INSTALL_STATE_DIR_INVALID');
+  }
+  const canonicalRepositoryRoot = realpathSync(repositoryRoot);
+  const canonicalAdminRoot = realpathSync(resolve(root));
+  const stateRoot = canonicalProspectivePath(resolve(configured));
+  if (
+    dirname(stateRoot) === stateRoot
+    || stateRoot === canonicalRepositoryRoot
+    || pathInside(canonicalAdminRoot, stateRoot)
+  ) {
+    throw new Error('INSTALL_STATE_DIR_INVALID');
+  }
+  return stateRoot;
+}
+
+export function statePaths(root, environment = process.env) {
+  const stateRoot = installStateRoot(root, environment);
   return {
     profile: join(root, '.ui-profile.json'),
     // Kept only for recognizing and quarantining state written by older releases.
@@ -1855,18 +1904,12 @@ function assertWritableDirectory(target) {
   accessSync(target, fsConstants.W_OK | fsConstants.X_OK);
 }
 
-function assertBackupRootAvailable(root, backupRoot) {
-  const repositoryRoot = resolve(root, '..');
-  const fromRepository = relative(repositoryRoot, backupRoot);
-  if (isAbsolute(fromRepository) || fromRepository === '..' || fromRepository.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`)) {
-    throw new Error('PREFLIGHT_FAILED');
-  }
-
+function assertBackupRootAvailable(backupRoot) {
   let existing = backupRoot;
   let state = strictPathState(existing);
   while (state.kind === 'missing') {
     const parent = dirname(existing);
-    if (existing === repositoryRoot || parent === existing) throw new Error('PREFLIGHT_FAILED');
+    if (parent === existing) throw new Error('PREFLIGHT_FAILED');
     existing = parent;
     state = strictPathState(existing);
   }
@@ -1902,7 +1945,7 @@ export function preflightInitialization(root, selectedUi) {
         readFileSync(target);
       }
     }
-    assertBackupRootAvailable(root, location.backupRoot);
+    assertBackupRootAvailable(location.backupRoot);
   } catch (error) {
     if (error instanceof Error && error.message === 'TEMPLATE_LAYOUT_INVALID') throw error;
     throw new Error('PREFLIGHT_FAILED');

@@ -20,16 +20,20 @@ test('INIT-100 keeps one admin workspace and moves the installer below admin app
   assert.match(lockfile, /apps\/install:/);
 });
 
-test('INIT-100 web installer shows the CLI-selected UI as read-only state', () => {
+test('INIT-100 web installer selects UI before exposing it as read-only plan state', () => {
   const html = read('admin/apps/install/src/index.html');
   const script = read('admin/apps/install/src/app.js');
 
-  assert.doesNotMatch(html, /id="ui-choice"|name="selectedUi"/);
+  assert.match(html, /id="ui-choice"/);
+  for (const ui of ['antd', 'ele', 'naive']) {
+    assert.match(html, new RegExp(`name="selectedUi"[^>]*value="${ui}"`));
+  }
   assert.match(html, /id="selected-ui-summary"/);
-  assert.match(html, /命令行.*选择|已选择.*管理界面/);
-  assert.doesNotMatch(html, /id="confirm-cleanup"/);
-  assert.doesNotMatch(script, /uiChoice|confirmCleanup/);
-  assert.doesNotMatch(script, /selectedUi\s*:/);
+  assert.match(html, /id="confirm-cleanup"[^>]*type="checkbox"/);
+  assert.match(script, /uiChoice|confirmCleanup/);
+  assert.match(script, /uiPrepareEndpoint/);
+  assert.match(script, /selectedUi:\s*selectedUi/);
+  assert.match(script, /confirmCleanup:\s*true/);
   assert.match(script, /JSON\.stringify\(\{\s*mode\s*\}\)/);
   assert.match(script, /重新启动|重启/);
   assert.match(script, /pnpm run dev/);
@@ -68,15 +72,18 @@ test('INIT-100 uses the ordinary API installer without a temporary runtime', () 
   assert.doesNotMatch(cli, /cmd\/init|init-runtime/);
 });
 
-test('INIT-100 public clone and acceptance docs use init before public dev/build', () => {
+test('INIT-100 public clone and acceptance docs use Go /install before public dev/build', () => {
   const rootReadme = read('README.md');
   const adminReadme = read('admin/README.md');
   const acceptance = read('docs/manual-acceptance/1.0.0-dev-end-to-end.md');
 
   for (const document of [rootReadme, adminReadme, acceptance]) {
-    assert.match(document, /pnpm run init/);
+    assert.match(document, /go run \.\/cmd\/api\/main\.go/);
+    assert.match(document, /127\.0\.0\.1:8080\/install/);
     assert.match(document, /pnpm run (?:dev|build)/);
   }
+  assert.match(rootReadme, /pnpm run init -- --check/);
+  assert.match(adminReadme, /pnpm run init -- --reset --confirm-reset/);
   assert.match(rootReadme, /ADMIN_UI=antd docker compose/);
   assert.match(acceptance, /只读/);
   assert.doesNotMatch(acceptance, /选择 UI=`antd`/);

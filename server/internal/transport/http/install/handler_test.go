@@ -504,6 +504,107 @@ func TestInstallationRollbackEndpointRequiresConfirmationAndUsesProvider(t *test
 	}
 }
 
+func TestUIPreparationEndpointAcceptsConfirmedSelectionAndRejectsUnknownFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	provider := &uiPreparationProviderStub{job: installer.UIPreparationJob{
+		ID: "ui-prepare-job-1", Action: installer.UIPreparationActionPrepare,
+		State: installer.UIPreparationJobQueued, SelectedUI: "ele",
+		CurrentStep: "queued", Progress: 0,
+	}}
+	handler := NewHandler(statusProviderStub{})
+	handler.SetUIPreparationProvider(provider)
+	router := gin.New()
+	RegisterRoutes(router, handler)
+
+	accepted := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/system/install/v1/ui/prepare", bytes.NewBufferString(`{"selectedUi":"ele","confirmCleanup":true}`))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(accepted, request)
+	if accepted.Code != http.StatusAccepted || provider.prepareCalls != 1 || provider.prepareRequest.SelectedUI != "ele" || !provider.prepareRequest.ConfirmCleanup {
+		t.Fatalf("prepare response = %d %s; calls=%d request=%#v", accepted.Code, accepted.Body.String(), provider.prepareCalls, provider.prepareRequest)
+	}
+	for _, expected := range []string{`"id":"ui-prepare-job-1"`, `"action":"prepare"`, `"state":"queued"`, `"selectedUi":"ele"`, `"currentStep":"queued"`} {
+		if !strings.Contains(accepted.Body.String(), expected) {
+			t.Fatalf("prepare response missing %s: %s", expected, accepted.Body.String())
+		}
+	}
+
+	rejected := httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPost, "/api/system/install/v1/ui/prepare", bytes.NewBufferString(`{"selectedUi":"antd","confirmCleanup":true,"command":"sh -c fixture"}`))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rejected, request)
+	if rejected.Code != http.StatusBadRequest || provider.prepareCalls != 1 {
+		t.Fatalf("unknown-field response = %d %s; calls=%d", rejected.Code, rejected.Body.String(), provider.prepareCalls)
+	}
+}
+
+func TestUIPreparationEndpointsRequireConfirmationAndMapStableConflicts(t *testing.T) {
+	tests := []struct {
+		name        string
+		body        string
+		providerErr error
+		wantStatus  int
+		wantMessage string
+	}{
+		{name: "confirmation", body: `{"selectedUi":"antd","confirmCleanup":false}`, wantStatus: http.StatusBadRequest},
+		{name: "invalid ui", body: `{"selectedUi":"unknown","confirmCleanup":true}`, providerErr: installer.ErrUIPreparationInvalid, wantStatus: http.StatusBadRequest},
+		{name: "busy", body: `{"selectedUi":"antd","confirmCleanup":true}`, providerErr: installer.ErrUIPreparationConflict, wantStatus: http.StatusConflict},
+		{name: "installed", body: `{"selectedUi":"antd","confirmCleanup":true}`, providerErr: installer.ErrUIPreparationInstalled, wantStatus: http.StatusConflict},
+		{name: "service closed", body: `{"selectedUi":"antd","confirmCleanup":true}`, providerErr: installer.ErrUIPreparationServiceClosed, wantStatus: http.StatusServiceUnavailable, wantMessage: "installation service unavailable"},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			provider := &uiPreparationProviderStub{err: testCase.providerErr}
+			handler := NewHandler(statusProviderStub{})
+			handler.SetUIPreparationProvider(provider)
+			router := gin.New()
+			RegisterRoutes(router, handler)
+
+			response := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, "/api/system/install/v1/ui/prepare", bytes.NewBufferString(testCase.body))
+			request.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(response, request)
+			if response.Code != testCase.wantStatus {
+				t.Fatalf("status = %d, want %d; body=%s", response.Code, testCase.wantStatus, response.Body.String())
+			}
+			if testCase.wantMessage != "" && !strings.Contains(response.Body.String(), `"message":"`+testCase.wantMessage+`"`) {
+				t.Fatalf("body = %s, want message %q", response.Body.String(), testCase.wantMessage)
+			}
+			if strings.Contains(response.Body.String(), "sh -c") || strings.Contains(response.Body.String(), "private") {
+				t.Fatalf("response leaks process detail: %s", response.Body.String())
+			}
+		})
+	}
+}
+
+func TestUIPreparationProgressAndResetUseDedicatedProvider(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	provider := &uiPreparationProviderStub{job: installer.UIPreparationJob{
+		ID: "ui-prepare-job-2", Action: installer.UIPreparationActionReset,
+		State: installer.UIPreparationJobRunning, CurrentStep: "reset",
+		Progress: 55,
+	}}
+	handler := NewHandler(statusProviderStub{})
+	handler.SetUIPreparationProvider(provider)
+	router := gin.New()
+	RegisterRoutes(router, handler)
+
+	progress := httptest.NewRecorder()
+	router.ServeHTTP(progress, httptest.NewRequest(http.MethodGet, "/api/system/install/v1/ui/progress/ui-prepare-job-2", nil))
+	if progress.Code != http.StatusOK || provider.progressID != "ui-prepare-job-2" || !strings.Contains(progress.Body.String(), `"progress":55`) {
+		t.Fatalf("progress response = %d %s; id=%q", progress.Code, progress.Body.String(), provider.progressID)
+	}
+
+	reset := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/system/install/v1/ui/reset", bytes.NewBufferString(`{"confirmReset":true}`))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(reset, request)
+	if reset.Code != http.StatusAccepted || provider.resetCalls != 1 || !provider.resetRequest.ConfirmReset {
+		t.Fatalf("reset response = %d %s; calls=%d request=%#v", reset.Code, reset.Body.String(), provider.resetCalls, provider.resetRequest)
+	}
+}
+
 type statusProviderStub struct {
 	status installer.Status
 	err    error
@@ -561,6 +662,33 @@ type rollbackProviderStub struct {
 	id        string
 	confirmed bool
 	calls     int
+}
+
+type uiPreparationProviderStub struct {
+	job            installer.UIPreparationJob
+	err            error
+	prepareRequest installer.UIPrepareRequest
+	resetRequest   installer.UIResetRequest
+	prepareCalls   int
+	resetCalls     int
+	progressID     string
+}
+
+func (s *uiPreparationProviderStub) StartPrepare(_ context.Context, request installer.UIPrepareRequest) (installer.UIPreparationJob, error) {
+	s.prepareCalls++
+	s.prepareRequest = request
+	return s.job, s.err
+}
+
+func (s *uiPreparationProviderStub) StartReset(_ context.Context, request installer.UIResetRequest) (installer.UIPreparationJob, error) {
+	s.resetCalls++
+	s.resetRequest = request
+	return s.job, s.err
+}
+
+func (s *uiPreparationProviderStub) Progress(_ context.Context, id string) (installer.UIPreparationJob, error) {
+	s.progressID = id
+	return s.job, s.err
 }
 
 func (s *rollbackProviderStub) Start(_ context.Context, request installer.ApplyRequest) (installer.ApplyJob, error) {

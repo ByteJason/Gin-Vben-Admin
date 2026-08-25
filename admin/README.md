@@ -16,16 +16,17 @@
 ## 初始化与验证
 
 ```text
-pnpm run init
+cd ../server
+go run ./cmd/api/main.go
 ```
 
-先在另一个终端进入 `server/` 并运行 `go run ./cmd/api/main.go`。`pnpm run init` 必须在本目录执行，但不需要预先运行 `pnpm install`：init 只使用 Node.js 内置模块。它先通过 `127.0.0.1` 检查普通 API 的 health、安装状态和 `/install` 页面，再交互选择 `antd`、`ele` 或 `naive`；确认后原子保留所选应用，将另外两套移动到仓库根目录 `.runtime/install/ui-backup/<transaction>/`，写入 `.ui-profile.json`，并对缩减后的 workspace 自动执行 `pnpm install --frozen-lockfile`。安装路由只接受真实 loopback 来源和 loopback Host，不信任代理头；请始终使用 init 输出的本机 URL。
+打开 [http://127.0.0.1:8080/install](http://127.0.0.1:8080/install)，在网页中选择 Ant Design Vue、Element Plus 或 Naive UI。无需预先执行 `pnpm install`：Go 会异步调用现有 Node/pnpm 初始化事务，原子保留所选应用，将另外两套移动到仓库根目录 `.runtime/install/ui-backup/<transaction>/`，写入 `.ui-profile.json`，并只对缩减后的 workspace 执行 `pnpm install --frozen-lockfile`。安装路由只接受真实 loopback 来源和 loopback Host，不信任代理头。
 
-UI 移动、依赖安装或 UI 重置中断后，再次运行对应的 init 命令会从最小未完成步骤继续，不会重新选择 UI。网页安装事务也会在服务重启后恢复到可重试状态，且不会把密码或 DSN 写入事务文件。
+UI 移动、依赖安装或 UI 重置中断后，重新打开页面即可继续固定选择；合法持久事务在 Go 重启后仍显示为 `ui_prepare`。安装完成前可在网页中确认恢复三套模板并重选。网页安装事务不会把密码或 DSN 写入事务文件。
 
 网页安装失败时，页面会保留当前输入并显示失败步骤、稳定原因标识、数据库代码（若有）、任务 ID；菜单或权限种子与旧数据冲突时还会显示安全的资源类型和资源 ID。服务端终端可按任务 ID 查找 `installation.job.failed`，结构化日志不会输出 SQL、DSN 或凭据。
 
-旧版 Windows 若在 `INSTALLER_BUILD_FAILED` 后留下严格一致的 profile、旧 receipt 和 `.runtime/init-backup/<transaction>/`，新版 init 会把备份迁入当前布局、隔离旧 receipt，并只重试所选 UI 的依赖。迁移中断可直接重跑，输出 `INIT_LEGACY_MIGRATION=resumed|completed`；也可直接运行 `pnpm run init -- --reset --confirm-reset` 恢复三套 UI，无需先安装依赖。任何冲突、符号链接、额外条目或 receipt/backup 不匹配都会以 `LEGACY_PREPARED_STATE_INVALID` 保持现场，不会运行 pnpm。
+旧版 Windows 若在 `INSTALLER_BUILD_FAILED` 后留下严格一致的 profile、旧 receipt 和 `.runtime/init-backup/<transaction>/`，网页准备任务会复用现有迁移器接管备份、隔离旧 receipt，并只重试所选 UI 的依赖。任何冲突、符号链接、额外条目或 receipt/backup 不匹配都会保持现场并显示稳定错误标识。
 
 状态和恢复命令：
 
@@ -34,7 +35,7 @@ pnpm run init -- --check                 # 严格只读，显示 INIT_REASON/INI
 pnpm run init -- --reset --confirm-reset  # 仅网页安装完成前
 ```
 
-安装完成前，公开的 `dev`、`build`、`preview` 会要求先运行 init；完成后它们从 `.ui-profile.json` 自动分发到唯一保留的应用：
+无参数执行 `pnpm run init` 不再询问 UI，只输出安装页地址；`--check`、`--reset` 保留为维护入口。安装完成前，公开的 `dev`、`build`、`preview` 会要求先完成网页安装；完成后它们从 `.ui-profile.json` 自动分发到唯一保留的应用：
 
 ```text
 pnpm run dev
@@ -42,7 +43,7 @@ pnpm run build
 pnpm run preview
 ```
 
-安装成功后停止旧服务端，并在两个终端分别运行。init 已只为所选 UI 安装依赖；这里再次执行 `pnpm install` 是幂等校验和本地链接补齐，不会恢复或安装未选择的 UI：
+安装成功后停止旧服务端，并在两个终端分别运行。网页准备任务已只为所选 UI 安装依赖；这里再次执行 `pnpm install` 是幂等校验和本地链接补齐，不会恢复或安装未选择的 UI：
 
 ```text
 # 仓库根目录，终端 1：服务端

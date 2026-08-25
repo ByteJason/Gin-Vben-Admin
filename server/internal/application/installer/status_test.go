@@ -74,10 +74,14 @@ func TestStatusServiceDerivesReadOnlyProfileStates(t *testing.T) {
 		want      State
 		installed bool
 		ui        installstate.UI
+		phase     InstallationPhase
+		uiAction  UIPreparationAction
 	}{
 		{name: "pristine", want: StatePristine},
 		{name: "ui prepared", profile: profileProviderStub{profile: InstallationProfile{SelectedUI: installstate.UIAntd}, exists: true}, want: StateUIPrepared, ui: installstate.UIAntd},
-		{name: "installing", profile: profileProviderStub{profile: InstallationProfile{SelectedUI: installstate.UIEle, Installing: true}, exists: true}, want: StateInstalling, ui: installstate.UIEle},
+		{name: "applying", profile: profileProviderStub{profile: InstallationProfile{SelectedUI: installstate.UIEle, Installing: true}, exists: true}, want: StateInstalling, ui: installstate.UIEle, phase: InstallationPhaseApply},
+		{name: "preparing ui", profile: profileProviderStub{profile: InstallationProfile{SelectedUI: installstate.UIEle, Installing: true, PreparingUI: true, UIAction: UIPreparationActionPrepare}, exists: true}, want: StateInstalling, ui: installstate.UIEle, phase: InstallationPhaseUIPrepare, uiAction: UIPreparationActionPrepare},
+		{name: "resetting ui", profile: profileProviderStub{profile: InstallationProfile{SelectedUI: installstate.UIEle, Installing: true, PreparingUI: true, UIAction: UIPreparationActionReset}, exists: true}, want: StateInstalling, ui: installstate.UIEle, phase: InstallationPhaseUIPrepare, uiAction: UIPreparationActionReset},
 		{name: "installed", marker: markerReaderStub{marker: validMarker(installstate.UINaive), installed: true}, profile: profileProviderStub{profile: InstallationProfile{SelectedUI: installstate.UINaive}, exists: true}, want: StateInstalled, installed: true, ui: installstate.UINaive},
 		{name: "damaged marker", marker: markerReaderStub{installed: true}, profile: profileProviderStub{profile: InstallationProfile{SelectedUI: installstate.UIAntd}, exists: true}, want: StateInconsistent, ui: installstate.UIAntd},
 		{name: "mismatched marker and profile", marker: markerReaderStub{marker: validMarker(installstate.UINaive), installed: true}, profile: profileProviderStub{profile: InstallationProfile{SelectedUI: installstate.UIAntd}, exists: true}, want: StateInconsistent, ui: installstate.UIAntd},
@@ -88,8 +92,8 @@ func TestStatusServiceDerivesReadOnlyProfileStates(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Status() error = %v", err)
 			}
-			if got.State != testCase.want || got.Installed != testCase.installed || got.SelectedUI != testCase.ui {
-				t.Fatalf("Status() = %#v, want state=%q installed=%v ui=%q", got, testCase.want, testCase.installed, testCase.ui)
+			if got.State != testCase.want || got.Installed != testCase.installed || got.SelectedUI != testCase.ui || got.Phase != testCase.phase || got.UIAction != testCase.uiAction {
+				t.Fatalf("Status() = %#v, want state=%q installed=%v ui=%q phase=%q action=%q", got, testCase.want, testCase.installed, testCase.ui, testCase.phase, testCase.uiAction)
 			}
 		})
 	}
@@ -150,6 +154,24 @@ func TestActivityProfileProviderDecoratesTheReadOnlyProfile(t *testing.T) {
 	}
 	if !exists || got.SelectedUI != installstate.UIEle || !got.Installing {
 		t.Fatalf("Profile() = (%#v, %t), want active ele profile", got, exists)
+	}
+}
+
+func TestActivityProfileProviderDoesNotClearDurableUIPreparationActivity(t *testing.T) {
+	base := profileProviderStub{profile: InstallationProfile{
+		SelectedUI:  installstate.UIEle,
+		Installing:  true,
+		PreparingUI: true,
+		UIAction:    UIPreparationActionReset,
+	}, exists: true}
+	provider := NewActivityProfileProvider(base, activityStub{active: false})
+
+	got, exists, err := provider.Profile(context.Background())
+	if err != nil {
+		t.Fatalf("Profile() error = %v", err)
+	}
+	if !exists || !got.Installing || !got.PreparingUI || got.UIAction != UIPreparationActionReset {
+		t.Fatalf("Profile() = (%#v, %t), want durable UI preparation activity preserved", got, exists)
 	}
 }
 
