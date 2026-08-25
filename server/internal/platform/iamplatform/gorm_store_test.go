@@ -3,12 +3,17 @@ package iamplatform
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/authdomain"
 	domain "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/iam"
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/persistence/gormdb"
+	gormmysql "gorm.io/driver/mysql"
+	gormpostgres "gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
 
 func TestGORMStoreNilDependencyReturnsStableErrors(t *testing.T) {
@@ -39,6 +44,90 @@ func TestGORMStoreUserPageRejectsInvalidQueryBeforeDatabaseAccess(t *testing.T) 
 	store := NewGORMStore(nil)
 	if _, err := store.ListUsersPage(tenant.WithContext(context.Background(), tenant.Context{TenantID: "default"}), domain.UserListQuery{PageSize: 101}); !errors.Is(err, domain.ErrInvalidUserQuery) {
 		t.Fatalf("ListUsersPage() error = %v, want ErrInvalidUserQuery", err)
+	}
+}
+
+func TestRoleListQueryKeepsGlobalAndCurrentOrganizationOnly(t *testing.T) {
+	database, err := gormdb.Open(gormdb.Options{
+		Driver: "postgres", Mode: gormdb.ModeSingle,
+		DSN: "host=127.0.0.1 port=1 user=fixture dbname=fixture sslmode=disable",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	scope := tenant.Context{TenantID: "tenant-a", Organization: "org-a"}
+	ctx := tenant.WithContext(context.Background(), scope)
+	query := scopedRoleListQuery(database.Read(ctx).Session(&gorm.Session{DryRun: true}).Table("roles"), scope)
+	statement := query.Find(&[]roleRow{}).Statement
+	sql := statement.SQL.String()
+	if !strings.Contains(sql, "tenant_id =") || !strings.Contains(sql, "org_id =") || !strings.Contains(sql, "org_id IS NULL") {
+		t.Fatalf("scoped role SQL=%s vars=%v", sql, statement.Vars)
+	}
+	if len(statement.Vars) != 2 || statement.Vars[0] != "tenant-a" || statement.Vars[1] != "org-a" {
+		t.Fatalf("scoped role vars=%v", statement.Vars)
+	}
+}
+
+func TestActiveRoleAuthorizationQueryFiltersStatusTenantAndOrganizationAcrossDialects(t *testing.T) {
+	for _, dialect := range []struct {
+		name string
+		open gorm.Dialector
+	}{
+		{name: "mysql", open: gormmysql.New(gormmysql.Config{DSN: "iam:iam@tcp(127.0.0.1:1)/iam", SkipInitializeWithVersion: true})},
+		{name: "postgres", open: gormpostgres.New(gormpostgres.Config{DSN: "host=127.0.0.1 port=1 user=iam password=iam dbname=iam sslmode=disable", PreferSimpleProtocol: true})},
+	} {
+		t.Run(dialect.name, func(t *testing.T) {
+			database, err := gorm.Open(dialect.open, &gorm.Config{DryRun: true, DisableAutomaticPing: true, SkipDefaultTransaction: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, scope := range []tenant.Context{
+				{TenantID: "tenant-a"},
+				{TenantID: "tenant-a", Organization: "org-a"},
+			} {
+				result := activeRoleIDsQuery(database, scope, 7).Order("ur.role_id ASC").Find(&[]activeRoleIDRow{})
+				if result.Error != nil {
+					t.Fatal(result.Error)
+				}
+				sql := strings.ToUpper(result.Statement.SQL.String())
+				for _, fragment := range []string{"JOIN ROLES AS R", "R.TENANT_ID = UR.TENANT_ID", "R.STATUS =", "UR.TENANT_ID =", "UR.USER_ID ="} {
+					if !strings.Contains(sql, fragment) {
+						t.Fatalf("scope=%+v SQL missing %q: %s", scope, fragment, sql)
+					}
+				}
+				if scope.Organization == "" {
+					if !strings.Contains(sql, "R.ORG_ID IS NULL AND UR.ORG_ID IS NULL") {
+						t.Fatalf("tenant-wide SQL leaked organization roles: %s", sql)
+					}
+				} else if !strings.Contains(sql, "R.ORG_ID IS NULL OR R.ORG_ID =") || !strings.Contains(sql, "UR.ORG_ID IS NULL OR UR.ORG_ID =") {
+					t.Fatalf("organization SQL missing global/current-org bounds: %s", sql)
+				}
+			}
+		})
+	}
+}
+
+func TestAuthorizationDataScopeQueryPinsPrimary(t *testing.T) {
+	database, err := gormdb.Open(gormdb.Options{
+		Driver: "postgres", Mode: gormdb.ModeSingle,
+		DSN: "host=127.0.0.1 port=1 user=fixture dbname=fixture sslmode=disable",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	scope := tenant.Context{TenantID: "tenant-a", Organization: "org-a"}
+	ctx := tenant.WithContext(context.Background(), scope)
+	query := NewGORMStore(database).authorizationDataScopesQuery(ctx, scope)
+	if query == nil {
+		t.Fatal("authorization data-scope query is nil")
+	}
+	if _, pinned := query.Statement.Settings.Load("gorm:db_resolver:write"); !pinned {
+		t.Fatal("authorization data-scope query is not pinned to the primary")
+	}
+	if _, staleRead := query.Statement.Settings.Load("gorm:db_resolver:read"); staleRead {
+		t.Fatal("authorization data-scope query retained the replica marker")
 	}
 }
 

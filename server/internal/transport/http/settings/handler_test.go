@@ -57,3 +57,25 @@ func TestSettingsHandlerRunsStructuredConnectionTest(t *testing.T) {
 		t.Fatalf("test status=%d body=%s", response.Code, response.Body.String())
 	}
 }
+
+func TestObservabilitySettingsAliasOnlyAcceptsKnownObservabilityKeys(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service := settingsapp.NewService(settingsapp.NewMemoryRepository(), nil, nil, nil)
+	handler := NewHandler(service, func(*gin.Context) settingsapp.Actor { return settingsapp.Actor{ID: "admin-1"} })
+	router := gin.New()
+	RegisterRoutes(router, handler)
+
+	valid := httptest.NewRequest(http.MethodGet, "/api/admin/v1/observability/settings/observability.metrics.enabled", nil)
+	validResponse := httptest.NewRecorder()
+	router.ServeHTTP(validResponse, valid)
+	if validResponse.Code != http.StatusOK {
+		t.Fatalf("valid observability setting status=%d body=%s", validResponse.Code, validResponse.Body.String())
+	}
+
+	invalid := httptest.NewRequest(http.MethodGet, "/api/admin/v1/observability/settings/security.jwt_secret", nil)
+	invalidResponse := httptest.NewRecorder()
+	router.ServeHTTP(invalidResponse, invalid)
+	if invalidResponse.Code != http.StatusNotFound {
+		t.Fatalf("non-observability setting status=%d body=%s", invalidResponse.Code, invalidResponse.Body.String())
+	}
+}

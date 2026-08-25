@@ -3,6 +3,9 @@ package iam
 import (
 	"context"
 	"errors"
+	"net/http"
+	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -35,6 +38,300 @@ func TestServiceAuthorizesRolePolicyAndScopes(t *testing.T) {
 	if err != nil || scope.Scope != domain.ScopeOrg || scope.IDs[0] != "org-a" {
 		t.Fatalf("scope=%+v err=%v", scope, err)
 	}
+}
+
+func TestServiceListAccessCodesLoadsPoliciesOnceAndAppliesWildcardDenyAndActiveFilters(t *testing.T) {
+	permissions := permissionRepositoryStub{permissions: []domain.Permission{
+		{ID: "z.read", Method: "GET", Path: "/z", Active: true},
+		{ID: "a.read", Method: "GET", Path: "/a", Active: true},
+		{ID: "a.read", Method: "GET", Path: "/a", Active: true},
+		{ID: "write.denied", Method: "POST", Path: "/write", Active: true},
+		{ID: "disabled.read", Method: "GET", Path: "/disabled", Active: false},
+		{ID: " ", Method: "GET", Path: "/blank", Active: true},
+	}}
+	policies := &countingPolicyStore{policies: []domain.Policy{
+		{RoleID: "role-super-admin", Domain: "tenant-a", Method: "*", Path: "*", Effect: domain.EffectAllow},
+		{RoleID: "role-super-admin", Domain: "tenant-a", Method: "POST", Path: "/write", Effect: domain.EffectDeny},
+	}}
+	service := NewServiceWithRepositories(nil, nil, nil, permissions, policies, nil)
+	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a"})
+
+	codes, err := service.ListAccessCodes(ctx, domain.Subject{UserID: "u1", RoleIDs: []string{"role-super-admin"}})
+	if err != nil {
+		t.Fatalf("ListAccessCodes() error = %v", err)
+	}
+	if !sort.StringsAreSorted(codes) || !containsString(codes, "a.read") || !containsString(codes, "z.read") || containsString(codes, "write.denied") || containsString(codes, "disabled.read") {
+		t.Fatalf("codes = %v, want sorted custom allows without denied/disabled entries", codes)
+	}
+	if policies.listCalls != 1 {
+		t.Fatalf("ListPolicies() calls = %d, want exactly one bounded policy read", policies.listCalls)
+	}
+}
+
+func TestServiceListAccessCodesEmptyAndTenantIsolated(t *testing.T) {
+	t.Run("empty persistent permissions use the production fallback", func(t *testing.T) {
+		policies := &countingPolicyStore{}
+		service := NewServiceWithRepositories(nil, nil, nil, permissionRepositoryStub{}, policies, nil)
+		codes, err := service.ListAccessCodes(context.Background(), domain.Subject{UserID: "u1"})
+		if err != nil || codes == nil || len(codes) != 0 {
+			t.Fatalf("codes=%v err=%v, want non-nil empty result", codes, err)
+		}
+		if policies.listCalls != 1 {
+			t.Fatalf("ListPolicies() calls = %d, want one bounded fallback evaluation", policies.listCalls)
+		}
+	})
+
+	t.Run("tenant domain policy cannot cross boundaries", func(t *testing.T) {
+		permissions := permissionRepositoryStub{permissions: []domain.Permission{{ID: "orders.read", Method: "GET", Path: "/orders", Active: true}}}
+		policies := &countingPolicyStore{policies: []domain.Policy{{RoleID: "reader", Domain: "tenant-a", Method: "GET", Path: "/orders", Effect: domain.EffectAllow}}}
+		service := NewServiceWithRepositories(nil, nil, nil, permissions, policies, nil)
+		ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-b"})
+		codes, err := service.ListAccessCodes(ctx, domain.Subject{UserID: "u1", RoleIDs: []string{"reader"}})
+		if err != nil || codes == nil || len(codes) != 0 {
+			t.Fatalf("cross-tenant codes=%v err=%v, want non-nil empty result", codes, err)
+		}
+	})
+}
+
+func TestServiceResolveSubjectFiltersDisabledMissingAndOutOfScopeRoles(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a", Organization: "org-a"})
+	for _, role := range []domain.Role{
+		{ID: "active-global", TenantID: "tenant-a", Active: true},
+		{ID: "active-org", TenantID: "tenant-a", OrgID: "org-a", Active: true},
+		{ID: "disabled", TenantID: "tenant-a", OrgID: "org-a", Active: false},
+		{ID: "other-org", TenantID: "tenant-a", OrgID: "org-b", Active: true},
+		{ID: "other-tenant", TenantID: "tenant-b", Active: true},
+	} {
+		if err := store.SaveRole(ctx, role); err != nil {
+			t.Fatal(err)
+		}
+	}
+	service := NewService(store)
+	user := domain.User{
+		ID: "u1", TenantID: "tenant-a", OrgID: "org-a", Active: true,
+		RoleIDs: []string{"other-tenant", "missing", "disabled", "active-org", "other-org", "active-global", "active-global"},
+	}
+	subject, err := service.ResolveSubject(ctx, user)
+	if err != nil {
+		t.Fatalf("ResolveSubject() error=%v", err)
+	}
+	if want := []string{"active-global", "active-org"}; !reflect.DeepEqual(subject.RoleIDs, want) {
+		t.Fatalf("effective roles=%v want=%v", subject.RoleIDs, want)
+	}
+	if subject.UserID != "u1" || subject.Domain != "tenant-a" {
+		t.Fatalf("subject=%+v", subject)
+	}
+}
+
+func TestServiceResolveSubjectPreservesDirectUserPolicyAfterRoleDisable(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a"})
+	if err := store.SaveRole(ctx, domain.Role{ID: "reader", TenantID: "tenant-a", Active: false}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SavePolicy(ctx, domain.Policy{RoleID: "reader", Domain: "tenant-a", Method: "GET", Path: "/role-only", Effect: domain.EffectAllow}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SavePolicy(ctx, domain.Policy{Subject: "u1", Domain: "tenant-a", Method: "GET", Path: "/direct", Effect: domain.EffectAllow}); err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(store)
+	subject, err := service.ResolveSubject(ctx, domain.User{ID: "u1", TenantID: "tenant-a", Active: true, RoleIDs: []string{"reader"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(subject.RoleIDs) != 0 {
+		t.Fatalf("disabled role leaked into subject: %v", subject.RoleIDs)
+	}
+	if allowed, err := service.Authorize(ctx, subject, domain.Request{Method: "GET", Path: "/direct"}); err != nil || !allowed {
+		t.Fatalf("direct user grant allowed=%v err=%v", allowed, err)
+	}
+	if allowed, err := service.Authorize(ctx, subject, domain.Request{Method: "GET", Path: "/role-only"}); err == nil || allowed {
+		t.Fatalf("disabled role grant allowed=%v err=%v", allowed, err)
+	}
+}
+
+func TestServiceListAccessCodesDoesNotLeakOrganizationScopedCatalogOrPolicy(t *testing.T) {
+	store := NewMemoryStore()
+	tenantWide := tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a"})
+	orgA := tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a", Organization: "org-a"})
+	orgB := tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a", Organization: "org-b"})
+	for _, permission := range []domain.Permission{
+		{ID: "org-a-code", Name: "Org A", Method: "GET", Path: "/org-a", Active: true, TenantID: "tenant-a", OrgID: "org-a"},
+		{ID: "org-a-policy-code", Name: "Org A policy", Method: "GET", Path: "/org-a-policy", Active: true, TenantID: "tenant-a"},
+		{ID: "shared-code", Name: "Shared", Method: "GET", Path: "/shared", Active: true, TenantID: "tenant-a"},
+	} {
+		writeContext := tenantWide
+		if permission.OrgID != "" {
+			writeContext = orgA
+		}
+		if err := store.SavePermission(writeContext, permission); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, policy := range []domain.Policy{
+		{RoleID: "reader", Domain: "tenant-a", OrgID: "org-a", Method: "GET", Path: "/org-a-policy", Effect: domain.EffectAllow},
+		{RoleID: "reader", Domain: "tenant-a", Method: "*", Path: "*", Effect: domain.EffectAllow},
+	} {
+		writeContext := tenantWide
+		if policy.OrgID != "" {
+			writeContext = orgA
+		}
+		if err := store.SavePolicy(writeContext, policy); err != nil {
+			t.Fatal(err)
+		}
+	}
+	service := NewService(store)
+	codes, err := service.ListAccessCodes(orgB, domain.Subject{UserID: "u1", RoleIDs: []string{"reader"}, Domain: "tenant-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"org-a-policy-code", "shared-code"}
+	for _, permission := range ProductionPermissionCatalog() {
+		if permission.Active {
+			want = append(want, permission.ID)
+		}
+	}
+	sort.Strings(want)
+	if !reflect.DeepEqual(codes, want) {
+		// The global wildcard legitimately grants global catalog entries, but
+		// the organization-private catalog entry must remain invisible.
+		t.Fatalf("org-b codes=%v want=%v", codes, want)
+	}
+
+	// Remove the global wildcard so the org-A-only policy is the sole grant.
+	store.policies = store.policies[:1]
+	codes, err = service.ListAccessCodes(orgB, domain.Subject{UserID: "u1", RoleIDs: []string{"reader"}, Domain: "tenant-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(codes) != 0 {
+		t.Fatalf("org-A policy leaked to org-B: %v", codes)
+	}
+}
+
+func TestLegacyEmptyCatalogFallsBackToProductionPermissionsAndMenus(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "default"})
+	if err := store.SavePolicy(ctx, domain.Policy{RoleID: "role-super-admin", Domain: "default", Method: "*", Path: "*", Effect: domain.EffectAllow}); err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(store)
+	subject := domain.Subject{UserID: "1", RoleIDs: []string{"role-super-admin"}, Domain: "default"}
+	codes, err := service.ListAccessCodes(ctx, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCodes := make([]string, 0, len(ProductionPermissionCatalog()))
+	for _, permission := range ProductionPermissionCatalog() {
+		if permission.Active {
+			wantCodes = append(wantCodes, permission.ID)
+		}
+	}
+	sort.Strings(wantCodes)
+	if !reflect.DeepEqual(codes, wantCodes) {
+		t.Fatalf("legacy access codes=%v want=%v", codes, wantCodes)
+	}
+	routes, err := service.ListMenuRoutesForSubject(ctx, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != 4 {
+		t.Fatalf("legacy production route roots=%d routes=%+v", len(routes), routes)
+	}
+}
+
+func TestLegacyPartialPermissionCatalogStillUnlocksProductionMenuFallback(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "default"})
+	if err := store.SavePermission(ctx, domain.Permission{
+		ID: "legacy:reports:read", Name: "Legacy report", Method: http.MethodGet,
+		Path: "/api/admin/v1/legacy/reports", Active: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SavePolicy(ctx, domain.Policy{RoleID: "role-super-admin", Domain: "default", Method: "*", Path: "*", Effect: domain.EffectAllow}); err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(store)
+	routes, err := service.ListMenuRoutesForSubject(ctx, domain.Subject{
+		UserID: "1", RoleIDs: []string{"role-super-admin"}, Domain: "default",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	leafCount := 0
+	for _, root := range routes {
+		leafCount += len(root.Children)
+	}
+	if len(routes) != 4 || leafCount != 14 {
+		t.Fatalf("legacy partial catalog routes=%d leaves=%d routes=%+v", len(routes), leafCount, routes)
+	}
+}
+
+func TestPersistentDisabledPermissionOverridesProductionBackfillByID(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "default"})
+	if err := store.SavePermission(ctx, domain.Permission{
+		ID: "dashboard:overview:read", Name: "Disabled dashboard", Method: http.MethodGet,
+		Path: "/api/admin/v1/dashboard/summary", Active: false,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SavePolicy(ctx, domain.Policy{RoleID: "role-super-admin", Domain: "default", Method: "*", Path: "*", Effect: domain.EffectAllow}); err != nil {
+		t.Fatal(err)
+	}
+	codes, err := NewService(store).ListAccessCodes(ctx, domain.Subject{UserID: "1", RoleIDs: []string{"role-super-admin"}, Domain: "default"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if containsString(codes, "dashboard:overview:read") {
+		t.Fatalf("explicitly disabled production permission was backfilled: %v", codes)
+	}
+}
+
+func TestListAccessCodesDoesNotTreatParameterizedPolicyAsBroaderWildcardPermission(t *testing.T) {
+	permissions := permissionRepositoryStub{permissions: ProductionPermissionCatalog()}
+	policies := &countingPolicyStore{policies: []domain.Policy{{
+		RoleID: "observer", Domain: "tenant-a", Method: http.MethodGet,
+		Path: "/api/admin/v1/observability/settings/*", Effect: domain.EffectAllow,
+	}}}
+	service := NewServiceWithRepositories(nil, nil, nil, permissions, policies, nil)
+	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a"})
+	codes, err := service.ListAccessCodes(ctx, domain.Subject{UserID: "u1", RoleIDs: []string{"observer"}, Domain: "tenant-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"system:observability:read"}; !reflect.DeepEqual(codes, want) {
+		t.Fatalf("parameterized policy codes=%v want=%v", codes, want)
+	}
+}
+
+type permissionRepositoryStub struct {
+	permissions []domain.Permission
+	err         error
+}
+
+func (s permissionRepositoryStub) ListPermissions(context.Context) ([]domain.Permission, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return append([]domain.Permission(nil), s.permissions...), nil
+}
+
+type countingPolicyStore struct {
+	policies  []domain.Policy
+	err       error
+	listCalls int
+}
+
+func (s *countingPolicyStore) ListPolicies(context.Context) ([]domain.Policy, error) {
+	s.listCalls++
+	if s.err != nil {
+		return nil, s.err
+	}
+	return append([]domain.Policy(nil), s.policies...), nil
 }
 
 func TestMemoryStoreNotFoundAndCopiesValues(t *testing.T) {
@@ -386,6 +683,76 @@ func TestServiceReplaceRolePermissionsAtomicallyReplacesRolePolicies(t *testing.
 	}
 	if _, err := service.ReplaceRolePermissions(tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-b"}), "role-editor", RolePermissionsInput{}); !errors.Is(err, tenant.ErrCrossTenant) {
 		t.Fatalf("cross-tenant permission error = %v", err)
+	}
+}
+
+func TestServiceListRolesKeepsGlobalAndCurrentOrganizationOnly(t *testing.T) {
+	store := NewMemoryStore()
+	for _, role := range []domain.Role{
+		{ID: "role-global", Name: "Global", TenantID: "tenant-a", Active: true},
+		{ID: "role-a", Name: "Org A", TenantID: "tenant-a", OrgID: "org-a", Active: true},
+		{ID: "role-b", Name: "Org B", TenantID: "tenant-a", OrgID: "org-b", Active: true},
+		{ID: "role-other-tenant", Name: "Other tenant", TenantID: "tenant-b", OrgID: "org-a", Active: true},
+	} {
+		if err := store.SaveRole(context.Background(), role); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a", Organization: "org-a"})
+	roles, err := NewService(store).ListRoles(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(roles) != 2 || roles[0].ID != "role-a" || roles[1].ID != "role-global" {
+		t.Fatalf("roles=%#v", roles)
+	}
+}
+
+func TestPlatformAdminMemoryAdapterStaysWithinSelectedTenant(t *testing.T) {
+	store := NewMemoryStore()
+	for _, user := range []domain.User{
+		{ID: "user-a", Username: "alice", TenantID: "tenant-a", OrgID: "org-a", Active: true},
+		{ID: "user-b", Username: "bob", TenantID: "tenant-b", OrgID: "org-b", Active: true},
+	} {
+		if err := store.SaveUser(context.Background(), user); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, role := range []domain.Role{
+		{ID: "role-a", Name: "Tenant A", TenantID: "tenant-a", OrgID: "org-a", Active: true},
+		{ID: "role-b", Name: "Tenant B", TenantID: "tenant-b", OrgID: "org-b", Active: true},
+	} {
+		if err := store.SaveRole(context.Background(), role); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, menu := range []domain.Menu{
+		{ID: "menu-a", Name: "Tenant A", Path: "/a", TenantID: "tenant-a", OrgID: "org-a", Active: true, Visible: true},
+		{ID: "menu-b", Name: "Tenant B", Path: "/b", TenantID: "tenant-b", OrgID: "org-b", Active: true, Visible: true},
+	} {
+		if err := store.SaveMenu(context.Background(), menu); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ctx := tenant.WithContext(context.Background(), tenant.Context{
+		TenantID: "tenant-a", Organization: "org-a", PlatformAdmin: true,
+	})
+	service := NewService(store)
+	page, err := service.ListUsersPage(ctx, domain.UserListQuery{})
+	if err != nil || page.Total != 1 || len(page.Items) != 1 || page.Items[0].ID != "user-a" {
+		t.Fatalf("platform user page=%+v err=%v, want selected tenant only", page, err)
+	}
+	roles, err := service.ListRoles(ctx)
+	if err != nil || len(roles) != 1 || roles[0].ID != "role-a" {
+		t.Fatalf("platform roles=%+v err=%v, want selected tenant only", roles, err)
+	}
+	menus, err := service.ListMenus(ctx)
+	if err != nil || len(menus) != 1 || menus[0].ID != "menu-a" {
+		t.Fatalf("platform menus=%+v err=%v, want selected tenant only", menus, err)
+	}
+	if _, err := service.GetAuthorizationUser(ctx, "user-b"); !errors.Is(err, tenant.ErrCrossTenant) {
+		t.Fatalf("cross-tenant authorization user error=%v, want cross tenant", err)
 	}
 }
 

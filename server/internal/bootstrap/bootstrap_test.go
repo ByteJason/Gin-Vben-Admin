@@ -15,10 +15,12 @@ import (
 	"time"
 
 	appauth "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/auth"
+	iamapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/iam"
 	monitorapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/monitor"
 	settingsapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/settings"
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/config"
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/authdomain"
+	domain "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/iam"
 	domainobs "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/observability"
 	observabilityplatform "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/observability"
 )
@@ -478,6 +480,40 @@ func TestHTTPCompositionAllowsLocalSingleNodeMonitorWithoutAuth(t *testing.T) {
 	server.Handler.ServeHTTP(res, req)
 	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"scope":"process"`) {
 		t.Fatalf("monitor status = %d, body=%s", res.Code, res.Body.String())
+	}
+}
+
+func TestHTTPCompositionWiresIAMProtectedMonitorAndDashboardSummary(t *testing.T) {
+	cfg := config.Default()
+	cfg.Auth.Enabled = true
+	store := iamapp.NewMemoryStore()
+	if err := store.SaveUser(context.Background(), domain.User{ID: "1", Username: "admin", TenantID: "default", Active: true, RoleIDs: []string{"role-ops"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveRole(context.Background(), domain.Role{ID: "role-ops", Name: "Operations", TenantID: "default", Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	for _, policy := range []domain.Policy{
+		{RoleID: "role-ops", PermissionID: "ops:monitor:read", Domain: "default", Method: http.MethodGet, Path: "/api/admin/v1/ops/monitor", Effect: domain.EffectAllow},
+		{RoleID: "role-ops", PermissionID: "dashboard:overview:read", Domain: "default", Method: http.MethodGet, Path: "/api/admin/v1/dashboard/summary", Effect: domain.EffectAllow},
+	} {
+		if err := store.SavePolicy(context.Background(), policy); err != nil {
+			t.Fatal(err)
+		}
+	}
+	server := newHTTPServerWithPlanAndCaptchaAndFilesAndAux(
+		cfg, nil, &bootstrapAuthSessionFake{}, nil, iamapp.NewService(store), nil,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil,
+		nil, nil, monitorapp.NewService(monitorapp.Config{Version: "fixture"}), nil,
+	)
+	for _, path := range []string{"/api/admin/v1/ops/monitor", "/api/admin/v1/dashboard/summary"} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.Header.Set("Authorization", "Bearer access")
+		response := httptest.NewRecorder()
+		server.Handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("GET %s status=%d body=%s", path, response.Code, response.Body.String())
+		}
 	}
 }
 

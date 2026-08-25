@@ -3,6 +3,8 @@ import type { IAMPermission } from '#/api/core/iam';
 
 import { nextTick, onMounted, ref } from 'vue';
 
+import { ManagementPage } from '@vben/common-ui';
+
 import { listIAMPermissionsApi } from '#/api/core/iam';
 import { $t } from '#/locales';
 
@@ -34,7 +36,7 @@ onMounted(loadPermissions);
 </script>
 
 <template>
-  <main
+  <ManagementPage
     class="iam-permissions-page"
     :aria-busy="loading"
     aria-labelledby="iam-permissions-title"
@@ -125,14 +127,11 @@ onMounted(loadPermissions);
         </table>
       </div>
     </section>
-  </main>
+  </ManagementPage>
 </template>
 
 <style scoped>
 .iam-permissions-page {
-  max-width: 1320px;
-  padding: 24px;
-  margin: 0 auto;
   color: hsl(var(--foreground));
 }
 
@@ -183,19 +182,19 @@ h2 {
   align-items: center;
   min-height: 28px;
   padding: 4px 10px;
-  border-radius: 999px;
   font-size: 0.78rem;
   font-weight: 650;
+  border-radius: 999px;
 }
 
 .scope-chip {
   color: hsl(var(--primary));
-  background: hsl(var(--primary) / 0.1);
+  background: hsl(var(--primary) / 10%);
 }
 
 .status-pill[data-status='active'] {
-  color: hsl(142 70% 30%);
-  background: hsl(142 70% 45% / 0.14);
+  color: hsl(142deg 70% 30%);
+  background: hsl(142deg 70% 45% / 14%);
 }
 
 .status-pill[data-status='disabled'] {
@@ -206,8 +205,8 @@ h2 {
 .feedback {
   padding: 10px 12px;
   margin: 12px 0;
-  color: hsl(0 65% 36%);
-  background: hsl(0 75% 55% / 0.1);
+  color: hsl(0deg 65% 36%);
+  background: hsl(0deg 75% 55% / 10%);
   border-radius: 8px;
 }
 
@@ -218,9 +217,9 @@ h2 {
   height: 1px;
   padding: 0;
   overflow: hidden;
-  clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+  clip-path: inset(50%);
 }
 
 .table-card {
@@ -237,8 +236,8 @@ h2 {
 }
 
 .result-count {
-  color: hsl(var(--muted-foreground));
   font-size: 0.85rem;
+  color: hsl(var(--muted-foreground));
 }
 
 .table-wrap {
@@ -295,10 +294,6 @@ code {
 }
 
 @media (max-width: 720px) {
-  .iam-permissions-page {
-    padding: 16px;
-  }
-
   .page-heading {
     display: grid;
   }

@@ -5,7 +5,29 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 )
+
+func TestRedisRuntimeStatsPreservesPoolCapacityActivityAndZeroKeyspace(t *testing.T) {
+	max := 13
+	got := redisRuntimeStats(&redis.PoolStats{
+		Hits: 1, Misses: 2, Timeouts: 3, WaitCount: 4, WaitDurationNs: int64(5 * time.Millisecond),
+		TotalConns: 7, IdleConns: 3, StaleConns: 6, PendingRequests: 8,
+	}, &max, ModeSingle, 0, true)
+	if !got.ModeAvailable || got.Mode != ModeSingle {
+		t.Fatalf("redis mode = %#v", got)
+	}
+	if !got.PoolAvailable || got.Pool.Max == nil || *got.Pool.Max != 13 || got.Pool.Total != 7 || got.Pool.Active != 4 || got.Pool.Idle != 3 {
+		t.Fatalf("pool capacity/activity = %#v", got)
+	}
+	if got.Pool.WaitDurationMS != 5 || got.Pool.WaitCount != 4 || got.Pool.Stale != 6 || got.Pool.Pending != 8 {
+		t.Fatalf("pool counters = %#v", got)
+	}
+	if !got.KeyspaceAvailable || got.Keyspace != 0 {
+		t.Fatalf("zero keyspace = %#v", got)
+	}
+}
 
 func TestNewBuildsSingleClientWithoutProbingNetwork(t *testing.T) {
 	client, err := New(Config{Addr: "127.0.0.1:6399"})

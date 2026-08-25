@@ -5,5 +5,6 @@ export * from './use-hover-toggle';
 export * from './use-pagination';
 export * from './use-refresh';
 export * from './use-tabs';
+export * from './use-visibility-polling';
 export * from './use-watermark';
 export * from '@vben-core/composables';

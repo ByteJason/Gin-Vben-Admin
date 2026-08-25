@@ -1,5 +1,5 @@
 // Generated from contracts/openapi/admin-v1.yaml; DO NOT EDIT.
-// CONTRACT_SHA256=9bf7fa88e5e37c141ae2a12173711473667fa3de0f1204449f2f170d56950b02
+// CONTRACT_SHA256=4f9a53020aeee1bab04d4865d2cdc1fc8745dd62537b2edca65a545202a75395
 
 export const ADMIN_API_PREFIX = '/admin/v1' as const;
 
@@ -13,6 +13,7 @@ export const ADMIN_ENDPOINTS = {
   requestAdminPasswordReset: '/admin/v1/auth/password/reset/request',
   resetAdminPassword: '/admin/v1/auth/password/reset',
   listAdminAuthSessions: '/admin/v1/auth/sessions',
+  getAdminAuthAccessCodes: '/admin/v1/auth/codes',
   revokeAdminAuthSession: '/admin/v1/auth/sessions/{id}',
   getCurrentAdminUser: '/admin/v1/iam/me',
   listIAMUsers: '/admin/v1/iam/users',
@@ -47,6 +48,8 @@ export const ADMIN_ENDPOINTS = {
   listSettingHistory: '/admin/v1/settings/{key}/history',
   rollbackSetting: '/admin/v1/settings/{key}/rollback',
   testSettingConnection: '/admin/v1/settings/{key}/test',
+  getObservabilitySetting: '/admin/v1/observability/settings/{key}',
+  updateObservabilitySetting: '/admin/v1/observability/settings/{key}',
   queryAuditEvents: '/admin/v1/audit/events',
   exportAuditEvents: '/admin/v1/audit/events/export',
   auditRetentionDryRun: '/admin/v1/audit/retention/dry-run',
@@ -94,12 +97,14 @@ export const ADMIN_ENDPOINTS = {
   listEmailMessages: '/admin/v1/mail/messages',
   sendEmailMessage: '/admin/v1/mail/messages',
   getEmailMessage: '/admin/v1/mail/messages/{id}',
+  getDashboardSummary: '/admin/v1/dashboard/summary',
   getMonitorOverview: '/admin/v1/ops/monitor',
 } as const;
 
 export const AUTH_API_PREFIX = '/admin/v1/auth' as const;
 export const AUTH_ENDPOINTS = {
   captcha: ADMIN_ENDPOINTS.issueAdminAuthCaptcha,
+  codes: ADMIN_ENDPOINTS.getAdminAuthAccessCodes,
   login: ADMIN_ENDPOINTS.adminAuthLogin,
   logout: ADMIN_ENDPOINTS.adminAuthLogout,
   passwordReset: ADMIN_ENDPOINTS.resetAdminPassword,
@@ -161,29 +166,137 @@ export interface EmailMessage {
   updatedAt: string;
 }
 
-export interface MonitorMetric {
-  status: 'ok' | 'degraded' | 'unavailable';
+export type MonitorStatus = 'ok' | 'degraded' | 'unavailable';
+export type MonitorMetricScope = 'process' | 'container' | 'host';
+export interface MonitorCapability {
+  scope: MonitorMetricScope;
+  available: boolean;
+  source?: string;
+}
+export type MonitorCapabilities = Record<string, MonitorCapability>;
+export interface MonitorHostMetric {
+  status: MonitorStatus;
   cores?: number;
   load1?: number;
+  load5?: number;
+  load15?: number;
+  rssBytes?: number;
   usedBytes?: number;
+  freeBytes?: number;
   totalBytes?: number;
   utilization?: number;
-  latencyMs?: number;
-  poolOpen?: number;
-  poolIdle?: number;
-  poolMax?: number;
+  capabilities: MonitorCapabilities;
+  message?: string;
+}
+export interface MonitorRuntimeMetric {
+  status: MonitorStatus;
+  goVersion: string;
+  os: string;
+  arch: string;
+  applicationVersion?: string;
+  commit?: string;
+  heapAllocBytes?: number;
+  heapSysBytes?: number;
+  heapInUseBytes?: number;
+  heapObjects?: number;
+  nextGcBytes?: number;
+  gcCount?: number;
+  lastGcPauseNs?: number;
+  capabilities: MonitorCapabilities;
+}
+export interface MonitorDatabasePool {
+  open: number;
+  inUse: number;
+  idle: number;
+  max: number;
+  waitCount: number;
+  waitDurationMs: number;
+  maxIdleClosed: number;
+  maxIdleTimeClosed: number;
+  maxLifetimeClosed: number;
+}
+export interface MonitorRedisPool {
+  max?: number;
+  total: number;
+  active: number;
+  idle: number;
+  hits: number;
+  misses: number;
+  timeouts: number;
+  waitCount: number;
+  waitDurationMs: number;
+  stale: number;
+  pending: number;
+}
+export interface MonitorDatabaseMetric {
+  status: MonitorStatus;
+  latencyMs: number;
+  driver?: 'mysql' | 'postgres';
+  mode?: 'single' | 'read_write' | 'cluster_endpoint';
+  pool?: MonitorDatabasePool;
+  capabilities: MonitorCapabilities;
+  message?: string;
+}
+export interface MonitorRedisMetric {
+  status: MonitorStatus;
+  latencyMs: number;
+  mode?: 'single' | 'sentinel' | 'cluster';
+  pool?: MonitorRedisPool;
   keyspace?: number;
+  capabilities: MonitorCapabilities;
   message?: string;
 }
 export interface MonitorOverview {
-  scope: 'process' | 'container';
+  scope: MonitorMetricScope;
   uptimeSeconds: number;
   version?: string;
-  cpu: MonitorMetric;
-  memory: MonitorMetric;
-  disk: MonitorMetric;
-  database: MonitorMetric;
-  redis: MonitorMetric;
+  runtime: MonitorRuntimeMetric;
+  cpu: MonitorHostMetric;
+  memory: MonitorHostMetric;
+  disk: MonitorHostMetric;
+  database: MonitorDatabaseMetric;
+  redis: MonitorRedisMetric;
+  collectedAt: string;
+}
+
+export type DashboardStatus = MonitorStatus;
+export interface DashboardCountMetric {
+  status: DashboardStatus;
+  value?: number;
+  message?: string;
+}
+export interface DashboardCounts {
+  users: DashboardCountMetric;
+  roles: DashboardCountMetric;
+  tasks: DashboardCountMetric;
+  importJobs: DashboardCountMetric;
+  exportJobs: DashboardCountMetric;
+  files: DashboardCountMetric;
+  auditEvents: DashboardCountMetric;
+  mailAccounts: DashboardCountMetric;
+  mailMessages: DashboardCountMetric;
+}
+export interface DashboardInstanceMetric {
+  status: DashboardStatus;
+  state?: MonitorStatus;
+  scope?: MonitorMetricScope;
+  version?: string;
+  uptimeSeconds?: number;
+}
+export interface DashboardHealthMetric {
+  status: DashboardStatus;
+  state?: MonitorStatus;
+}
+export interface DashboardHealth {
+  runtime: DashboardHealthMetric;
+  database: DashboardHealthMetric;
+  redis: DashboardHealthMetric;
+}
+export interface DashboardSummary {
+  status: DashboardStatus;
+  counts: DashboardCounts;
+  instance: DashboardInstanceMetric;
+  health: DashboardHealth;
   collectedAt: string;
 }
 

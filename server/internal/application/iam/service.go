@@ -607,8 +607,15 @@ func (s *MemoryStore) ListRoles(ctx context.Context) ([]domain.Role, error) {
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	requestScope, scoped := tenant.FromContext(ctx)
 	out := make([]domain.Role, 0, len(s.roles))
 	for _, role := range s.roles {
+		if scoped && role.TenantID != "" && role.TenantID != requestScope.TenantID {
+			continue
+		}
+		if scoped && !requestScope.PlatformAdmin && requestScope.Organization != "" && role.OrgID != "" && role.OrgID != requestScope.Organization {
+			continue
+		}
 		out = append(out, cloneRole(role))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
@@ -656,7 +663,7 @@ func (s *MemoryStore) ListMenus(ctx context.Context) ([]domain.Menu, error) {
 	requestScope, scoped := tenant.FromContext(ctx)
 	out := make([]domain.Menu, 0, len(s.menus))
 	for _, menu := range s.menus {
-		if scoped && menu.TenantID != "" && menu.TenantID != requestScope.TenantID && !requestScope.PlatformAdmin {
+		if scoped && menu.TenantID != "" && menu.TenantID != requestScope.TenantID {
 			continue
 		}
 		if scoped && !requestScope.PlatformAdmin && requestScope.Organization != "" && menu.OrgID != "" && menu.OrgID != requestScope.Organization {
@@ -688,7 +695,7 @@ func (s *MemoryStore) FindMenu(ctx context.Context, id string) (domain.Menu, err
 		if menu.ID != id {
 			continue
 		}
-		if scoped && menu.TenantID != "" && menu.TenantID != requestScope.TenantID && !requestScope.PlatformAdmin {
+		if scoped && menu.TenantID != "" && menu.TenantID != requestScope.TenantID {
 			continue
 		}
 		if scoped && !requestScope.PlatformAdmin && requestScope.Organization != "" && menu.OrgID != "" && menu.OrgID != requestScope.Organization {
@@ -744,7 +751,7 @@ func (s *MemoryStore) ReorderMenus(ctx context.Context, items []domain.MenuOrder
 		}
 		seen[item.ID] = struct{}{}
 		for key, menu := range s.menus {
-			if menu.ID != item.ID || (scoped && menu.TenantID != requestScope.TenantID && !requestScope.PlatformAdmin) {
+			if menu.ID != item.ID || (scoped && menu.TenantID != "" && menu.TenantID != requestScope.TenantID) {
 				continue
 			}
 			if !requestScope.PlatformAdmin && scoped && requestScope.Organization != "" && menu.OrgID != "" && menu.OrgID != requestScope.Organization {
@@ -762,7 +769,24 @@ func (s *MemoryStore) ReorderMenus(ctx context.Context, items []domain.MenuOrder
 }
 
 func (s *MemoryStore) SavePermission(ctx context.Context, permission domain.Permission) error {
-	return s.save(ctx, permission.ID, func() { s.permissions[permission.ID] = permission })
+	if err := check(ctx); err != nil {
+		return err
+	}
+	key := permission.ID
+	if scope, scoped := tenant.FromContext(ctx); scoped {
+		if permission.TenantID != "" && permission.TenantID != scope.TenantID && !scope.PlatformAdmin {
+			return tenant.ErrCrossTenant
+		}
+		if permission.OrgID != "" && scope.Organization != "" && permission.OrgID != scope.Organization && !scope.PlatformAdmin {
+			return tenant.ErrOrganizationDenied
+		}
+		permission.TenantID = scope.TenantID
+		if permission.OrgID == "" {
+			permission.OrgID = scope.Organization
+		}
+		key = scope.TenantID + "\x00" + permission.ID
+	}
+	return s.save(ctx, permission.ID, func() { s.permissions[key] = permission })
 }
 
 func (s *MemoryStore) ListPermissions(ctx context.Context) ([]domain.Permission, error) {
@@ -771,8 +795,18 @@ func (s *MemoryStore) ListPermissions(ctx context.Context) ([]domain.Permission,
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	requestScope, scoped := tenant.FromContext(ctx)
 	out := make([]domain.Permission, 0, len(s.permissions))
 	for _, permission := range s.permissions {
+		if scoped && permission.TenantID != "" && permission.TenantID != requestScope.TenantID {
+			continue
+		}
+		if scoped && requestScope.Organization == "" && permission.OrgID != "" {
+			continue
+		}
+		if scoped && requestScope.Organization != "" && permission.OrgID != "" && permission.OrgID != requestScope.Organization {
+			continue
+		}
 		out = append(out, permission)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
@@ -788,6 +822,18 @@ func (s *MemoryStore) SavePolicy(ctx context.Context, policy domain.Policy) erro
 	}
 	if policy.Effect == "" {
 		policy.Effect = domain.EffectDeny
+	}
+	if scope, scoped := tenant.FromContext(ctx); scoped {
+		if policy.Domain != "" && policy.Domain != scope.TenantID && !scope.PlatformAdmin {
+			return tenant.ErrCrossTenant
+		}
+		if policy.OrgID != "" && scope.Organization != "" && policy.OrgID != scope.Organization && !scope.PlatformAdmin {
+			return tenant.ErrOrganizationDenied
+		}
+		policy.Domain = scope.TenantID
+		if policy.OrgID == "" {
+			policy.OrgID = scope.Organization
+		}
 	}
 	s.mu.Lock()
 	s.policies = append(s.policies, policy)
@@ -805,7 +851,21 @@ func (s *MemoryStore) ListPolicies(ctx context.Context) ([]domain.Policy, error)
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return append([]domain.Policy(nil), s.policies...), nil
+	requestScope, scoped := tenant.FromContext(ctx)
+	out := make([]domain.Policy, 0, len(s.policies))
+	for _, policy := range s.policies {
+		if scoped && policy.Domain != "" && policy.Domain != requestScope.TenantID {
+			continue
+		}
+		if scoped && requestScope.Organization == "" && policy.OrgID != "" {
+			continue
+		}
+		if scoped && requestScope.Organization != "" && policy.OrgID != "" && policy.OrgID != requestScope.Organization {
+			continue
+		}
+		out = append(out, policy)
+	}
+	return out, nil
 }
 
 func (s *MemoryStore) SaveDataScope(ctx context.Context, scope domain.DataScope) error {
@@ -838,7 +898,10 @@ func (s *MemoryStore) ListDataScopes(ctx context.Context) ([]domain.DataScope, e
 		if scoped && scope.Domain != requestScope.TenantID {
 			continue
 		}
-		if scoped && !requestScope.PlatformAdmin && requestScope.Organization != "" && scope.OrgID != "" && scope.OrgID != requestScope.Organization {
+		if scoped && requestScope.Organization == "" && scope.OrgID != "" {
+			continue
+		}
+		if scoped && requestScope.Organization != "" && scope.OrgID != "" && scope.OrgID != requestScope.Organization {
 			continue
 		}
 		out = append(out, cloneDataScope(scope))
@@ -971,8 +1034,14 @@ type Service struct {
 type userLister interface {
 	ListUsers(context.Context) ([]domain.User, error)
 }
+type authorizationUserFinder interface {
+	FindUserForAuthorization(context.Context, string) (domain.User, error)
+}
 type roleLister interface {
 	ListRoles(context.Context) ([]domain.Role, error)
+}
+type activeUserRoleLister interface {
+	ListActiveRoleIDsForUser(context.Context, string) ([]string, error)
 }
 type menuLister interface {
 	ListMenus(context.Context) ([]domain.Menu, error)
@@ -1107,6 +1176,216 @@ func (s *Service) Authorize(ctx context.Context, subject domain.Subject, request
 	return s.Authorizer.Authorize(ctx, subject, request)
 }
 
+// ResolveSubject builds the only authorization subject that HTTP adapters
+// should trust for an authenticated user. Management reads deliberately keep
+// every assigned role, including disabled ones, while this boundary intersects
+// assignments with active roles inside the effective tenant/organization.
+// Direct-user policies remain effective because the user ID is preserved even
+// when no role survives the intersection.
+func (s *Service) ResolveSubject(ctx context.Context, user domain.User) (domain.Subject, error) {
+	if s == nil || s.Roles == nil {
+		return domain.Subject{}, ErrRepositoryMissing
+	}
+	if !user.Active || strings.TrimSpace(user.ID) == "" {
+		return domain.Subject{}, domain.ErrAccessDenied
+	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return domain.Subject{}, err
+	}
+	effectiveScope, err := scope.BindPrincipal(user.TenantID, user.OrgID)
+	if err != nil {
+		return domain.Subject{}, err
+	}
+	effectiveContext := tenant.WithContext(ctx, effectiveScope)
+
+	var roleIDs []string
+	if lister, ok := s.Roles.(activeUserRoleLister); ok {
+		roleIDs, err = lister.ListActiveRoleIDsForUser(effectiveContext, user.ID)
+	} else {
+		var roles []domain.Role
+		roles, err = s.listEffectiveRoles(effectiveContext, user.RoleIDs)
+		roleIDs = make([]string, 0, len(roles))
+		for _, role := range roles {
+			roleIDs = append(roleIDs, role.ID)
+		}
+	}
+	if err != nil {
+		return domain.Subject{}, err
+	}
+	roleIDs = normalizedRoleIDs(roleIDs)
+	return domain.Subject{UserID: user.ID, RoleIDs: roleIDs, Domain: effectiveScope.TenantID}, nil
+}
+
+func (s *Service) listEffectiveRoles(ctx context.Context, assignedRoleIDs []string) ([]domain.Role, error) {
+	lister, ok := s.Roles.(roleLister)
+	if !ok {
+		return nil, ErrRepositoryMissing
+	}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	assigned := make(map[string]struct{}, len(assignedRoleIDs))
+	for _, roleID := range assignedRoleIDs {
+		if roleID = strings.TrimSpace(roleID); roleID != "" {
+			assigned[roleID] = struct{}{}
+		}
+	}
+	roles, err := lister.ListRoles(ctx)
+	if err != nil {
+		return nil, err
+	}
+	effective := make([]domain.Role, 0, len(roles))
+	for _, role := range roles {
+		if _, ok := assigned[role.ID]; !ok || !role.Active {
+			continue
+		}
+		if role.TenantID != "" && role.TenantID != scope.TenantID {
+			continue
+		}
+		if !scope.PlatformAdmin {
+			if scope.Organization == "" && role.OrgID != "" {
+				continue
+			}
+			if scope.Organization != "" && role.OrgID != "" && role.OrgID != scope.Organization {
+				continue
+			}
+		}
+		effective = append(effective, role)
+	}
+	sort.Slice(effective, func(i, j int) bool { return effective[i].ID < effective[j].ID })
+	return effective, nil
+}
+
+func normalizedRoleIDs(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// ListAccessCodes resolves the active permission IDs currently granted to a
+// subject. Permissions and policies are each loaded once, then the canonical
+// domain evaluator applies the same wildcard, deny-wins, and tenant-domain
+// semantics as Authorize without triggering a cache or repository side effect
+// for every permission in the catalog.
+func (s *Service) ListAccessCodes(ctx context.Context, subject domain.Subject) ([]string, error) {
+	if s == nil || s.Permissions == nil || s.Policies == nil {
+		return nil, ErrRepositoryMissing
+	}
+	subject = subjectWithTenant(ctx, subject)
+	permissions, err := s.ListPermissions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	permissions = mergeProductionPermissions(permissions)
+	eligible := make([]domain.Permission, 0, len(permissions))
+	seen := make(map[string]struct{}, len(permissions))
+	for _, permission := range permissions {
+		code := strings.TrimSpace(permission.ID)
+		if !permission.Active || code == "" {
+			continue
+		}
+		if _, exists := seen[code]; exists {
+			continue
+		}
+		seen[code] = struct{}{}
+		permission.ID = code
+		eligible = append(eligible, permission)
+	}
+	if len(eligible) == 0 {
+		return []string{}, nil
+	}
+	policies, err := s.Policies.ListPolicies(ctx)
+	if err != nil {
+		return nil, err
+	}
+	codes := make([]string, 0, len(eligible))
+	for _, permission := range eligible {
+		allowed, authErr := domain.EvaluatePolicies(policies, subject, domain.Request{
+			Domain: subject.Domain,
+			Method: permission.Method,
+			Path:   permissionEvaluationPath(permission.Path),
+		})
+		if authErr != nil {
+			if errors.Is(authErr, domain.ErrAccessDenied) {
+				continue
+			}
+			return nil, authErr
+		}
+		if allowed {
+			codes = append(codes, permission.ID)
+		}
+	}
+	sort.Strings(codes)
+	return codes, nil
+}
+
+// mergeProductionPermissions backfills only catalog IDs that an older tenant
+// has never persisted. A persisted row with the same ID remains authoritative,
+// including an explicit disabled row, while unrelated legacy permissions no
+// longer suppress new production menu eligibility.
+func mergeProductionPermissions(persisted []domain.Permission) []domain.Permission {
+	merged := append([]domain.Permission(nil), persisted...)
+	known := make(map[string]struct{}, len(persisted))
+	for _, permission := range persisted {
+		if id := strings.TrimSpace(permission.ID); id != "" {
+			known[id] = struct{}{}
+		}
+	}
+	for _, permission := range ProductionPermissionCatalog() {
+		id := strings.TrimSpace(permission.ID)
+		if id == "" {
+			continue
+		}
+		if _, exists := known[id]; exists {
+			continue
+		}
+		known[id] = struct{}{}
+		merged = append(merged, permission)
+	}
+	return merged
+}
+
+// permissionEvaluationPath turns a permission pattern into one canonical
+// request witness before policy evaluation. Evaluating pattern against pattern
+// lets a parameter policy such as /settings/:key accidentally match the wider
+// literal /settings/* permission. A collection permission uses its root as the
+// witness; parameter segments use a concrete sentinel. Global and genuinely
+// broader wildcard policies still match through the regular domain evaluator.
+func permissionEvaluationPath(pattern string) string {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "*" {
+		return "/__permission_scope__"
+	}
+	if strings.HasSuffix(pattern, "/*") {
+		root := strings.TrimSuffix(pattern, "/*")
+		if root == "" {
+			return "/"
+		}
+		return root
+	}
+	segments := strings.Split(pattern, "/")
+	for index, segment := range segments {
+		if segment == "*" || strings.HasPrefix(segment, ":") {
+			segments[index] = "__permission_scope__"
+		}
+	}
+	return strings.Join(segments, "/")
+}
+
 func (s *Service) ResolveDataScope(ctx context.Context, subject domain.Subject, resource string) (domain.DataScope, error) {
 	if s == nil || s.Scopes == nil {
 		return domain.DataScope{}, domain.ErrDataScopeNotFound
@@ -1174,6 +1453,18 @@ func (s *Service) ListUsersPage(ctx context.Context, query domain.UserListQuery)
 }
 
 func (s *Service) GetUser(ctx context.Context, id string) (domain.User, error) {
+	return s.getUser(ctx, id, false)
+}
+
+// GetAuthorizationUser pins security-sensitive identity reads to an adapter's
+// primary/read-your-write seam when available. Management reads may continue
+// using replicas, but account disable and role revocation must take effect
+// before another request is authorized.
+func (s *Service) GetAuthorizationUser(ctx context.Context, id string) (domain.User, error) {
+	return s.getUser(ctx, id, true)
+}
+
+func (s *Service) getUser(ctx context.Context, id string, authorization bool) (domain.User, error) {
 	if s == nil || s.Users == nil {
 		return domain.User{}, ErrRepositoryMissing
 	}
@@ -1185,11 +1476,23 @@ func (s *Service) GetUser(ctx context.Context, id string) (domain.User, error) {
 	if err != nil {
 		return domain.User{}, err
 	}
-	user, err := s.Users.FindUser(ctx, id)
+	var user domain.User
+	if finder, ok := s.Users.(authorizationUserFinder); authorization && ok {
+		user, err = finder.FindUserForAuthorization(ctx, id)
+	} else {
+		user, err = s.Users.FindUser(ctx, id)
+	}
 	if err != nil {
 		return domain.User{}, err
 	}
-	if err := checkUserScope(scope, user); err != nil {
+	if user.TenantID != "" && user.TenantID != scope.TenantID {
+		return domain.User{}, tenant.ErrCrossTenant
+	}
+	if authorization {
+		if _, err := scope.BindPrincipal(user.TenantID, user.OrgID); err != nil {
+			return domain.User{}, err
+		}
+	} else if err := checkUserScope(scope, user); err != nil {
 		return domain.User{}, err
 	}
 	if user.TenantID == "" {
@@ -1596,11 +1899,11 @@ func batchItemError(err error) error {
 }
 
 func checkUserScope(scope tenant.Context, user domain.User) error {
-	if scope.PlatformAdmin {
-		return nil
-	}
 	if user.TenantID != "" && user.TenantID != scope.TenantID {
 		return tenant.ErrCrossTenant
+	}
+	if scope.PlatformAdmin {
+		return nil
 	}
 	if scope.Organization != "" && user.OrgID != scope.Organization {
 		return tenant.ErrOrganizationDenied
@@ -1609,11 +1912,11 @@ func checkUserScope(scope tenant.Context, user domain.User) error {
 }
 
 func checkRoleScope(scope tenant.Context, role domain.Role) error {
-	if scope.PlatformAdmin {
-		return nil
-	}
 	if role.TenantID != "" && role.TenantID != scope.TenantID {
 		return tenant.ErrCrossTenant
+	}
+	if scope.PlatformAdmin {
+		return nil
 	}
 	if scope.Organization != "" && role.OrgID != "" && role.OrgID != scope.Organization {
 		return tenant.ErrOrganizationDenied
@@ -1625,7 +1928,7 @@ func filterUsers(users []domain.User, query domain.UserListQuery, scope tenant.C
 	keyword := strings.ToLower(query.Keyword)
 	filtered := make([]domain.User, 0, len(users))
 	for _, user := range users {
-		if !scope.PlatformAdmin && user.TenantID != "" && user.TenantID != scope.TenantID {
+		if user.TenantID != "" && user.TenantID != scope.TenantID {
 			continue
 		}
 		if query.OrgID != "" && user.OrgID != query.OrgID {
@@ -1743,7 +2046,25 @@ func (s *Service) ListRoles(ctx context.Context) ([]domain.Role, error) {
 	if !ok {
 		return nil, ErrRepositoryMissing
 	}
-	return repo.ListRoles(ctx)
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	roles, err := repo.ListRoles(ctx)
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]domain.Role, 0, len(roles))
+	for _, role := range roles {
+		if role.TenantID != "" && role.TenantID != scope.TenantID {
+			continue
+		}
+		if !scope.PlatformAdmin && scope.Organization != "" && role.OrgID != "" && role.OrgID != scope.Organization {
+			continue
+		}
+		filtered = append(filtered, role)
+	}
+	return filtered, nil
 }
 
 func (s *Service) SaveRole(ctx context.Context, role domain.Role) error {
@@ -1958,6 +2279,29 @@ func (s *Service) ListMenuRoutes(ctx context.Context) ([]MenuRoute, error) {
 	if err != nil {
 		return nil, err
 	}
+	return s.buildValidatedMenuRoutes(menus)
+}
+
+// ListMenuRoutesForSubject resolves the subject's effective permission codes
+// and filters permission-bound route nodes on the server. Public nodes retain
+// their existing visibility semantics, and a directory remains available when
+// it is needed to contain at least one authorized visible descendant.
+func (s *Service) ListMenuRoutesForSubject(ctx context.Context, subject domain.Subject) ([]MenuRoute, error) {
+	codes, err := s.ListAccessCodes(ctx, subject)
+	if err != nil {
+		return nil, err
+	}
+	menus, err := s.ListMenus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(menus) == 0 {
+		menus = ProductionMenuCatalog()
+	}
+	return s.buildValidatedMenuRoutes(filterMenusByAccessCodes(menus, codes))
+}
+
+func (s *Service) buildValidatedMenuRoutes(menus []domain.Menu) ([]MenuRoute, error) {
 	for _, menu := range menus {
 		if strings.TrimSpace(menu.Component) == "" {
 			continue
@@ -1967,6 +2311,84 @@ func (s *Service) ListMenuRoutes(ctx context.Context) ([]MenuRoute, error) {
 		}
 	}
 	return BuildMenuRoutes(menus)
+}
+
+func filterMenusByAccessCodes(menus []domain.Menu, codes []string) []domain.Menu {
+	allowedCodes := make(map[string]struct{}, len(codes))
+	for _, code := range codes {
+		if code = strings.TrimSpace(code); code != "" {
+			allowedCodes[code] = struct{}{}
+		}
+	}
+	byID := make(map[string]domain.Menu, len(menus))
+	children := make(map[string][]string, len(menus))
+	for _, menu := range menus {
+		byID[menu.ID] = menu
+		if menu.ParentID != "" {
+			children[menu.ParentID] = append(children[menu.ParentID], menu.ID)
+		}
+	}
+
+	structuralMemo := make(map[string]bool, len(menus))
+	structuralVisiting := make(map[string]bool, len(menus))
+	var structurallyVisible func(string) bool
+	structurallyVisible = func(id string) bool {
+		if visible, resolved := structuralMemo[id]; resolved {
+			return visible
+		}
+		menu, exists := byID[id]
+		if !exists || !menu.Active || !menu.Visible || menu.Type == domain.MenuTypeButton || structuralVisiting[id] {
+			structuralMemo[id] = false
+			return false
+		}
+		structuralVisiting[id] = true
+		visible := true
+		if menu.ParentID != "" {
+			if _, parentExists := byID[menu.ParentID]; parentExists {
+				visible = structurallyVisible(menu.ParentID)
+			}
+		}
+		delete(structuralVisiting, id)
+		structuralMemo[id] = visible
+		return visible
+	}
+
+	permissionMemo := make(map[string]bool, len(menus))
+	permissionVisiting := make(map[string]bool, len(menus))
+	var permitted func(string) bool
+	permitted = func(id string) bool {
+		if keep, resolved := permissionMemo[id]; resolved {
+			return keep
+		}
+		menu, exists := byID[id]
+		if !exists || !structurallyVisible(id) || permissionVisiting[id] {
+			permissionMemo[id] = false
+			return false
+		}
+		permissionVisiting[id] = true
+		permission := strings.TrimSpace(menu.Permission)
+		_, explicitlyAllowed := allowedCodes[permission]
+		keep := explicitlyAllowed || (permission == "" && menu.Type != domain.MenuTypeDirectory)
+		if menu.Type == domain.MenuTypeDirectory && !keep {
+			for _, childID := range children[id] {
+				if permitted(childID) {
+					keep = true
+					break
+				}
+			}
+		}
+		delete(permissionVisiting, id)
+		permissionMemo[id] = keep
+		return keep
+	}
+
+	filtered := make([]domain.Menu, 0, len(menus))
+	for _, menu := range menus {
+		if permitted(menu.ID) {
+			filtered = append(filtered, menu)
+		}
+	}
+	return filtered
 }
 
 func (s *Service) GetMenu(ctx context.Context, id string) (domain.Menu, error) {

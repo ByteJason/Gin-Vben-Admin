@@ -3,7 +3,7 @@
 exports[`defaultPreferences immutability test > should not modify the config object 1`] = `
 {
   "app": {
-    "accessMode": "frontend",
+    "accessMode": "mixed",
     "authPageLayout": "panel-right",
     "checkUpdatesInterval": 1,
     "colorGrayMode": false,
@@ -17,7 +17,7 @@ exports[`defaultPreferences immutability test > should not modify the config obj
     "contentPaddingRight": 0,
     "contentPaddingTop": 0,
     "defaultAvatar": "https://unpkg.com/@vbenjs/static-source@0.1.7/source/avatar-v1.webp",
-    "defaultHomePath": "/dashboard",
+    "defaultHomePath": "/dashboard/analytics",
     "dynamicTitle": true,
     "enableCheckUpdates": true,
     "enableCopyPreferences": true,

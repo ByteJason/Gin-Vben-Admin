@@ -63,6 +63,43 @@ func TestApplyServiceCompletesInstallationInSafeOrder(t *testing.T) {
 	}
 }
 
+func TestApplyServicePreservesIdentityFailureDiagnosticAfterCompensation(t *testing.T) {
+	calls := make([]string, 0, 12)
+	identity := &applyIdentityStub{
+		calls:         &calls,
+		initializeErr: navigationDiagnosticJobError{cause: errors.New("password=TOP_SECRET_VALUE")},
+	}
+	service := NewApplyService(
+		&applyMarkerStub{calls: &calls},
+		&applyPlanStub{calls: &calls, plan: Plan{
+			SelectedUI: installstate.UIAntd, Mode: installstate.ModeEmbedded,
+			CanCleanup: true, CanBuild: true, CanWriteEnv: true,
+		}},
+		&applyDependencyStub{calls: &calls},
+		&applySchemaStub{calls: &calls},
+		identity,
+		&applyEnvironmentStub{calls: &calls},
+		nil,
+		time.Now,
+	)
+
+	_, err := service.Apply(context.Background(), validApplyRequest())
+	if !errors.Is(err, ErrApplyFailed) {
+		t.Fatalf("Apply() error=%v, want ErrApplyFailed", err)
+	}
+	var provider FailureDiagnosticProvider
+	if !errors.As(err, &provider) {
+		t.Fatalf("Apply() error=%T %v, want diagnostic provider", err, err)
+	}
+	got := provider.InstallationFailureDiagnostic()
+	if got.Reason != "navigation_seed_conflict" || got.ResourceKind != "menu" || got.ResourceID != "menu-system-settings" {
+		t.Fatalf("diagnostic=%#v", got)
+	}
+	if indexOf(calls, "identity.rollback") < 0 {
+		t.Fatalf("identity failure was not compensated: calls=%#v", calls)
+	}
+}
+
 func TestApplyServicePersistsCredentialFreeProgressAndRemovesJournalAfterMarker(t *testing.T) {
 	calls := make([]string, 0, 20)
 	journal := &applyJournalStub{calls: &calls}
@@ -193,6 +230,86 @@ func TestApplyServiceRecoversInterruptedJournalWithFreshDatabaseCredentialsThenR
 	}
 	if identity.recoveryDatabase.DSN != request.Database.DSN || identity.recoveryReceipt.Reference != interrupted.Identity.Reference {
 		t.Fatalf("identity recovery inputs = %#v/%#v", identity.recoveryDatabase, identity.recoveryReceipt)
+	}
+}
+
+func TestApplyServiceAbandonsConcurrentInstallationLoserReceiptAfterRestart(t *testing.T) {
+	calls := make([]string, 0, 30)
+	request := validApplyRequest()
+	interrupted := ApplyTransaction{
+		Schema: ApplyTransactionSchema, Owner: ApplyTransactionOwner,
+		ID: "install-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", SelectedUI: installstate.UIAntd,
+		Mode: installstate.ModeEmbedded, DatabaseTarget: mustDatabaseTargetDigest(t, request.Database),
+		Phase: TransactionCompensationPending, CurrentStep: "failed",
+		CompletedSteps: []string{"plan", "database", "redis", "schema"},
+		Identity:       &IdentityReceipt{Reference: "install-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+		UpdatedAt:      time.Date(2026, time.August, 24, 8, 15, 0, 0, time.UTC),
+	}
+	identity := &applyIdentityStub{calls: &calls, recoveryErr: ErrIdentityNotOwned}
+	journal := &applyJournalStub{calls: &calls, loaded: interrupted, exists: true}
+	service := NewApplyService(
+		&applyMarkerStub{calls: &calls},
+		&applyPlanStub{calls: &calls, plan: Plan{SelectedUI: installstate.UIAntd, Mode: installstate.ModeEmbedded, CanCleanup: true, CanBuild: true, CanWriteEnv: true}},
+		&applyDependencyStub{calls: &calls},
+		&applySchemaStub{calls: &calls},
+		identity,
+		&applyEnvironmentStub{calls: &calls},
+		journal,
+		time.Now,
+	)
+
+	if _, err := service.Apply(context.Background(), request); err != nil {
+		t.Fatalf("Apply() concurrent loser recovery error=%v calls=%#v", err, calls)
+	}
+	if !orderedCalls(calls, []string{"identity.recover", "journal.remove", "journal.create", "schema.up", "identity.initialize", "environment.publish", "marker.create"}) {
+		t.Fatalf("concurrent loser recovery calls=%#v", calls)
+	}
+	if len(journal.removedIDs) < 1 || journal.removedIDs[0] != interrupted.ID {
+		t.Fatalf("removed journals=%v want loser first=%q", journal.removedIDs, interrupted.ID)
+	}
+	if journal.created.ID == "" || journal.created.ID == interrupted.ID {
+		t.Fatalf("new transaction=%q loser=%q", journal.created.ID, interrupted.ID)
+	}
+}
+
+func TestApplyServiceDiscardsSideEffectFreeRetryableJournalBeforeDatabaseTargetValidation(t *testing.T) {
+	calls := make([]string, 0, 30)
+	request := validApplyRequest()
+	oldRequest := request
+	oldRequest.Database.Host = "old-db.internal"
+	oldRequest.Database.Database = "old_app"
+	oldRequest.Database.DSN = "old-user:old-password@tcp(old-db.internal:3306)/old_app"
+	interrupted := ApplyTransaction{
+		Schema: ApplyTransactionSchema, Owner: ApplyTransactionOwner,
+		ID: "install-cccccccccccccccccccccccccccccccc", SelectedUI: installstate.UIAntd,
+		Mode: installstate.ModeEmbedded, DatabaseTarget: mustDatabaseTargetDigest(t, oldRequest.Database),
+		Phase: TransactionRetryable, CurrentStep: "failed",
+		CompletedSteps: []string{"plan", "database", "redis", "schema"},
+		UpdatedAt:      time.Date(2026, time.August, 24, 8, 20, 0, 0, time.UTC),
+	}
+	journal := &applyJournalStub{calls: &calls, loaded: interrupted, exists: true}
+	service := NewApplyService(
+		&applyMarkerStub{calls: &calls},
+		&applyPlanStub{calls: &calls, plan: Plan{SelectedUI: installstate.UIAntd, Mode: installstate.ModeEmbedded, CanCleanup: true, CanBuild: true, CanWriteEnv: true}},
+		&applyDependencyStub{calls: &calls},
+		&applySchemaStub{calls: &calls},
+		&applyIdentityStub{calls: &calls},
+		&applyEnvironmentStub{calls: &calls},
+		journal,
+		time.Now,
+	)
+
+	if _, err := service.Apply(context.Background(), request); err != nil {
+		t.Fatalf("Apply() changed-target retry error=%v calls=%#v", err, calls)
+	}
+	if !orderedCalls(calls, []string{"journal.load", "journal.remove", "plan", "database.check", "redis.check", "journal.create"}) {
+		t.Fatalf("changed-target retry calls=%#v", calls)
+	}
+	if len(journal.removedIDs) < 1 || journal.removedIDs[0] != interrupted.ID {
+		t.Fatalf("removed journals=%v want retryable first=%q", journal.removedIDs, interrupted.ID)
+	}
+	if journal.created.DatabaseTarget == interrupted.DatabaseTarget {
+		t.Fatalf("new transaction retained old target=%q", interrupted.DatabaseTarget)
 	}
 }
 
@@ -861,17 +978,19 @@ type applyIdentityStub struct {
 	recoveryDatabase  DatabaseConnection
 	recoveryReceipt   IdentityReceipt
 	preparedReference string
+	recoveryErr       error
+	initializeErr     error
 }
 
 func (s *applyIdentityStub) Initialize(context.Context, DatabaseConnection, AdminAccount) (IdentityReceipt, error) {
 	*s.calls = append(*s.calls, "identity.initialize")
-	return IdentityReceipt{Reference: "installation-1"}, nil
+	return IdentityReceipt{Reference: "installation-1"}, s.initializeErr
 }
 
 func (s *applyIdentityStub) InitializeWithReference(_ context.Context, _ DatabaseConnection, _ AdminAccount, reference string) (IdentityReceipt, error) {
 	*s.calls = append(*s.calls, "identity.initialize")
 	s.preparedReference = reference
-	return IdentityReceipt{Reference: reference}, nil
+	return IdentityReceipt{Reference: reference}, s.initializeErr
 }
 
 func (s *applyIdentityStub) Rollback(context.Context, IdentityReceipt) error {
@@ -883,7 +1002,7 @@ func (s *applyIdentityStub) RecoverRollback(_ context.Context, database Database
 	*s.calls = append(*s.calls, "identity.recover")
 	s.recoveryDatabase = database
 	s.recoveryReceipt = receipt
-	return nil
+	return s.recoveryErr
 }
 
 func (s *applyIdentityStub) Finalize(context.Context, IdentityReceipt) error {
@@ -906,6 +1025,7 @@ type applyJournalStub struct {
 	created        ApplyTransaction
 	saved          []ApplyTransaction
 	removedID      string
+	removedIDs     []string
 	respectContext bool
 	ownershipErr   error
 	releaseErr     error
@@ -946,6 +1066,7 @@ func (s *applyJournalStub) Update(ctx context.Context, transaction ApplyTransact
 func (s *applyJournalStub) Remove(_ context.Context, id string) error {
 	*s.calls = append(*s.calls, "journal.remove")
 	s.removedID = id
+	s.removedIDs = append(s.removedIDs, id)
 	return nil
 }
 

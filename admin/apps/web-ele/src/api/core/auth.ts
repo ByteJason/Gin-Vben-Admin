@@ -130,5 +130,5 @@ export async function revokeSessionApi(sessionId: string) {
 
 /** 获取当前账号的权限码。 */
 export async function getAccessCodesApi() {
-  return requestClient.get<string[]>(`${AUTH_API_PREFIX}/codes`);
+  return requestClient.get<string[]>(AUTH_ENDPOINTS.codes);
 }

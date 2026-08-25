@@ -71,6 +71,27 @@ func TestAuthorizerSupportsActionObjectAliasesAndRejectsDomainMismatch(t *testin
 	}
 }
 
+func TestAuthorizerPathPrefixIncludesCollectionRootAndDescendants(t *testing.T) {
+	policies := NewMemoryPolicyStore()
+	if err := policies.AddPolicy(Policy{Subject: "u1", Method: "GET", Path: "/api/admin/v1/dictionaries/*", Effect: EffectAllow}); err != nil {
+		t.Fatal(err)
+	}
+	authorizer := NewAuthorizer(policies)
+	for _, path := range []string{
+		"/api/admin/v1/dictionaries",
+		"/api/admin/v1/dictionaries/regions/items",
+	} {
+		allowed, err := authorizer.Authorize(context.Background(), Subject{UserID: "u1"}, Request{Method: "GET", Path: path})
+		if err != nil || !allowed {
+			t.Fatalf("prefix policy should allow %q: allowed=%v err=%v", path, allowed, err)
+		}
+	}
+	allowed, err := authorizer.Authorize(context.Background(), Subject{UserID: "u1"}, Request{Method: "GET", Path: "/api/admin/v1/dictionaries-archive"})
+	if !errors.Is(err, ErrAccessDenied) || allowed {
+		t.Fatalf("prefix policy escaped collection: allowed=%v err=%v", allowed, err)
+	}
+}
+
 func TestDataScopeResolverMatchesRoleAndCopiesIDs(t *testing.T) {
 	p := NewMemoryPolicyStore()
 	p.Add(DataScope{RoleID: "role-org", Resource: "orders", Scope: ScopeOrg, IDs: []string{"org-a"}})

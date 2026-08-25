@@ -457,6 +457,28 @@ func TestInstallationProgressAndRetryEndpointsUseJobProvider(t *testing.T) {
 	}
 }
 
+func TestInstallationProgressExposesNavigationConflictResource(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	jobProvider := &jobProviderStub{job: installer.ApplyJob{
+		ID: "install-job-seed", State: installer.JobFailed, CanRetry: true,
+		ErrorCode: 50000, ErrorKey: "internal_error", FailureStep: "identity",
+		FailureReason: "navigation_seed_conflict", FailureOperation: "apply",
+		FailureResourceKind: "permission", FailureResourceID: "iam:users:read",
+	}}
+	router := gin.New()
+	RegisterRoutes(router, NewHandlerWithApplyAndJobs(statusProviderStub{}, nil, nil, nil, nil, jobProvider))
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/system/install/v1/progress/install-job-seed", nil))
+	body := response.Body.String()
+	if response.Code != http.StatusOK ||
+		!strings.Contains(body, `"failureReason":"navigation_seed_conflict"`) ||
+		!strings.Contains(body, `"failureResourceKind":"permission"`) ||
+		!strings.Contains(body, `"failureResourceId":"iam:users:read"`) {
+		t.Fatalf("progress response = %d %s", response.Code, body)
+	}
+}
+
 func TestInstallationRollbackEndpointRequiresConfirmationAndUsesProvider(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	provider := &rollbackProviderStub{result: installer.RollbackResult{

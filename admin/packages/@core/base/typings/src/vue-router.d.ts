@@ -139,6 +139,8 @@ type RouteRecordStringComponent<T = string> = Omit<
 type ComponentRecordType = Record<string, () => Promise<Component>>;
 
 interface GenerateMenuAndRoutesOptions {
+  /** API/button access codes used by static route authority checks. */
+  accessCodes?: string[];
   fetchMenuListAsync?: () => Promise<RouteRecordStringComponent[]>;
   forbiddenComponent?: RouteRecordRaw['component'];
   layoutMap?: ComponentRecordType;

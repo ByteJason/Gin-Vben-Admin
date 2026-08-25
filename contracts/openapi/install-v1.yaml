@@ -722,7 +722,7 @@ components:
           description: 凭据无关的失败位置，仅在 state 为 failed 时返回
         failureReason:
           type: string
-          enum: [tls_mode_mismatch, tls_configuration_failed, authentication_failed, permission_denied, database_unavailable, database_busy, schema_unavailable, schema_conflict, migration_dirty, migration_statement_failed, migration_status_failed, migration_close_failed, invalid_configuration, unknown]
+          enum: [tls_mode_mismatch, tls_configuration_failed, authentication_failed, permission_denied, database_unavailable, database_busy, schema_unavailable, schema_conflict, migration_dirty, migration_statement_failed, migration_status_failed, migration_close_failed, invalid_configuration, navigation_seed_conflict, unknown]
           description: 白名单化的失败原因，不包含驱动原文或敏感连接信息
         failureOperation:
           type: string
@@ -732,6 +732,14 @@ components:
           type: string
           pattern: '^[0-9A-Z]{5}$'
           description: 可用时返回五位 SQLSTATE；不返回数据库原始消息或语句文本
+        failureResourceKind:
+          type: string
+          enum: [menu, permission]
+          description: 导航种子冲突时返回白名单化的资源类型
+        failureResourceId:
+          type: string
+          pattern: '^[A-Za-z0-9:._-]{1,128}$'
+          description: 导航种子冲突时返回安全、定长的资源 ID，不包含 SQL 或凭据
         canRetry:
           type: boolean
         canRollback:

@@ -5,6 +5,7 @@ import (
 
 	audithttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/audit"
 	authhttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/auth"
+	dashboardhttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/dashboard"
 	dictionaryhttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/dictionary"
 	filehttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/file"
 	iamhttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/iam"
@@ -26,9 +27,11 @@ type AuxiliaryRoutes struct {
 	Files        *filehttp.Handler
 	Mail         *mailhttp.Handler
 	Monitor      *monitorhttp.Handler
+	Dashboard    *dashboardhttp.Handler
 	Dictionary   *dictionaryhttp.Handler
 	Tasks        *taskshttp.Handler
 	ImportExport *importexporthttp.Handler
+	IAM          httpmiddleware.IAMAccess
 	TenantPolicy *httpmiddleware.TenantPolicy
 }
 
@@ -56,12 +59,17 @@ func RegisterRoutesWithIAM(r gin.IRouter, authHandler *authhttp.Handler, iamHand
 	}
 	capabilities := auxiliary[0]
 	if authHandler != nil && authHandler.Service() != nil {
-		protected := r.Group("/api/admin/v1", authhttp.Middleware(authHandler.Service()), httpmiddleware.TenantContext(policy))
+		protected := r.Group("/api/admin/v1",
+			authhttp.Middleware(authHandler.Service()),
+			httpmiddleware.TenantContext(policy),
+			httpmiddleware.IAMAuthorization(capabilities.IAM),
+		)
 		settingshttp.RegisterRoutesOn(protected, capabilities.Settings)
 		audithttp.RegisterRoutesOn(protected, capabilities.Audit)
 		filehttp.RegisterRoutesOn(protected, capabilities.Files)
 		mailhttp.RegisterRoutesOn(protected, capabilities.Mail)
 		monitorhttp.RegisterRoutesOn(protected, capabilities.Monitor)
+		dashboardhttp.RegisterRoutesOn(protected, capabilities.Dashboard)
 		dictionaryhttp.RegisterRoutesOn(protected, capabilities.Dictionary)
 		taskshttp.RegisterRoutesOn(protected, capabilities.Tasks)
 		importexporthttp.RegisterRoutesOn(protected, capabilities.ImportExport)
@@ -77,6 +85,7 @@ func RegisterRoutesWithIAM(r gin.IRouter, authHandler *authhttp.Handler, iamHand
 	filehttp.RegisterRoutesOn(localScoped, capabilities.Files)
 	mailhttp.RegisterRoutesOn(localScoped, capabilities.Mail)
 	monitorhttp.RegisterRoutesOn(localScoped, capabilities.Monitor)
+	dashboardhttp.RegisterRoutesOn(localScoped, capabilities.Dashboard)
 	dictionaryhttp.RegisterRoutesOn(localScoped, capabilities.Dictionary)
 	taskshttp.RegisterRoutesOn(localScoped, capabilities.Tasks)
 	importexporthttp.RegisterRoutesOn(localScoped, capabilities.ImportExport)

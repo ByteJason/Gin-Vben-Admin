@@ -45,7 +45,7 @@ if (operations.length === 0) {
 const endpointLines = operations
   .map(({ id, path: endpoint }) => `  ${id}: '${endpoint}',`)
   .join('\n');
-const generated = `// Generated from contracts/openapi/admin-v1.yaml; DO NOT EDIT.\n// CONTRACT_SHA256=${contractHash}\n\nexport const ADMIN_API_PREFIX = '/admin/v1' as const;\n\nexport const ADMIN_ENDPOINTS = {\n${endpointLines}\n} as const;\n\nexport const AUTH_API_PREFIX = '/admin/v1/auth' as const;\nexport const AUTH_ENDPOINTS = {\n  captcha: ADMIN_ENDPOINTS.issueAdminAuthCaptcha,\n  login: ADMIN_ENDPOINTS.adminAuthLogin,\n  logout: ADMIN_ENDPOINTS.adminAuthLogout,\n  passwordReset: ADMIN_ENDPOINTS.resetAdminPassword,\n  passwordResetRequest: ADMIN_ENDPOINTS.requestAdminPasswordReset,\n  register: ADMIN_ENDPOINTS.adminAuthRegister,\n  refresh: ADMIN_ENDPOINTS.adminAuthRefresh,\n  sessions: ADMIN_ENDPOINTS.listAdminAuthSessions,\n} as const;\n\nexport const MENU_ENDPOINT = ADMIN_ENDPOINTS.listVisibleMenus;\nexport const CURRENT_USER_ENDPOINT = ADMIN_ENDPOINTS.getCurrentAdminUser;
+const generated = `// Generated from contracts/openapi/admin-v1.yaml; DO NOT EDIT.\n// CONTRACT_SHA256=${contractHash}\n\nexport const ADMIN_API_PREFIX = '/admin/v1' as const;\n\nexport const ADMIN_ENDPOINTS = {\n${endpointLines}\n} as const;\n\nexport const AUTH_API_PREFIX = '/admin/v1/auth' as const;\nexport const AUTH_ENDPOINTS = {\n  captcha: ADMIN_ENDPOINTS.issueAdminAuthCaptcha,\n  codes: ADMIN_ENDPOINTS.getAdminAuthAccessCodes,\n  login: ADMIN_ENDPOINTS.adminAuthLogin,\n  logout: ADMIN_ENDPOINTS.adminAuthLogout,\n  passwordReset: ADMIN_ENDPOINTS.resetAdminPassword,\n  passwordResetRequest: ADMIN_ENDPOINTS.requestAdminPasswordReset,\n  register: ADMIN_ENDPOINTS.adminAuthRegister,\n  refresh: ADMIN_ENDPOINTS.adminAuthRefresh,\n  sessions: ADMIN_ENDPOINTS.listAdminAuthSessions,\n} as const;\n\nexport const MENU_ENDPOINT = ADMIN_ENDPOINTS.listVisibleMenus;\nexport const CURRENT_USER_ENDPOINT = ADMIN_ENDPOINTS.getCurrentAdminUser;
 
 export interface SMTPAccount {
   id: string;
@@ -96,29 +96,137 @@ export interface EmailMessage {
   updatedAt: string;
 }
 
-export interface MonitorMetric {
-  status: 'ok' | 'degraded' | 'unavailable';
+export type MonitorStatus = 'ok' | 'degraded' | 'unavailable';
+export type MonitorMetricScope = 'process' | 'container' | 'host';
+export interface MonitorCapability {
+  scope: MonitorMetricScope;
+  available: boolean;
+  source?: string;
+}
+export type MonitorCapabilities = Record<string, MonitorCapability>;
+export interface MonitorHostMetric {
+  status: MonitorStatus;
   cores?: number;
   load1?: number;
+  load5?: number;
+  load15?: number;
+  rssBytes?: number;
   usedBytes?: number;
+  freeBytes?: number;
   totalBytes?: number;
   utilization?: number;
-  latencyMs?: number;
-  poolOpen?: number;
-  poolIdle?: number;
-  poolMax?: number;
+  capabilities: MonitorCapabilities;
+  message?: string;
+}
+export interface MonitorRuntimeMetric {
+  status: MonitorStatus;
+  goVersion: string;
+  os: string;
+  arch: string;
+  applicationVersion?: string;
+  commit?: string;
+  heapAllocBytes?: number;
+  heapSysBytes?: number;
+  heapInUseBytes?: number;
+  heapObjects?: number;
+  nextGcBytes?: number;
+  gcCount?: number;
+  lastGcPauseNs?: number;
+  capabilities: MonitorCapabilities;
+}
+export interface MonitorDatabasePool {
+  open: number;
+  inUse: number;
+  idle: number;
+  max: number;
+  waitCount: number;
+  waitDurationMs: number;
+  maxIdleClosed: number;
+  maxIdleTimeClosed: number;
+  maxLifetimeClosed: number;
+}
+export interface MonitorRedisPool {
+  max?: number;
+  total: number;
+  active: number;
+  idle: number;
+  hits: number;
+  misses: number;
+  timeouts: number;
+  waitCount: number;
+  waitDurationMs: number;
+  stale: number;
+  pending: number;
+}
+export interface MonitorDatabaseMetric {
+  status: MonitorStatus;
+  latencyMs: number;
+  driver?: 'mysql' | 'postgres';
+  mode?: 'single' | 'read_write' | 'cluster_endpoint';
+  pool?: MonitorDatabasePool;
+  capabilities: MonitorCapabilities;
+  message?: string;
+}
+export interface MonitorRedisMetric {
+  status: MonitorStatus;
+  latencyMs: number;
+  mode?: 'single' | 'sentinel' | 'cluster';
+  pool?: MonitorRedisPool;
   keyspace?: number;
+  capabilities: MonitorCapabilities;
   message?: string;
 }
 export interface MonitorOverview {
-  scope: 'process' | 'container';
+  scope: MonitorMetricScope;
   uptimeSeconds: number;
   version?: string;
-  cpu: MonitorMetric;
-  memory: MonitorMetric;
-  disk: MonitorMetric;
-  database: MonitorMetric;
-  redis: MonitorMetric;
+  runtime: MonitorRuntimeMetric;
+  cpu: MonitorHostMetric;
+  memory: MonitorHostMetric;
+  disk: MonitorHostMetric;
+  database: MonitorDatabaseMetric;
+  redis: MonitorRedisMetric;
+  collectedAt: string;
+}
+
+export type DashboardStatus = MonitorStatus;
+export interface DashboardCountMetric {
+  status: DashboardStatus;
+  value?: number;
+  message?: string;
+}
+export interface DashboardCounts {
+  users: DashboardCountMetric;
+  roles: DashboardCountMetric;
+  tasks: DashboardCountMetric;
+  importJobs: DashboardCountMetric;
+  exportJobs: DashboardCountMetric;
+  files: DashboardCountMetric;
+  auditEvents: DashboardCountMetric;
+  mailAccounts: DashboardCountMetric;
+  mailMessages: DashboardCountMetric;
+}
+export interface DashboardInstanceMetric {
+  status: DashboardStatus;
+  state?: MonitorStatus;
+  scope?: MonitorMetricScope;
+  version?: string;
+  uptimeSeconds?: number;
+}
+export interface DashboardHealthMetric {
+  status: DashboardStatus;
+  state?: MonitorStatus;
+}
+export interface DashboardHealth {
+  runtime: DashboardHealthMetric;
+  database: DashboardHealthMetric;
+  redis: DashboardHealthMetric;
+}
+export interface DashboardSummary {
+  status: DashboardStatus;
+  counts: DashboardCounts;
+  instance: DashboardInstanceMetric;
+  health: DashboardHealth;
   collectedAt: string;
 }
 

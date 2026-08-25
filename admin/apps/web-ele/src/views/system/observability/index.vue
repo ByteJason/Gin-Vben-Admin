@@ -1,8 +1,19 @@
 <script setup lang="ts">
-import { nextTick, onMounted, reactive, ref } from 'vue';
+import { computed, nextTick, onMounted, reactive, ref } from 'vue';
 
-import { getSettingApi, updateSettingApi } from '#/api/core/settings';
+import { useAccess } from '@vben/access';
+import { ManagementPage } from '@vben/common-ui';
+
+import {
+  getObservabilitySettingApi,
+  updateObservabilitySettingApi,
+} from '#/api/core/settings';
 import { $t } from '#/locales';
+
+const { hasAccessByCodes } = useAccess();
+const canManage = computed(() =>
+  hasAccessByCodes(['system:observability:manage']),
+);
 
 const settingKeys = {
   metricsEnabled: 'observability.metrics.enabled',
@@ -62,12 +73,12 @@ async function load() {
   try {
     const entries = await Promise.all(
       Object.values(settingKeys).map(
-        async (key) => [key, await getSettingApi(key)] as const,
+        async (key) => [key, await getObservabilitySettingApi(key)] as const,
       ),
     );
     const values = Object.fromEntries(entries) as Record<
       SettingKey,
-      Awaited<ReturnType<typeof getSettingApi>>
+      Awaited<ReturnType<typeof getObservabilitySettingApi>>
     >;
     for (const [key, setting] of entries) versions[key] = setting.version;
     state.metricsEnabled = parseValue(
@@ -100,7 +111,8 @@ async function load() {
 }
 
 async function update(key: SettingKey, value: unknown) {
-  const setting = await updateSettingApi(key, {
+  if (!canManage.value) return;
+  const setting = await updateObservabilitySettingApi(key, {
     expectedVersion: versions[key],
     value,
   });
@@ -108,6 +120,7 @@ async function update(key: SettingKey, value: unknown) {
 }
 
 async function save() {
+  if (!canManage.value) return;
   error.value = '';
   message.value = '';
   if (state.metricsEnabled && !isHTTPURL(state.metricsEndpoint)) {
@@ -148,7 +161,7 @@ onMounted(load);
 </script>
 
 <template>
-  <section
+  <ManagementPage
     class="observability-page"
     :aria-busy="loading"
     aria-labelledby="observability-title"
@@ -179,7 +192,10 @@ onMounted(load);
     </p>
 
     <form class="settings-form" @submit.prevent="save">
-      <fieldset class="setting-card" :disabled="loading || saving">
+      <fieldset
+        class="setting-card"
+        :disabled="!canManage || loading || saving"
+      >
         <legend>{{ $t('page.observability.metricsTitle') }}</legend>
         <label class="switch-row" for="metrics-enabled">
           <span>
@@ -206,7 +222,10 @@ onMounted(load);
         </label>
       </fieldset>
 
-      <fieldset class="setting-card" :disabled="loading || saving">
+      <fieldset
+        class="setting-card"
+        :disabled="!canManage || loading || saving"
+      >
         <legend>{{ $t('page.observability.tracingTitle') }}</legend>
         <label class="switch-row" for="tracing-enabled">
           <span>
@@ -288,7 +307,12 @@ onMounted(load);
         <button type="button" :disabled="loading || saving" @click="load">
           {{ $t('page.observability.reload') }}
         </button>
-        <button class="primary" type="submit" :disabled="loading || saving">
+        <button
+          v-if="canManage"
+          class="primary"
+          type="submit"
+          :disabled="loading || saving"
+        >
           {{
             saving
               ? $t('page.observability.saving')
@@ -297,14 +321,11 @@ onMounted(load);
         </button>
       </div>
     </form>
-  </section>
+  </ManagementPage>
 </template>
 
 <style scoped>
 .observability-page {
-  max-width: 1080px;
-  padding: 24px;
-  margin: 0 auto;
   color: hsl(var(--foreground));
 }
 
@@ -514,10 +535,6 @@ select:focus-visible {
 }
 
 @media (max-width: 700px) {
-  .observability-page {
-    padding: 16px;
-  }
-
   .page-heading {
     display: grid;
     gap: 12px;

@@ -159,9 +159,11 @@ test('installation contract exposes one credential-write-only apply operation', 
   assert.match(install, /ApplyJob/);
   const jobSchema = install.slice(install.indexOf('    ApplyJob:'), install.indexOf('    RollbackRequest:'));
   assert.match(jobSchema, /failureStep:[\s\S]*?enum: \[request, coordination, plan, database, redis, recovery, journal, schema, identity, environment, marker, lock, complete\]/);
-  assert.match(jobSchema, /failureReason:[\s\S]*?enum: \[tls_mode_mismatch, tls_configuration_failed, authentication_failed, permission_denied, database_unavailable, database_busy, schema_unavailable, schema_conflict, migration_dirty, migration_statement_failed, migration_status_failed, migration_close_failed, invalid_configuration, unknown\]/);
+  assert.match(jobSchema, /failureReason:[\s\S]*?enum: \[tls_mode_mismatch, tls_configuration_failed, authentication_failed, permission_denied, database_unavailable, database_busy, schema_unavailable, schema_conflict, migration_dirty, migration_statement_failed, migration_status_failed, migration_close_failed, invalid_configuration, navigation_seed_conflict, unknown\]/);
   assert.match(jobSchema, /failureOperation:[\s\S]*?enum: \[connect, apply, status, close\]/);
   assert.match(jobSchema, /databaseCode:[\s\S]*?pattern: '\^\[0-9A-Z\]\{5\}\$'/);
+  assert.match(jobSchema, /failureResourceKind:[\s\S]*?enum: \[menu, permission\]/);
+  assert.ok(jobSchema.includes("failureResourceId:\n          type: string\n          pattern: '^[A-Za-z0-9:._-]{1,128}$'"));
   assert.doesNotMatch(jobSchema, /password|dsn|secret|rawError|errorDetail|query/i);
   assert.match(install, /AdminAccount/);
   const applySchema = install.slice(install.indexOf('    ApplyRequest:'), install.indexOf('    AdminAccount:'));

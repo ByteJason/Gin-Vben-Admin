@@ -19,7 +19,43 @@ const (
 	installationRoleID      = "role-super-admin"
 )
 
-var ErrIdentityChanged = errors.New("installation identity belongs to a different transaction")
+var ErrIdentityChanged = installer.ErrIdentityNotOwned
+
+var errNavigationSeedConflict = errors.New("navigation seed conflicts with an existing resource")
+
+type navigationSeedConflictError struct {
+	resourceKind string
+	resourceID   string
+}
+
+func newNavigationSeedConflict(resourceKind, resourceID string) error {
+	return &navigationSeedConflictError{resourceKind: resourceKind, resourceID: resourceID}
+}
+
+func (e *navigationSeedConflictError) Error() string { return errNavigationSeedConflict.Error() }
+func (e *navigationSeedConflictError) Unwrap() error { return errNavigationSeedConflict }
+func (e *navigationSeedConflictError) InstallationFailureDiagnostic() installer.FailureDiagnostic {
+	diagnostic := installer.FailureDiagnostic{Reason: "navigation_seed_conflict", Operation: "apply"}
+	if (e.resourceKind == "menu" || e.resourceKind == "permission") && validNavigationResourceID(e.resourceID) {
+		diagnostic.ResourceKind = e.resourceKind
+		diagnostic.ResourceID = e.resourceID
+	}
+	return diagnostic
+}
+
+func validNavigationResourceID(id string) bool {
+	if len(id) == 0 || len(id) > 128 {
+		return false
+	}
+	for _, character := range id {
+		if (character < 'a' || character > 'z') && (character < 'A' || character > 'Z') &&
+			(character < '0' || character > '9') && character != ':' && character != '.' &&
+			character != '_' && character != '-' {
+			return false
+		}
+	}
+	return true
+}
 
 type GORMIdentityStore struct {
 	database *gormdb.Store
@@ -45,15 +81,19 @@ func NewSystemIdentityInstaller() *IdentityInstaller {
 }
 
 type installationIdentityMetadata struct {
-	InstallationID string `json:"installation_id"`
-	State          string `json:"state"`
-	UserID         uint64 `json:"user_id"`
-	Username       string `json:"username"`
-	RoleID         string `json:"role_id"`
+	InstallationID    string   `json:"installation_id"`
+	State             string   `json:"state"`
+	UserID            uint64   `json:"user_id"`
+	Username          string   `json:"username"`
+	RoleID            string   `json:"role_id"`
+	SeedMenuIDs       []string `json:"seed_menu_ids,omitempty"`
+	SeedPermissionIDs []string `json:"seed_permission_ids,omitempty"`
 }
 
 type installationUserRow struct {
 	ID                 uint64  `gorm:"column:id;primaryKey"`
+	TenantID           string  `gorm:"column:tenant_id"`
+	OrgID              *string `gorm:"column:org_id"`
 	Username           string  `gorm:"column:username"`
 	UsernameNormalized *string `gorm:"column:username_normalized"`
 	PasswordHash       string  `gorm:"column:password_hash"`
@@ -78,7 +118,8 @@ func (s *GORMIdentityStore) Initialize(ctx context.Context, reference, username,
 			return err
 		}
 		if err := tx.Table("roles").Create(map[string]any{
-			"id": installationRoleID, "name": "Super Administrator", "status": "active", "data_scope": "all",
+			"id": installationRoleID, "tenant_id": initialTenantID, "org_id": nil,
+			"name": "Super Administrator", "status": "active", "data_scope": "all",
 		}).Error; err != nil {
 			return err
 		}
@@ -94,22 +135,160 @@ func (s *GORMIdentityStore) Initialize(ctx context.Context, reference, username,
 		if user.ID == 0 {
 			return errors.New("initial administrator id was not generated")
 		}
-		if err := tx.Table("user_roles").Create(map[string]any{"user_id": user.ID, "role_id": installationRoleID}).Error; err != nil {
-			return err
-		}
-		if err := tx.Table("iam_policies").Create(map[string]any{
-			"role_id": installationRoleID, "domain": "", "method": "*", "path": "*", "effect": "allow",
+		if err := tx.Table("user_roles").Create(map[string]any{
+			"tenant_id": initialTenantID, "org_id": nil, "user_id": user.ID, "role_id": installationRoleID,
 		}).Error; err != nil {
 			return err
 		}
+		if err := tx.Table("iam_policies").Create(map[string]any{
+			"tenant_id": initialTenantID, "org_id": nil, "role_id": installationRoleID,
+			"domain": "", "method": "*", "path": "*", "effect": "allow",
+		}).Error; err != nil {
+			return err
+		}
+		seedReceipt, err := seedInitialNavigation(gormNavigationSeedStore{tx: tx})
+		if err != nil {
+			return err
+		}
 		metadata.UserID = user.ID
+		metadata.SeedMenuIDs = append([]string(nil), seedReceipt.MenuIDs...)
+		metadata.SeedPermissionIDs = append([]string(nil), seedReceipt.PermissionIDs...)
 		metadata.State = "installed"
 		return updateInstallationMetadata(tx, s.driver, metadata)
 	})
 	if err != nil {
+		var diagnostic installer.FailureDiagnosticProvider
+		if errors.As(err, &diagnostic) {
+			return err
+		}
 		return ErrIdentityInstallation
 	}
 	return nil
+}
+
+type gormNavigationSeedStore struct{ tx *gorm.DB }
+
+type navigationMenuSeedRow struct {
+	ID         string  `gorm:"column:id;primaryKey"`
+	TenantID   string  `gorm:"column:tenant_id"`
+	OrgID      *string `gorm:"column:org_id"`
+	ParentID   *string `gorm:"column:parent_id"`
+	Name       string  `gorm:"column:name"`
+	Path       string  `gorm:"column:path"`
+	MenuType   string  `gorm:"column:menu_type"`
+	Component  *string `gorm:"column:component"`
+	Redirect   *string `gorm:"column:redirect"`
+	Icon       *string `gorm:"column:icon"`
+	Permission *string `gorm:"column:permission"`
+	SortOrder  int     `gorm:"column:sort_order"`
+	Visible    bool    `gorm:"column:visible"`
+	Status     string  `gorm:"column:status"`
+	KeepAlive  bool    `gorm:"column:keep_alive"`
+	External   bool    `gorm:"column:external"`
+}
+
+type navigationPermissionSeedRow struct {
+	ID       string  `gorm:"column:id;primaryKey"`
+	TenantID string  `gorm:"column:tenant_id"`
+	OrgID    *string `gorm:"column:org_id"`
+	Name     string  `gorm:"column:name"`
+	Method   string  `gorm:"column:method"`
+	Path     string  `gorm:"column:path"`
+	Status   string  `gorm:"column:status"`
+}
+
+func (s gormNavigationSeedStore) EnsureMenu(menu initialMenuSeed) (bool, error) {
+	if s.tx == nil {
+		return false, ErrIdentityInstallation
+	}
+	var existing []navigationMenuSeedRow
+	err := s.tx.Table("menus").
+		Where("id = ? OR (tenant_id = ? AND path = ?)", menu.ID, initialTenantID, menu.Path).
+		Find(&existing).Error
+	if err != nil {
+		return false, err
+	}
+	if len(existing) != 0 {
+		if len(existing) == 1 && existing[0].matches(menu) {
+			return false, nil
+		}
+		return false, newNavigationSeedConflict("menu", menu.ID)
+	}
+	result := s.createMenu(menu)
+	return result.Error == nil, result.Error
+}
+
+func (s gormNavigationSeedStore) EnsurePermission(permission initialPermissionSeed) (bool, error) {
+	if s.tx == nil {
+		return false, ErrIdentityInstallation
+	}
+	var existing []navigationPermissionSeedRow
+	err := s.tx.Table("permissions").
+		Where("id = ? OR (method = ? AND path = ?)", permission.ID, permission.Method, permission.Path).
+		Find(&existing).Error
+	if err != nil {
+		return false, err
+	}
+	if len(existing) != 0 {
+		if len(existing) == 1 && existing[0].matches(permission) {
+			return false, nil
+		}
+		return false, newNavigationSeedConflict("permission", permission.ID)
+	}
+	result := s.createPermission(permission)
+	return result.Error == nil, result.Error
+}
+
+func (s gormNavigationSeedStore) createMenu(menu initialMenuSeed) *gorm.DB {
+	return s.tx.Table("menus").Create(&navigationMenuSeedRow{
+		ID: menu.ID, TenantID: initialTenantID, ParentID: optionalSeedString(menu.ParentID), Name: menu.Name, Path: menu.Path,
+		MenuType: menu.Type, Component: optionalSeedString(menu.Component), Redirect: optionalSeedString(menu.Redirect),
+		Icon: optionalSeedString(menu.Icon), Permission: optionalSeedString(menu.Permission), SortOrder: menu.Sort,
+		Visible: menu.Visible, Status: statusForSeed(menu.Active), KeepAlive: menu.KeepAlive, External: menu.External,
+	})
+}
+
+func (s gormNavigationSeedStore) createPermission(permission initialPermissionSeed) *gorm.DB {
+	return s.tx.Table("permissions").Create(&navigationPermissionSeedRow{
+		ID: permission.ID, TenantID: initialTenantID, Name: permission.Name, Method: permission.Method,
+		Path: permission.Path, Status: statusForSeed(permission.Active),
+	})
+}
+
+func (row navigationMenuSeedRow) matches(seed initialMenuSeed) bool {
+	return row.ID == seed.ID && row.TenantID == initialTenantID && row.OrgID == nil &&
+		nullableSeedStringMatches(row.ParentID, seed.ParentID) && row.Name == seed.Name && row.Path == seed.Path &&
+		row.MenuType == seed.Type && nullableSeedStringMatches(row.Component, seed.Component) &&
+		nullableSeedStringMatches(row.Redirect, seed.Redirect) && nullableSeedStringMatches(row.Icon, seed.Icon) &&
+		nullableSeedStringMatches(row.Permission, seed.Permission) && row.SortOrder == seed.Sort &&
+		row.Visible == seed.Visible && row.Status == statusForSeed(seed.Active) && row.KeepAlive == seed.KeepAlive && row.External == seed.External
+}
+
+func (row navigationPermissionSeedRow) matches(seed initialPermissionSeed) bool {
+	return row.ID == seed.ID && row.TenantID == initialTenantID && row.OrgID == nil &&
+		row.Name == seed.Name && row.Method == seed.Method && row.Path == seed.Path && row.Status == statusForSeed(seed.Active)
+}
+
+func nullableSeedStringMatches(actual *string, expected string) bool {
+	if expected == "" {
+		return actual == nil
+	}
+	return actual != nil && *actual == expected
+}
+
+func statusForSeed(active bool) string {
+	if active {
+		return "active"
+	}
+	return "disabled"
+}
+
+func optionalSeedString(value string) *string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	trimmed := strings.TrimSpace(value)
+	return &trimmed
 }
 
 func newInstallationUserRow(username, passwordHash string) (installationUserRow, error) {
@@ -118,7 +297,7 @@ func newInstallationUserRow(username, passwordHash string) (installationUserRow,
 	if err != nil || identifierType != authdomain.IdentifierUsername || strings.TrimSpace(passwordHash) == "" {
 		return installationUserRow{}, authdomain.ErrInvalidIdentifier
 	}
-	return installationUserRow{Username: username, UsernameNormalized: &normalized, PasswordHash: passwordHash}, nil
+	return installationUserRow{TenantID: initialTenantID, Username: username, UsernameNormalized: &normalized, PasswordHash: passwordHash}, nil
 }
 
 func (s *GORMIdentityStore) Rollback(ctx context.Context, reference string) error {
@@ -142,17 +321,28 @@ func (s *GORMIdentityStore) Rollback(ctx context.Context, reference string) erro
 		if metadata.UserID == 0 || metadata.RoleID != installationRoleID {
 			return errors.New("installation identity metadata is incomplete")
 		}
+		seedMenuIDs, seedPermissionIDs := filterKnownInitialNavigationSeedIDs(metadata.SeedMenuIDs, metadata.SeedPermissionIDs)
+		for _, id := range seedMenuIDs {
+			if err := tx.Exec("DELETE FROM menus WHERE id = ? AND tenant_id = ?", id, initialTenantID).Error; err != nil {
+				return err
+			}
+		}
+		for _, id := range seedPermissionIDs {
+			if err := tx.Exec("DELETE FROM permissions WHERE id = ? AND tenant_id = ?", id, initialTenantID).Error; err != nil {
+				return err
+			}
+		}
 		for _, operation := range []struct {
 			query string
 			args  []any
 		}{
 			{query: "DELETE FROM auth_audit_events WHERE user_id = ?", args: []any{metadata.UserID}},
 			{query: "DELETE FROM auth_sessions WHERE user_id = ?", args: []any{metadata.UserID}},
-			{query: "DELETE FROM user_roles WHERE user_id = ? AND role_id = ?", args: []any{metadata.UserID, metadata.RoleID}},
-			{query: "DELETE FROM iam_data_scopes WHERE role_id = ?", args: []any{metadata.RoleID}},
-			{query: "DELETE FROM iam_policies WHERE role_id = ?", args: []any{metadata.RoleID}},
-			{query: "DELETE FROM users WHERE id = ? AND username = ?", args: []any{metadata.UserID, metadata.Username}},
-			{query: "DELETE FROM roles WHERE id = ?", args: []any{metadata.RoleID}},
+			{query: "DELETE FROM user_roles WHERE tenant_id = ? AND user_id = ? AND role_id = ?", args: []any{initialTenantID, metadata.UserID, metadata.RoleID}},
+			{query: "DELETE FROM iam_data_scopes WHERE tenant_id = ? AND role_id = ?", args: []any{initialTenantID, metadata.RoleID}},
+			{query: "DELETE FROM iam_policies WHERE tenant_id = ? AND role_id = ?", args: []any{initialTenantID, metadata.RoleID}},
+			{query: "DELETE FROM users WHERE tenant_id = ? AND id = ? AND username = ?", args: []any{initialTenantID, metadata.UserID, metadata.Username}},
+			{query: "DELETE FROM roles WHERE tenant_id = ? AND id = ?", args: []any{initialTenantID, metadata.RoleID}},
 			{query: "DELETE FROM app_metadata WHERE metadata_key = ?", args: []any{installationMetadataKey}},
 		} {
 			if err := tx.Exec(operation.query, operation.args...).Error; err != nil {

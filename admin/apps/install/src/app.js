@@ -7,7 +7,8 @@ const applyEndpoint = '/api/system/install/v1/apply';
 const progressEndpoint = '/api/system/install/v1/progress';
 const retryEndpoint = '/api/system/install/v1/retry';
 const rollbackEndpoint = '/api/system/install/v1/rollback';
-const installationCompletedMessage = '安装已完成。请停止旧服务端，回到仓库根目录，并按下方两个终端命令分别重启服务端和启动管理端；管理端先运行 pnpm install，再运行 pnpm run dev。';
+const installationCompletedMessage =
+  '安装已完成。请停止旧服务端，回到仓库根目录，并按下方两个终端命令分别重启服务端和启动管理端；管理端先运行 pnpm install，再运行 pnpm run dev。';
 
 const title = document.querySelector('#status-title');
 const badge = document.querySelector('#status-badge');
@@ -48,7 +49,9 @@ const adminPassword = document.querySelector('#admin-password');
 const adminPasswordConfirm = document.querySelector('#admin-password-confirm');
 const applyButton = document.querySelector('#apply-button');
 const applyResult = document.querySelector('#apply-result');
-const installFailureDetails = document.querySelector('#install-failure-details');
+const installFailureDetails = document.querySelector(
+  '#install-failure-details',
+);
 const failureReason = document.querySelector('#failure-reason');
 const failureStep = document.querySelector('#failure-step');
 const failureErrorCode = document.querySelector('#failure-error-code');
@@ -56,13 +59,19 @@ const failureErrorKey = document.querySelector('#failure-error-key');
 const failureReasonKey = document.querySelector('#failure-reason-key');
 const failureOperation = document.querySelector('#failure-operation');
 const failureDatabaseCode = document.querySelector('#failure-database-code');
+const failureResourceKind = document.querySelector('#failure-resource-kind');
+const failureResourceId = document.querySelector('#failure-resource-id');
 const failureJobId = document.querySelector('#failure-job-id');
 const rollbackButton = document.querySelector('#rollback-button');
 const applyProgress = document.querySelector('#apply-progress');
 const applySteps = document.querySelector('#apply-steps');
 const nextSteps = document.querySelector('#next-steps');
 
-const uiLabels = { antd: 'Ant Design Vue', ele: 'Element Plus', naive: 'Naive UI' };
+const uiLabels = {
+  antd: 'Ant Design Vue',
+  ele: 'Element Plus',
+  naive: 'Naive UI',
+};
 const modeLabels = {
   embedded: '嵌入式单包',
   standalone: '静态资源独立部署',
@@ -95,14 +104,17 @@ let rollbackJobId = null;
 let statusRefreshTimer = null;
 
 function browserLanguageHeader() {
-  const languages = Array.isArray(navigator.languages) && navigator.languages.length
-    ? navigator.languages
-    : [navigator.language || 'en-US'];
+  const languages =
+    Array.isArray(navigator.languages) && navigator.languages.length
+      ? navigator.languages
+      : [navigator.language || 'en-US'];
   return languages.join(',');
 }
 
 function suggestBrowserLocale() {
-  const browserLocale = /^zh(?:-|$)/i.test(navigator.language || '') ? 'zh-CN' : 'en-US';
+  const browserLocale = /^zh(?:-|$)/i.test(navigator.language || '')
+    ? 'zh-CN'
+    : 'en-US';
   localeChoice.value = browserLocale;
   localeSuggestion.textContent = `已根据浏览器语言建议 ${browserLocale}，可手动调整。`;
 }
@@ -146,7 +158,9 @@ async function loadCapabilities() {
     renderCapabilities(envelope.data);
   } catch {
     platformSummary.textContent = '未识别';
-    capabilityList.replaceChildren(createCapabilityMessage('暂未读取到运行工具信息'));
+    capabilityList.replaceChildren(
+      createCapabilityMessage('暂未读取到运行工具信息'),
+    );
   }
 }
 
@@ -177,7 +191,8 @@ function renderStatus(status) {
     badge.textContent = '已安装';
     badge.dataset.tone = 'success';
     message.textContent = installationCompletedMessage;
-    selectedUi.textContent = uiLabels[status.selectedUi] || status.selectedUi || '—';
+    selectedUi.textContent =
+      uiLabels[status.selectedUi] || status.selectedUi || '—';
     selectedUiSummary.textContent = selectedUi.textContent;
     selectedMode.textContent = modeLabels[status.mode] || status.mode || '—';
     selectionPanel.hidden = true;
@@ -195,8 +210,10 @@ function renderStatus(status) {
     title.textContent = '安装任务正在执行';
     badge.textContent = '安装中';
     badge.dataset.tone = 'pending';
-    message.textContent = '安装事务正在执行；若服务中断，重新启动服务端并在此页重新提交即可恢复。';
-    selectedUi.textContent = uiLabels[status.selectedUi] || status.selectedUi || '—';
+    message.textContent =
+      '安装事务正在执行；若服务中断，重新启动服务端并在此页重新提交即可恢复。';
+    selectedUi.textContent =
+      uiLabels[status.selectedUi] || status.selectedUi || '—';
     selectedUiSummary.textContent = selectedUi.textContent;
     selectedMode.textContent = '安装中';
     selectionPanel.hidden = true;
@@ -215,7 +232,8 @@ function renderStatus(status) {
     title.textContent = '等待选择管理界面';
     badge.textContent = '等待初始化';
     badge.dataset.tone = 'pending';
-    message.textContent = '等待执行 pnpm run init 并选择一个 UI；完成后此页面会自动继续。';
+    message.textContent =
+      '等待执行 pnpm run init 并选择一个 UI；完成后此页面会自动继续。';
     details.hidden = true;
     selectionPanel.hidden = true;
     connectionPanel.hidden = true;
@@ -230,7 +248,9 @@ function renderStatus(status) {
   }
 
   if (status.state === 'inconsistent') {
-    renderError('初始化尚未完成，请返回终端重新运行 pnpm run init 继续恢复；需要先查看 checkpoint 时可运行 pnpm run init -- --check。');
+    renderError(
+      '初始化尚未完成，请返回终端重新运行 pnpm run init 继续恢复；需要先查看 checkpoint 时可运行 pnpm run init -- --check。',
+    );
     return;
   }
 
@@ -238,7 +258,8 @@ function renderStatus(status) {
   badge.textContent = '待安装';
   badge.dataset.tone = 'ready';
   message.textContent = '本机安装状态可用，接下来将检查运行环境和目录权限。';
-  selectedUi.textContent = uiLabels[status.selectedUi] || status.selectedUi || '—';
+  selectedUi.textContent =
+    uiLabels[status.selectedUi] || status.selectedUi || '—';
   selectedUiSummary.textContent = selectedUi.textContent;
   selectedMode.textContent = '尚未选择';
   selectionPanel.hidden = false;
@@ -268,7 +289,8 @@ function renderError(detail = '请确认服务已启动，然后重新检查。'
 
 function renderCapabilities(capabilities) {
   const platform = capabilities.platform || {};
-  platformSummary.textContent = [platform.os, platform.arch].filter(Boolean).join(' / ') || '未识别';
+  platformSummary.textContent =
+    [platform.os, platform.arch].filter(Boolean).join(' / ') || '未识别';
   const items = Array.isArray(capabilities.tools) ? capabilities.tools : [];
   const nodes = items.map((tool) => {
     const item = document.createElement('li');
@@ -280,7 +302,9 @@ function renderCapabilities(capabilities) {
     item.append(name, state);
     return item;
   });
-  capabilityList.replaceChildren(...(nodes.length ? nodes : [createCapabilityMessage('未返回工具信息')]));
+  capabilityList.replaceChildren(
+    ...(nodes.length ? nodes : [createCapabilityMessage('未返回工具信息')]),
+  );
 }
 
 function createCapabilityMessage(value) {
@@ -299,7 +323,8 @@ async function requestPlan(event) {
   updateApplyButton();
   planButton.disabled = true;
   planButton.textContent = '正在检查';
-  planMessage.textContent = '正在验证目录的读取、写入、创建、重命名与删除能力。';
+  planMessage.textContent =
+    '正在验证目录的读取、写入、创建、重命名与删除能力。';
   planMessage.dataset.tone = 'pending';
   planPanel.hidden = true;
   try {
@@ -347,15 +372,20 @@ function renderPlan(plan) {
     const permission = entry.permission || {};
     path.textContent = String(entry.path || '—');
     action.textContent = actionLabel(entry.action);
-    const permitted = permission.canRead && permission.canRename && permission.canDelete;
-    ready.textContent = permitted || entry.action === 'keep' ? '可用' : '需处理';
-    ready.dataset.ready = permitted || entry.action === 'keep' ? 'true' : 'false';
+    const permitted =
+      permission.canRead && permission.canRename && permission.canDelete;
+    ready.textContent =
+      permitted || entry.action === 'keep' ? '可用' : '需处理';
+    ready.dataset.ready =
+      permitted || entry.action === 'keep' ? 'true' : 'false';
     item.append(path, action, ready);
     return item;
   });
   planEntries.replaceChildren(...nodes);
   const ready = plan.canBuild && plan.canWriteEnv && plan.canCleanup;
-  planMessage.textContent = ready ? '预检通过，可以继续填写服务连接信息。' : '部分目录权限需要处理，尚未执行任何文件变更。';
+  planMessage.textContent = ready
+    ? '预检通过，可以继续填写服务连接信息。'
+    : '部分目录权限需要处理，尚未执行任何文件变更。';
   planMessage.dataset.tone = ready ? 'success' : 'error';
   planPanel.hidden = false;
   connectionPanel.hidden = !ready;
@@ -367,7 +397,11 @@ function yesNo(value) {
 }
 
 function actionLabel(action) {
-  return { keep: '保留', remove: '待移除', create: '待创建', write: '待写入' }[action] || '检查';
+  return (
+    { keep: '保留', remove: '待移除', create: '待创建', write: '待写入' }[
+      action
+    ] || '检查'
+  );
 }
 
 async function requestDependencyCheck(event, endpoint, resultElement) {
@@ -390,7 +424,10 @@ async function requestDependencyCheck(event, endpoint, resultElement) {
     const response = await fetch(endpoint, {
       method: 'POST',
       credentials: 'same-origin',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify(formValues),
     });
     const envelope = await response.json();
@@ -398,7 +435,8 @@ async function requestDependencyCheck(event, endpoint, resultElement) {
       throw new Error('dependency check failed');
     }
     const result = envelope.data;
-    if (endpoint === databaseCheckEndpoint) databaseCheckPassed = Boolean(result.ok);
+    if (endpoint === databaseCheckEndpoint)
+      databaseCheckPassed = Boolean(result.ok);
     if (endpoint === redisCheckEndpoint) redisCheckPassed = Boolean(result.ok);
     resultElement.textContent = result.ok
       ? `连接成功，耗时 ${Number(result.latencyMs || 0)} ms。`
@@ -411,13 +449,20 @@ async function requestDependencyCheck(event, endpoint, resultElement) {
     resultElement.dataset.tone = 'error';
   } finally {
     submit.disabled = false;
-    submit.textContent = endpoint === databaseCheckEndpoint ? '测试数据库连接' : '测试 Redis 连接';
+    submit.textContent =
+      endpoint === databaseCheckEndpoint ? '测试数据库连接' : '测试 Redis 连接';
     updateApplyButton();
   }
 }
 
 function updateApplyButton() {
-  applyButton.disabled = !currentPlan || !currentPlan.canBuild || !currentPlan.canWriteEnv || !currentPlan.canCleanup || !databaseCheckPassed || !redisCheckPassed;
+  applyButton.disabled =
+    !currentPlan ||
+    !currentPlan.canBuild ||
+    !currentPlan.canWriteEnv ||
+    !currentPlan.canCleanup ||
+    !databaseCheckPassed ||
+    !redisCheckPassed;
 }
 
 function invalidateDependencyCheck(resultElement) {
@@ -500,7 +545,12 @@ function renderJobProgress(job) {
   const step = stepLabels[job.currentStep] || '正在执行安装任务';
   setProgress(progress, `${step}，${progress}%`);
   applyResult.textContent = `${step}（${progress}%）`;
-  applyResult.dataset.tone = job.state === 'failed' ? 'error' : job.state === 'completed' ? 'success' : 'pending';
+  applyResult.dataset.tone =
+    job.state === 'failed'
+      ? 'error'
+      : job.state === 'completed'
+        ? 'success'
+        : 'pending';
   if (job.state !== 'failed') clearInstallationFailure();
   rollbackButton.hidden = !(job.state === 'failed' && job.canRollback);
   applySteps.replaceChildren();
@@ -524,10 +574,13 @@ function wait(milliseconds) {
 async function pollInstallation(jobId) {
   for (let attempt = 0; attempt < 1800; attempt += 1) {
     if (attempt > 0) await wait(1000);
-    const response = await fetch(`${progressEndpoint}/${encodeURIComponent(jobId)}`, {
-      credentials: 'same-origin',
-      headers: { Accept: 'application/json' },
-    });
+    const response = await fetch(
+      `${progressEndpoint}/${encodeURIComponent(jobId)}`,
+      {
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json' },
+      },
+    );
     const envelope = await response.json();
     if (!response.ok || envelope.code !== 0 || !envelope.data) {
       throw new Error('installation progress unavailable');
@@ -541,22 +594,39 @@ async function pollInstallation(jobId) {
 
 function installationFailureMessage(job) {
   const databaseReasons = {
-    tls_mode_mismatch: '数据库未启用 TLS，且数据库连接测试与迁移采用了不同模式；请统一 TLS 配置。当前输入已保留。',
-    tls_configuration_failed: '数据库 TLS 证书、CA 或主机名校验失败，请检查加密连接配置。当前输入已保留。',
-    authentication_failed: '数据库身份验证失败，请检查账号、密码和访问规则。当前输入已保留。',
-    permission_denied: '数据库账号缺少建表、索引或约束变更权限。当前输入已保留。',
-    database_unavailable: '数据库迁移连接不可用，请检查地址、服务状态及 TLS 模式。当前输入已保留。',
-    database_busy: '数据库当前被锁定或事务发生冲突，请等待占用结束后重试。当前输入已保留。',
-    schema_unavailable: '目标数据库 schema 不存在或当前账号不可访问。当前输入已保留。',
-    schema_conflict: '目标数据库已存在冲突的表、字段或约束，请核对现有结构。当前输入已保留。',
-    migration_dirty: '数据库迁移版本处于 dirty 状态，需要先核对失败版本再继续。当前输入已保留。',
-    migration_statement_failed: '数据库迁移语句执行失败，请按任务 ID 和数据库代码定位。当前输入已保留。',
-    migration_status_failed: '数据库迁移状态读取或校验失败，请按任务 ID 定位。当前输入已保留。',
-    migration_close_failed: '数据库迁移已经执行，但连接收尾失败，请核对迁移状态后重试。当前输入已保留。',
-    invalid_configuration: '数据库迁移配置不完整，请重新检查连接参数。当前输入已保留。',
-    unknown: '数据库迁移出现未分类故障，请按任务 ID 在服务端日志中定位。当前输入已保留。',
+    tls_mode_mismatch:
+      '数据库未启用 TLS，且数据库连接测试与迁移采用了不同模式；请统一 TLS 配置。当前输入已保留。',
+    tls_configuration_failed:
+      '数据库 TLS 证书、CA 或主机名校验失败，请检查加密连接配置。当前输入已保留。',
+    authentication_failed:
+      '数据库身份验证失败，请检查账号、密码和访问规则。当前输入已保留。',
+    permission_denied:
+      '数据库账号缺少建表、索引或约束变更权限。当前输入已保留。',
+    database_unavailable:
+      '数据库迁移连接不可用，请检查地址、服务状态及 TLS 模式。当前输入已保留。',
+    database_busy:
+      '数据库当前被锁定或事务发生冲突，请等待占用结束后重试。当前输入已保留。',
+    schema_unavailable:
+      '目标数据库 schema 不存在或当前账号不可访问。当前输入已保留。',
+    schema_conflict:
+      '目标数据库已存在冲突的表、字段或约束，请核对现有结构。当前输入已保留。',
+    migration_dirty:
+      '数据库迁移版本处于 dirty 状态，需要先核对失败版本再继续。当前输入已保留。',
+    migration_statement_failed:
+      '数据库迁移语句执行失败，请按任务 ID 和数据库代码定位。当前输入已保留。',
+    migration_status_failed:
+      '数据库迁移状态读取或校验失败，请按任务 ID 定位。当前输入已保留。',
+    migration_close_failed:
+      '数据库迁移已经执行，但连接收尾失败，请核对迁移状态后重试。当前输入已保留。',
+    invalid_configuration:
+      '数据库迁移配置不完整，请重新检查连接参数。当前输入已保留。',
+    navigation_seed_conflict:
+      '数据库中已有同 ID 但定义不同的菜单或权限种子；请根据下方冲突资源定位并核对历史数据。当前输入已保留。',
+    unknown:
+      '数据库迁移出现未分类故障，请按任务 ID 在服务端日志中定位。当前输入已保留。',
   };
-  if (databaseReasons[job?.failureReason]) return databaseReasons[job.failureReason];
+  if (databaseReasons[job?.failureReason])
+    return databaseReasons[job.failureReason];
   if (job?.errorKey === 'installation_running') {
     return '检测到另一项初始化或安装任务正在执行。若终端中的 pnpm run init 已结束，请重新运行 pnpm run init 继续恢复。当前输入已保留。';
   }
@@ -569,19 +639,26 @@ function installationFailureMessage(job) {
   if (job?.errorKey === 'validation_failed') {
     const reasons = {
       plan: '安装方案或目录预检未通过，请重新检查目录权限。当前输入已保留。',
-      database: '数据库连接复核未通过，请检查数据库服务和当前配置。当前输入已保留。',
-      redis: 'Redis 连接复核未通过，请检查 Redis 服务和当前配置。当前输入已保留。',
-      journal: '安装事务状态校验未通过，请保留当前目录并重新检查初始化状态。当前输入已保留。',
+      database:
+        '数据库连接复核未通过，请检查数据库服务和当前配置。当前输入已保留。',
+      redis:
+        'Redis 连接复核未通过，请检查 Redis 服务和当前配置。当前输入已保留。',
+      journal:
+        '安装事务状态校验未通过，请保留当前目录并重新检查初始化状态。当前输入已保留。',
       coordination: '安装执行权释放或校验未完成，请稍后重试。当前输入已保留。',
     };
-    return reasons[job?.failureStep] || '安装前置校验未通过，请根据失败位置检查配置。当前输入已保留。';
+    return (
+      reasons[job?.failureStep] ||
+      '安装前置校验未通过，请根据失败位置检查配置。当前输入已保留。'
+    );
   }
   if (job?.errorKey === 'request_unavailable') {
     return '安装请求或进度查询未完成，请确认服务端仍在运行。当前输入已保留。';
   }
   if (job?.errorKey === 'internal_error') {
     const reasons = {
-      schema: '数据库结构迁移执行失败，请查看失败任务定位信息。当前输入已保留。',
+      schema:
+        '数据库结构迁移执行失败，请查看失败任务定位信息。当前输入已保留。',
       identity: '初始管理员创建失败，请查看失败任务定位信息。当前输入已保留。',
       environment: '运行配置写入失败，请检查目录权限。当前输入已保留。',
       journal: '安装事务记录写入失败，请检查安装状态目录。当前输入已保留。',
@@ -589,7 +666,10 @@ function installationFailureMessage(job) {
       lock: '安装锁写入失败，请检查安装状态目录。当前输入已保留。',
       recovery: '上次安装事务恢复失败，请查看服务端终端。当前输入已保留。',
     };
-    return reasons[job?.failureStep] || '服务端安装执行失败，请查看失败任务定位信息。当前输入已保留。';
+    return (
+      reasons[job?.failureStep] ||
+      '服务端安装执行失败，请查看失败任务定位信息。当前输入已保留。'
+    );
   }
   return '安装未完成，请根据失败位置和错误标识继续排查。当前输入已保留。';
 }
@@ -604,6 +684,8 @@ function installationFailureDiagnostics(job) {
     reasonKey: String(job?.failureReason || '未提供'),
     operation: String(job?.failureOperation || '未提供'),
     databaseCode: String(job?.databaseCode || '—'),
+    resourceKind: String(job?.failureResourceKind || '—'),
+    resourceId: String(job?.failureResourceId || '—'),
     jobId: String(job?.id || '未提供'),
   };
 }
@@ -617,6 +699,8 @@ function renderInstallationFailure(job) {
   failureReasonKey.textContent = diagnostics.reasonKey;
   failureOperation.textContent = diagnostics.operation;
   failureDatabaseCode.textContent = diagnostics.databaseCode;
+  failureResourceKind.textContent = diagnostics.resourceKind;
+  failureResourceId.textContent = diagnostics.resourceId;
   failureJobId.textContent = diagnostics.jobId;
   installFailureDetails.hidden = false;
   installFailureDetails.focus();
@@ -624,7 +708,18 @@ function renderInstallationFailure(job) {
 
 function clearInstallationFailure() {
   installFailureDetails.hidden = true;
-  for (const output of [failureReason, failureStep, failureErrorCode, failureErrorKey, failureReasonKey, failureOperation, failureDatabaseCode, failureJobId]) {
+  for (const output of [
+    failureReason,
+    failureStep,
+    failureErrorCode,
+    failureErrorKey,
+    failureReasonKey,
+    failureOperation,
+    failureDatabaseCode,
+    failureResourceKind,
+    failureResourceId,
+    failureJobId,
+  ]) {
     output.textContent = '—';
   }
 }
@@ -633,12 +728,19 @@ function announceApplyError(detail, diagnosticsAvailable = false) {
   applyResult.textContent = detail;
   applyResult.dataset.tone = 'error';
   applyResult.setAttribute('role', diagnosticsAvailable ? 'status' : 'alert');
-  applyResult.setAttribute('aria-live', diagnosticsAvailable ? 'polite' : 'assertive');
+  applyResult.setAttribute(
+    'aria-live',
+    diagnosticsAvailable ? 'polite' : 'assertive',
+  );
   if (diagnosticsAvailable) return;
   applyResult.focus();
 }
 
-async function postInstallationRequest(targetEndpoint, payload, fetcher = fetch) {
+async function postInstallationRequest(
+  targetEndpoint,
+  payload,
+  fetcher = fetch,
+) {
   const response = await fetcher(targetEndpoint, {
     method: 'POST',
     credentials: 'same-origin',
@@ -653,12 +755,20 @@ async function postInstallationRequest(targetEndpoint, payload, fetcher = fetch)
   return { response, envelope };
 }
 
-async function submitInstallationRequest(payload, failedJobId, fetcher = fetch) {
+async function submitInstallationRequest(
+  payload,
+  failedJobId,
+  fetcher = fetch,
+) {
   const targetEndpoint = failedJobId
     ? `${retryEndpoint}/${encodeURIComponent(failedJobId)}`
     : applyEndpoint;
   let outcome = await postInstallationRequest(targetEndpoint, payload, fetcher);
-  if (failedJobId && outcome.response.status === 404 && outcome.envelope?.code === 30000) {
+  if (
+    failedJobId &&
+    outcome.response.status === 404 &&
+    outcome.envelope?.code === 30000
+  ) {
     clearFailedJobActions();
     outcome = await postInstallationRequest(applyEndpoint, payload, fetcher);
   }
@@ -676,7 +786,9 @@ function commitCompletedInstallation(status, result) {
   renderStatus(status);
 }
 
-async function reconcileCompletedInstallation(statusReader = fetchInstallationStatus) {
+async function reconcileCompletedInstallation(
+  statusReader = fetchInstallationStatus,
+) {
   const status = await statusReader();
   if (!status?.installed) return false;
   commitCompletedInstallation(status);
@@ -699,7 +811,8 @@ async function requestInstallation(event) {
 
   applyButton.disabled = true;
   applyButton.textContent = '安装中';
-  applyResult.textContent = '服务端正在按顺序执行迁移、管理员初始化、配置写入和安装锁定。';
+  applyResult.textContent =
+    '服务端正在按顺序执行迁移、管理员初始化、配置写入和安装锁定。';
   applyResult.dataset.tone = 'pending';
   applyResult.setAttribute('role', 'status');
   applyResult.setAttribute('aria-live', 'polite');
@@ -712,9 +825,15 @@ async function requestInstallation(event) {
       locale: localeChoice.value,
       database: dependencies.database,
       redis: dependencies.redis,
-      admin: { username: adminUsername.value.trim(), password: adminPassword.value },
+      admin: {
+        username: adminUsername.value.trim(),
+        password: adminPassword.value,
+      },
     };
-    const { response, envelope } = await submitInstallationRequest(payload, retryJobId);
+    const { response, envelope } = await submitInstallationRequest(
+      payload,
+      retryJobId,
+    );
     if (!response.ok || envelope.code !== 0 || !envelope.data) {
       if (installationCompletionDetected(envelope)) {
         installationCompleted = await reconcileCompletedInstallation();
@@ -724,7 +843,14 @@ async function requestInstallation(event) {
         id: envelope?.traceId || envelope?.meta?.requestId,
         failureStep: 'request',
         errorCode: Number.isInteger(envelope?.code) ? envelope.code : undefined,
-        errorKey: envelope?.code === 10007 ? 'installation_running' : envelope?.code === 10006 ? 'installation_completed' : envelope?.code === 10000 ? 'invalid_request' : 'request_unavailable',
+        errorKey:
+          envelope?.code === 10007
+            ? 'installation_running'
+            : envelope?.code === 10006
+              ? 'installation_completed'
+              : envelope?.code === 10000
+                ? 'invalid_request'
+                : 'request_unavailable',
       };
       announceApplyError(installationFailureMessage(failure), true);
       renderInstallationFailure(failure);
@@ -745,13 +871,23 @@ async function requestInstallation(event) {
         return;
       }
     }
-    const completedStatus = { installed: true, installerVersion: 'current', mode: result.mode };
+    const completedStatus = {
+      installed: true,
+      installerVersion: 'current',
+      mode: result.mode,
+    };
     completedStatus.selectedUi = result.selectedUi;
     commitCompletedInstallation(completedStatus, result);
     installationCompleted = true;
   } catch {
-    announceApplyError('安装请求未完成，请确认服务仍在运行。当前输入已保留；服务恢复后可直接重试，修改连接配置后再重新测试。', true);
-    renderInstallationFailure({ failureStep: 'request', errorKey: 'request_unavailable' });
+    announceApplyError(
+      '安装请求未完成，请确认服务仍在运行。当前输入已保留；服务恢复后可直接重试，修改连接配置后再重新测试。',
+      true,
+    );
+    renderInstallationFailure({
+      failureStep: 'request',
+      errorKey: 'request_unavailable',
+    });
   } finally {
     if (!installationCompleted) {
       applyButton.textContent = retryJobId ? '重新尝试安装' : '开始安装';
@@ -767,25 +903,33 @@ async function requestRollback() {
   applyResult.textContent = '正在按安装清单恢复本次失败事务。';
   applyResult.dataset.tone = 'pending';
   try {
-    const response = await fetch(`${rollbackEndpoint}/${encodeURIComponent(rollbackJobId)}`, {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ confirmRollback: true }),
-    });
+    const response = await fetch(
+      `${rollbackEndpoint}/${encodeURIComponent(rollbackJobId)}`,
+      {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ confirmRollback: true }),
+      },
+    );
     const envelope = await response.json();
     if (!response.ok || envelope.code !== 0 || !envelope.data) {
       throw new Error('rollback request failed');
     }
     renderJobProgress(envelope.data);
     clearInstallationFailure();
-    applyResult.textContent = '本次失败事务已回滚，当前输入仍保留，可以直接重试或修改后再测试。';
+    applyResult.textContent =
+      '本次失败事务已回滚，当前输入仍保留，可以直接重试或修改后再测试。';
     applyResult.dataset.tone = 'success';
     rollbackButton.hidden = true;
     rollbackJobId = null;
     retryJobId = envelope.data.canRetry ? envelope.data.jobId : null;
   } catch {
-    applyResult.textContent = '回滚未完成，请保留当前安装目录并使用离线恢复流程。';
+    applyResult.textContent =
+      '回滚未完成，请保留当前安装目录并使用离线恢复流程。';
     applyResult.dataset.tone = 'error';
   } finally {
     rollbackButton.disabled = false;
@@ -800,7 +944,8 @@ function clearInstallSecrets() {
 }
 
 function clearSensitiveFields(form) {
-  for (const input of form.querySelectorAll('input[type="password"]')) input.value = '';
+  for (const input of form.querySelectorAll('input[type="password"]'))
+    input.value = '';
 }
 
 async function loadAll() {
@@ -810,12 +955,20 @@ async function loadAll() {
 retryButton.addEventListener('click', loadAll);
 suggestBrowserLocale();
 planForm.addEventListener('submit', requestPlan);
-databaseForm.addEventListener('submit', (event) => requestDependencyCheck(event, databaseCheckEndpoint, databaseResult));
-redisForm.addEventListener('submit', (event) => requestDependencyCheck(event, redisCheckEndpoint, redisResult));
+databaseForm.addEventListener('submit', (event) =>
+  requestDependencyCheck(event, databaseCheckEndpoint, databaseResult),
+);
+redisForm.addEventListener('submit', (event) =>
+  requestDependencyCheck(event, redisCheckEndpoint, redisResult),
+);
 adminForm.addEventListener('submit', requestInstallation);
 rollbackButton.addEventListener('click', requestRollback);
-databaseForm.addEventListener('input', () => invalidateDependencyCheck(databaseResult));
-redisForm.addEventListener('input', () => invalidateDependencyCheck(redisResult));
+databaseForm.addEventListener('input', () =>
+  invalidateDependencyCheck(databaseResult),
+);
+redisForm.addEventListener('input', () =>
+  invalidateDependencyCheck(redisResult),
+);
 modeChoice.addEventListener('change', invalidatePlanIfModeChanged);
 databaseDriver.addEventListener('change', () => {
   databasePort.value = databaseDriver.value === 'postgres' ? '5432' : '3306';

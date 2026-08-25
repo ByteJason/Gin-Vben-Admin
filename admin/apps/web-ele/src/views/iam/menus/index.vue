@@ -8,6 +8,9 @@ import type {
 
 import { computed, nextTick, onMounted, reactive, ref } from 'vue';
 
+import { useAccess } from '@vben/access';
+import { ManagementPage } from '@vben/common-ui';
+
 import {
   createIAMMenuApi,
   deleteIAMMenuApi,
@@ -17,6 +20,13 @@ import {
   updateIAMMenuApi,
 } from '#/api/core/iam';
 import { $t } from '#/locales';
+
+const { hasAccessByCodes } = useAccess();
+const canManage = computed(() => hasAccessByCodes(['iam:menus:manage']));
+const canReadComponents = computed(() =>
+  hasAccessByCodes(['iam:components:read']),
+);
+const canEditMenus = computed(() => canManage.value && canReadComponents.value);
 
 type MenuRow = {
   depth: number;
@@ -156,6 +166,7 @@ async function loadMenus() {
 }
 
 async function loadComponents() {
+  if (!canReadComponents.value) return;
   componentsLoading.value = true;
   try {
     components.value = await listIAMComponentsApi();
@@ -189,6 +200,7 @@ function resetForm() {
 }
 
 function openCreateMenu(parentId = '') {
+  if (!canEditMenus.value) return;
   resetForm();
   menuForm.parentId = parentId;
   feedback.value = '';
@@ -196,6 +208,7 @@ function openCreateMenu(parentId = '') {
 }
 
 function openEditMenu(menu: IAMMenu) {
+  if (!canEditMenus.value) return;
   resetForm();
   editingId.value = menu.id;
   Object.assign(menuForm, {
@@ -218,7 +231,7 @@ function validateForm() {
   const name = menuForm.name.trim();
   const path = menuForm.path.trim();
   if (!name || !path || (!isEditing.value && !id)) return false;
-  if (!['directory', 'menu', 'button'].includes(menuForm.type)) return false;
+  if (!['button', 'directory', 'menu'].includes(menuForm.type)) return false;
   if (menuForm.type !== 'directory' && !menuForm.component?.trim())
     return false;
   if (menuForm.parentId?.trim() === menuForm.id.trim()) return false;
@@ -229,6 +242,7 @@ function validateForm() {
 }
 
 async function saveMenu() {
+  if (!canEditMenus.value) return;
   formError.value = '';
   if (!validateForm()) {
     formError.value = String($t('page.iam.menuSaveError'));
@@ -279,6 +293,7 @@ async function saveMenu() {
 }
 
 async function deleteMenu(menu: IAMMenu) {
+  if (!canManage.value) return;
   if (deletingId.value) return;
   if (!window.confirm(String($t('page.iam.menuDeleteConfirm')))) return;
   deletingId.value = menu.id;
@@ -297,11 +312,13 @@ async function deleteMenu(menu: IAMMenu) {
 }
 
 function setSort(menu: IAMMenu, event: Event) {
+  if (!canManage.value) return;
   const value = Number((event.target as HTMLInputElement).value);
   menu.sort = Number.isFinite(value) ? Math.trunc(value) : 0;
 }
 
 async function saveReorder() {
+  if (!canManage.value) return;
   reordering.value = true;
   error.value = '';
   try {
@@ -323,12 +340,13 @@ async function saveReorder() {
 }
 
 onMounted(async () => {
-  await Promise.all([loadMenus(), loadComponents()]);
+  await loadMenus();
+  await loadComponents();
 });
 </script>
 
 <template>
-  <main
+  <ManagementPage
     class="iam-menus-page"
     :aria-busy="loading || saving || reordering"
     aria-labelledby="iam-menus-title"
@@ -340,8 +358,15 @@ onMounted(async () => {
         <p class="description">{{ $t('page.iam.menusDescription') }}</p>
       </div>
       <div class="heading-actions">
-        <span class="scope-chip">{{ $t('page.iam.manage') }}</span>
-        <button class="primary-button" type="button" @click="openCreateMenu()">
+        <span v-if="canManage" class="scope-chip">{{
+          $t('page.iam.manage')
+        }}</span>
+        <button
+          v-if="canEditMenus"
+          class="primary-button"
+          type="button"
+          @click="openCreateMenu()"
+        >
           {{ $t('page.iam.menuCreate') }}
         </button>
       </div>
@@ -378,6 +403,7 @@ onMounted(async () => {
         <div class="table-actions">
           <span class="result-count">{{ menuRows.length }}</span>
           <button
+            v-if="canManage"
             class="secondary-button"
             type="button"
             :disabled="reordering || loading || menus.length === 0"
@@ -431,9 +457,7 @@ onMounted(async () => {
                   class="menu-name"
                   :style="{ paddingLeft: `${row.depth * 18}px` }"
                 >
-                  <span v-if="row.depth" class="tree-branch" aria-hidden="true"
-                    >└</span
-                  >
+                  <span v-if="row.depth" class="tree-branch" aria-hidden="true">└</span>
                   {{ row.menu.name }}
                 </span>
               </td>
@@ -450,6 +474,7 @@ onMounted(async () => {
                   :id="`menu-sort-${row.menu.id}`"
                   class="sort-input"
                   type="number"
+                  :disabled="!canManage"
                   :value="row.menu.sort ?? 0"
                   @input="setSort(row.menu, $event)"
                 />
@@ -476,6 +501,7 @@ onMounted(async () => {
               <td>
                 <div class="row-actions">
                   <button
+                    v-if="canEditMenus"
                     class="link-button"
                     type="button"
                     @click="openCreateMenu(row.menu.id)"
@@ -483,6 +509,7 @@ onMounted(async () => {
                     {{ $t('page.iam.menuCreateChild') }}
                   </button>
                   <button
+                    v-if="canEditMenus"
                     class="link-button"
                     type="button"
                     @click="openEditMenu(row.menu)"
@@ -490,6 +517,7 @@ onMounted(async () => {
                     {{ $t('page.iam.menuEdit') }}
                   </button>
                   <button
+                    v-if="canManage"
                     class="link-button danger-link"
                     type="button"
                     :disabled="deletingId === row.menu.id"
@@ -506,7 +534,7 @@ onMounted(async () => {
     </section>
 
     <section
-      v-if="formOpen"
+      v-if="formOpen && canEditMenus"
       class="menu-dialog-backdrop"
       role="presentation"
       @keydown.esc="closeForm"
@@ -546,10 +574,8 @@ onMounted(async () => {
           {{ formError }}
         </p>
         <form class="menu-form" @submit.prevent="saveMenu">
-          <label v-if="!isEditing" for="menu-id"
-            >{{ $t('page.iam.menuId')
-            }}<span aria-hidden="true"> *</span></label
-          >
+          <label v-if="!isEditing" for="menu-id">{{ $t('page.iam.menuId')
+            }}<span aria-hidden="true"> *</span></label>
           <input
             v-if="!isEditing"
             id="menu-id"
@@ -558,10 +584,8 @@ onMounted(async () => {
             maxlength="64"
             autocomplete="off"
           />
-          <label for="menu-name"
-            >{{ $t('page.iam.menuName')
-            }}<span aria-hidden="true"> *</span></label
-          >
+          <label for="menu-name">{{ $t('page.iam.menuName')
+            }}<span aria-hidden="true"> *</span></label>
           <input
             id="menu-name"
             v-model="menuForm.name"
@@ -569,10 +593,8 @@ onMounted(async () => {
             maxlength="191"
             autocomplete="off"
           />
-          <label for="menu-path"
-            >{{ $t('page.iam.menuPath')
-            }}<span aria-hidden="true"> *</span></label
-          >
+          <label for="menu-path">{{ $t('page.iam.menuPath')
+            }}<span aria-hidden="true"> *</span></label>
           <input
             id="menu-path"
             v-model="menuForm.path"
@@ -580,10 +602,8 @@ onMounted(async () => {
             maxlength="255"
             autocomplete="off"
           />
-          <label for="menu-type"
-            >{{ $t('page.iam.menuType')
-            }}<span aria-hidden="true"> *</span></label
-          >
+          <label for="menu-type">{{ $t('page.iam.menuType')
+            }}<span aria-hidden="true"> *</span></label>
           <select id="menu-type" v-model="menuForm.type">
             <option value="directory">
               {{ $t('page.iam.menuDirectory') }}
@@ -651,22 +671,14 @@ onMounted(async () => {
             min="-1000000"
             max="1000000"
           />
-          <label class="checkbox-field"
-            ><input v-model="menuForm.visible" type="checkbox" />
-            {{ $t('page.iam.menuVisible') }}</label
-          >
-          <label class="checkbox-field"
-            ><input v-model="menuForm.active" type="checkbox" />
-            {{ $t('page.iam.menuActive') }}</label
-          >
-          <label class="checkbox-field"
-            ><input v-model="menuForm.keepAlive" type="checkbox" />
-            {{ $t('page.iam.menuKeepAlive') }}</label
-          >
-          <label class="checkbox-field"
-            ><input v-model="menuForm.external" type="checkbox" />
-            {{ $t('page.iam.menuExternal') }}</label
-          >
+          <label class="checkbox-field"><input v-model="menuForm.visible" type="checkbox" />
+            {{ $t('page.iam.menuVisible') }}</label>
+          <label class="checkbox-field"><input v-model="menuForm.active" type="checkbox" />
+            {{ $t('page.iam.menuActive') }}</label>
+          <label class="checkbox-field"><input v-model="menuForm.keepAlive" type="checkbox" />
+            {{ $t('page.iam.menuKeepAlive') }}</label>
+          <label class="checkbox-field"><input v-model="menuForm.external" type="checkbox" />
+            {{ $t('page.iam.menuExternal') }}</label>
           <div class="dialog-actions">
             <button
               class="secondary-button"
@@ -683,37 +695,38 @@ onMounted(async () => {
         </form>
       </div>
     </section>
-  </main>
+  </ManagementPage>
 </template>
 
 <style scoped>
 .iam-menus-page {
-  max-width: 1440px;
-  padding: 24px;
-  margin: 0 auto;
   color: hsl(var(--foreground));
 }
+
 .page-heading,
 .table-heading,
 .dialog-heading {
   display: flex;
   align-items: center;
 }
+
 .page-heading {
   gap: 24px;
   align-items: flex-start;
   justify-content: space-between;
   margin-bottom: 20px;
 }
+
 .heading-actions,
 .table-actions,
 .row-actions,
 .dialog-actions {
   display: flex;
-  align-items: center;
-  gap: 8px;
   flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
 }
+
 .eyebrow {
   margin: 0;
   font-size: 0.75rem;
@@ -722,60 +735,73 @@ onMounted(async () => {
   text-transform: uppercase;
   letter-spacing: 0.12em;
 }
+
 h1,
 h2 {
   margin: 4px 0 8px;
 }
+
 h1 {
   font-size: clamp(1.5rem, 2vw, 2rem);
 }
+
 h2 {
   font-size: 1.05rem;
 }
+
 .description,
 .table-help {
   max-width: 760px;
   margin: 0;
   color: hsl(var(--muted-foreground));
 }
+
 .table-help {
   font-size: 0.85rem;
 }
+
 .scope-chip,
 .status-pill {
   display: inline-flex;
   align-items: center;
   min-height: 28px;
   padding: 4px 10px;
-  border-radius: 999px;
   font-size: 0.78rem;
   font-weight: 650;
+  border-radius: 999px;
 }
+
 .scope-chip {
   color: hsl(var(--primary));
-  background: hsl(var(--primary) / 0.1);
+  background: hsl(var(--primary) / 10%);
 }
+
 .status-pill[data-status='active'] {
-  color: hsl(142 70% 30%);
-  background: hsl(142 70% 45% / 0.14);
+  color: hsl(142deg 70% 30%);
+  background: hsl(142deg 70% 45% / 14%);
 }
+
 .status-pill[data-status='disabled'] {
   color: hsl(var(--muted-foreground));
   background: hsl(var(--muted));
 }
+
 .feedback {
   padding: 10px 12px;
   margin: 12px 0;
   border-radius: 8px;
 }
+
 .feedback-error {
-  color: hsl(0 65% 36%);
-  background: hsl(0 75% 55% / 0.1);
+  color: hsl(0deg 65% 36%);
+  background: hsl(0deg 75% 55% / 10%);
 }
+
 .feedback-success {
-  color: hsl(142 70% 30%);
-  background: hsl(142 70% 45% / 0.12);
+  color: hsl(142deg 70% 30%);
+  background: hsl(142deg 70% 45% / 12%);
 }
+
 .sr-status,
 .sr-only {
   position: absolute;
@@ -783,39 +809,46 @@ h2 {
   height: 1px;
   padding: 0;
   overflow: hidden;
-  clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+  clip-path: inset(50%);
 }
+
 .table-card {
   overflow: hidden;
   background: hsl(var(--card));
   border: 1px solid hsl(var(--border));
   border-radius: 14px;
 }
+
 .table-heading {
   justify-content: space-between;
   padding: 16px 18px;
   border-bottom: 1px solid hsl(var(--border));
 }
+
 .result-count {
-  color: hsl(var(--muted-foreground));
   font-size: 0.85rem;
+  color: hsl(var(--muted-foreground));
 }
+
 .table-wrap {
   overflow-x: auto;
 }
+
 table {
   width: 100%;
   min-width: 1120px;
   border-collapse: collapse;
 }
+
 th,
 td {
   padding: 13px 16px;
   text-align: left;
   border-bottom: 1px solid hsl(var(--border));
 }
+
 th {
   font-size: 0.78rem;
   font-weight: 700;
@@ -823,67 +856,81 @@ th {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
+
 tbody th {
   color: hsl(var(--foreground));
   text-transform: none;
   letter-spacing: normal;
 }
+
 tbody tr:last-child th,
 tbody tr:last-child td {
   border-bottom: 0;
 }
+
 .primary-text {
   font-weight: 650;
 }
+
 .menu-name {
   display: inline-flex;
   align-items: center;
   min-height: 28px;
   font-weight: 600;
 }
+
 .tree-branch {
   margin-right: 6px;
   color: hsl(var(--muted-foreground));
 }
+
 code {
   padding: 2px 5px;
   color: hsl(var(--muted-foreground));
   background: hsl(var(--muted));
   border-radius: 4px;
 }
+
 .table-state {
   padding: 28px;
   color: hsl(var(--muted-foreground));
   text-align: center;
 }
+
 button,
 input,
 select {
   font: inherit;
 }
+
 button {
   min-height: 34px;
   cursor: pointer;
   border-radius: 7px;
 }
+
 button:disabled {
   cursor: not-allowed;
   opacity: 0.6;
 }
+
 .primary-button,
 .secondary-button {
   padding: 6px 12px;
   border: 1px solid hsl(var(--border));
 }
+
 .primary-button {
   color: hsl(var(--primary-foreground));
   background: hsl(var(--primary));
   border-color: hsl(var(--primary));
 }
+
 .secondary-button {
   color: hsl(var(--foreground));
   background: hsl(var(--background));
 }
+
 .link-button {
   min-height: auto;
   padding: 2px 0;
@@ -891,14 +938,17 @@ button:disabled {
   background: transparent;
   border: 0;
 }
+
 .danger-link {
-  color: hsl(0 65% 42%);
+  color: hsl(0deg 65% 42%);
 }
+
 .icon-button {
   width: 34px;
-  border: 1px solid hsl(var(--border));
   background: transparent;
+  border: 1px solid hsl(var(--border));
 }
+
 .sort-input {
   width: 76px;
   padding: 5px 7px;
@@ -907,6 +957,7 @@ button:disabled {
   border: 1px solid hsl(var(--border));
   border-radius: 6px;
 }
+
 .menu-dialog-backdrop {
   position: fixed;
   inset: 0;
@@ -914,33 +965,38 @@ button:disabled {
   display: grid;
   place-items: center;
   padding: 20px;
-  background: hsl(220 30% 10% / 0.55);
+  background: hsl(220deg 30% 10% / 55%);
 }
+
 .menu-dialog {
   width: min(720px, 100%);
   max-height: min(92vh, 900px);
-  overflow: auto;
   padding: 22px;
+  overflow: auto;
   background: hsl(var(--card));
   border: 1px solid hsl(var(--border));
   border-radius: 14px;
-  box-shadow: 0 20px 60px hsl(220 30% 10% / 0.25);
+  box-shadow: 0 20px 60px hsl(220deg 30% 10% / 25%);
 }
+
 .dialog-heading {
-  justify-content: space-between;
   gap: 16px;
+  justify-content: space-between;
   margin-bottom: 12px;
 }
+
 .menu-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
   gap: 10px 14px;
   align-items: center;
 }
+
 .menu-form > label:not(.checkbox-field) {
-  color: hsl(var(--muted-foreground));
   font-size: 0.9rem;
+  color: hsl(var(--muted-foreground));
 }
+
 .menu-form input:not([type='checkbox']),
 .menu-form select {
   width: 100%;
@@ -951,31 +1007,34 @@ button:disabled {
   border: 1px solid hsl(var(--border));
   border-radius: 6px;
 }
+
 .checkbox-field {
-  grid-column: 2;
   display: flex;
-  align-items: center;
+  grid-column: 2;
   gap: 8px;
+  align-items: center;
 }
+
 .dialog-actions {
   grid-column: 1 / -1;
   justify-content: flex-end;
   margin-top: 8px;
 }
+
 @media (max-width: 720px) {
-  .iam-menus-page {
-    padding: 16px;
-  }
   .page-heading {
     display: grid;
   }
+
   .menu-form {
     grid-template-columns: 1fr;
   }
+
   .checkbox-field,
   .dialog-actions {
     grid-column: 1;
   }
+
   .heading-actions {
     justify-content: flex-start;
   }

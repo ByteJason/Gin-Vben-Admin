@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	monitorapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/monitor"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -67,6 +68,8 @@ type Client struct {
 	client     redis.UniversalClient
 	namespace  string
 	addressMap map[string]string
+	poolMax    *int
+	mode       string
 }
 
 // New creates a Redis client for a standalone, Sentinel, or Cluster topology.
@@ -78,9 +81,10 @@ func New(config Config) (*Client, error) {
 	}
 
 	var client redis.UniversalClient
+	var poolMax *int
 	switch normalized.Mode {
 	case ModeSingle:
-		client = redis.NewClient(&redis.Options{
+		constructed := redis.NewClient(&redis.Options{
 			Addr:         normalized.Addr,
 			Username:     normalized.Username,
 			Password:     normalized.Password,
@@ -90,8 +94,11 @@ func New(config Config) (*Client, error) {
 			WriteTimeout: normalized.WriteTimeout,
 			Dialer:       normalized.dialer(),
 		})
+		client = constructed
+		max := constructed.Options().PoolSize
+		poolMax = &max
 	case ModeSentinel:
-		client = redis.NewFailoverClient(&redis.FailoverOptions{
+		constructed := redis.NewFailoverClient(&redis.FailoverOptions{
 			MasterName:    normalized.MasterName,
 			SentinelAddrs: normalized.Addrs,
 			Username:      normalized.Username,
@@ -102,6 +109,9 @@ func New(config Config) (*Client, error) {
 			WriteTimeout:  normalized.WriteTimeout,
 			Dialer:        normalized.dialer(),
 		})
+		client = constructed
+		max := constructed.Options().PoolSize
+		poolMax = &max
 	case ModeCluster:
 		client = redis.NewClusterClient(&redis.ClusterOptions{
 			Addrs:        normalized.Addrs,
@@ -116,7 +126,7 @@ func New(config Config) (*Client, error) {
 		return nil, fmt.Errorf("%w: unsupported mode", ErrInvalidConfig)
 	}
 
-	return &Client{client: client, namespace: normalized.Namespace, addressMap: cloneAddressMap(normalized.AddressMap)}, nil
+	return &Client{client: client, namespace: normalized.Namespace, addressMap: cloneAddressMap(normalized.AddressMap), poolMax: poolMax, mode: normalized.Mode}, nil
 }
 
 // Name implements the health dependency contract.
@@ -129,24 +139,45 @@ func (c *Client) Ping(ctx context.Context) error {
 	return c.client.Ping(ctx).Err()
 }
 
-// RuntimeStats exposes only pool counters and the logical database key count
+// RedisRuntimeStats exposes only pool counters and the logical database key count
 // for the operations snapshot. Authentication material and endpoint details
 // remain private to the client.
-func (c *Client) RuntimeStats(ctx context.Context) (open, idle, max int, keyspace int64, err error) {
+func (c *Client) RedisRuntimeStats(ctx context.Context) (monitorapp.RedisRuntimeStats, error) {
 	if c == nil || c.client == nil {
-		return 0, 0, 0, 0, errors.New("redis client is not initialized")
+		return monitorapp.RedisRuntimeStats{}, errors.New("redis client is not initialized")
 	}
-	stats := c.client.PoolStats()
-	if stats != nil {
-		open, idle, max = int(stats.TotalConns), int(stats.IdleConns), int(stats.TotalConns)
-	}
+	keyspace, keyspaceAvailable := int64(0), false
 	// DBSize is a count only; it never returns key names or values. Some
-	// clustered providers do not support it, so retain healthy pool stats and
-	// leave keyspace at zero when the optional command is unavailable.
+	// clustered providers do not support it, so its capability is explicit.
 	if size, sizeErr := c.client.DBSize(ctx).Result(); sizeErr == nil {
 		keyspace = size
+		keyspaceAvailable = true
 	}
-	return open, idle, max, keyspace, nil
+	return redisRuntimeStats(c.client.PoolStats(), c.poolMax, c.mode, keyspace, keyspaceAvailable), nil
+}
+
+func redisRuntimeStats(stats *redis.PoolStats, poolMax *int, mode string, keyspace int64, keyspaceAvailable bool) monitorapp.RedisRuntimeStats {
+	result := monitorapp.RedisRuntimeStats{Mode: mode, ModeAvailable: mode != "", Keyspace: keyspace, KeyspaceAvailable: keyspaceAvailable}
+	if stats == nil {
+		return result
+	}
+	active := int(stats.TotalConns) - int(stats.IdleConns)
+	if active < 0 {
+		active = 0
+	}
+	var max *int
+	if poolMax != nil {
+		value := *poolMax
+		max = &value
+	}
+	result.Pool = monitorapp.RedisPool{
+		Max: max, Total: int(stats.TotalConns), Active: active, Idle: int(stats.IdleConns),
+		Hits: stats.Hits, Misses: stats.Misses, Timeouts: stats.Timeouts, WaitCount: stats.WaitCount,
+		WaitDurationMS: float64(stats.WaitDurationNs) / float64(time.Millisecond),
+		Stale:          stats.StaleConns, Pending: stats.PendingRequests,
+	}
+	result.PoolAvailable = true
+	return result
 }
 
 // Key builds a physical cache key under this client's namespace.

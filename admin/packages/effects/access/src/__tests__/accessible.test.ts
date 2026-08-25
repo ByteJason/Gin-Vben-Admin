@@ -238,3 +238,99 @@ describe('generateAccessible - redirect normalization', () => {
     expect(findByName(result, 'Custom')?.redirect).toBe('/custom/keep');
   });
 });
+
+describe('generateAccessible - mixed access-code fallback', () => {
+  it('filters static fallback children by accessCodes and drops empty groups', async () => {
+    const routes = [
+      {
+        name: 'menu-identity',
+        path: '/iam',
+        meta: { authority: ['iam:users:read', 'iam:roles:read'] },
+        children: [
+          {
+            name: 'menu-identity-users',
+            path: '/iam/users',
+            meta: { authority: ['iam:users:read'] },
+          },
+          {
+            name: 'menu-identity-roles',
+            path: '/iam/roles',
+            meta: { authority: ['iam:roles:read'] },
+          },
+        ],
+      },
+    ] as RouteRecordRaw[];
+
+    const allowed = await generateAccessible('mixed', {
+      accessCodes: ['iam:users:read'],
+      fetchMenuListAsync: async () => [],
+      roles: ['unrelated-role'],
+      router: createRouterStub(),
+      routes,
+    });
+    expect(allowed.accessibleRoutes).toHaveLength(1);
+    expect(
+      allowed.accessibleRoutes[0]?.children?.map(({ name }) => name),
+    ).toEqual(['menu-identity-users']);
+
+    const denied = await generateAccessible('mixed', {
+      accessCodes: [],
+      fetchMenuListAsync: async () => [],
+      roles: ['iam:users:read'],
+      router: createRouterStub(),
+      routes,
+    });
+    expect(denied.accessibleRoutes).toEqual([]);
+  });
+
+  it('merges matching seeded routes once and keeps static compatibility children', async () => {
+    const routes = [
+      {
+        name: 'menu-identity',
+        path: '/iam',
+        meta: { authority: ['iam:users:read'], title: 'Static identity' },
+        children: [
+          {
+            name: 'menu-identity-users',
+            path: '/iam/users',
+            meta: { authority: ['iam:users:read'], title: 'Static users' },
+          },
+          {
+            name: 'IAMPolicies',
+            path: '/iam/policies',
+            meta: { hideInMenu: true, title: 'Compatibility policy' },
+          },
+        ],
+      },
+    ] as RouteRecordRaw[];
+    const backendRoutes = [
+      {
+        component: '',
+        name: 'menu-identity',
+        path: '/iam',
+        meta: { title: 'Server identity' },
+        children: [
+          {
+            component: '',
+            name: 'menu-identity-users',
+            path: '/iam/users',
+            meta: { title: 'Server users' },
+          },
+        ],
+      },
+    ];
+
+    const result = await generateAccessible('mixed', {
+      accessCodes: ['iam:users:read'],
+      fetchMenuListAsync: async () => backendRoutes,
+      router: createRouterStub(),
+      routes,
+    });
+
+    expect(result.accessibleRoutes).toHaveLength(1);
+    expect(result.accessibleRoutes[0]?.meta?.title).toBe('Server identity');
+    expect(
+      result.accessibleRoutes[0]?.children?.map(({ name }) => name),
+    ).toEqual(['menu-identity-users', 'IAMPolicies']);
+  });
+});

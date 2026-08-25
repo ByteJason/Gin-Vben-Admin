@@ -15,7 +15,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const basePath = "/api/admin/v1/settings"
+const (
+	basePath              = "/api/admin/v1/settings"
+	observabilityBasePath = "/api/admin/v1/observability/settings"
+)
 
 type ActorResolver func(*gin.Context) settingsapp.Actor
 
@@ -35,6 +38,7 @@ func NewHandler(service *settingsapp.Service, resolvers ...ActorResolver) *Handl
 func RegisterRoutes(r gin.IRouter, handler *Handler) {
 	group := r.Group(basePath)
 	registerRoutes(group, handler)
+	registerObservabilityRoutes(r.Group(observabilityBasePath), handler)
 }
 
 // RegisterRoutesOn mounts settings routes below an already-prefixed router
@@ -42,6 +46,7 @@ func RegisterRoutes(r gin.IRouter, handler *Handler) {
 // shared admin authentication middleware without duplicating /api/admin/v1.
 func RegisterRoutesOn(group gin.IRouter, handler *Handler) {
 	registerRoutes(group.Group("/settings"), handler)
+	registerObservabilityRoutes(group.Group("/observability/settings"), handler)
 }
 
 func registerRoutes(group gin.IRouter, handler *Handler) {
@@ -58,6 +63,16 @@ func registerRoutes(group gin.IRouter, handler *Handler) {
 	group.PUT("/:key", handler.update)
 	group.POST("/:key/test", handler.testConnection)
 	group.POST("/:key/rollback", handler.rollback)
+}
+
+func registerObservabilityRoutes(group gin.IRouter, handler *Handler) {
+	if handler == nil || handler.service == nil {
+		group.GET("/:key", disabled)
+		group.PUT("/:key", disabled)
+		return
+	}
+	group.GET("/:key", handler.getObservability)
+	group.PUT("/:key", handler.updateObservability)
 }
 
 type updateRequest struct {
@@ -96,7 +111,20 @@ func (h *Handler) listDefinitions(c *gin.Context) {
 }
 
 func (h *Handler) get(c *gin.Context) {
-	setting, err := h.service.Get(c.Request.Context(), h.actorFor(c), c.Param("key"))
+	h.getKey(c, c.Param("key"))
+}
+
+func (h *Handler) getObservability(c *gin.Context) {
+	key := c.Param("key")
+	if !settingsapp.IsObservabilitySettingKey(key) {
+		writeError(c, settingsapp.ErrSettingNotFound)
+		return
+	}
+	h.getKey(c, key)
+}
+
+func (h *Handler) getKey(c *gin.Context, key string) {
+	setting, err := h.service.Get(c.Request.Context(), h.actorFor(c), key)
 	if err != nil {
 		writeError(c, err)
 		return
@@ -114,12 +142,25 @@ func (h *Handler) history(c *gin.Context) {
 }
 
 func (h *Handler) update(c *gin.Context) {
+	h.updateKey(c, c.Param("key"))
+}
+
+func (h *Handler) updateObservability(c *gin.Context) {
+	key := c.Param("key")
+	if !settingsapp.IsObservabilitySettingKey(key) {
+		writeError(c, settingsapp.ErrSettingNotFound)
+		return
+	}
+	h.updateKey(c, key)
+}
+
+func (h *Handler) updateKey(c *gin.Context, key string) {
 	var request updateRequest
 	if err := c.ShouldBindJSON(&request); err != nil || len(request.Value) == 0 {
 		response.Error(c, http.StatusBadRequest, 10000, "invalid request")
 		return
 	}
-	setting, err := h.service.Update(c.Request.Context(), h.actorFor(c), settingsapp.UpdateInput{Key: c.Param("key"), Value: request.Value, ExpectedVersion: request.ExpectedVersion})
+	setting, err := h.service.Update(c.Request.Context(), h.actorFor(c), settingsapp.UpdateInput{Key: key, Value: request.Value, ExpectedVersion: request.ExpectedVersion})
 	if err != nil {
 		writeError(c, err)
 		return

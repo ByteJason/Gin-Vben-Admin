@@ -8,15 +8,38 @@ import (
 	"time"
 
 	domain "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/iam"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
 	rediscache "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/cache/redis"
 )
 
 func TestDecisionDigestIsIndependentOfRoleOrder(t *testing.T) {
+	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "admin", Organization: "ops"})
 	request := domain.Request{Domain: "admin", Method: "GET", Path: "/users"}
-	left := decisionDigest(domain.Subject{UserID: "7", RoleIDs: []string{"role-b", "role-a"}}, request)
-	right := decisionDigest(domain.Subject{UserID: "7", RoleIDs: []string{"role-a", "role-b"}}, request)
+	left := decisionDigest(ctx, domain.Subject{UserID: "7", RoleIDs: []string{"role-b", "role-a"}}, request)
+	right := decisionDigest(ctx, domain.Subject{UserID: "7", RoleIDs: []string{"role-a", "role-b"}}, request)
 	if left == "" || left != right {
 		t.Fatalf("digest mismatch: left=%q right=%q", left, right)
+	}
+}
+
+func TestDecisionDigestSeparatesEffectiveOrganizationAndPlatformAdministratorScope(t *testing.T) {
+	subject := domain.Subject{UserID: "7", RoleIDs: []string{"role-a"}, Domain: "tenant-a"}
+	request := domain.Request{Domain: "tenant-a", Method: "GET", Path: "/users"}
+	digest := func(organization string, platformAdministrator bool) string {
+		ctx := tenant.WithContext(context.Background(), tenant.Context{
+			TenantID: "tenant-a", Organization: organization, PlatformAdmin: platformAdministrator,
+		})
+		return decisionDigest(ctx, subject, request)
+	}
+
+	organizationA := digest("org-a", false)
+	organizationB := digest("org-b", false)
+	platformAdministrator := digest("org-a", true)
+	if organizationA == organizationB {
+		t.Fatal("decision digest reused across organizations")
+	}
+	if organizationA == platformAdministrator {
+		t.Fatal("decision digest reused across platform-administrator scopes")
 	}
 }
 
@@ -24,10 +47,10 @@ func TestRedisPermissionCacheRequiresClient(t *testing.T) {
 	cache := NewRedisPermissionCache(nil)
 	subject := domain.Subject{UserID: "7"}
 	request := domain.Request{Method: "GET", Path: "/users"}
-	if _, _, err := cache.Get(context.Background(), subject, request); !errors.Is(err, ErrPermissionCacheUnavailable) {
+	if _, _, _, err := cache.Get(context.Background(), subject, request); !errors.Is(err, ErrPermissionCacheUnavailable) {
 		t.Fatalf("Get() error=%v", err)
 	}
-	if err := cache.Set(context.Background(), subject, request, true, time.Minute); !errors.Is(err, ErrPermissionCacheUnavailable) {
+	if err := cache.Set(context.Background(), subject, request, 0, true, time.Minute); !errors.Is(err, ErrPermissionCacheUnavailable) {
 		t.Fatalf("Set() error=%v", err)
 	}
 	if err := cache.Invalidate(context.Background()); !errors.Is(err, ErrPermissionCacheUnavailable) {
@@ -57,12 +80,12 @@ func TestRedisPermissionCacheIntegration(t *testing.T) {
 		_ = client.Close()
 		t.Fatal(err)
 	}
-	oldKey, err := cache.decisionKey(0, subject, request)
+	oldKey, err := cache.decisionKey(ctx, 0, subject, request)
 	if err != nil {
 		_ = client.Close()
 		t.Fatal(err)
 	}
-	newKey, err := cache.decisionKey(1, subject, request)
+	newKey, err := cache.decisionKey(ctx, 1, subject, request)
 	if err != nil {
 		_ = client.Close()
 		t.Fatal(err)
@@ -80,19 +103,20 @@ func TestRedisPermissionCacheIntegration(t *testing.T) {
 	_ = client.Delete(ctx, oldKey)
 	_ = client.Delete(ctx, newKey)
 
-	if allowed, found, err := cache.Get(ctx, subject, request); err != nil || found || allowed {
+	allowed, found, generation, err := cache.Get(ctx, subject, request)
+	if err != nil || found || allowed {
 		t.Fatalf("initial Get() allowed=%v found=%v err=%v", allowed, found, err)
 	}
-	if err := cache.Set(ctx, subject, request, true, time.Minute); err != nil {
+	if err := cache.Set(ctx, subject, request, generation, true, time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	if allowed, found, err := cache.Get(ctx, subject, request); err != nil || !found || !allowed {
+	if allowed, found, _, err := cache.Get(ctx, subject, request); err != nil || !found || !allowed {
 		t.Fatalf("cached Get() allowed=%v found=%v err=%v", allowed, found, err)
 	}
 	if err := cache.Invalidate(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if allowed, found, err := cache.Get(ctx, subject, request); err != nil || found || allowed {
+	if allowed, found, _, err := cache.Get(ctx, subject, request); err != nil || found || allowed {
 		t.Fatalf("invalidated Get() allowed=%v found=%v err=%v", allowed, found, err)
 	}
 }

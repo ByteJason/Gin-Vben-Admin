@@ -12,6 +12,7 @@ import (
 
 	iamapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/iam"
 	domain "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/iam"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
 	rediscache "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/cache/redis"
 )
 
@@ -37,37 +38,34 @@ func NewRedisPermissionCache(cache *rediscache.Client, versionTTL ...time.Durati
 	return &RedisPermissionCache{cache: cache, versionTTL: ttl}
 }
 
-func (c *RedisPermissionCache) Get(ctx context.Context, subject domain.Subject, request domain.Request) (bool, bool, error) {
+func (c *RedisPermissionCache) Get(ctx context.Context, subject domain.Subject, request domain.Request) (bool, bool, iamapp.DecisionCacheGeneration, error) {
 	version, err := c.version(ctx)
 	if err != nil {
-		return false, false, err
+		return false, false, 0, err
 	}
-	key, err := c.decisionKey(version, subject, request)
+	generation := iamapp.DecisionCacheGeneration(version)
+	key, err := c.decisionKey(ctx, generation, subject, request)
 	if err != nil {
-		return false, false, err
+		return false, false, 0, err
 	}
 	var allowed bool
 	if err := c.cache.GetJSON(ctx, key, &allowed); err != nil {
 		if errors.Is(err, rediscache.ErrCacheMiss) {
-			return false, false, nil
+			return false, false, generation, nil
 		}
-		return false, false, err
+		return false, false, 0, err
 	}
-	return allowed, true, nil
+	return allowed, true, generation, nil
 }
 
-func (c *RedisPermissionCache) Set(ctx context.Context, subject domain.Subject, request domain.Request, allowed bool, ttl time.Duration) error {
+func (c *RedisPermissionCache) Set(ctx context.Context, subject domain.Subject, request domain.Request, generation iamapp.DecisionCacheGeneration, allowed bool, ttl time.Duration) error {
 	if err := c.validate(); err != nil {
 		return err
 	}
 	if ttl <= 0 {
 		return rediscache.ErrInvalidTTL
 	}
-	version, err := c.version(ctx)
-	if err != nil {
-		return err
-	}
-	key, err := c.decisionKey(version, subject, request)
+	key, err := c.decisionKey(ctx, generation, subject, request)
 	if err != nil {
 		return err
 	}
@@ -104,12 +102,12 @@ func (c *RedisPermissionCache) version(ctx context.Context) (int64, error) {
 	return version, nil
 }
 
-func (c *RedisPermissionCache) decisionKey(version int64, subject domain.Subject, request domain.Request) (string, error) {
+func (c *RedisPermissionCache) decisionKey(ctx context.Context, generation iamapp.DecisionCacheGeneration, subject domain.Subject, request domain.Request) (string, error) {
 	if err := c.validate(); err != nil {
 		return "", err
 	}
-	digest := decisionDigest(subject, request)
-	return c.cache.Key("iam", "permission", "decision", strconv.FormatInt(version, 10), digest)
+	digest := decisionDigest(ctx, subject, request)
+	return c.cache.Key("iam", "permission", "decision", strconv.FormatInt(int64(generation), 10), digest)
 }
 
 func (c *RedisPermissionCache) validate() error {
@@ -127,7 +125,12 @@ type decisionIdentity struct {
 	RoleIDs   []string `json:"role_ids,omitempty"`
 	Domain    string   `json:"domain,omitempty"`
 	Superuser bool     `json:"superuser,omitempty"`
-	Request   struct {
+	Scope     struct {
+		TenantID      string `json:"tenant_id,omitempty"`
+		Organization  string `json:"organization,omitempty"`
+		PlatformAdmin bool   `json:"platform_admin,omitempty"`
+	} `json:"scope"`
+	Request struct {
 		Domain string `json:"domain,omitempty"`
 		Method string `json:"method,omitempty"`
 		Path   string `json:"path,omitempty"`
@@ -136,11 +139,16 @@ type decisionIdentity struct {
 	} `json:"request"`
 }
 
-func decisionDigest(subject domain.Subject, request domain.Request) string {
+func decisionDigest(ctx context.Context, subject domain.Subject, request domain.Request) string {
 	roles := append([]string(nil), subject.RoleIDs...)
 	sort.Strings(roles)
 	identity := decisionIdentity{
 		UserID: subject.UserID, RoleIDs: roles, Domain: subject.Domain, Superuser: subject.Superuser,
+	}
+	if scope, ok := tenant.FromContext(ctx); ok {
+		identity.Scope.TenantID = scope.TenantID
+		identity.Scope.Organization = scope.Organization
+		identity.Scope.PlatformAdmin = scope.PlatformAdmin
 	}
 	identity.Request.Domain = request.Domain
 	identity.Request.Method = request.Method

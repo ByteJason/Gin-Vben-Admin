@@ -2,6 +2,8 @@ import type { BasicUserInfo } from '@vben-core/typings';
 
 /** 用户信息 */
 interface UserInfo extends BasicUserInfo {
+  /** 当前身份可使用的 API/按钮权限码；旧服务端可能不返回。 */
+  accessCodes?: string[];
   /**
    * 用户描述
    */

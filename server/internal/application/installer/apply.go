@@ -21,6 +21,11 @@ var (
 	ErrPreflightFailed  = errors.New("installation preflight failed")
 	ErrApplyFailed      = errors.New("installation apply failed")
 	ErrApplyRollback    = errors.New("installation rollback failed")
+	// ErrIdentityNotOwned means a prepared receipt has no transaction-owned
+	// identity side effects because another installer committed the singleton
+	// installation identity first. Recovery may discard only that receipt; it
+	// must never compensate the winning transaction.
+	ErrIdentityNotOwned = errors.New("installation identity is owned by another transaction")
 )
 
 type applyStageError struct {
@@ -253,10 +258,19 @@ func (s *ApplyService) apply(ctx context.Context, request ApplyRequest, report f
 			if err := transaction.Validate(); err != nil {
 				return ApplyResult{}, withApplyFailureStage("journal", ErrPreflightFailed)
 			}
-			if transaction.DatabaseTarget != databaseTarget {
-				return ApplyResult{}, withApplyFailureStage("journal", ErrPreflightFailed)
+			if sideEffectFreeRetryableTransaction(&transaction) {
+				// No receipt remains to bind this journal to its original target.
+				// Remove it before plan/dependency probes so corrected database
+				// settings or an offline former target cannot deadlock re-init.
+				if err := s.journal.Remove(ctx, transaction.ID); err != nil {
+					return ApplyResult{}, withApplyFailureStage("coordination", ErrApplyBusy)
+				}
+			} else {
+				if transaction.DatabaseTarget != databaseTarget {
+					return ApplyResult{}, withApplyFailureStage("journal", ErrPreflightFailed)
+				}
+				interrupted = &transaction
 			}
-			interrupted = &transaction
 		}
 	}
 
@@ -365,7 +379,7 @@ func (s *ApplyService) apply(ctx context.Context, request ApplyRequest, report f
 			transaction.Identity = &identityReceipt
 		}
 		s.persistFailure(ctx, transaction, rollbackErr)
-		return ApplyResult{}, applyFailure("identity", rollbackErr)
+		return ApplyResult{}, applyFailureWithCause("identity", err, rollbackErr)
 	}
 	steps = appendCompleted(steps, "identity")
 	reportApplyStep(report, "identity")
@@ -518,7 +532,7 @@ func (s *ApplyService) rollbackPreparedIdentity(database DatabaseConnection, rec
 	}
 	rollbackCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := recovery.RecoverRollback(rollbackCtx, database, receipt); err != nil {
+	if err := recovery.RecoverRollback(rollbackCtx, database, receipt); err != nil && !errors.Is(err, ErrIdentityNotOwned) {
 		return ErrApplyRollback
 	}
 	return nil
@@ -692,7 +706,7 @@ func (s *ApplyService) recoverInterrupted(ctx context.Context, database Database
 	if transaction == nil || s.journal == nil {
 		return nil
 	}
-	if transaction.Phase == TransactionRetryable && transaction.Identity == nil && transaction.EnvironmentIntent == "" && transaction.Environment == nil && transaction.Marker == nil {
+	if sideEffectFreeRetryableTransaction(transaction) {
 		if err := s.journal.Remove(ctx, transaction.ID); err != nil {
 			return ErrApplyBusy
 		}
@@ -721,7 +735,7 @@ func (s *ApplyService) recoverInterrupted(ctx context.Context, database Database
 		recovery, ok := s.identity.(IdentityRecovery)
 		if !ok {
 			rollbackErrors = append(rollbackErrors, ErrApplyRollback)
-		} else if err := recovery.RecoverRollback(rollbackCtx, database, *transaction.Identity); err != nil {
+		} else if err := recovery.RecoverRollback(rollbackCtx, database, *transaction.Identity); err != nil && !errors.Is(err, ErrIdentityNotOwned) {
 			rollbackErrors = append(rollbackErrors, err)
 		}
 	}
@@ -736,6 +750,12 @@ func (s *ApplyService) recoverInterrupted(ctx context.Context, database Database
 		return ErrApplyBusy
 	}
 	return nil
+}
+
+func sideEffectFreeRetryableTransaction(transaction *ApplyTransaction) bool {
+	return transaction != nil && transaction.Phase == TransactionRetryable &&
+		transaction.Identity == nil && transaction.EnvironmentIntent == "" &&
+		transaction.Environment == nil && transaction.Marker == nil
 }
 
 func (s *ApplyService) advanceTransaction(ctx context.Context, transaction *ApplyTransaction, next, completed string) error {
@@ -891,6 +911,14 @@ func applyFailure(stage string, rollbackErr error) error {
 		return withApplyFailureStage(stage, fmt.Errorf("%w at %s: %w", ErrApplyFailed, stage, ErrApplyRollback))
 	}
 	return withApplyFailureStage(stage, fmt.Errorf("%w at %s", ErrApplyFailed, stage))
+}
+
+func applyFailureWithCause(stage string, cause, rollbackErr error) error {
+	failure := applyFailure(stage, rollbackErr)
+	if cause == nil {
+		return failure
+	}
+	return withApplyFailureStage(stage, errors.Join(failure, cause))
 }
 
 func receiptPointer[T comparable](receipt T) *T {

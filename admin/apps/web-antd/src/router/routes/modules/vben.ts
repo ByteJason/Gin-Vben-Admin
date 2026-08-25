@@ -11,7 +11,7 @@ import {
 import { IFrameView } from '#/layouts';
 import { $t } from '#/locales';
 
-const routes: RouteRecordRaw[] = [
+const developmentRoutes: RouteRecordRaw[] = [
   {
     meta: {
       badgeType: 'dot',
@@ -66,6 +66,10 @@ const routes: RouteRecordRaw[] = [
       },
     ],
   },
+];
+
+const routes: RouteRecordRaw[] = [
+  ...(import.meta.env.DEV ? developmentRoutes : []),
   {
     name: 'VbenAboutLegacy',
     path: '/vben-admin/about',
@@ -80,6 +84,7 @@ const routes: RouteRecordRaw[] = [
     path: '/gin-vben-admin/about',
     component: () => import('#/views/_core/about/index.vue'),
     meta: {
+      hideInMenu: true,
       icon: 'lucide:copyright',
       title: $t('demos.vben.about'),
       order: 9999,

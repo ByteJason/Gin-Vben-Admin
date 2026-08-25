@@ -8,6 +8,8 @@ import type {
 
 import { computed, nextTick, onMounted, reactive, ref } from 'vue';
 
+import { ManagementPage } from '@vben/common-ui';
+
 import {
   exportAuditEventsApi,
   queryAuditEventsApi,
@@ -15,7 +17,7 @@ import {
 } from '#/api/core/audit';
 import { $t } from '#/locales';
 
-const categories: Array<AuditCategory | ''> = [
+const categories: Array<'' | AuditCategory> = [
   '',
   'login',
   'operation',
@@ -24,7 +26,7 @@ const categories: Array<AuditCategory | ''> = [
 const state = reactive({
   action: '',
   actorId: '',
-  category: '' as AuditCategory | '',
+  category: '' as '' | AuditCategory,
   from: '',
   limit: 50,
   offset: 0,
@@ -52,7 +54,7 @@ const totalPages = computed(() =>
   Math.max(1, Math.ceil(page.value.total / state.limit)),
 );
 
-function categoryLabel(category: AuditCategory | '') {
+function categoryLabel(category: '' | AuditCategory) {
   return $t(`page.audit.category.${category || 'all'}`);
 }
 
@@ -175,7 +177,11 @@ onMounted(load);
 </script>
 
 <template>
-  <main class="audit-page" :aria-busy="loading" aria-labelledby="audit-title">
+  <ManagementPage
+    class="audit-page"
+    :aria-busy="loading"
+    aria-labelledby="audit-title"
+  >
     <header class="page-heading">
       <div>
         <p class="eyebrow">{{ $t('page.audit.eyebrow') }}</p>
@@ -405,112 +411,126 @@ onMounted(load);
         }}
       </p>
     </aside>
-  </main>
+  </ManagementPage>
 </template>
 
 <style scoped>
 .audit-page {
-  max-width: 1440px;
-  padding: 24px;
-  margin: 0 auto;
   color: hsl(var(--foreground));
 }
+
 .page-heading,
 .table-heading {
   display: flex;
+  gap: 20px;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 20px;
 }
+
 .page-heading {
   margin-bottom: 20px;
 }
+
 .eyebrow {
   margin: 0;
-  color: hsl(var(--primary));
   font-size: 0.75rem;
   font-weight: 700;
-  letter-spacing: 0.12em;
+  color: hsl(var(--primary));
   text-transform: uppercase;
+  letter-spacing: 0.12em;
 }
+
 h1,
 h2 {
   margin: 4px 0 8px;
 }
+
 h1 {
   font-size: clamp(1.5rem, 2vw, 2rem);
 }
+
 .description {
   max-width: 860px;
   margin: 0;
-  color: hsl(var(--muted-foreground));
   line-height: 1.6;
+  color: hsl(var(--muted-foreground));
 }
+
 .retention-chip,
 .category-pill {
   display: inline-flex;
   align-items: center;
   min-height: 28px;
   padding: 4px 10px;
-  border-radius: 999px;
-  color: hsl(var(--primary));
-  background: hsl(var(--primary) / 0.1);
   font-size: 0.78rem;
   font-weight: 650;
+  color: hsl(var(--primary));
+  background: hsl(var(--primary) / 10%);
+  border-radius: 999px;
 }
+
 .filter-card,
 .table-card,
 .retention-card {
   padding: 18px;
   margin-top: 16px;
+  background: hsl(var(--card));
   border: 1px solid hsl(var(--border));
   border-radius: 12px;
-  background: hsl(var(--card));
-  box-shadow: 0 8px 24px hsl(var(--foreground) / 0.04);
+  box-shadow: 0 8px 24px hsl(var(--foreground) / 4%);
 }
+
 .category-tabs,
 .actions,
 .pagination,
 .retention-actions {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
   gap: 8px;
+  align-items: center;
 }
+
 .category-tabs {
   margin: 14px 0;
 }
+
 button {
   min-height: 40px;
   padding: 8px 12px;
+  color: hsl(var(--foreground));
+  cursor: pointer;
+  background: hsl(var(--background));
   border: 1px solid hsl(var(--border));
   border-radius: 8px;
-  color: hsl(var(--foreground));
-  background: hsl(var(--background));
-  cursor: pointer;
 }
+
 button[aria-pressed='true'],
 button.primary {
   color: hsl(var(--primary-foreground));
   background: hsl(var(--primary));
 }
+
 button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
+
 .field-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
 }
+
 .field {
   display: grid;
   gap: 4px;
   font-weight: 600;
 }
+
 .field-wide {
   grid-column: span 2;
 }
+
 .field input {
   width: 100%;
   min-height: 44px;
@@ -522,74 +542,90 @@ button:disabled {
   border: 1px solid hsl(var(--border));
   border-radius: 8px;
 }
+
 .table-heading > div:first-child {
   display: flex;
-  align-items: center;
   gap: 10px;
+  align-items: center;
 }
+
 .result-count {
   color: hsl(var(--muted-foreground));
 }
+
 .table-wrap {
   overflow-x: auto;
 }
+
 table {
   width: 100%;
-  border-collapse: collapse;
   min-width: 980px;
+  border-collapse: collapse;
 }
+
 th,
 td {
   padding: 12px 10px;
-  text-align: left;
   vertical-align: top;
+  text-align: left;
   border-top: 1px solid hsl(var(--border));
 }
+
 th {
   font-size: 0.8rem;
   color: hsl(var(--muted-foreground));
 }
+
 code.details {
   display: block;
   max-width: 280px;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
+
 .table-state {
   padding: 36px;
-  text-align: center;
   color: hsl(var(--muted-foreground));
+  text-align: center;
 }
+
 .pagination {
   justify-content: center;
   margin-top: 16px;
 }
+
 .retention-card {
   display: flex;
+  gap: 20px;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 20px;
 }
+
 .retention-card p {
   margin: 0;
   color: hsl(var(--muted-foreground));
 }
+
 .retention-result {
   margin-top: 12px !important;
   color: hsl(var(--primary)) !important;
 }
+
 .feedback {
   padding: 10px 12px;
   border-radius: 8px;
 }
+
 .feedback-error {
   color: hsl(var(--destructive));
-  background: hsl(var(--destructive) / 0.08);
+  background: hsl(var(--destructive) / 8%);
 }
+
 .feedback-success {
   color: hsl(var(--primary));
-  background: hsl(var(--primary) / 0.08);
+  background: hsl(var(--primary) / 8%);
 }
+
 .sr-status,
 .sr-only {
   position: absolute;
@@ -598,40 +634,45 @@ code.details {
   padding: 0;
   margin: -1px;
   overflow: hidden;
-  clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+  clip-path: inset(50%);
 }
+
 @media (max-width: 960px) {
   .field-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
   .retention-card {
-    align-items: stretch;
     flex-direction: column;
+    align-items: stretch;
   }
 }
+
 @media (max-width: 600px) {
-  .audit-page {
-    padding: 16px;
-  }
   .page-heading,
   .table-heading {
     flex-direction: column;
   }
+
   .field-grid {
     grid-template-columns: 1fr;
   }
+
   .field-wide {
     grid-column: auto;
   }
+
   .actions {
     width: 100%;
   }
+
   .actions button {
     flex: 1;
   }
 }
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

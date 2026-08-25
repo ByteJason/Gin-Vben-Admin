@@ -64,9 +64,19 @@ for (const app of apps) {
     for (const token of ['getMonitorOverviewApi', 'refresh']) {
       assert.match(read(monitorApi), new RegExp(token), `${app}/${token}`);
     }
-    for (const token of ['CPU', 'memory', 'disk', 'MySQL', 'PostgreSQL', 'Redis', 'degraded', '15']) {
-      assert.match(read(monitorView), new RegExp(token, 'i'), `${app}/${token}`);
+    const monitorSource = read(monitorView);
+    for (const token of ['CPU', 'memory', 'disk', 'Redis', 'degraded', '15']) {
+      assert.match(monitorSource, new RegExp(token, 'i'), `${app}/${token}`);
     }
+    assert.match(monitorSource, /overview\.database\.driver/);
+    assert.match(monitorSource, /overview\.database\.mode/);
+    assert.match(monitorSource, /overview\.database\.status/);
+    assert.match(monitorSource, /overview\.database\.pool/);
+    assert.match(monitorSource, /overview\.redis\.mode/);
+    assert.match(monitorSource, /overview\.redis\.status/);
+    assert.match(monitorSource, /overview\.redis\.pool/);
+    assert.match(monitorSource, /overview\.redis\.keyspace/);
+    assert.doesNotMatch(monitorSource, /\b(?:MySQL|PostgreSQL)\b/i);
     assert.match(read(routes), /views\/system\/mail\/index\.vue/);
     assert.match(read(routes), /views\/system\/monitor\/index\.vue/);
   });

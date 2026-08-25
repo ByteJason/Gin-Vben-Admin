@@ -13,7 +13,9 @@
       <header class="site-header" aria-label="产品标识">
         <span class="brand-mark" aria-hidden="true">
           <svg viewBox="0 0 24 24" role="img">
-            <path d="M12 2.4 20 6v6.1c0 4.5-3.2 8.2-8 9.5-4.8-1.3-8-5-8-9.5V6l8-3.6Z" />
+            <path
+              d="M12 2.4 20 6v6.1c0 4.5-3.2 8.2-8 9.5-4.8-1.3-8-5-8-9.5V6l8-3.6Z"
+            />
             <path d="m8.4 12 2.2 2.2 5-5" />
           </svg>
         </span>
@@ -26,7 +28,10 @@
       <main id="install-main" class="install-layout" tabindex="-1">
         <section class="intro" aria-labelledby="install-title">
           <p class="eyebrow">安全、可验证的初始化</p>
-          <h1 id="install-title"><span class="title-line">配置你的</span><span class="title-line">管理系统</span></h1>
+          <h1 id="install-title">
+            <span class="title-line">配置你的</span
+            ><span class="title-line">管理系统</span>
+          </h1>
           <p class="intro-copy">
             安装向导会在提交前检查运行环境与连接状态，并清晰展示每一步结果。
           </p>
@@ -44,10 +49,17 @@
               <p class="section-label">实例状态</p>
               <h2 id="status-title" tabindex="-1">正在检查安装状态</h2>
             </div>
-            <span id="status-badge" class="status-badge" data-tone="pending">检查中</span>
+            <span id="status-badge" class="status-badge" data-tone="pending"
+              >检查中</span
+            >
           </div>
 
-          <div id="status-message" class="status-message" role="status" aria-live="polite">
+          <div
+            id="status-message"
+            class="status-message"
+            role="status"
+            aria-live="polite"
+          >
             正在连接本机安装服务，请稍候。
           </div>
 
@@ -76,7 +88,11 @@
             </ul>
           </section>
 
-          <section id="selection-panel" class="selection-panel" aria-labelledby="selection-title">
+          <section
+            id="selection-panel"
+            class="selection-panel"
+            aria-labelledby="selection-title"
+          >
             <div class="capability-panel__heading">
               <h3 id="selection-title">确认安装方案</h3>
               <span>确认选择后检查目录权限</span>
@@ -87,8 +103,16 @@
                 <div class="plan-group__fields">
                   <div class="form-field readonly-field">
                     <span class="field-label">管理界面</span>
-                    <output id="selected-ui-summary" class="readonly-summary" aria-live="polite">读取命令行选择中</output>
-                    <span class="field-help">已由命令行 <code>pnpm run init</code> 选定，安装页仅确认结果。</span>
+                    <output
+                      id="selected-ui-summary"
+                      class="readonly-summary"
+                      aria-live="polite"
+                      >读取命令行选择中</output
+                    >
+                    <span class="field-help"
+                      >已由命令行
+                      <code>pnpm run init</code> 选定，安装页仅确认结果。</span
+                    >
                   </div>
                   <div class="form-field">
                     <label for="mode-choice">运行方式</label>
@@ -100,7 +124,9 @@
                         <option value="api_only">仅 API</option>
                       </optgroup>
                     </select>
-                    <span class="field-help">本地首次安装建议保持开发调试，部署时再选择高级模式。</span>
+                    <span class="field-help"
+                      >本地首次安装建议保持开发调试，部署时再选择高级模式。</span
+                    >
                   </div>
                 </div>
               </fieldset>
@@ -113,7 +139,9 @@
                       <option value="single">单语言</option>
                       <option value="multi">双语切换</option>
                     </select>
-                    <span class="field-help">单语言更精简；双语模式允许用户在界面内切换。</span>
+                    <span class="field-help"
+                      >单语言更精简；双语模式允许用户在界面内切换。</span
+                    >
                   </div>
                   <div class="form-field">
                     <label for="locale-choice">默认语言</label>
@@ -121,7 +149,11 @@
                       <option value="zh-CN">简体中文（zh-CN）</option>
                       <option value="en-US">English (en-US)</option>
                     </select>
-                    <span id="locale-suggestion" class="field-help" aria-live="polite"></span>
+                    <span
+                      id="locale-suggestion"
+                      class="field-help"
+                      aria-live="polite"
+                    ></span>
                   </div>
                 </div>
               </fieldset>
@@ -129,150 +161,364 @@
                 检查目录权限
               </button>
             </form>
-            <div id="plan-message" class="plan-message" role="status" aria-live="polite" tabindex="-1"></div>
-            <div id="plan-panel" class="plan-result" hidden aria-labelledby="plan-result-title">
+            <div
+              id="plan-message"
+              class="plan-message"
+              role="status"
+              aria-live="polite"
+              tabindex="-1"
+            ></div>
+            <div
+              id="plan-panel"
+              class="plan-result"
+              hidden
+              aria-labelledby="plan-result-title"
+            >
               <h4 id="plan-result-title">预检结果</h4>
               <dl class="plan-summary">
-                <div><dt>可裁剪模板</dt><dd id="plan-cleanup">—</dd></div>
-                <div><dt>可构建</dt><dd id="plan-build">—</dd></div>
-                <div><dt>可写配置</dt><dd id="plan-env">—</dd></div>
-                <div><dt>需要重启</dt><dd id="plan-restart">—</dd></div>
+                <div>
+                  <dt>可裁剪模板</dt>
+                  <dd id="plan-cleanup">—</dd>
+                </div>
+                <div>
+                  <dt>可构建</dt>
+                  <dd id="plan-build">—</dd>
+                </div>
+                <div>
+                  <dt>可写配置</dt>
+                  <dd id="plan-env">—</dd>
+                </div>
+                <div>
+                  <dt>需要重启</dt>
+                  <dd id="plan-restart">—</dd>
+                </div>
               </dl>
-              <ul id="plan-entries" class="plan-entries" aria-live="polite"></ul>
+              <ul
+                id="plan-entries"
+                class="plan-entries"
+                aria-live="polite"
+              ></ul>
             </div>
           </section>
 
-          <section id="connection-panel" class="connection-panel" aria-labelledby="connection-title" hidden>
+          <section
+            id="connection-panel"
+            class="connection-panel"
+            aria-labelledby="connection-title"
+            hidden
+          >
             <div class="capability-panel__heading">
               <h3 id="connection-title">配置服务连接</h3>
               <span>敏感值仅保留在当前页面，不写入恢复日志</span>
             </div>
             <div class="connection-grid">
-            <form id="database-form" class="connection-form connection-form--database">
-              <div class="connection-form__heading">
-                <h4>数据库</h4>
-                <p>填写业务数据库连接并完成即时验证。</p>
-              </div>
-              <div class="form-field">
-                <label for="database-driver">类型</label>
-                <select id="database-driver" name="driver" required>
-                  <option value="mysql">MySQL</option>
-                  <option value="postgres">PostgreSQL</option>
-                </select>
-              </div>
-              <div class="form-field">
-                <label for="database-host">主机</label>
-                <input id="database-host" name="host" value="localhost" autocomplete="off" required />
-              </div>
-              <div class="form-field">
-                <label for="database-port">端口</label>
-                <input id="database-port" name="port" type="number" min="1" max="65535" value="3306" inputmode="numeric" required />
-              </div>
-              <div class="form-field">
-                <label for="database-name">数据库名</label>
-                <input id="database-name" name="database" autocomplete="off" required />
-              </div>
-              <div class="form-field">
-                <label for="database-username">账号</label>
-                <input id="database-username" name="username" autocomplete="username" required />
-              </div>
-              <div class="form-field">
-                <label for="database-password">密码</label>
-                <input id="database-password" name="password" type="password" autocomplete="new-password" required />
-              </div>
-              <details class="advanced-fields">
-                <summary>高级 DSN（可选）</summary>
+              <form
+                id="database-form"
+                class="connection-form connection-form--database"
+              >
+                <div class="connection-form__heading">
+                  <h4>数据库</h4>
+                  <p>填写业务数据库连接并完成即时验证。</p>
+                </div>
                 <div class="form-field">
-                  <label for="database-dsn">DSN</label>
-                  <input id="database-dsn" name="dsn" type="password" autocomplete="new-password" />
+                  <label for="database-driver">类型</label>
+                  <select id="database-driver" name="driver" required>
+                    <option value="mysql">MySQL</option>
+                    <option value="postgres">PostgreSQL</option>
+                  </select>
                 </div>
-              </details>
-              <button class="primary-button" type="submit">测试数据库连接</button>
-              <div id="database-result" class="connection-result" role="status" aria-live="polite" aria-atomic="true"></div>
-            </form>
-
-            <form id="redis-form" class="connection-form connection-form--redis">
-              <div class="connection-form__heading">
-                <h4>Redis</h4>
-                <p>验证缓存服务可访问后再提交安装。</p>
-              </div>
-              <div class="form-field">
-                <label for="redis-address">地址</label>
-                <input id="redis-address" name="addr" value="localhost:6379" autocomplete="off" required />
-              </div>
-              <div class="form-field">
-                <label for="redis-username">账号（可选）</label>
-                <input id="redis-username" name="username" autocomplete="username" />
-              </div>
-              <div class="form-field">
-                <label for="redis-password">密码（可选）</label>
-                <input id="redis-password" name="password" type="password" autocomplete="new-password" />
-              </div>
-              <div class="form-field">
-                <label for="redis-db">数据库编号</label>
-                <input id="redis-db" name="db" type="number" min="0" value="0" inputmode="numeric" />
-              </div>
-              <button class="primary-button" type="submit">测试 Redis 连接</button>
-              <div id="redis-result" class="connection-result" role="status" aria-live="polite" aria-atomic="true"></div>
-            </form>
-
-            <form id="admin-form" class="connection-form connection-form--admin">
-              <div class="connection-form__heading">
-                <h4>初始管理员</h4>
-                <p>安装成功后使用该账号首次登录，请设置独立的高强度密码。</p>
-              </div>
-              <div class="form-field">
-                <label for="admin-username">账号</label>
-                <input id="admin-username" name="username" value="admin" minlength="3" maxlength="64" autocomplete="username" required />
-              </div>
-              <div class="form-field">
-                <label for="admin-password">密码（至少 12 个字符）</label>
-                <input id="admin-password" name="password" type="password" minlength="12" maxlength="128" autocomplete="new-password" required />
-              </div>
-              <div class="form-field">
-                <label for="admin-password-confirm">确认密码</label>
-                <input id="admin-password-confirm" type="password" minlength="12" maxlength="128" autocomplete="new-password" required />
-              </div>
-              <div class="install-action">
-                <button id="apply-button" class="primary-button" type="submit" disabled>开始安装</button>
-                <div id="apply-result" class="connection-result install-feedback" role="status" aria-live="polite" aria-atomic="true" tabindex="-1"></div>
-                <section id="install-failure-details" class="install-failure-details" role="alert" aria-live="assertive" aria-atomic="true" tabindex="-1" aria-labelledby="failure-details-title" hidden>
-                  <div class="failure-details__heading">
-                    <div>
-                      <span>诊断信息</span>
-                      <h5 id="failure-details-title">安装失败原因</h5>
-                    </div>
-                    <strong>输入内容已保留</strong>
+                <div class="form-field">
+                  <label for="database-host">主机</label>
+                  <input
+                    id="database-host"
+                    name="host"
+                    value="localhost"
+                    autocomplete="off"
+                    required
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="database-port">端口</label>
+                  <input
+                    id="database-port"
+                    name="port"
+                    type="number"
+                    min="1"
+                    max="65535"
+                    value="3306"
+                    inputmode="numeric"
+                    required
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="database-name">数据库名</label>
+                  <input
+                    id="database-name"
+                    name="database"
+                    autocomplete="off"
+                    required
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="database-username">账号</label>
+                  <input
+                    id="database-username"
+                    name="username"
+                    autocomplete="username"
+                    required
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="database-password">密码</label>
+                  <input
+                    id="database-password"
+                    name="password"
+                    type="password"
+                    autocomplete="new-password"
+                    required
+                  />
+                </div>
+                <details class="advanced-fields">
+                  <summary>高级 DSN（可选）</summary>
+                  <div class="form-field">
+                    <label for="database-dsn">DSN</label>
+                    <input
+                      id="database-dsn"
+                      name="dsn"
+                      type="password"
+                      autocomplete="new-password"
+                    />
                   </div>
-                  <p id="failure-reason" class="failure-reason">—</p>
-                  <dl class="failure-diagnostics">
-                    <div><dt>失败位置</dt><dd id="failure-step">—</dd></div>
-                    <div><dt>错误码</dt><dd><code id="failure-error-code">—</code></dd></div>
-                    <div><dt>错误标识</dt><dd><code id="failure-error-key">—</code></dd></div>
-                    <div><dt>原因标识</dt><dd><code id="failure-reason-key">—</code></dd></div>
-                    <div><dt>失败操作</dt><dd><code id="failure-operation">—</code></dd></div>
-                    <div><dt>数据库代码</dt><dd><code id="failure-database-code">—</code></dd></div>
-                    <div><dt>任务／请求 ID</dt><dd><code id="failure-job-id">—</code></dd></div>
-                  </dl>
-                  <p class="failure-location">
-                    当前页面直接显示公开原因；更详细的定位可在运行 <code>go run ./cmd/api/main.go</code>
-                    的服务端终端中按任务 ID 查找 <code>installation.job.failed</code>。
-                  </p>
-                </section>
-                <button id="rollback-button" class="secondary-button" type="button" hidden>
-                  回滚本次失败的安装
+                </details>
+                <button class="primary-button" type="submit">
+                  测试数据库连接
                 </button>
-                <div class="progress-panel">
-                  <label class="progress-label" for="apply-progress">安装进度</label>
-                  <progress id="apply-progress" max="100" value="0" aria-valuetext="尚未开始">0%</progress>
-                  <ol id="apply-steps" class="apply-steps" aria-live="polite"></ol>
+                <div
+                  id="database-result"
+                  class="connection-result"
+                  role="status"
+                  aria-live="polite"
+                  aria-atomic="true"
+                ></div>
+              </form>
+
+              <form
+                id="redis-form"
+                class="connection-form connection-form--redis"
+              >
+                <div class="connection-form__heading">
+                  <h4>Redis</h4>
+                  <p>验证缓存服务可访问后再提交安装。</p>
                 </div>
-              </div>
-            </form>
+                <div class="form-field">
+                  <label for="redis-address">地址</label>
+                  <input
+                    id="redis-address"
+                    name="addr"
+                    value="localhost:6379"
+                    autocomplete="off"
+                    required
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="redis-username">账号（可选）</label>
+                  <input
+                    id="redis-username"
+                    name="username"
+                    autocomplete="username"
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="redis-password">密码（可选）</label>
+                  <input
+                    id="redis-password"
+                    name="password"
+                    type="password"
+                    autocomplete="new-password"
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="redis-db">数据库编号</label>
+                  <input
+                    id="redis-db"
+                    name="db"
+                    type="number"
+                    min="0"
+                    value="0"
+                    inputmode="numeric"
+                  />
+                </div>
+                <button class="primary-button" type="submit">
+                  测试 Redis 连接
+                </button>
+                <div
+                  id="redis-result"
+                  class="connection-result"
+                  role="status"
+                  aria-live="polite"
+                  aria-atomic="true"
+                ></div>
+              </form>
+
+              <form
+                id="admin-form"
+                class="connection-form connection-form--admin"
+              >
+                <div class="connection-form__heading">
+                  <h4>初始管理员</h4>
+                  <p>安装成功后使用该账号首次登录，请设置独立的高强度密码。</p>
+                </div>
+                <div class="form-field">
+                  <label for="admin-username">账号</label>
+                  <input
+                    id="admin-username"
+                    name="username"
+                    value="admin"
+                    minlength="3"
+                    maxlength="64"
+                    autocomplete="username"
+                    required
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="admin-password">密码（至少 12 个字符）</label>
+                  <input
+                    id="admin-password"
+                    name="password"
+                    type="password"
+                    minlength="12"
+                    maxlength="128"
+                    autocomplete="new-password"
+                    required
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="admin-password-confirm">确认密码</label>
+                  <input
+                    id="admin-password-confirm"
+                    type="password"
+                    minlength="12"
+                    maxlength="128"
+                    autocomplete="new-password"
+                    required
+                  />
+                </div>
+                <div class="install-action">
+                  <button
+                    id="apply-button"
+                    class="primary-button"
+                    type="submit"
+                    disabled
+                  >
+                    开始安装
+                  </button>
+                  <div
+                    id="apply-result"
+                    class="connection-result install-feedback"
+                    role="status"
+                    aria-live="polite"
+                    aria-atomic="true"
+                    tabindex="-1"
+                  ></div>
+                  <section
+                    id="install-failure-details"
+                    class="install-failure-details"
+                    role="alert"
+                    aria-live="assertive"
+                    aria-atomic="true"
+                    tabindex="-1"
+                    aria-labelledby="failure-details-title"
+                    hidden
+                  >
+                    <div class="failure-details__heading">
+                      <div>
+                        <span>诊断信息</span>
+                        <h5 id="failure-details-title">安装失败原因</h5>
+                      </div>
+                      <strong>输入内容已保留</strong>
+                    </div>
+                    <p id="failure-reason" class="failure-reason">—</p>
+                    <dl class="failure-diagnostics">
+                      <div>
+                        <dt>失败位置</dt>
+                        <dd id="failure-step">—</dd>
+                      </div>
+                      <div>
+                        <dt>错误码</dt>
+                        <dd><code id="failure-error-code">—</code></dd>
+                      </div>
+                      <div>
+                        <dt>错误标识</dt>
+                        <dd><code id="failure-error-key">—</code></dd>
+                      </div>
+                      <div>
+                        <dt>原因标识</dt>
+                        <dd><code id="failure-reason-key">—</code></dd>
+                      </div>
+                      <div>
+                        <dt>失败操作</dt>
+                        <dd><code id="failure-operation">—</code></dd>
+                      </div>
+                      <div>
+                        <dt>数据库代码</dt>
+                        <dd><code id="failure-database-code">—</code></dd>
+                      </div>
+                      <div>
+                        <dt>冲突资源类型</dt>
+                        <dd><code id="failure-resource-kind">—</code></dd>
+                      </div>
+                      <div>
+                        <dt>冲突资源 ID</dt>
+                        <dd><code id="failure-resource-id">—</code></dd>
+                      </div>
+                      <div>
+                        <dt>任务／请求 ID</dt>
+                        <dd><code id="failure-job-id">—</code></dd>
+                      </div>
+                    </dl>
+                    <p class="failure-location">
+                      当前页面直接显示公开原因；更详细的定位可在运行
+                      <code>go run ./cmd/api/main.go</code> 的服务端终端中按任务
+                      ID 查找 <code>installation.job.failed</code>。
+                    </p>
+                  </section>
+                  <button
+                    id="rollback-button"
+                    class="secondary-button"
+                    type="button"
+                    hidden
+                  >
+                    回滚本次失败的安装
+                  </button>
+                  <div class="progress-panel">
+                    <label class="progress-label" for="apply-progress"
+                      >安装进度</label
+                    >
+                    <progress
+                      id="apply-progress"
+                      max="100"
+                      value="0"
+                      aria-valuetext="尚未开始"
+                    >
+                      0%
+                    </progress>
+                    <ol
+                      id="apply-steps"
+                      class="apply-steps"
+                      aria-live="polite"
+                    ></ol>
+                  </div>
+                </div>
+              </form>
             </div>
           </section>
 
-          <section id="next-steps" class="next-steps" aria-labelledby="next-steps-title" hidden>
+          <section
+            id="next-steps"
+            class="next-steps"
+            aria-labelledby="next-steps-title"
+            hidden
+          >
             <h3 id="next-steps-title">重新启动服务并运行管理端</h3>
             <p>停止旧服务端并回到仓库根目录后，打开两个终端分别执行：</p>
             <div class="terminal-grid">
@@ -290,7 +536,12 @@ pnpm run dev</code></pre>
             </div>
           </section>
 
-          <button id="retry-button" class="secondary-button" type="button" hidden>
+          <button
+            id="retry-button"
+            class="secondary-button"
+            type="button"
+            hidden
+          >
             重新检查
           </button>
         </section>

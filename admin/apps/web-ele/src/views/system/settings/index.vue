@@ -7,6 +7,9 @@ import type {
 
 import { computed, nextTick, onMounted, reactive, ref } from 'vue';
 
+import { useAccess } from '@vben/access';
+import { ManagementPage } from '@vben/common-ui';
+
 import {
   getSettingApi,
   listSettingDefinitionsApi,
@@ -17,7 +20,10 @@ import {
 } from '#/api/core/settings';
 import { $t } from '#/locales';
 
-const categories: Array<SettingCategory | 'all'> = [
+const { hasAccessByCodes } = useAccess();
+const canManage = computed(() => hasAccessByCodes(['system:settings:manage']));
+
+const categories: Array<'all' | SettingCategory> = [
   'all',
   'basic',
   'security',
@@ -29,7 +35,7 @@ const categories: Array<SettingCategory | 'all'> = [
 const definitions = ref<SettingDefinition[]>([]);
 const values = reactive<Record<string, SettingData>>({});
 const drafts = reactive<Record<string, string>>({});
-const selectedCategory = ref<SettingCategory | 'all'>('all');
+const selectedCategory = ref<'all' | SettingCategory>('all');
 const loading = ref(true);
 const savingKey = ref('');
 const testingKey = ref('');
@@ -49,7 +55,7 @@ const visibleDefinitions = computed(() =>
   ),
 );
 
-function categoryLabel(category: SettingCategory | 'all') {
+function categoryLabel(category: 'all' | SettingCategory) {
   return $t(`page.settings.category.${category}`);
 }
 
@@ -107,6 +113,7 @@ async function load() {
 }
 
 async function save(definition: SettingDefinition) {
+  if (!canManage.value) return;
   const current = values[definition.key];
   if (!current) return;
   error.value = '';
@@ -137,6 +144,7 @@ async function save(definition: SettingDefinition) {
 }
 
 async function testConnection(definition: SettingDefinition) {
+  if (!canManage.value) return;
   testingKey.value = definition.key;
   error.value = '';
   message.value = '';
@@ -168,6 +176,7 @@ async function openHistory(definition: SettingDefinition) {
 }
 
 async function rollback(item: SettingData) {
+  if (!canManage.value) return;
   const current = values[historyKey.value];
   if (!current) return;
   try {
@@ -190,8 +199,8 @@ onMounted(load);
 </script>
 
 <template>
-  <main
-    class="settings-center-page"
+  <ManagementPage
+    class="settings-page"
     :aria-busy="loading"
     aria-labelledby="settings-center-title"
   >
@@ -276,7 +285,7 @@ onMounted(load);
               <td>
                 <input
                   :aria-label="`${definition.key} ${$t('page.settings.value')}`"
-                  :disabled="savingKey === definition.key"
+                  :disabled="!canManage || savingKey === definition.key"
                   :placeholder="
                     definition.sensitive ? '••••••' : definition.default
                   "
@@ -297,6 +306,7 @@ onMounted(load);
               <td>{{ values[definition.key]?.version ?? 0 }}</td>
               <td class="actions-cell">
                 <button
+                  v-if="canManage"
                   :disabled="
                     definition.sensitive && !drafts[definition.key]?.trim()
                   "
@@ -310,6 +320,7 @@ onMounted(load);
                   }}
                 </button>
                 <button
+                  v-if="canManage"
                   :disabled="testingKey === definition.key"
                   type="button"
                   @click="testConnection(definition)"
@@ -353,6 +364,7 @@ onMounted(load);
         <li v-for="item in history" :key="`${item.key}-${item.version}`">
           <span>v{{ item.version }} · {{ item.updatedAt || '—' }}</span>
           <button
+            v-if="canManage"
             :disabled="item.version === values[historyKey]?.version"
             type="button"
             @click="rollback(item)"
@@ -362,162 +374,187 @@ onMounted(load);
         </li>
       </ul>
     </aside>
-  </main>
+  </ManagementPage>
 </template>
 
 <style scoped>
-.settings-center-page {
-  max-width: 1440px;
-  padding: 24px;
-  margin: 0 auto;
+.settings-page {
   color: hsl(var(--foreground));
 }
+
 .page-heading,
 .table-heading {
   display: flex;
+  gap: 20px;
   align-items: center;
   justify-content: space-between;
-  gap: 20px;
 }
+
 .page-heading {
   align-items: flex-start;
   margin-bottom: 20px;
 }
+
 .eyebrow {
   margin: 0;
-  color: hsl(var(--primary));
   font-size: 0.75rem;
   font-weight: 700;
-  letter-spacing: 0.12em;
+  color: hsl(var(--primary));
   text-transform: uppercase;
+  letter-spacing: 0.12em;
 }
+
 h1,
 h2 {
   margin: 4px 0 8px;
 }
+
 h1 {
   font-size: clamp(1.5rem, 2vw, 2rem);
 }
+
 .description {
   max-width: 860px;
   margin: 0;
-  color: hsl(var(--muted-foreground));
   line-height: 1.6;
+  color: hsl(var(--muted-foreground));
 }
+
 .scope-chip,
 .source-pill {
   display: inline-flex;
   align-items: center;
   min-height: 28px;
   padding: 4px 10px;
-  border-radius: 999px;
-  color: hsl(var(--primary));
-  background: hsl(var(--primary) / 0.1);
   font-size: 0.78rem;
   font-weight: 650;
+  color: hsl(var(--primary));
+  background: hsl(var(--primary) / 10%);
+  border-radius: 999px;
 }
+
 .category-tabs {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 16px;
 }
+
 button {
   min-height: 40px;
   padding: 8px 12px;
+  color: hsl(var(--foreground));
+  cursor: pointer;
+  background: hsl(var(--background));
   border: 1px solid hsl(var(--border));
   border-radius: 8px;
-  color: hsl(var(--foreground));
-  background: hsl(var(--background));
-  cursor: pointer;
 }
+
 button[aria-pressed='true'],
 button.primary {
   color: hsl(var(--primary-foreground));
   background: hsl(var(--primary));
 }
+
 button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
+
 .settings-card,
 .history-card {
   padding: 18px;
+  background: hsl(var(--card));
   border: 1px solid hsl(var(--border));
   border-radius: 12px;
-  background: hsl(var(--card));
-  box-shadow: 0 8px 24px hsl(var(--foreground) / 0.04);
+  box-shadow: 0 8px 24px hsl(var(--foreground) / 4%);
 }
+
 .history-card {
   margin-top: 16px;
 }
+
 .table-wrap {
   overflow-x: auto;
 }
+
 table {
   width: 100%;
   border-collapse: collapse;
 }
+
 th,
 td {
   min-width: 120px;
   padding: 12px 10px;
-  border-bottom: 1px solid hsl(var(--border));
-  text-align: left;
   vertical-align: middle;
+  text-align: left;
+  border-bottom: 1px solid hsl(var(--border));
 }
+
 th {
   font-size: 0.82rem;
 }
+
 td {
   font-size: 0.88rem;
 }
+
 .primary-text {
   display: block;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
+
 small {
   display: block;
   margin-top: 4px;
-  color: hsl(var(--muted-foreground));
   font-weight: 400;
+  color: hsl(var(--muted-foreground));
 }
+
 input {
   width: min(280px, 100%);
   min-height: 40px;
   padding: 8px 10px;
-  border: 1px solid hsl(var(--border));
-  border-radius: 8px;
   color: hsl(var(--foreground));
   background: hsl(var(--background));
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
 }
+
 .actions-cell {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   min-width: 280px;
 }
+
 .feedback {
   padding: 10px 12px;
   margin: 12px 0;
   border-radius: 8px;
 }
+
 .feedback-error {
-  color: hsl(0 65% 36%);
-  background: hsl(0 75% 55% / 0.1);
+  color: hsl(0deg 65% 36%);
+  background: hsl(0deg 75% 55% / 10%);
 }
+
 .feedback-success {
-  color: hsl(142 70% 30%);
-  background: hsl(142 70% 45% / 0.14);
+  color: hsl(142deg 70% 30%);
+  background: hsl(142deg 70% 45% / 14%);
 }
+
 .table-state {
   padding: 32px;
   color: hsl(var(--muted-foreground));
   text-align: center;
 }
+
 .result-count {
   color: hsl(var(--muted-foreground));
 }
+
 .history-list {
   display: grid;
   gap: 8px;
@@ -525,14 +562,16 @@ input {
   margin: 0;
   list-style: none;
 }
+
 .history-list li {
   display: flex;
+  gap: 12px;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
   padding: 8px 0;
   border-bottom: 1px solid hsl(var(--border));
 }
+
 .sr-status,
 .sr-only {
   position: absolute;
@@ -540,22 +579,22 @@ input {
   height: 1px;
   padding: 0;
   overflow: hidden;
-  clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+  clip-path: inset(50%);
 }
+
 @media (max-width: 720px) {
-  .settings-center-page {
-    padding: 16px;
-  }
   .page-heading {
     flex-direction: column;
   }
+
   th,
   td {
     min-width: 140px;
   }
 }
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

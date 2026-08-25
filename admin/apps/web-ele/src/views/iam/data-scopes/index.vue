@@ -3,6 +3,8 @@ import type { IAMDataScope, IAMDataScopeType } from '#/api/core/iam';
 
 import { nextTick, onMounted, ref } from 'vue';
 
+import { ManagementPage } from '@vben/common-ui';
+
 import { listIAMDataScopesApi } from '#/api/core/iam';
 import { $t } from '#/locales';
 
@@ -44,7 +46,7 @@ onMounted(loadDataScopes);
 </script>
 
 <template>
-  <main
+  <ManagementPage
     class="iam-data-scopes-page"
     :aria-busy="dataScopesLoading"
     aria-labelledby="iam-data-scopes-title"
@@ -136,14 +138,11 @@ onMounted(loadDataScopes);
         </table>
       </div>
     </section>
-  </main>
+  </ManagementPage>
 </template>
 
 <style scoped>
 .iam-data-scopes-page {
-  max-width: 1320px;
-  padding: 24px;
-  margin: 0 auto;
   color: hsl(var(--foreground));
 }
 
@@ -193,18 +192,18 @@ h2 {
   align-items: center;
   min-height: 28px;
   padding: 4px 10px;
-  color: hsl(var(--primary));
   font-size: 0.78rem;
   font-weight: 650;
-  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--primary));
+  background: hsl(var(--primary) / 10%);
   border-radius: 999px;
 }
 
 .feedback {
   padding: 10px 12px;
   margin: 12px 0;
-  color: hsl(0 65% 36%);
-  background: hsl(0 75% 55% / 0.1);
+  color: hsl(0deg 65% 36%);
+  background: hsl(0deg 75% 55% / 10%);
   border-radius: 8px;
 }
 
@@ -215,9 +214,9 @@ h2 {
   height: 1px;
   padding: 0;
   overflow: hidden;
-  clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+  clip-path: inset(50%);
 }
 
 .table-card {
@@ -234,8 +233,8 @@ h2 {
 }
 
 .result-count {
-  color: hsl(var(--muted-foreground));
   font-size: 0.85rem;
+  color: hsl(var(--muted-foreground));
 }
 
 .table-wrap {
@@ -296,10 +295,6 @@ code {
 }
 
 @media (max-width: 720px) {
-  .iam-data-scopes-page {
-    padding: 16px;
-  }
-
   .page-heading {
     display: grid;
   }

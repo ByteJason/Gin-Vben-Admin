@@ -25,6 +25,44 @@ func TestContextCarriesOrganizationUnderTenant(t *testing.T) {
 	}
 }
 
+func TestContextChecksTenantWideAndOrganizationBoundPrincipals(t *testing.T) {
+	scope, err := NewContext("tenant-a", "org-b", false)
+	if err != nil {
+		t.Fatalf("NewContext() error = %v", err)
+	}
+	if err := scope.CheckPrincipal("tenant-a", ""); err != nil {
+		t.Fatalf("tenant-wide principal should be valid in a scoped organization: %v", err)
+	}
+	if err := scope.CheckPrincipal("tenant-a", "org-a"); !errors.Is(err, ErrOrganizationDenied) {
+		t.Fatalf("principal bound to another organization should be denied: %v", err)
+	}
+	if err := scope.CheckPrincipal("tenant-b", ""); !errors.Is(err, ErrCrossTenant) {
+		t.Fatalf("tenant-wide principal must not cross tenants: %v", err)
+	}
+}
+
+func TestContextBindsOrganizationPrincipalWhenRequestScopeIsTenantWide(t *testing.T) {
+	scope, err := NewContext("tenant-a", "", false)
+	if err != nil {
+		t.Fatalf("NewContext() error = %v", err)
+	}
+	bound, err := scope.BindPrincipal("tenant-a", "org-a")
+	if err != nil {
+		t.Fatalf("BindPrincipal() error = %v", err)
+	}
+	if bound.TenantID != "tenant-a" || bound.Organization != "org-a" || bound.PlatformAdmin {
+		t.Fatalf("bound scope = %#v", bound)
+	}
+
+	tenantWide, err := scope.BindPrincipal("tenant-a", "")
+	if err != nil {
+		t.Fatalf("tenant-wide BindPrincipal() error = %v", err)
+	}
+	if tenantWide.Organization != "" {
+		t.Fatalf("tenant-wide principal was unexpectedly narrowed: %#v", tenantWide)
+	}
+}
+
 func TestCrossTenantIsDeniedAndPlatformAdminMustBeExplicit(t *testing.T) {
 	scope, err := NewContext("tenant-a", "", false)
 	if err != nil {

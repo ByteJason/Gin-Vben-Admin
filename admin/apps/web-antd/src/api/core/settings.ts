@@ -71,8 +71,25 @@ export async function getSettingApi(key: string) {
   return requestClient.get<SettingData>(settingPath(key));
 }
 
+const observabilitySettingPath = (key: string) =>
+  ADMIN_ENDPOINTS.getObservabilitySetting.replace(
+    '{key}',
+    encodeURIComponent(key),
+  );
+
+export async function getObservabilitySettingApi(key: string) {
+  return requestClient.get<SettingData>(observabilitySettingPath(key));
+}
+
 export async function updateSettingApi(key: string, input: SettingUpdateInput) {
   return requestClient.put<SettingData>(settingPath(key), input);
+}
+
+export async function updateObservabilitySettingApi(
+  key: string,
+  input: SettingUpdateInput,
+) {
+  return requestClient.put<SettingData>(observabilitySettingPath(key), input);
 }
 
 export async function listSettingHistoryApi(key: string) {

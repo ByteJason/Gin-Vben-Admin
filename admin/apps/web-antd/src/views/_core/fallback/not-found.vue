@@ -1,9 +1,18 @@
 <script lang="ts" setup>
-import { Fallback } from '@vben/common-ui';
+import { computed } from 'vue';
 
-defineOptions({ name: 'Fallback404Demo' });
+import { Fallback } from '@vben/common-ui';
+import { preferences } from '@vben/preferences';
+import { useUserStore } from '@vben/stores';
+
+defineOptions({ name: 'Fallback404' });
+
+const userStore = useUserStore();
+const homePath = computed(
+  () => userStore.userInfo?.homePath || preferences.app.defaultHomePath,
+);
 </script>
 
 <template>
-  <Fallback status="404" />
+  <Fallback :home-path="homePath" status="404" />
 </template>

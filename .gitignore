@@ -96,6 +96,7 @@ __debug_bin*
 /var/
 /runtime/
 /.runtime/
+/server/.runtime/
 /uploads/
 /logs/
 /backups/

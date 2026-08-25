@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import type {
   IAMRole,
+  IAMRoleUsersReplaceInput,
   IAMUser,
   IAMUserBatchStatusInput,
   IAMUserCreateInput,
-  IAMRoleUsersReplaceInput,
   IAMUserLoginEventPage,
   IAMUserPage,
   IAMUserPasswordResetInput,
@@ -14,6 +14,9 @@ import type {
 
 import { computed, nextTick, onMounted, reactive, ref } from 'vue';
 
+import { useAccess } from '@vben/access';
+import { ManagementPage } from '@vben/common-ui';
+
 import {
   batchUpdateIAMUserStatusApi,
   createIAMUserApi,
@@ -22,11 +25,21 @@ import {
   listIAMRolesApi,
   listIAMUserLoginEventsApi,
   listIAMUsersApi,
-  resetIAMUserPasswordApi,
   replaceIAMRoleUsersApi,
+  resetIAMUserPasswordApi,
   updateIAMUserApi,
 } from '#/api/core/iam';
 import { $t } from '#/locales';
+
+const { hasAccessByCodes } = useAccess();
+const canManage = computed(() => hasAccessByCodes(['iam:users:manage']));
+const canReadRoles = computed(() => hasAccessByCodes(['iam:roles:read']));
+const canManageRoleAssignments = computed(
+  () =>
+    canManage.value &&
+    canReadRoles.value &&
+    hasAccessByCodes(['iam:roles:manage']),
+);
 
 const state = reactive({
   keyword: '',
@@ -202,6 +215,7 @@ function clearUserForm() {
 }
 
 function openCreate() {
+  if (!canManage.value) return;
   formMode.value = 'create';
   clearUserForm();
   formMessage.value = '';
@@ -209,6 +223,7 @@ function openCreate() {
 }
 
 async function openEdit(user: IAMUser) {
+  if (!canManage.value) return;
   formMode.value = 'edit';
   clearUserForm();
   editingId.value = user.id;
@@ -266,6 +281,7 @@ function validateUserForm() {
 }
 
 async function submitUserForm() {
+  if (!canManage.value) return;
   formError.value = '';
   const validationError = validateUserForm();
   if (validationError) {
@@ -307,6 +323,7 @@ async function submitUserForm() {
 }
 
 function openResetPassword(user: IAMUser) {
+  if (!canManage.value) return;
   resetUserId.value = user.id;
   resetUsername.value = user.username;
   resetPassword.value = '';
@@ -332,6 +349,7 @@ function validateResetPassword() {
 }
 
 async function submitResetPassword() {
+  if (!canManage.value) return;
   resetError.value = '';
   actionError.value = '';
   actionMessage.value = '';
@@ -473,6 +491,7 @@ async function focusRoleAssignmentError() {
 }
 
 function openRoleAssignment(user: IAMUser) {
+  if (!canManageRoleAssignments.value) return;
   const currentRoleIds = roleIdsForUser(user.id);
   roleAssignmentUserId.value = user.id;
   roleAssignmentUsername.value = user.username;
@@ -509,6 +528,7 @@ function roleAssignmentChanges() {
 }
 
 async function submitRoleAssignment() {
+  if (!canManageRoleAssignments.value) return;
   roleAssignmentError.value = '';
   if (rolesError.value) {
     roleAssignmentError.value = rolesError.value;
@@ -545,7 +565,8 @@ async function submitRoleAssignment() {
     }
     roleAssignmentOpen.value = false;
     actionMessage.value = String($t('page.iam.roleAssignmentDone'));
-    await Promise.all([loadUsers(), loadRoles()]);
+    await loadUsers();
+    await loadRoles();
     await focusActionFeedback();
   } catch {
     roleAssignmentError.value = String($t('page.iam.roleAssignmentError'));
@@ -556,6 +577,7 @@ async function submitRoleAssignment() {
 }
 
 async function deleteUser(user: IAMUser) {
+  if (!canManage.value) return;
   if (
     actionLoading.value ||
     formLoading.value ||
@@ -583,6 +605,7 @@ async function deleteUser(user: IAMUser) {
 }
 
 async function batchUpdate(active: boolean) {
+  if (!canManage.value) return;
   if (
     actionLoading.value ||
     resetLoading.value ||
@@ -642,6 +665,7 @@ async function loadUsers() {
 }
 
 async function loadRoles() {
+  if (!canReadRoles.value) return;
   rolesLoading.value = true;
   rolesError.value = '';
   try {
@@ -681,12 +705,13 @@ async function changePageSize() {
 }
 
 onMounted(async () => {
-  await Promise.all([loadUsers(), loadRoles()]);
+  await loadUsers();
+  await loadRoles();
 });
 </script>
 
 <template>
-  <main
+  <ManagementPage
     class="iam-users-page"
     :aria-busy="loading"
     aria-labelledby="iam-users-title"
@@ -698,8 +723,15 @@ onMounted(async () => {
         <p class="description">{{ $t('page.iam.description') }}</p>
       </div>
       <div class="heading-actions">
-        <span class="scope-chip">{{ $t('page.iam.manage') }}</span>
-        <button class="primary" type="button" @click="openCreate">
+        <span v-if="canManage" class="scope-chip">{{
+          $t('page.iam.manage')
+        }}</span>
+        <button
+          v-if="canManage"
+          class="primary"
+          type="button"
+          @click="openCreate"
+        >
           {{ $t('page.iam.create') }}
         </button>
       </div>
@@ -757,7 +789,7 @@ onMounted(async () => {
           <option value="disabled">{{ $t('page.iam.disabled') }}</option>
         </select>
       </label>
-      <label class="field" for="iam-users-role">
+      <label v-if="canReadRoles" class="field" for="iam-users-role">
         <span>{{ $t('page.iam.role') }}</span>
         <select
           id="iam-users-role"
@@ -787,11 +819,10 @@ onMounted(async () => {
     <section class="table-card" aria-labelledby="iam-users-table-title">
       <div class="table-heading">
         <h2 id="iam-users-table-title">{{ $t('page.iam.users') }}</h2>
-        <span class="result-count"
-          >{{ page.total }} {{ $t('page.iam.rows') }}</span
-        >
+        <span class="result-count">{{ page.total }} {{ $t('page.iam.rows') }}</span>
       </div>
       <div
+        v-if="canManage"
         class="bulk-toolbar"
         role="toolbar"
         :aria-label="$t('page.iam.bulkActions')"
@@ -856,7 +887,7 @@ onMounted(async () => {
           </caption>
           <thead>
             <tr>
-              <th scope="col" class="selection-column">
+              <th v-if="canManage" scope="col" class="selection-column">
                 <span class="sr-only">{{ $t('page.iam.selectAll') }}</span>
               </th>
               <th scope="col">{{ $t('page.iam.username') }}</th>
@@ -881,7 +912,7 @@ onMounted(async () => {
               </td>
             </tr>
             <tr v-for="user in page.items" v-else :key="user.id">
-              <td class="selection-column">
+              <td v-if="canManage" class="selection-column">
                 <input
                   :id="`iam-user-select-${user.id}`"
                   :checked="selectedIds.includes(user.id)"
@@ -922,6 +953,7 @@ onMounted(async () => {
               <td>{{ formatDate(user.lastLoginAt) }}</td>
               <td>
                 <button
+                  v-if="canManage"
                   class="link-button"
                   type="button"
                   :disabled="
@@ -937,6 +969,7 @@ onMounted(async () => {
                   {{ $t('page.iam.edit') }}
                 </button>
                 <button
+                  v-if="canManageRoleAssignments"
                   class="link-button"
                   type="button"
                   :disabled="
@@ -968,6 +1001,7 @@ onMounted(async () => {
                   {{ $t('page.iam.loginEvents') }}
                 </button>
                 <button
+                  v-if="canManage"
                   class="link-button"
                   type="button"
                   :disabled="
@@ -983,6 +1017,7 @@ onMounted(async () => {
                   {{ $t('page.iam.resetPassword') }}
                 </button>
                 <button
+                  v-if="canManage"
                   class="link-button danger"
                   type="button"
                   :disabled="
@@ -1034,7 +1069,7 @@ onMounted(async () => {
     </section>
 
     <section
-      v-if="formOpen"
+      v-if="formOpen && canManage"
       class="modal-backdrop"
       :aria-label="$t('page.iam.form')"
       @click.self="closeForm"
@@ -1171,7 +1206,7 @@ onMounted(async () => {
     </section>
 
     <section
-      v-if="roleAssignmentOpen"
+      v-if="roleAssignmentOpen && canManageRoleAssignments"
       class="modal-backdrop"
       :aria-label="$t('page.iam.roleAssignmentTitle')"
       @click.self="closeRoleAssignment"
@@ -1273,7 +1308,7 @@ onMounted(async () => {
     </section>
 
     <section
-      v-if="resetOpen"
+      v-if="resetOpen && canManage"
       class="modal-backdrop"
       :aria-label="$t('page.iam.resetTitle')"
       @click.self="closeResetPassword"
@@ -1504,14 +1539,11 @@ onMounted(async () => {
         </footer>
       </div>
     </section>
-  </main>
+  </ManagementPage>
 </template>
 
 <style scoped>
 .iam-users-page {
-  max-width: 1440px;
-  padding: 24px;
-  margin: 0 auto;
   color: hsl(var(--foreground));
 }
 
@@ -2025,7 +2057,7 @@ th small {
   overflow: hidden;
   white-space: nowrap;
   border: 0;
-  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
 }
 
 @media (max-width: 1100px) {
@@ -2040,10 +2072,6 @@ th small {
 }
 
 @media (max-width: 768px) {
-  .iam-users-page {
-    padding: 16px;
-  }
-
   .page-heading {
     display: block;
   }
@@ -2104,6 +2132,7 @@ th small {
     margin-bottom: 4px;
   }
 }
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

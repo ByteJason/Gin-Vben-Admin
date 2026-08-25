@@ -6,6 +6,7 @@ import (
 
 	auditapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/audit"
 	appauth "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/auth"
+	dashboardapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/dashboard"
 	dictionaryapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/dictionary"
 	fileapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/file"
 	iamapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/iam"
@@ -21,6 +22,7 @@ import (
 	adminhttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/admin"
 	audithttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/audit"
 	authhttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/auth"
+	dashboardhttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/dashboard"
 	dictionaryhttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/dictionary"
 	filehttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/file"
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/health"
@@ -95,7 +97,7 @@ func newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasksAndRunsAndImportExport
 	if installStatus != nil {
 		installHandler = installhttp.NewHandlerWithApplyAndJobs(installStatus, installplatform.NewSystemCapabilityProbe(), installPlan, dependencyChecks, applyService, jobService)
 	}
-	var auxiliary adminhttp.AuxiliaryRoutes
+	auxiliary := adminhttp.AuxiliaryRoutes{IAM: iamService}
 	if settingsService != nil {
 		auxiliary.Settings = settingshttp.NewHandler(settingsService)
 	}
@@ -109,7 +111,11 @@ func newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasksAndRunsAndImportExport
 		auxiliary.Mail = mailhttp.NewHandler(mailService)
 	}
 	if monitorService != nil {
-		auxiliary.Monitor = monitorhttp.NewHandler(monitorService)
+		if iamService != nil {
+			auxiliary.Monitor = monitorhttp.NewHandlerWithIAM(monitorService, iamService)
+		} else {
+			auxiliary.Monitor = monitorhttp.NewHandler(monitorService)
+		}
 	}
 	if dictionaryService != nil {
 		auxiliary.Dictionary = dictionaryhttp.NewHandler(dictionaryService)
@@ -119,6 +125,31 @@ func newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasksAndRunsAndImportExport
 	}
 	if importExportService != nil {
 		auxiliary.ImportExport = importexporthttp.NewHandler(importExportService)
+	}
+	dashboardConfig := dashboardapp.Config{}
+	if iamService != nil {
+		dashboardConfig.IAM = iamService
+	}
+	if taskService != nil {
+		dashboardConfig.Tasks = taskService
+	}
+	if importExportService != nil {
+		dashboardConfig.ImportExport = importExportService
+	}
+	if fileService != nil {
+		dashboardConfig.Files = fileService
+	}
+	if auditService != nil {
+		dashboardConfig.Audit = auditService
+	}
+	if mailService != nil {
+		dashboardConfig.Mail = mailService
+	}
+	if monitorService != nil {
+		dashboardConfig.Monitor = monitorService
+	}
+	if iamService != nil {
+		auxiliary.Dashboard = dashboardhttp.NewHandlerWithIAM(dashboardapp.NewService(dashboardConfig), iamService)
 	}
 	tenantPolicy := httpmiddleware.TenantPolicy{
 		Mode:                  cfg.Tenant.Mode,

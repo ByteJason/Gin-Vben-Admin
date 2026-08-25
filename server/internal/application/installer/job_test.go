@@ -206,12 +206,54 @@ func TestApplyJobPublishesOnlyStructuredFailureDiagnostic(t *testing.T) {
 	}
 }
 
+func TestApplyJobPublishesBoundedNavigationSeedConflictDiagnostic(t *testing.T) {
+	var output bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&output, nil))
+	runner := &jobRunnerStub{run: func(_ context.Context, _ ApplyRequest, report func(string)) (ApplyResult, error) {
+		report("schema")
+		return ApplyResult{}, navigationDiagnosticJobError{cause: errors.New("password=TOP_SECRET_VALUE")}
+	}}
+	service := NewApplyJobServiceWithLogger(runner, logger)
+	job, err := service.Start(context.Background(), validApplyRequest())
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	failed := waitForJob(t, service, job.ID, JobFailed)
+	if failed.FailureReason != "navigation_seed_conflict" || failed.FailureOperation != "apply" ||
+		failed.FailureResourceKind != "menu" || failed.FailureResourceID != "menu-system-settings" {
+		t.Fatalf("failure diagnostic = %#v", failed)
+	}
+	encoded := output.String()
+	for _, expected := range []string{
+		"failure_reason", "navigation_seed_conflict", "failure_resource_kind", "menu",
+		"failure_resource_id", "menu-system-settings",
+	} {
+		if !strings.Contains(encoded, expected) {
+			t.Fatalf("structured failure log missing %q: %s", expected, encoded)
+		}
+	}
+	if strings.Contains(encoded, "TOP_SECRET_VALUE") {
+		t.Fatalf("structured failure log leaked raw cause: %s", encoded)
+	}
+}
+
 type diagnosticJobError struct{ cause error }
 
 func (e diagnosticJobError) Error() string { return "database schema installation failed" }
 func (e diagnosticJobError) Unwrap() error { return e.cause }
 func (e diagnosticJobError) InstallationFailureDiagnostic() FailureDiagnostic {
 	return FailureDiagnostic{Reason: "tls_mode_mismatch", Operation: "connect", DatabaseCode: "08006"}
+}
+
+type navigationDiagnosticJobError struct{ cause error }
+
+func (e navigationDiagnosticJobError) Error() string { return "navigation seed installation failed" }
+func (e navigationDiagnosticJobError) Unwrap() error { return e.cause }
+func (e navigationDiagnosticJobError) InstallationFailureDiagnostic() FailureDiagnostic {
+	return FailureDiagnostic{
+		Reason: "navigation_seed_conflict", Operation: "apply",
+		ResourceKind: "menu", ResourceID: "menu-system-settings",
+	}
 }
 
 func TestApplyJobCloseCancelsActiveRunner(t *testing.T) {

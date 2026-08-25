@@ -48,13 +48,15 @@ func NewHandlerWithAudit(service *iamapp.Service, auth appauth.AuthService, audi
 // default-deny: a missing service or auth dependency exposes only 503 stubs.
 func RegisterRoutes(r gin.IRouter, handler *Handler, policies ...httpmiddleware.TenantPolicy) {
 	group := r.Group(basePath)
-	if handler == nil || handler.service == nil || handler.auth == nil {
-		registerDisabled(group)
-		return
-	}
 	policy := httpmiddleware.TenantPolicy{Mode: "single", DefaultTenantID: "default"}
 	if len(policies) > 0 {
 		policy = policies[0]
+	}
+	if handler == nil || handler.service == nil || handler.auth == nil {
+		registerDisabled(group)
+		r.Group("/api/admin/v1/auth").GET("/codes", disabled)
+		r.Group("/api/admin/v1/menu").GET("/all", disabled)
+		return
 	}
 	group.Use(authhttp.Middleware(handler.auth), httpmiddleware.TenantContext(policy))
 	group.GET("/me", handler.currentUser)
@@ -83,9 +85,12 @@ func RegisterRoutes(r gin.IRouter, handler *Handler, policies ...httpmiddleware.
 	group.POST("/policies", handler.createPolicy)
 	group.GET("/data-scopes", handler.listDataScopes)
 	group.POST("/data-scopes", handler.createDataScope)
-	// The UI contract uses this compact menu path; it is the same guarded
-	// collection as /iam/menus and deliberately has no separate policy source.
+	// The UI contract uses this bootstrap path. It verifies the active user and
+	// tenant, then filters dynamic routes through that user's IAM access codes.
 	r.Group("/api/admin/v1").Use(authhttp.Middleware(handler.auth), httpmiddleware.TenantContext(policy)).GET("/menu/all", handler.listMenuRoutes)
+	// Compatibility for Vben clients that load button/API permission codes
+	// separately from /iam/me. Both endpoints delegate to the same IAM resolver.
+	r.Group("/api/admin/v1/auth").Use(authhttp.Middleware(handler.auth), httpmiddleware.TenantContext(policy)).GET("/codes", handler.accessCodes)
 }
 
 func registerDisabled(group *gin.RouterGroup) {
@@ -108,27 +113,8 @@ func (h *Handler) guard(c *gin.Context) bool {
 }
 
 func (h *Handler) authorizedUser(c *gin.Context) (domain.User, bool) {
-	if h == nil || h.service == nil || h.service.Users == nil {
-		response.Error(c, http.StatusServiceUnavailable, codeUnavailable, "dependency unavailable")
-		return domain.User{}, false
-	}
-	value, exists := c.Get("auth_claims")
-	claims, ok := value.(authdomain.Claims)
-	if !exists || !ok || strings.TrimSpace(claims.Subject) == "" {
-		response.Error(c, http.StatusUnauthorized, 20000, "unauthenticated")
-		return domain.User{}, false
-	}
-	user, err := h.service.Users.FindUser(c.Request.Context(), claims.Subject)
-	if err != nil {
-		if errors.Is(err, iamapp.ErrRepositoryMissing) {
-			response.Error(c, http.StatusServiceUnavailable, codeUnavailable, "dependency unavailable")
-		} else {
-			response.Error(c, http.StatusForbidden, codeForbidden, "forbidden")
-		}
-		return domain.User{}, false
-	}
-	if !user.Active {
-		response.Error(c, http.StatusForbidden, codeForbidden, "forbidden")
+	user, subject, allowed := h.authenticatedUser(c)
+	if !allowed {
 		return domain.User{}, false
 	}
 	scope, err := tenant.RequireContext(c.Request.Context())
@@ -136,7 +122,7 @@ func (h *Handler) authorizedUser(c *gin.Context) (domain.User, bool) {
 		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid tenant context")
 		return domain.User{}, false
 	}
-	allowed, err := h.service.Authorize(c.Request.Context(), domain.Subject{UserID: user.ID, RoleIDs: user.RoleIDs, Domain: scope.TenantID}, domain.Request{
+	allowed, err = h.service.Authorize(c.Request.Context(), subject, domain.Request{
 		Domain: scope.TenantID,
 		Method: c.Request.Method,
 		Path:   c.FullPath(),
@@ -150,6 +136,53 @@ func (h *Handler) authorizedUser(c *gin.Context) (domain.User, bool) {
 		return domain.User{}, false
 	}
 	return user, true
+}
+
+// authenticatedUser is the bootstrap-safe identity seam. Self profile,
+// access-code, and dynamic-menu reads require a verified bearer, an active
+// account, and a matching tenant/organization, but do not require a circular
+// policy grant for the bootstrap endpoint itself.
+func (h *Handler) authenticatedUser(c *gin.Context) (domain.User, domain.Subject, bool) {
+	if h == nil || h.service == nil || h.service.Users == nil {
+		response.Error(c, http.StatusServiceUnavailable, codeUnavailable, "dependency unavailable")
+		return domain.User{}, domain.Subject{}, false
+	}
+	value, exists := c.Get("auth_claims")
+	claims, ok := value.(authdomain.Claims)
+	if !exists || !ok || strings.TrimSpace(claims.Subject) == "" {
+		response.Error(c, http.StatusUnauthorized, 20000, "unauthenticated")
+		return domain.User{}, domain.Subject{}, false
+	}
+	user, err := h.service.GetAuthorizationUser(c.Request.Context(), claims.Subject)
+	if err != nil {
+		if errors.Is(err, iamapp.ErrRepositoryMissing) {
+			response.Error(c, http.StatusServiceUnavailable, codeUnavailable, "dependency unavailable")
+		} else {
+			response.Error(c, http.StatusForbidden, codeForbidden, "forbidden")
+		}
+		return domain.User{}, domain.Subject{}, false
+	}
+	if !user.Active {
+		response.Error(c, http.StatusForbidden, codeForbidden, "forbidden")
+		return domain.User{}, domain.Subject{}, false
+	}
+	scope, err := tenant.RequireContext(c.Request.Context())
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, codeBadRequest, "invalid tenant context")
+		return domain.User{}, domain.Subject{}, false
+	}
+	effectiveScope, err := scope.BindPrincipal(user.TenantID, user.OrgID)
+	if err != nil {
+		writeServiceError(c, err)
+		return domain.User{}, domain.Subject{}, false
+	}
+	c.Request = c.Request.WithContext(tenant.WithContext(c.Request.Context(), effectiveScope))
+	subject, err := h.service.ResolveSubject(c.Request.Context(), user)
+	if err != nil {
+		writeServiceError(c, err)
+		return domain.User{}, domain.Subject{}, false
+	}
+	return user, subject, true
 }
 
 type userCreateRequest struct {
@@ -222,24 +255,44 @@ type userPageResponse struct {
 }
 
 type currentUserResponse struct {
-	UserID   string   `json:"userId"`
-	Username string   `json:"username"`
-	RealName string   `json:"realName"`
-	Avatar   string   `json:"avatar"`
-	Roles    []string `json:"roles"`
-	HomePath string   `json:"homePath"`
-	Desc     string   `json:"desc"`
+	UserID      string   `json:"userId"`
+	Username    string   `json:"username"`
+	RealName    string   `json:"realName"`
+	Avatar      string   `json:"avatar"`
+	Roles       []string `json:"roles"`
+	HomePath    string   `json:"homePath"`
+	Desc        string   `json:"desc"`
+	AccessCodes []string `json:"accessCodes"`
 }
 
 func (h *Handler) currentUser(c *gin.Context) {
-	user, allowed := h.authorizedUser(c)
+	user, subject, allowed := h.authenticatedUser(c)
 	if !allowed {
+		return
+	}
+	accessCodes, err := h.service.ListAccessCodes(c.Request.Context(), subject)
+	if err != nil {
+		writeServiceError(c, err)
 		return
 	}
 	response.OK(c, currentUserResponse{
 		UserID: user.ID, Username: user.Username, RealName: user.DisplayName,
-		Roles: append([]string(nil), user.RoleIDs...), HomePath: "/analytics",
+		Roles: append([]string(nil), subject.RoleIDs...), HomePath: "/dashboard/analytics",
+		AccessCodes: accessCodes,
 	})
+}
+
+func (h *Handler) accessCodes(c *gin.Context) {
+	_, subject, allowed := h.authenticatedUser(c)
+	if !allowed {
+		return
+	}
+	accessCodes, err := h.service.ListAccessCodes(c.Request.Context(), subject)
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	response.OK(c, accessCodes)
 }
 
 func (h *Handler) listUsers(c *gin.Context) {
@@ -808,10 +861,11 @@ func (h *Handler) reorderMenus(c *gin.Context) {
 }
 
 func (h *Handler) listMenuRoutes(c *gin.Context) {
-	if !h.guard(c) {
+	_, subject, allowed := h.authenticatedUser(c)
+	if !allowed {
 		return
 	}
-	routes, err := h.service.ListMenuRoutes(c.Request.Context())
+	routes, err := h.service.ListMenuRoutesForSubject(c.Request.Context(), subject)
 	if err != nil {
 		writeServiceError(c, err)
 		return

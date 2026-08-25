@@ -5,7 +5,13 @@ import { useRouter } from 'vue-router';
 
 import { LOGIN_PATH } from '@vben/constants';
 import { preferences } from '@vben/preferences';
-import { resetAllStores, useAccessStore, useUserStore } from '@vben/stores';
+import {
+  authenticateThenNavigate,
+  bootstrapAuthenticatedSession,
+  resetAllStores,
+  useAccessStore,
+  useUserStore,
+} from '@vben/stores';
 
 import { notification } from 'ant-design-vue';
 import { defineStore } from 'pinia';
@@ -32,65 +38,76 @@ export const useAuthStore = defineStore('auth', () => {
     onSuccess?: () => Promise<void> | void,
   ) {
     // 异步处理用户登录操作并获取 accessToken
-    let userInfo: null | UserInfo = null;
+    let userInfo: UserInfo;
+    loginLoading.value = true;
+    loginError.value = null;
+    loginSuccess.value = false;
     try {
-      loginLoading.value = true;
-      loginError.value = null;
-      loginSuccess.value = false;
-      const { accessToken } = await loginApi({
-        captcha:
-          typeof params.captcha === 'string' ? params.captcha : undefined,
-        captchaId:
-          typeof params.captchaId === 'string' ? params.captchaId : undefined,
-        password: params.password,
-        identifier: params.identifier ?? params.username,
-      });
-
-      // 如果成功获取到 accessToken
-      if (accessToken) {
-        accessStore.setAccessToken(accessToken);
-
-        // 获取用户信息并存储到 accessStore 中
-        const [fetchUserInfoResult, accessCodes] = await Promise.all([
-          fetchUserInfo(),
-          getAccessCodesApi(),
-        ]);
-
-        userInfo = fetchUserInfoResult;
-
-        userStore.setUserInfo(userInfo);
-        accessStore.setAccessCodes(accessCodes);
-        loginSuccess.value = true;
-
-        if (accessStore.loginExpired) {
-          accessStore.setLoginExpired(false);
-        } else {
-          onSuccess
-            ? await onSuccess?.()
-            : await router.push(
-                userInfo.homePath || preferences.app.defaultHomePath,
-              );
-        }
-
-        if (userInfo?.realName) {
-          notification.success({
-            description: `${$t('authentication.loginSuccessDesc')}:${userInfo?.realName}`,
-            duration: 3,
-            message: $t('authentication.loginSuccess'),
+      userInfo = await authenticateThenNavigate({
+        authenticate: async () => {
+          const { accessToken } = await loginApi({
+            captcha:
+              typeof params.captcha === 'string' ? params.captcha : undefined,
+            captchaId:
+              typeof params.captchaId === 'string'
+                ? params.captchaId
+                : undefined,
+            password: params.password,
+            identifier: params.identifier ?? params.username,
           });
-        }
-      }
-      if (!accessToken) {
-        loginError.value = 'Login response did not include an access token';
-      }
-    } catch (error: any) {
-      loginSuccess.value = false;
-      const responseData = error?.response?.data ?? error?.data ?? error;
-      loginError.value =
-        responseData?.message ??
-        responseData?.error ??
-        'Login failed. Check your credentials and try again.';
-      throw error;
+          if (!accessToken) {
+            throw new Error('Login response did not include an access token');
+          }
+          return bootstrapAuthenticatedSession({
+            accessToken,
+            commit: ({ accessCodes, userInfo: resolvedUserInfo }) => {
+              userStore.setUserInfo(resolvedUserInfo);
+              accessStore.setAccessCodes(accessCodes);
+            },
+            fetchLegacyAccessCodes: getAccessCodesApi,
+            fetchUserInfo: getUserInfoApi,
+            rollback: async () => {
+              try {
+                await logoutApi();
+              } catch {
+                // Cookie/session cleanup is best-effort; local state must reset.
+              }
+              accessStore.setAccessToken(null);
+              accessStore.setAccessCodes([]);
+              userStore.setUserInfo(null);
+            },
+            stageAccessToken: (token) => accessStore.setAccessToken(token),
+          });
+        },
+        navigate: async (authenticatedUser) => {
+          loginSuccess.value = true;
+          if (accessStore.loginExpired) {
+            accessStore.setLoginExpired(false);
+          } else {
+            onSuccess
+              ? await onSuccess()
+              : await router.push(
+                  authenticatedUser.homePath || preferences.app.defaultHomePath,
+                );
+          }
+          if (authenticatedUser.realName) {
+            notification.success({
+              description: `${$t('authentication.loginSuccessDesc')}:${authenticatedUser.realName}`,
+              duration: 3,
+              message: $t('authentication.loginSuccess'),
+            });
+          }
+        },
+        onAuthenticationFailure: (error) => {
+          loginSuccess.value = false;
+          const responseData =
+            (error as any)?.response?.data ?? (error as any)?.data ?? error;
+          loginError.value =
+            (responseData as any)?.message ??
+            (responseData as any)?.error ??
+            'Login failed. Check your credentials and try again.';
+        },
+      });
     } finally {
       loginLoading.value = false;
     }

@@ -50,7 +50,7 @@
     "update:deps": "npx taze -r -w",
     "version": "pnpm exec changeset version && pnpm install --no-frozen-lockfile",
     "catalog": "pnpm dlx codemod pnpm/catalog",
-    "test:smoke": "node --test tests/smoke.test.mjs tests/init-cli.test.mjs tests/docker-ui.test.mjs tests/pnpm-command.test.mjs tests/dependency-log.test.mjs tests/dependency-runner.test.mjs tests/process-identity.test.mjs"
+    "test:smoke": "node --test tests/smoke.test.mjs tests/production-admin-contract.test.mjs tests/manage-access-contract.test.mjs tests/init-cli.test.mjs tests/docker-ui.test.mjs tests/pnpm-command.test.mjs tests/dependency-log.test.mjs tests/dependency-runner.test.mjs tests/process-identity.test.mjs"
   },
   "dependencies": {
     "sortablejs": "catalog:"

@@ -53,7 +53,7 @@ func TestInstallationUserRowStoresNormalizedUsername(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newInstallationUserRow() error = %v", err)
 	}
-	if row.Username != "Alice" || row.UsernameNormalized == nil || *row.UsernameNormalized != "alice" {
+	if row.Username != "Alice" || row.UsernameNormalized == nil || *row.UsernameNormalized != "alice" || row.TenantID != initialTenantID || row.OrgID != nil {
 		t.Fatalf("installation row = %+v", row)
 	}
 }
@@ -74,6 +74,51 @@ func TestIdentityInstallerRecoversRollbackAfterProcessRestartWithFreshConnection
 	}
 	if store.rollbackReference != receipt.Reference || store.closeCalls != 2 {
 		t.Fatalf("recovered rollback reference/close = %q/%d", store.rollbackReference, store.closeCalls)
+	}
+}
+
+func TestIdentityInstallerPreservesNotOwnedRecoverySentinel(t *testing.T) {
+	store := &identityStoreStub{rollbackErr: installer.ErrIdentityNotOwned}
+	service := NewIdentityInstaller(
+		func(installer.DatabaseConnection) (IdentityStore, error) { return store, nil },
+		&passwordHasherStub{hash: "$2a$12$fixture-hash"},
+		bytes.NewReader(bytes.Repeat([]byte{0x7e}, 64)),
+	)
+	err := service.RecoverRollback(
+		context.Background(),
+		installer.DatabaseConnection{Driver: "mysql", Mode: "single", DSN: "user:secret@tcp(db:3306)/app"},
+		installer.IdentityReceipt{Reference: "install-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+	)
+	if !errors.Is(err, installer.ErrIdentityNotOwned) {
+		t.Fatalf("RecoverRollback() error=%v, want ErrIdentityNotOwned", err)
+	}
+}
+
+func TestIdentityInstallerPreservesSafeInitializationDiagnostic(t *testing.T) {
+	cause := &navigationSeedConflictError{resourceKind: "permission", resourceID: "iam:users:read"}
+	store := &identityStoreStub{initializeErr: cause}
+	service := NewIdentityInstaller(
+		func(installer.DatabaseConnection) (IdentityStore, error) { return store, nil },
+		&passwordHasherStub{hash: "$2a$12$fixture-hash"},
+		bytes.NewReader(bytes.Repeat([]byte{0x7f}, 64)),
+	)
+	receipt, err := service.InitializeWithReference(
+		context.Background(),
+		installer.DatabaseConnection{Driver: "mysql", Mode: "single", DSN: "user:secret@tcp(db:3306)/app"},
+		installer.AdminAccount{Username: "admin", Password: "initial-password-123"},
+		"install-cccccccccccccccccccccccccccccccc",
+	)
+	if err == nil || receipt.Reference == "" {
+		t.Fatalf("InitializeWithReference() receipt=%#v error=%v", receipt, err)
+	}
+	var provider installer.FailureDiagnosticProvider
+	if !errors.As(err, &provider) {
+		t.Fatalf("InitializeWithReference() error=%T %v, want diagnostic provider", err, err)
+	}
+	got := provider.InstallationFailureDiagnostic()
+	if got.Reason != "navigation_seed_conflict" || got.Operation != "apply" ||
+		got.ResourceKind != "permission" || got.ResourceID != "iam:users:read" {
+		t.Fatalf("diagnostic=%#v", got)
 	}
 }
 
@@ -168,18 +213,20 @@ type identityStoreStub struct {
 	rollbackReference string
 	closeCalls        int
 	closeErrors       map[int]error
+	rollbackErr       error
+	initializeErr     error
 }
 
 func (s *identityStoreStub) Initialize(_ context.Context, reference, username, passwordHash string) error {
 	s.rollbackReference = reference
 	s.username = username
 	s.passwordHash = passwordHash
-	return nil
+	return s.initializeErr
 }
 
 func (s *identityStoreStub) Rollback(_ context.Context, reference string) error {
 	s.rollbackReference = reference
-	return nil
+	return s.rollbackErr
 }
 
 func (s *identityStoreStub) Close() error {

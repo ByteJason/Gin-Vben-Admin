@@ -1,8 +1,10 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
 
-const breakpoints = [375, 768, 1024, 1440];
+const breakpoints = [375, 768, 1440, 1920, 2560];
 const managementPages = [
+  { path: '/dashboard/analytics', endpoint: '/dashboard/summary' },
+  { path: '/system/monitor', endpoint: '/ops/monitor' },
   { path: '/system/settings', endpoint: '/settings' },
   { path: '/system/audit', endpoint: '/audit/events' },
   { path: '/system/files', endpoint: '/files' },
@@ -10,6 +12,22 @@ const managementPages = [
 ];
 
 const fixtureUser = {
+  accessCodes: [
+    'dashboard:overview:read',
+    'iam:users:read',
+    'iam:roles:read',
+    'iam:menus:read',
+    'iam:permissions:read',
+    'system:settings:read',
+    'system:dictionary:read',
+    'system:mail:read',
+    'system:files:read',
+    'system:observability:read',
+    'ops:monitor:read',
+    'ops:audit:read',
+    'ops:tasks:read',
+    'ops:data-jobs:read',
+  ],
   homePath: '/system/files',
   id: 'b107-fixture-user',
   realName: 'B10.7 Fixture',
@@ -17,48 +35,7 @@ const fixtureUser = {
   username: 'b107-fixture',
 };
 
-const fixtureMenus = [
-  {
-    component: 'BasicLayout',
-    meta: { icon: 'lucide:activity', order: 30, title: 'System' },
-    name: 'system',
-    path: '/system',
-    children: [
-      {
-        component: '/system/settings/index.vue',
-        meta: { order: 1, title: 'Settings' },
-        name: 'settings',
-        path: 'settings',
-      },
-      {
-        component: '/system/audit/index.vue',
-        meta: { order: 2, title: 'Audit' },
-        name: 'audit',
-        path: 'audit',
-      },
-      {
-        component: '/system/files/index.vue',
-        meta: { order: 3, title: 'Files' },
-        name: 'files',
-        path: 'files',
-      },
-    ],
-  },
-  {
-    component: 'BasicLayout',
-    meta: { icon: 'lucide:users', order: 20, title: 'IAM' },
-    name: 'iam',
-    path: '/iam',
-    children: [
-      {
-        component: '/iam/users/index.vue',
-        meta: { order: 1, title: 'Users' },
-        name: 'users',
-        path: 'users',
-      },
-    ],
-  },
-];
+const fixtureMenus: unknown[] = [];
 
 function envelope(data: unknown, code = 0, message = 'success') {
   return JSON.stringify({ code, data, message });
@@ -104,13 +81,12 @@ test.beforeEach(async ({ page }, testInfo) => {
     }
     if (pathname.endsWith('/codes')) {
       await route.fulfill({
-        body: envelope([]),
+        body: envelope(null, 404, 'legacy endpoint absent'),
         contentType: 'application/json',
-        status: 200,
+        status: 404,
       });
       return;
     }
-
     const managementEndpoint = managementPages.some(({ endpoint }) =>
       pathname.endsWith(endpoint),
     );
@@ -122,6 +98,141 @@ test.beforeEach(async ({ page }, testInfo) => {
       });
       return;
     }
+    if (pathname.endsWith('/auth/sessions')) {
+      await route.fulfill({
+        body: envelope([
+          {
+            createdAt: '2026-08-25T00:00:00Z',
+            deviceId: 'browser-1',
+            deviceName: 'Chrome',
+            expiresAt: '2026-08-26T00:00:00Z',
+            id: 'session-1',
+            ipAddress: '127.0.0.1',
+            lastSeenAt: '2026-08-25T00:30:00Z',
+            revoked: false,
+            userAgent: 'fixture',
+          },
+        ]),
+        contentType: 'application/json',
+        status: 200,
+      });
+      return;
+    }
+    if (pathname.endsWith('/dashboard/summary')) {
+      await route.fulfill({
+        body: envelope({
+          collectedAt: '2026-08-25T00:30:00Z',
+          counts: {
+            auditEvents: { status: 'ok', value: 0 },
+            exportJobs: { status: 'ok', value: 1 },
+            files: { status: 'ok', value: 2 },
+            importJobs: { status: 'ok', value: 0 },
+            mailAccounts: { status: 'ok', value: 1 },
+            mailMessages: { status: 'ok', value: 4 },
+            roles: { status: 'ok', value: 2 },
+            tasks: { status: 'ok', value: 0 },
+            users: { status: 'ok', value: 1 },
+          },
+          health: {
+            database: { state: 'ok', status: 'ok' },
+            redis: { state: 'ok', status: 'ok' },
+            runtime: { state: 'running', status: 'ok' },
+          },
+          instance: {
+            scope: 'process',
+            state: 'running',
+            status: 'ok',
+            uptimeSeconds: 3600,
+            version: '1.0.0-dev',
+          },
+          status: 'ok',
+        }),
+        contentType: 'application/json',
+        status: 200,
+      });
+      return;
+    }
+    if (pathname.endsWith('/ops/monitor')) {
+      await route.fulfill({
+        body: envelope({
+          collectedAt: '2026-08-25T00:30:00Z',
+          cpu: {
+            capabilities: { cores: { available: true, scope: 'process' } },
+            cores: 4,
+            load1: 0.5,
+            status: 'ok',
+            utilization: 0.25,
+          },
+          database: {
+            capabilities: { pool: { available: true, scope: 'process' } },
+            driver: 'postgres',
+            latencyMs: 2,
+            mode: 'single',
+            pool: {
+              idle: 3,
+              inUse: 1,
+              max: 10,
+              maxIdleClosed: 0,
+              maxIdleTimeClosed: 0,
+              maxLifetimeClosed: 0,
+              open: 4,
+              waitCount: 0,
+              waitDurationMs: 0,
+            },
+            status: 'ok',
+          },
+          disk: {
+            capabilities: { usedBytes: { available: true, scope: 'process' } },
+            freeBytes: 600000,
+            status: 'ok',
+            totalBytes: 1000000,
+            usedBytes: 400000,
+            utilization: 0.4,
+          },
+          memory: {
+            capabilities: { rssBytes: { available: true, scope: 'process' } },
+            rssBytes: 500000,
+            status: 'ok',
+          },
+          redis: {
+            capabilities: { pool: { available: true, scope: 'process' } },
+            keyspace: 12,
+            latencyMs: 1,
+            mode: 'single',
+            pool: {
+              active: 1,
+              hits: 5,
+              idle: 2,
+              max: 10,
+              misses: 0,
+              pending: 0,
+              stale: 0,
+              timeouts: 0,
+              total: 3,
+              waitCount: 0,
+              waitDurationMs: 0,
+            },
+            status: 'ok',
+          },
+          runtime: {
+            applicationVersion: '1.0.0-dev',
+            arch: 'amd64',
+            capabilities: {},
+            gcCount: 0,
+            goVersion: 'go1.26.5',
+            os: 'windows',
+            status: 'ok',
+          },
+          scope: 'process',
+          uptimeSeconds: 3600,
+          version: '1.0.0-dev',
+        }),
+        contentType: 'application/json',
+        status: 200,
+      });
+      return;
+    }
+
     if (pathname.endsWith('/audit/events')) {
       await route.fulfill({
         body: envelope({ items: [], limit: 50, offset: 0, total: 0 }),

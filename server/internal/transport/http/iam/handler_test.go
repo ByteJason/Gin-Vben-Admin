@@ -3,8 +3,10 @@ package iamhttp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -56,6 +58,8 @@ func TestIAMDisabledMenuWriterRoutesRemainAvailableAs503(t *testing.T) {
 	r := gin.New()
 	RegisterRoutes(r, nil)
 	for _, methodPath := range [][2]string{
+		{http.MethodGet, "/api/admin/v1/auth/codes"},
+		{http.MethodGet, "/api/admin/v1/menu/all"},
 		{http.MethodPost, "/api/admin/v1/iam/menus"},
 		{http.MethodPatch, "/api/admin/v1/iam/menus/menu"},
 		{http.MethodDelete, "/api/admin/v1/iam/menus/menu"},
@@ -72,7 +76,7 @@ func TestIAMDisabledMenuWriterRoutesRemainAvailableAs503(t *testing.T) {
 
 func TestIAMComponentRegistryIsGuardedAndReturnsAllowlist(t *testing.T) {
 	store := iamapp.NewMemoryStore()
-	if err := store.SaveUser(context.Background(), domain.User{ID: "u1", Username: "alice", Active: true}); err != nil {
+	if err := store.SaveUser(context.Background(), domain.User{ID: "u1", Username: "alice", TenantID: "default", Active: true}); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.SavePolicy(context.Background(), domain.Policy{Subject: "u1", Method: http.MethodGet, Path: "/api/admin/v1/iam/components", Effect: domain.EffectAllow}); err != nil {
@@ -103,7 +107,7 @@ func TestIAMComponentRegistryIsGuardedAndReturnsAllowlist(t *testing.T) {
 
 func TestIAMMenuWriterAndDynamicRouteProjection(t *testing.T) {
 	store := iamapp.NewMemoryStore()
-	if err := store.SaveUser(context.Background(), domain.User{ID: "u1", Username: "alice", Active: true}); err != nil {
+	if err := store.SaveUser(context.Background(), domain.User{ID: "u1", Username: "alice", TenantID: "default", Active: true}); err != nil {
 		t.Fatal(err)
 	}
 	paths := []struct {
@@ -147,17 +151,99 @@ func TestIAMMenuWriterAndDynamicRouteProjection(t *testing.T) {
 	}
 }
 
+func TestIAMMenuRoutesOnlyExposeAuthorizedPermissionNodes(t *testing.T) {
+	store := iamapp.NewMemoryStore()
+	if err := store.SaveUser(context.Background(), domain.User{
+		ID: "u1", Username: "alice", TenantID: "default", Active: true, RoleIDs: []string{"role-reader"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveRole(context.Background(), domain.Role{ID: "role-reader", Name: "Reader", TenantID: "default", Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	for _, menu := range []domain.Menu{
+		{ID: "menu-iam", Name: "Identity", Path: "/iam", Type: domain.MenuTypeDirectory, Active: true, Visible: true},
+		{ID: "menu-users", ParentID: "menu-iam", Name: "Users", Path: "/iam/users", Type: domain.MenuTypeMenu, Component: "/iam/users/index.vue", Permission: "iam:users:read", Active: true, Visible: true},
+		{ID: "menu-roles", ParentID: "menu-iam", Name: "Roles", Path: "/iam/roles", Type: domain.MenuTypeMenu, Component: "/iam/roles/index.vue", Permission: "iam:roles:read", Active: true, Visible: true},
+		{ID: "menu-public", ParentID: "menu-iam", Name: "Public", Path: "/iam/public", Type: domain.MenuTypeMenu, Component: "/iam/permissions/index.vue", Active: true, Visible: true},
+	} {
+		if err := store.SaveMenu(context.Background(), menu); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, permission := range []domain.Permission{
+		{ID: "iam:users:read", Method: http.MethodGet, Path: "/api/admin/v1/iam/users", Active: true},
+		{ID: "iam:roles:read", Method: http.MethodGet, Path: "/api/admin/v1/iam/roles", Active: true},
+	} {
+		if err := store.SavePermission(context.Background(), permission); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, policy := range []domain.Policy{
+		{RoleID: "role-reader", Method: http.MethodGet, Path: "/api/admin/v1/iam/users", Effect: domain.EffectAllow},
+	} {
+		if err := store.SavePolicy(context.Background(), policy); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := newIAMTestRouter(store, authdomain.Claims{Subject: "u1", Type: authdomain.AccessToken, ExpiresAt: time.Now().Add(time.Minute)})
+	for _, bootstrapPath := range []string{"/api/admin/v1/iam/me", "/api/admin/v1/auth/codes"} {
+		request := httptest.NewRequest(http.MethodGet, bootstrapPath, nil)
+		request.Header.Set("Authorization", "Bearer test")
+		response := httptest.NewRecorder()
+		r.ServeHTTP(response, request)
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"iam:users:read"`) || strings.Contains(response.Body.String(), `"iam:roles:read"`) {
+			t.Fatalf("bootstrap %s status=%d body=%s", bootstrapPath, response.Code, response.Body.String())
+		}
+	}
+	request := httptest.NewRequest(http.MethodGet, "/api/admin/v1/menu/all", nil)
+	request.Header.Set("Authorization", "Bearer test")
+	response := httptest.NewRecorder()
+	r.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	if !strings.Contains(body, `"name":"menu-iam"`) || !strings.Contains(body, `"name":"menu-users"`) || !strings.Contains(body, `"name":"menu-public"`) {
+		t.Fatalf("authorized/public route missing: %s", body)
+	}
+	if strings.Contains(body, `"name":"menu-roles"`) {
+		t.Fatalf("unauthorized route leaked: %s", body)
+	}
+}
+
 func TestIAMCurrentUserReturnsVersionedProfile(t *testing.T) {
 	store := iamapp.NewMemoryStore()
 	if err := store.SaveUser(context.Background(), domain.User{
-		ID: "u1", Username: "alice", DisplayName: "Alice", Active: true, RoleIDs: []string{"r-admin"},
+		ID: "u1", Username: "alice", DisplayName: "Alice", TenantID: "default", Active: true, RoleIDs: []string{"r-admin"},
 	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveRole(context.Background(), domain.Role{ID: "r-admin", Name: "Administrator", TenantID: "default", Active: true}); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.SavePolicy(context.Background(), domain.Policy{
 		Subject: "u1", Method: http.MethodGet, Path: "/api/admin/v1/iam/me", Effect: domain.EffectAllow,
 	}); err != nil {
 		t.Fatal(err)
+	}
+	if err := store.SavePermission(context.Background(), domain.Permission{
+		ID: "users.read", Name: "Read users", Method: http.MethodGet, Path: "/api/admin/v1/iam/users", Active: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SavePermission(context.Background(), domain.Permission{
+		ID: "users.disabled", Name: "Disabled permission", Method: http.MethodDelete, Path: "/api/admin/v1/iam/users/:id", Active: false,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, policy := range []domain.Policy{
+		{RoleID: "r-admin", Method: http.MethodGet, Path: "/api/admin/v1/iam/users", Effect: domain.EffectAllow},
+		{RoleID: "r-admin", Method: http.MethodDelete, Path: "/api/admin/v1/iam/users/:id", Effect: domain.EffectAllow},
+	} {
+		if err := store.SavePolicy(context.Background(), policy); err != nil {
+			t.Fatal(err)
+		}
 	}
 	r := newIAMTestRouter(store, authdomain.Claims{Subject: "u1", Type: authdomain.AccessToken, ExpiresAt: time.Now().Add(time.Minute)})
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/v1/iam/me", nil)
@@ -170,29 +256,290 @@ func TestIAMCurrentUserReturnsVersionedProfile(t *testing.T) {
 	var envelope struct {
 		Code int `json:"code"`
 		Data struct {
-			UserID   string   `json:"userId"`
-			Username string   `json:"username"`
-			RealName string   `json:"realName"`
-			Roles    []string `json:"roles"`
+			UserID      string   `json:"userId"`
+			Username    string   `json:"username"`
+			RealName    string   `json:"realName"`
+			Roles       []string `json:"roles"`
+			HomePath    string   `json:"homePath"`
+			AccessCodes []string `json:"accessCodes"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(resp.Body.Bytes(), &envelope); err != nil {
 		t.Fatal(err)
 	}
-	if envelope.Code != 0 || envelope.Data.UserID != "u1" || envelope.Data.Username != "alice" || envelope.Data.RealName != "Alice" || len(envelope.Data.Roles) != 1 || envelope.Data.Roles[0] != "r-admin" {
+	if envelope.Code != 0 || envelope.Data.UserID != "u1" || envelope.Data.Username != "alice" || envelope.Data.RealName != "Alice" || len(envelope.Data.Roles) != 1 || envelope.Data.Roles[0] != "r-admin" || envelope.Data.HomePath != "/dashboard/analytics" || !reflect.DeepEqual(envelope.Data.AccessCodes, []string{"iam:users:read", "users.read"}) {
 		t.Fatalf("profile envelope=%s", resp.Body.String())
 	}
 }
 
+func TestIAMCurrentUserUsesActiveRolesAndKeepsDirectUserAccess(t *testing.T) {
+	store := iamapp.NewMemoryStore()
+	if err := store.SaveUser(context.Background(), domain.User{
+		ID: "u1", Username: "alice", TenantID: "default", Active: true,
+		RoleIDs: []string{"role-active", "role-disabled"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, role := range []domain.Role{
+		{ID: "role-active", Name: "Active", TenantID: "default", Active: true},
+		{ID: "role-disabled", Name: "Disabled", TenantID: "default", Active: false},
+	} {
+		if err := store.SaveRole(context.Background(), role); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, permission := range []domain.Permission{
+		{ID: "role.only", Method: http.MethodGet, Path: "/role-only", Active: true},
+		{ID: "direct.only", Method: http.MethodGet, Path: "/direct-only", Active: true},
+	} {
+		if err := store.SavePermission(context.Background(), permission); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, policy := range []domain.Policy{
+		{RoleID: "role-disabled", Method: http.MethodGet, Path: "/role-only", Effect: domain.EffectAllow},
+		{Subject: "u1", Method: http.MethodGet, Path: "/direct-only", Effect: domain.EffectAllow},
+	} {
+		if err := store.SavePolicy(context.Background(), policy); err != nil {
+			t.Fatal(err)
+		}
+	}
+	router := newIAMTestRouter(store, authdomain.Claims{Subject: "u1", Type: authdomain.AccessToken, ExpiresAt: time.Now().Add(time.Minute)})
+	request := httptest.NewRequest(http.MethodGet, "/api/admin/v1/iam/me", nil)
+	request.Header.Set("Authorization", "Bearer test")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var envelope struct {
+		Data struct {
+			Roles       []string `json:"roles"`
+			AccessCodes []string `json:"accessCodes"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if len(envelope.Data.Roles) != 1 || envelope.Data.Roles[0] != "role-active" {
+		t.Fatalf("effective roles=%v body=%s", envelope.Data.Roles, response.Body.String())
+	}
+	if len(envelope.Data.AccessCodes) != 1 || envelope.Data.AccessCodes[0] != "direct.only" {
+		t.Fatalf("access codes=%v body=%s", envelope.Data.AccessCodes, response.Body.String())
+	}
+}
+
+func TestIAMAccessCodesCompatibilityRouteUsesSameResolverAndBearer(t *testing.T) {
+	store := iamapp.NewMemoryStore()
+	if err := store.SaveUser(context.Background(), domain.User{
+		ID: "u1", Username: "alice", TenantID: "default", Active: true, RoleIDs: []string{"r-reader"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveRole(context.Background(), domain.Role{ID: "r-reader", Name: "Reader", TenantID: "default", Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	for _, permission := range []domain.Permission{
+		{ID: "users.write", Name: "Write users", Method: http.MethodPost, Path: "/api/admin/v1/iam/users", Active: true},
+		{ID: "users.read", Name: "Read users", Method: http.MethodGet, Path: "/api/admin/v1/iam/users", Active: true},
+	} {
+		if err := store.SavePermission(context.Background(), permission); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, policy := range []domain.Policy{
+		{Subject: "u1", Method: http.MethodGet, Path: "/api/admin/v1/auth/codes", Effect: domain.EffectAllow},
+		{RoleID: "r-reader", Method: http.MethodGet, Path: "/api/admin/v1/iam/users", Effect: domain.EffectAllow},
+		{RoleID: "r-reader", Method: http.MethodPost, Path: "/api/admin/v1/iam/users", Effect: domain.EffectAllow},
+	} {
+		if err := store.SavePolicy(context.Background(), policy); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := newIAMTestRouter(store, authdomain.Claims{Subject: "u1", Type: authdomain.AccessToken, ExpiresAt: time.Now().Add(time.Minute)})
+
+	unauthenticated := httptest.NewRecorder()
+	r.ServeHTTP(unauthenticated, httptest.NewRequest(http.MethodGet, "/api/admin/v1/auth/codes", nil))
+	if unauthenticated.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated status=%d body=%s", unauthenticated.Code, unauthenticated.Body.String())
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/admin/v1/auth/codes", nil)
+	request.Header.Set("Authorization", "Bearer test")
+	response := httptest.NewRecorder()
+	r.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var envelope struct {
+		Code int      `json:"code"`
+		Data []string `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Code != 0 || !reflect.DeepEqual(envelope.Data, []string{"iam:users:read", "users.read", "users.write"}) {
+		t.Fatalf("access codes envelope=%s", response.Body.String())
+	}
+}
+
+func TestIAMAccessCodesRejectsCrossOrganizationContext(t *testing.T) {
+	store := iamapp.NewMemoryStore()
+	if err := store.SaveUser(context.Background(), domain.User{
+		ID: "u1", Username: "alice", TenantID: "default", OrgID: "org-a", Active: true, RoleIDs: []string{"r-reader"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SavePermission(context.Background(), domain.Permission{
+		ID: "users.read", Name: "Read users", Method: http.MethodGet, Path: "/api/admin/v1/iam/users", Active: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, policy := range []domain.Policy{
+		{Subject: "u1", Method: http.MethodGet, Path: "/api/admin/v1/auth/codes", Effect: domain.EffectAllow},
+		{RoleID: "r-reader", Method: http.MethodGet, Path: "/api/admin/v1/iam/users", Effect: domain.EffectAllow},
+	} {
+		if err := store.SavePolicy(context.Background(), policy); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := newIAMTestRouter(store, authdomain.Claims{Subject: "u1", Type: authdomain.AccessToken, ExpiresAt: time.Now().Add(time.Minute)})
+	request := httptest.NewRequest(http.MethodGet, "/api/admin/v1/auth/codes", nil)
+	request.Header.Set("Authorization", "Bearer test")
+	request.Header.Set(httpmiddleware.OrganizationHeader, "org-b")
+	response := httptest.NewRecorder()
+	r.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), `"code":30000`) {
+		t.Fatalf("cross-org status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestIAMBootstrapReadsRejectCrossTenantContext(t *testing.T) {
+	store := iamapp.NewMemoryStore()
+	if err := store.SaveUser(context.Background(), domain.User{
+		ID: "u1", Username: "alice", TenantID: "tenant-a", Active: true, RoleIDs: []string{"r-reader"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SavePermission(context.Background(), domain.Permission{
+		ID: "users.read", Method: http.MethodGet, Path: "/api/admin/v1/iam/users", Active: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SavePolicy(context.Background(), domain.Policy{
+		RoleID: "r-reader", Domain: "tenant-a", Method: http.MethodGet, Path: "/api/admin/v1/iam/users", Effect: domain.EffectAllow,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	r := newIAMTestRouterWithTenantPolicy(store, authdomain.Claims{Subject: "u1", Type: authdomain.AccessToken, ExpiresAt: time.Now().Add(time.Minute)}, httpmiddleware.TenantPolicy{Mode: "multi"})
+	for _, path := range []string{"/api/admin/v1/iam/me", "/api/admin/v1/auth/codes", "/api/admin/v1/menu/all"} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.Header.Set("Authorization", "Bearer test")
+		request.Header.Set(httpmiddleware.TenantHeader, "tenant-b")
+		response := httptest.NewRecorder()
+		r.ServeHTTP(response, request)
+		if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), `"message":"forbidden"`) {
+			t.Fatalf("path=%s status=%d body=%s", path, response.Code, response.Body.String())
+		}
+	}
+}
+
+func TestIAMBootstrapReadsRejectDisabledUser(t *testing.T) {
+	store := iamapp.NewMemoryStore()
+	if err := store.SaveUser(context.Background(), domain.User{
+		ID: "u1", Username: "alice", TenantID: "default", Active: false,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	r := newIAMTestRouter(store, authdomain.Claims{Subject: "u1", Type: authdomain.AccessToken, ExpiresAt: time.Now().Add(time.Minute)})
+	for _, path := range []string{"/api/admin/v1/iam/me", "/api/admin/v1/auth/codes", "/api/admin/v1/menu/all"} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.Header.Set("Authorization", "Bearer test")
+		response := httptest.NewRecorder()
+		r.ServeHTTP(response, request)
+		if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), `"message":"forbidden"`) {
+			t.Fatalf("path=%s status=%d body=%s", path, response.Code, response.Body.String())
+		}
+	}
+}
+
+func TestIAMAccessCodesFailsClosedWithoutPermissionAndSanitizesDependencyErrors(t *testing.T) {
+	t.Run("no grants returns an empty bootstrap result", func(t *testing.T) {
+		store := iamapp.NewMemoryStore()
+		if err := store.SaveUser(context.Background(), domain.User{ID: "u1", Username: "alice", TenantID: "default", Active: true}); err != nil {
+			t.Fatal(err)
+		}
+		r := newIAMTestRouter(store, authdomain.Claims{Subject: "u1", Type: authdomain.AccessToken, ExpiresAt: time.Now().Add(time.Minute)})
+		request := httptest.NewRequest(http.MethodGet, "/api/admin/v1/auth/codes", nil)
+		request.Header.Set("Authorization", "Bearer test")
+		response := httptest.NewRecorder()
+		r.ServeHTTP(response, request)
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"data":[]`) {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+		}
+	})
+
+	t.Run("missing permission dependency returns service unavailable", func(t *testing.T) {
+		store := iamapp.NewMemoryStore()
+		if err := store.SaveUser(context.Background(), domain.User{ID: "u1", Username: "alice", TenantID: "default", Active: true}); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.SavePolicy(context.Background(), domain.Policy{Subject: "u1", Method: http.MethodGet, Path: "/api/admin/v1/auth/codes", Effect: domain.EffectAllow}); err != nil {
+			t.Fatal(err)
+		}
+		service := iamapp.NewServiceWithRepositories(store, store, store, nil, store, store)
+		r := gin.New()
+		RegisterRoutes(r, NewHandler(service, authStub{claims: authdomain.Claims{Subject: "u1", Type: authdomain.AccessToken, ExpiresAt: time.Now().Add(time.Minute)}}))
+		request := httptest.NewRequest(http.MethodGet, "/api/admin/v1/auth/codes", nil)
+		request.Header.Set("Authorization", "Bearer test")
+		response := httptest.NewRecorder()
+		r.ServeHTTP(response, request)
+		if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), `"message":"dependency unavailable"`) {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+		}
+	})
+
+	t.Run("repository details do not cross the HTTP boundary", func(t *testing.T) {
+		store := iamapp.NewMemoryStore()
+		if err := store.SaveUser(context.Background(), domain.User{ID: "u1", Username: "alice", TenantID: "default", Active: true}); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.SavePolicy(context.Background(), domain.Policy{Subject: "u1", Method: http.MethodGet, Path: "/api/admin/v1/auth/codes", Effect: domain.EffectAllow}); err != nil {
+			t.Fatal(err)
+		}
+		const secret = "password=top-secret dsn=private-host"
+		service := iamapp.NewServiceWithRepositories(store, store, store, errorPermissionRepository{err: errors.New(secret)}, store, store)
+		r := gin.New()
+		RegisterRoutes(r, NewHandler(service, authStub{claims: authdomain.Claims{Subject: "u1", Type: authdomain.AccessToken, ExpiresAt: time.Now().Add(time.Minute)}}))
+		request := httptest.NewRequest(http.MethodGet, "/api/admin/v1/auth/codes", nil)
+		request.Header.Set("Authorization", "Bearer test")
+		response := httptest.NewRecorder()
+		r.ServeHTTP(response, request)
+		body := response.Body.String()
+		if response.Code != http.StatusInternalServerError || !strings.Contains(body, `"message":"internal error"`) || strings.Contains(body, secret) || strings.Contains(body, "top-secret") || strings.Contains(body, "private-host") {
+			t.Fatalf("status=%d body=%s", response.Code, body)
+		}
+	})
+}
+
+type errorPermissionRepository struct{ err error }
+
+func (r errorPermissionRepository) ListPermissions(context.Context) ([]domain.Permission, error) {
+	return nil, r.err
+}
+
 func TestIAMUserListUsesRolePolicyAndDefaultDeny(t *testing.T) {
 	store := iamapp.NewMemoryStore()
-	if err := store.SaveUser(context.Background(), domain.User{ID: "u1", Username: "alice", Active: true, RoleIDs: []string{"r-reader"}}); err != nil {
+	if err := store.SaveUser(context.Background(), domain.User{ID: "u1", Username: "alice", TenantID: "default", Active: true, RoleIDs: []string{"r-reader"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveRole(context.Background(), domain.Role{ID: "r-reader", Name: "Reader", TenantID: "default", Active: true}); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.SavePolicy(context.Background(), domain.Policy{RoleID: "r-reader", Method: http.MethodGet, Path: "/api/admin/v1/iam/users", Effect: domain.EffectAllow}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SaveUser(context.Background(), domain.User{ID: "u2", Username: "bob", Active: true}); err != nil {
+	if err := store.SaveUser(context.Background(), domain.User{ID: "u2", Username: "bob", TenantID: "default", Active: true}); err != nil {
 		t.Fatal(err)
 	}
 	r := newIAMTestRouter(store, authdomain.Claims{Subject: "u1", Type: authdomain.AccessToken, ExpiresAt: time.Now().Add(time.Minute)})
@@ -215,7 +562,7 @@ func TestIAMUserListUsesRolePolicyAndDefaultDeny(t *testing.T) {
 	}
 
 	storeDenied := iamapp.NewMemoryStore()
-	if err := storeDenied.SaveUser(context.Background(), domain.User{ID: "u1", Username: "alice", Active: true}); err != nil {
+	if err := storeDenied.SaveUser(context.Background(), domain.User{ID: "u1", Username: "alice", TenantID: "default", Active: true}); err != nil {
 		t.Fatal(err)
 	}
 	r = newIAMTestRouter(storeDenied, authdomain.Claims{Subject: "u1", Type: authdomain.AccessToken, ExpiresAt: time.Now().Add(time.Minute)})
@@ -230,7 +577,7 @@ func TestIAMUserListUsesRolePolicyAndDefaultDeny(t *testing.T) {
 
 func TestIAMUsesValidatedTenantContextInsteadOfRawHeader(t *testing.T) {
 	store := iamapp.NewMemoryStore()
-	_ = store.SaveUser(context.Background(), domain.User{ID: "u1", Username: "alice", Active: true})
+	_ = store.SaveUser(context.Background(), domain.User{ID: "u1", Username: "alice", TenantID: "tenant-a", Active: true})
 	_ = store.SavePolicy(context.Background(), domain.Policy{Subject: "u1", Domain: "tenant-a", Method: http.MethodGet, Path: "/api/admin/v1/iam/users", Effect: domain.EffectAllow})
 	r := newIAMTestRouterWithTenantPolicy(store, authdomain.Claims{Subject: "u1", Type: authdomain.AccessToken, ExpiresAt: time.Now().Add(time.Minute)}, httpmiddleware.TenantPolicy{Mode: "multi"})
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/v1/iam/users", nil)
@@ -249,6 +596,55 @@ func TestIAMUsesValidatedTenantContextInsteadOfRawHeader(t *testing.T) {
 	r.ServeHTTP(resp, req)
 	if resp.Code != http.StatusForbidden || !strings.Contains(resp.Body.String(), `"code":30000`) {
 		t.Fatalf("mismatched tenant status=%d body=%s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestIAMNarrowsMissingOrganizationToBoundPrincipalBeforeRepositoryRead(t *testing.T) {
+	store := iamapp.NewMemoryStore()
+	for _, user := range []domain.User{
+		{ID: "u1", Username: "admin-a", TenantID: "tenant-a", OrgID: "org-a", Active: true},
+		{ID: "u2", Username: "reader-a", TenantID: "tenant-a", OrgID: "org-a", Active: true},
+		{ID: "u3", Username: "reader-b", TenantID: "tenant-a", OrgID: "org-b", Active: true},
+	} {
+		if err := store.SaveUser(context.Background(), user); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.SavePolicy(context.Background(), domain.Policy{
+		Subject: "u1", Domain: "tenant-a", Method: http.MethodGet,
+		Path: "/api/admin/v1/iam/users", Effect: domain.EffectAllow,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	router := newIAMTestRouterWithTenantPolicy(
+		store,
+		authdomain.Claims{Subject: "u1", Type: authdomain.AccessToken, ExpiresAt: time.Now().Add(time.Minute)},
+		httpmiddleware.TenantPolicy{Mode: "multi"},
+	)
+	request := httptest.NewRequest(http.MethodGet, "/api/admin/v1/iam/users", nil)
+	request.Header.Set("Authorization", "Bearer test")
+	request.Header.Set(httpmiddleware.TenantHeader, "tenant-a")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var envelope struct {
+		Data struct {
+			Items []domain.User `json:"items"`
+			Total int           `json:"total"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Data.Total != 2 || len(envelope.Data.Items) != 2 {
+		t.Fatalf("organization-scoped page=%#v body=%s", envelope.Data, response.Body.String())
+	}
+	for _, item := range envelope.Data.Items {
+		if item.OrgID != "org-a" {
+			t.Fatalf("cross-organization item leaked: %#v", item)
+		}
 	}
 }
 
@@ -312,7 +708,7 @@ func TestIAMUserListRejectsInvalidPagination(t *testing.T) {
 
 func TestIAMRoleCreateReturnsValidationError(t *testing.T) {
 	store := iamapp.NewMemoryStore()
-	_ = store.SaveUser(context.Background(), domain.User{ID: "u1", Username: "alice", Active: true})
+	_ = store.SaveUser(context.Background(), domain.User{ID: "u1", Username: "alice", TenantID: "default", Active: true})
 	_ = store.SavePolicy(context.Background(), domain.Policy{Subject: "u1", Method: http.MethodPost, Path: "/api/admin/v1/iam/roles", Effect: domain.EffectAllow})
 	r := newIAMTestRouter(store, authdomain.Claims{Subject: "u1", Type: authdomain.AccessToken, ExpiresAt: time.Now().Add(time.Minute)})
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/v1/iam/roles", strings.NewReader(`{"name":""}`))
@@ -327,7 +723,7 @@ func TestIAMRoleCreateReturnsValidationError(t *testing.T) {
 
 func TestIAMPolicyAndDataScopeCollections(t *testing.T) {
 	store := iamapp.NewMemoryStore()
-	_ = store.SaveUser(context.Background(), domain.User{ID: "u1", Username: "alice", Active: true})
+	_ = store.SaveUser(context.Background(), domain.User{ID: "u1", Username: "alice", TenantID: "default", Active: true})
 	_ = store.SavePolicy(context.Background(), domain.Policy{Subject: "u1", Method: http.MethodGet, Path: "/api/admin/v1/iam/policies", Effect: domain.EffectAllow})
 	_ = store.SavePolicy(context.Background(), domain.Policy{Subject: "u1", Method: http.MethodGet, Path: "/api/admin/v1/iam/data-scopes", Effect: domain.EffectAllow})
 	_ = store.SaveDataScope(context.Background(), domain.DataScope{Subject: "u1", Resource: "orders", Scope: domain.ScopeOwn})

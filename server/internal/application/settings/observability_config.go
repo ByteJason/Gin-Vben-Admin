@@ -20,6 +20,22 @@ var observabilitySettingKeys = []string{
 	"observability.otlp.api_key",
 }
 
+var observabilitySettingKeySet = func() map[string]struct{} {
+	keys := make(map[string]struct{}, len(observabilitySettingKeys))
+	for _, key := range observabilitySettingKeys {
+		keys[key] = struct{}{}
+	}
+	return keys
+}()
+
+// IsObservabilitySettingKey is the shared allowlist for the dedicated
+// observability settings transport. Keeping the boundary beside the runtime
+// overlay prevents an IAM path grant from widening to unrelated settings.
+func IsObservabilitySettingKey(key string) bool {
+	_, ok := observabilitySettingKeySet[key]
+	return ok
+}
+
 // ResolveObservabilityConfig overlays persisted values on a validated fallback
 // without exposing secret contents in errors. allow preserves higher-authority
 // configuration sources; a nil predicate allows every known persisted key.

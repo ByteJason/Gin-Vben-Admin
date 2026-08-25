@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
+	monitorapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/monitor"
 	mysqldriver "github.com/go-sql-driver/mysql"
 	gormmysql "gorm.io/driver/mysql"
 	gormpostgres "gorm.io/driver/postgres"
@@ -17,6 +19,8 @@ import (
 type Store struct {
 	database *gorm.DB
 	closers  []*sql.DB
+	driver   string
+	mode     string
 }
 
 // Open constructs the configured topology without probing the network. Ping is
@@ -36,7 +40,7 @@ func Open(options Options) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	store := &Store{closers: []*sql.DB{primarySQL}}
+	store := &Store{closers: []*sql.DB{primarySQL}, driver: options.Driver, mode: string(options.Mode)}
 	closeOnError := func(cause error) (*Store, error) {
 		return nil, errors.Join(cause, store.Close())
 	}
@@ -91,22 +95,46 @@ func (s *Store) Ping(ctx context.Context) error {
 	return nil
 }
 
-// RuntimeStats returns non-sensitive SQL pool counters for the operations
+// DatabaseRuntimeStats returns non-sensitive SQL pool counters for the operations
 // snapshot. It deliberately exposes no DSN, driver credentials, or query
 // text. Read/write topologies are aggregated across their configured pools.
-func (s *Store) RuntimeStats(context.Context) (open, idle, max int, keyspace int64, err error) {
+func (s *Store) DatabaseRuntimeStats(context.Context) (monitorapp.DatabaseRuntimeStats, error) {
 	if s == nil || len(s.closers) == 0 {
-		return 0, 0, 0, 0, errors.New("database store is not initialized")
+		return monitorapp.DatabaseRuntimeStats{}, errors.New("database store is not initialized")
 	}
+	snapshots := make([]sql.DBStats, 0, len(s.closers))
 	for _, connection := range s.closers {
-		stats := connection.Stats()
-		open += stats.OpenConnections
-		idle += stats.Idle
-		if stats.MaxOpenConnections > max {
-			max = stats.MaxOpenConnections
-		}
+		snapshots = append(snapshots, connection.Stats())
 	}
-	return open, idle, max, 0, nil
+	return monitorapp.DatabaseRuntimeStats{
+		Driver: s.driver, DriverAvailable: s.driver != "",
+		Mode: s.mode, ModeAvailable: s.mode != "",
+		Pool: aggregatePoolStats(snapshots), PoolAvailable: true,
+	}, nil
+}
+
+func aggregatePoolStats(snapshots []sql.DBStats) monitorapp.DatabasePool {
+	var pool monitorapp.DatabasePool
+	unlimited := false
+	for _, stats := range snapshots {
+		pool.Open += stats.OpenConnections
+		pool.InUse += stats.InUse
+		pool.Idle += stats.Idle
+		if stats.MaxOpenConnections == 0 {
+			unlimited = true
+		} else if !unlimited {
+			pool.Max += stats.MaxOpenConnections
+		}
+		pool.WaitCount += stats.WaitCount
+		pool.WaitDurationMS += float64(stats.WaitDuration) / float64(time.Millisecond)
+		pool.MaxIdleClosed += stats.MaxIdleClosed
+		pool.MaxIdleTimeClosed += stats.MaxIdleTimeClosed
+		pool.MaxLifetimeClosed += stats.MaxLifetimeClosed
+	}
+	if unlimited {
+		pool.Max = 0
+	}
+	return pool
 }
 
 // Read returns a GORM session explicitly routed to a configured replica when

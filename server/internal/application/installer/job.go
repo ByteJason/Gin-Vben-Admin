@@ -28,23 +28,25 @@ const (
 )
 
 type ApplyJob struct {
-	ID               string            `json:"id"`
-	State            JobState          `json:"state"`
-	SelectedUI       installstate.UI   `json:"selectedUi,omitempty"`
-	Mode             installstate.Mode `json:"mode"`
-	CurrentStep      string            `json:"currentStep"`
-	Progress         int               `json:"progress"`
-	Steps            []ApplyStep       `json:"steps"`
-	InstalledAt      *time.Time        `json:"installedAt,omitempty"`
-	ErrorCode        int               `json:"errorCode,omitempty"`
-	ErrorKey         string            `json:"errorKey,omitempty"`
-	FailureStep      string            `json:"failureStep,omitempty"`
-	FailureReason    string            `json:"failureReason,omitempty"`
-	FailureOperation string            `json:"failureOperation,omitempty"`
-	DatabaseCode     string            `json:"databaseCode,omitempty"`
-	CanRetry         bool              `json:"canRetry"`
-	CanRollback      bool              `json:"canRollback"`
-	LastUpdated      time.Time         `json:"lastUpdated"`
+	ID                  string            `json:"id"`
+	State               JobState          `json:"state"`
+	SelectedUI          installstate.UI   `json:"selectedUi,omitempty"`
+	Mode                installstate.Mode `json:"mode"`
+	CurrentStep         string            `json:"currentStep"`
+	Progress            int               `json:"progress"`
+	Steps               []ApplyStep       `json:"steps"`
+	InstalledAt         *time.Time        `json:"installedAt,omitempty"`
+	ErrorCode           int               `json:"errorCode,omitempty"`
+	ErrorKey            string            `json:"errorKey,omitempty"`
+	FailureStep         string            `json:"failureStep,omitempty"`
+	FailureReason       string            `json:"failureReason,omitempty"`
+	FailureOperation    string            `json:"failureOperation,omitempty"`
+	DatabaseCode        string            `json:"databaseCode,omitempty"`
+	FailureResourceKind string            `json:"failureResourceKind,omitempty"`
+	FailureResourceID   string            `json:"failureResourceId,omitempty"`
+	CanRetry            bool              `json:"canRetry"`
+	CanRollback         bool              `json:"canRollback"`
+	LastUpdated         time.Time         `json:"lastUpdated"`
 }
 
 // FailureDiagnostic is a bounded, credential-free description of an
@@ -53,6 +55,8 @@ type FailureDiagnostic struct {
 	Reason       string
 	Operation    string
 	DatabaseCode string
+	ResourceKind string
+	ResourceID   string
 }
 
 // FailureDiagnosticProvider lets platform adapters preserve useful failure
@@ -263,6 +267,8 @@ func (s *ApplyJobService) run(id string, request ApplyRequest) {
 		job.FailureReason = diagnostic.Reason
 		job.FailureOperation = diagnostic.Operation
 		job.DatabaseCode = diagnostic.DatabaseCode
+		job.FailureResourceKind = diagnostic.ResourceKind
+		job.FailureResourceID = diagnostic.ResourceID
 		job.CanRollback = false
 		if _, ok := s.runner.(RollbackRunner); ok && errors.Is(err, ErrApplyRollback) {
 			job.CanRollback = true
@@ -280,6 +286,8 @@ func (s *ApplyJobService) run(id string, request ApplyRequest) {
 			"failure_reason", job.FailureReason,
 			"failure_operation", job.FailureOperation,
 			"database_code", job.DatabaseCode,
+			"failure_resource_kind", job.FailureResourceKind,
+			"failure_resource_id", job.FailureResourceID,
 			"error_code", job.ErrorCode,
 			"error_key", job.ErrorKey,
 			"can_retry", job.CanRetry,
@@ -307,6 +315,8 @@ func (s *ApplyJobService) run(id string, request ApplyRequest) {
 	job.FailureReason = ""
 	job.FailureOperation = ""
 	job.DatabaseCode = ""
+	job.FailureResourceKind = ""
+	job.FailureResourceID = ""
 	job.CanRetry = false
 	job.CanRollback = false
 	s.jobs[id] = job
@@ -482,16 +492,38 @@ func publicFailureDiagnostic(err error) FailureDiagnostic {
 	if !validDatabaseCode(diagnostic.DatabaseCode) {
 		diagnostic.DatabaseCode = ""
 	}
+	if diagnostic.Reason != "navigation_seed_conflict" || !validFailureResourceKind(diagnostic.ResourceKind) || !validFailureResourceID(diagnostic.ResourceID) {
+		diagnostic.ResourceKind = ""
+		diagnostic.ResourceID = ""
+	}
 	return diagnostic
 }
 
 func validFailureReason(reason string) bool {
 	switch reason {
-	case "tls_mode_mismatch", "tls_configuration_failed", "authentication_failed", "permission_denied", "database_unavailable", "database_busy", "schema_unavailable", "schema_conflict", "migration_dirty", "migration_statement_failed", "migration_status_failed", "migration_close_failed", "invalid_configuration", "unknown":
+	case "tls_mode_mismatch", "tls_configuration_failed", "authentication_failed", "permission_denied", "database_unavailable", "database_busy", "schema_unavailable", "schema_conflict", "migration_dirty", "migration_statement_failed", "migration_status_failed", "migration_close_failed", "invalid_configuration", "navigation_seed_conflict", "unknown":
 		return true
 	default:
 		return false
 	}
+}
+
+func validFailureResourceKind(kind string) bool {
+	return kind == "menu" || kind == "permission"
+}
+
+func validFailureResourceID(id string) bool {
+	if len(id) == 0 || len(id) > 128 {
+		return false
+	}
+	for _, character := range id {
+		if (character < 'a' || character > 'z') && (character < 'A' || character > 'Z') &&
+			(character < '0' || character > '9') && character != ':' && character != '.' &&
+			character != '_' && character != '-' {
+			return false
+		}
+	}
+	return true
 }
 
 func validFailureOperation(operation string) bool {

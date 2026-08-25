@@ -58,7 +58,9 @@ for (const app of apps) {
       assert.match(view, new RegExp(token, 'i'), `${app}/${token}`);
     }
     assert.match(route, /views\/system\/audit\/index\.vue/);
-    assert.match(route, /path:\s*'audit'/);
+    assert.match(route, /name:\s*'menu-operations-audit'/);
+    assert.match(route, /authority:\s*\['ops:audit:read'\]/);
+    assert.match(route, /path:\s*'\/system\/audit'/);
   });
   for (const locale of ['zh-CN', 'en-US']) {
     test(`B10.5 ${app}/${locale} has audit bilingual copy`, () => {

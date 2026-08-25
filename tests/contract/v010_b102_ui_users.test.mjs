@@ -21,7 +21,9 @@ test('B10.2 UI users list has equivalent route, API adapter, and page for every 
     const viewText = read(view);
     assert.match(routeText, /path:\s*['"]\/iam['"]/);
     assert.match(routeText, /path:\s*['"]users['"]/);
-    assert.match(routeText, /IAMUsers/);
+    assert.match(routeText, /name:\s*['"]menu-identity-users['"]/);
+    assert.match(routeText, /component:\s*\(\) => import\(['"]#\/views\/iam\/users\/index\.vue['"]\)/);
+    assert.match(routeText, /authority:\s*\[['"]iam:users:read['"]\]/);
     assert.match(apiText, /ADMIN_ENDPOINTS\.listIAMUsers/);
     assert.match(apiText, /pageSize/);
     assert.match(apiText, /roleId/);

@@ -2,7 +2,7 @@
 
 基于 Go、Gin、Vue 3 与 Vue Vben Admin 的企业级后台管理基础平台。
 
-当前版本：`0.9.0-rc`
+当前版本：`1.0.0-dev`
 
 ## 项目链接
 
@@ -28,6 +28,7 @@
 - Prometheus 指标和 OTLP tracing 导出（默认关闭，可在管理端配置）
 - Windows、macOS、Linux 通用的 Node.js 开发命令
 - 源码运行与 Docker Compose 部署
+- 四组生产菜单、真实运行概览与数据库/Redis 资源监控
 
 ## 技术选型
 
@@ -150,6 +151,8 @@ cd admin
 pnpm install
 pnpm run dev
 ```
+
+登录后默认进入 `/dashboard/analytics`“运行概览”。生产菜单、兼容路由、访问码与各页面职责见 [`docs/admin-information-architecture.md`](docs/admin-information-architecture.md)。
 
 编辑本地 `server/configs/server.yaml` 或设置环境变量后，使用显式命令管理数据库迁移：
 

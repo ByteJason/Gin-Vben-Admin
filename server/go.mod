@@ -3,6 +3,7 @@ module github.com/ByteJason/Gin-Vben-Admin/server
 go 1.24
 
 require (
+	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/gin-gonic/gin v1.11.0
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/golang-migrate/migrate/v4 v4.17.1

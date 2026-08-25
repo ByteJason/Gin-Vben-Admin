@@ -218,6 +218,31 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '503':
           $ref: '#/components/responses/AuthServiceUnavailable'
+  /api/admin/v1/auth/codes:
+    get:
+      tags: [Admin, IAM]
+      operationId: getAdminAuthAccessCodes
+      summary: 查询当前管理端用户的访问码
+      description: 访问码由 IAM 权限数据统一计算；兼容旧版管理端独立拉取访问码的登录流程。
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: 当前用户访问码
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessCodesEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/AuthServiceUnavailable'
   /api/admin/v1/auth/sessions/{id}:
     delete:
       tags: [Admin]
@@ -254,8 +279,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CurrentUserEnvelope'
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
         '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
   /api/admin/v1/iam/users:
     get:
@@ -647,8 +674,11 @@ paths:
                       data:
                         type: array
                         items: { $ref: '#/components/schemas/IAMMenuRoute' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
   /api/admin/v1/iam/permissions:
     get:
       tags: [IAM]
@@ -929,6 +959,42 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
+  /api/admin/v1/observability/settings/{key}:
+    get:
+      tags: [Settings]
+      operationId: getObservabilitySetting
+      summary: 查询单项可观测设置
+      description: 仅接受固定的 observability 设置键；独立静态路由用于隔离通用系统设置权限。
+      security: [{BearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/ObservabilitySettingKey'
+      responses:
+        '200': { $ref: '#/components/responses/SettingResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
+    put:
+      tags: [Settings]
+      operationId: updateObservabilitySetting
+      summary: 以乐观版本号更新单项可观测设置
+      description: 仅接受固定的 observability 设置键，不授予其他系统设置写权限。
+      security: [{BearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/ObservabilitySettingKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SettingUpdateRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/SettingResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/SettingConflict' }
         '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
   /api/admin/v1/audit/events:
     get:
@@ -1669,11 +1735,34 @@ paths:
         '200': { $ref: '#/components/responses/SuccessResponse' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/admin/v1/dashboard/summary:
+    get:
+      tags: [Admin]
+      operationId: getDashboardSummary
+      summary: 获取运行概览的真实聚合摘要
+      description: 需要 dashboard:overview:read；仅返回租户范围计数、实例/version/uptime 与 DB/Redis 状态，不暴露连接池、keyspace、地址或凭据。
+      security: [{BearerAuth: []}]
+      responses:
+        '200':
+          description: 当前租户的轻量运行概览
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/DashboardSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /api/admin/v1/ops/monitor:
     get:
       tags: [Admin]
       operationId: getMonitorOverview
-      summary: 获取平台管理员只读运维快照
+      summary: 获取 IAM 访问码保护的只读资源快照
+      description: 需要 ops:monitor:read；每个可选指标通过 capabilities 区分合法零值与采集不可用，不返回地址、DSN、凭据、原始命令或路径。
       security: [{BearerAuth: []}]
       responses:
         '200':
@@ -1686,7 +1775,10 @@ paths:
                   - type: object
                     properties:
                       data: { $ref: '#/components/schemas/MonitorOverview' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
 
 components:
   securitySchemes:
@@ -1724,6 +1816,21 @@ components:
         type: string
         minLength: 1
         maxLength: 128
+    ObservabilitySettingKey:
+      name: key
+      in: path
+      required: true
+      schema:
+        type: string
+        enum:
+          - observability.metrics.enabled
+          - observability.metrics.endpoint
+          - observability.tracing.enabled
+          - observability.tracing.endpoint
+          - observability.tracing.protocol
+          - observability.tracing.tls_verify
+          - observability.tracing.sample_rate
+          - observability.otlp.api_key
     FileId:
       name: id
       in: path
@@ -2029,34 +2136,192 @@ components:
         total: { type: integer }
         limit: { type: integer }
         offset: { type: integer }
-    MonitorMetric:
+    MonitorStatus:
+      type: string
+      enum: [ok, degraded, unavailable]
+    MonitorMetricScope:
+      type: string
+      enum: [process, container, host]
+    MonitorCapability:
       type: object
-      required: [status]
+      additionalProperties: false
+      required: [scope, available]
+      properties:
+        scope: { $ref: '#/components/schemas/MonitorMetricScope' }
+        available: { type: boolean }
+        source: { type: string }
+    MonitorHostMetric:
+      type: object
+      additionalProperties: false
+      required: [status, capabilities]
       properties:
         status: { type: string, enum: [ok, degraded, unavailable] }
         cores: { type: integer }
         load1: { type: number }
+        load5: { type: number }
+        load15: { type: number }
+        rssBytes: { type: integer, format: int64 }
         usedBytes: { type: integer, format: int64 }
+        freeBytes: { type: integer, format: int64 }
         totalBytes: { type: integer, format: int64 }
         utilization: { type: number }
-        latencyMs: { type: number }
-        poolOpen: { type: integer }
-        poolIdle: { type: integer }
-        poolMax: { type: integer }
-        keyspace: { type: integer, format: int64 }
+        capabilities:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/MonitorCapability' }
+        message: { type: string }
+    MonitorRuntimeMetric:
+      type: object
+      additionalProperties: false
+      required: [status, goVersion, os, arch, capabilities]
+      properties:
+        status: { type: string, enum: [ok, degraded, unavailable] }
+        goVersion: { type: string }
+        os: { type: string }
+        arch: { type: string }
+        applicationVersion: { type: string }
+        commit: { type: string }
+        heapAllocBytes: { type: integer, format: int64, minimum: 0 }
+        heapSysBytes: { type: integer, format: int64, minimum: 0 }
+        heapInUseBytes: { type: integer, format: int64, minimum: 0 }
+        heapObjects: { type: integer, format: int64, minimum: 0 }
+        nextGcBytes: { type: integer, format: int64, minimum: 0 }
+        gcCount: { type: integer, minimum: 0 }
+        lastGcPauseNs: { type: integer, format: int64, minimum: 0 }
+        capabilities:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/MonitorCapability' }
+    MonitorDatabasePool:
+      type: object
+      additionalProperties: false
+      required: [open, inUse, idle, max, waitCount, waitDurationMs, maxIdleClosed, maxIdleTimeClosed, maxLifetimeClosed]
+      properties:
+        open: { type: integer, minimum: 0 }
+        inUse: { type: integer, minimum: 0 }
+        idle: { type: integer, minimum: 0 }
+        max: { type: integer, minimum: 0 }
+        waitCount: { type: integer, format: int64, minimum: 0 }
+        waitDurationMs: { type: number, minimum: 0 }
+        maxIdleClosed: { type: integer, format: int64, minimum: 0 }
+        maxIdleTimeClosed: { type: integer, format: int64, minimum: 0 }
+        maxLifetimeClosed: { type: integer, format: int64, minimum: 0 }
+    MonitorRedisPool:
+      type: object
+      additionalProperties: false
+      required: [total, active, idle, hits, misses, timeouts, waitCount, waitDurationMs, stale, pending]
+      properties:
+        max: { type: integer, minimum: 0 }
+        total: { type: integer, minimum: 0 }
+        active: { type: integer, minimum: 0 }
+        idle: { type: integer, minimum: 0 }
+        hits: { type: integer, minimum: 0 }
+        misses: { type: integer, minimum: 0 }
+        timeouts: { type: integer, minimum: 0 }
+        waitCount: { type: integer, minimum: 0 }
+        waitDurationMs: { type: number, minimum: 0 }
+        stale: { type: integer, minimum: 0 }
+        pending: { type: integer, minimum: 0 }
+    MonitorDatabaseMetric:
+      type: object
+      additionalProperties: false
+      required: [status, latencyMs, capabilities]
+      properties:
+        status: { type: string, enum: [ok, degraded, unavailable] }
+        latencyMs: { type: number, minimum: 0 }
+        driver: { type: string, enum: [mysql, postgres] }
+        mode: { type: string, enum: [single, read_write, cluster_endpoint] }
+        pool: { $ref: '#/components/schemas/MonitorDatabasePool' }
+        capabilities:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/MonitorCapability' }
+        message: { type: string }
+    MonitorRedisMetric:
+      type: object
+      additionalProperties: false
+      required: [status, latencyMs, capabilities]
+      properties:
+        status: { type: string, enum: [ok, degraded, unavailable] }
+        latencyMs: { type: number, minimum: 0 }
+        mode: { type: string, enum: [single, sentinel, cluster] }
+        pool: { $ref: '#/components/schemas/MonitorRedisPool' }
+        keyspace: { type: integer, format: int64, minimum: 0 }
+        capabilities:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/MonitorCapability' }
         message: { type: string }
     MonitorOverview:
       type: object
-      required: [scope, uptimeSeconds, cpu, memory, disk, database, redis, collectedAt]
+      additionalProperties: false
+      required: [scope, uptimeSeconds, runtime, cpu, memory, disk, database, redis, collectedAt]
       properties:
-        scope: { type: string, enum: [process, container] }
-        uptimeSeconds: { type: number }
+        scope: { $ref: '#/components/schemas/MonitorMetricScope' }
+        uptimeSeconds: { type: number, minimum: 0 }
         version: { type: string }
-        cpu: { $ref: '#/components/schemas/MonitorMetric' }
-        memory: { $ref: '#/components/schemas/MonitorMetric' }
-        disk: { $ref: '#/components/schemas/MonitorMetric' }
-        database: { $ref: '#/components/schemas/MonitorMetric' }
-        redis: { $ref: '#/components/schemas/MonitorMetric' }
+        runtime: { $ref: '#/components/schemas/MonitorRuntimeMetric' }
+        cpu: { $ref: '#/components/schemas/MonitorHostMetric' }
+        memory: { $ref: '#/components/schemas/MonitorHostMetric' }
+        disk: { $ref: '#/components/schemas/MonitorHostMetric' }
+        database: { $ref: '#/components/schemas/MonitorDatabaseMetric' }
+        redis: { $ref: '#/components/schemas/MonitorRedisMetric' }
+        collectedAt: { type: string, format: date-time }
+    DashboardStatus:
+      type: string
+      enum: [ok, degraded, unavailable]
+    DashboardCountMetric:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: { $ref: '#/components/schemas/DashboardStatus' }
+        value: { type: integer, format: int64, minimum: 0 }
+        message: { type: string }
+    DashboardCounts:
+      type: object
+      additionalProperties: false
+      required: [users, roles, tasks, importJobs, exportJobs, files, auditEvents, mailAccounts, mailMessages]
+      properties:
+        users: { $ref: '#/components/schemas/DashboardCountMetric' }
+        roles: { $ref: '#/components/schemas/DashboardCountMetric' }
+        tasks: { $ref: '#/components/schemas/DashboardCountMetric' }
+        importJobs: { $ref: '#/components/schemas/DashboardCountMetric' }
+        exportJobs: { $ref: '#/components/schemas/DashboardCountMetric' }
+        files: { $ref: '#/components/schemas/DashboardCountMetric' }
+        auditEvents: { $ref: '#/components/schemas/DashboardCountMetric' }
+        mailAccounts: { $ref: '#/components/schemas/DashboardCountMetric' }
+        mailMessages: { $ref: '#/components/schemas/DashboardCountMetric' }
+    DashboardInstanceMetric:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: { $ref: '#/components/schemas/DashboardStatus' }
+        state: { $ref: '#/components/schemas/MonitorStatus' }
+        scope: { $ref: '#/components/schemas/MonitorMetricScope' }
+        version: { type: string }
+        uptimeSeconds: { type: number, minimum: 0 }
+    DashboardHealthMetric:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: { $ref: '#/components/schemas/DashboardStatus' }
+        state: { $ref: '#/components/schemas/MonitorStatus' }
+    DashboardHealth:
+      type: object
+      additionalProperties: false
+      required: [runtime, database, redis]
+      properties:
+        runtime: { $ref: '#/components/schemas/DashboardHealthMetric' }
+        database: { $ref: '#/components/schemas/DashboardHealthMetric' }
+        redis: { $ref: '#/components/schemas/DashboardHealthMetric' }
+    DashboardSummary:
+      type: object
+      additionalProperties: false
+      required: [status, counts, instance, health, collectedAt]
+      properties:
+        status: { $ref: '#/components/schemas/DashboardStatus' }
+        counts: { $ref: '#/components/schemas/DashboardCounts' }
+        instance: { $ref: '#/components/schemas/DashboardInstanceMetric' }
+        health: { $ref: '#/components/schemas/DashboardHealth' }
         collectedAt: { type: string, format: date-time }
     AuditCategory:
       type: string
@@ -2121,6 +2386,14 @@ components:
           properties:
             data:
               $ref: '#/components/schemas/CurrentUser'
+    AccessCodesEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { type: string }
     CaptchaChallenge:
       type: object
       additionalProperties: false
@@ -2283,6 +2556,9 @@ components:
         lastLoginAt: { type: string, format: date-time }
         passwordChangedAt: { type: string, format: date-time }
         roles:
+          type: array
+          items: { type: string }
+        accessCodes:
           type: array
           items: { type: string }
         homePath: { type: string }
@@ -2955,6 +3231,20 @@ components:
                 properties:
                   code:
                     enum: [10002, 10003, 20000]
+    InternalServerError:
+      description: 服务内部依赖返回了不可公开的错误
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ErrorEnvelope'
+              - type: object
+                properties:
+                  code:
+                    const: 50000
     ServiceUnavailable:
       description: 服务未就绪
       content:

@@ -68,7 +68,9 @@ for (const app of apps) {
       assert.match(view, new RegExp(token, 'i'), `${app}/${token}`);
     }
     assert.match(route, /views\/system\/settings\/index\.vue/);
-    assert.match(route, /path:\s*'settings'/);
+    assert.match(route, /name:\s*'menu-system-settings'/);
+    assert.match(route, /authority:\s*\['system:settings:read'\]/);
+    assert.match(route, /path:\s*'\/system\/settings'/);
   });
 }
 

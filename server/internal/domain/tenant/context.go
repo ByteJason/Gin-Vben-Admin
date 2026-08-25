@@ -113,6 +113,36 @@ func (scope Context) CheckResource(resourceTenantID, resourceOrganizationID stri
 	return nil
 }
 
+// BindPrincipal verifies that an authenticated principal may operate inside
+// the request scope and returns the effective scope for downstream reads. A
+// principal without an organization binding is tenant-wide. A non-platform
+// principal bound to an organization narrows an otherwise tenant-wide request
+// to that organization; an explicitly different request organization is
+// denied.
+func (scope Context) BindPrincipal(principalTenantID, principalOrganizationID string) (Context, error) {
+	principalOrganizationID = strings.TrimSpace(principalOrganizationID)
+	resourceOrganizationID := principalOrganizationID
+	if resourceOrganizationID == "" {
+		resourceOrganizationID = scope.Organization
+	}
+	if err := scope.CheckResource(principalTenantID, resourceOrganizationID); err != nil {
+		return Context{}, err
+	}
+	effective := scope
+	if !scope.PlatformAdmin && effective.Organization == "" && principalOrganizationID != "" {
+		effective.Organization = principalOrganizationID
+	}
+	return effective, nil
+}
+
+// CheckPrincipal verifies a principal boundary when the caller does not need
+// the downstream effective scope. Request handlers should prefer
+// BindPrincipal and install its returned Context before invoking services.
+func (scope Context) CheckPrincipal(principalTenantID, principalOrganizationID string) error {
+	_, err := scope.BindPrincipal(principalTenantID, principalOrganizationID)
+	return err
+}
+
 func validateID(value string, invalid error) error {
 	if len(value) > 128 {
 		return invalid

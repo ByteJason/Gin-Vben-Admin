@@ -4,7 +4,7 @@ const brandLogoUrl = `${import.meta.env.BASE_URL}gin-vben-admin-logo.png`;
 
 const defaultPreferences: Preferences = {
   app: {
-    accessMode: 'frontend',
+    accessMode: 'mixed',
     authPageLayout: 'panel-right',
     checkUpdatesInterval: 1,
     colorGrayMode: false,
@@ -19,7 +19,7 @@ const defaultPreferences: Preferences = {
     contentPaddingTop: 0,
     defaultAvatar:
       'https://unpkg.com/@vbenjs/static-source@0.1.7/source/avatar-v1.webp',
-    defaultHomePath: '/dashboard',
+    defaultHomePath: '/dashboard/analytics',
     dynamicTitle: true,
     enableCheckUpdates: true,
     enableCopyPreferences: true,

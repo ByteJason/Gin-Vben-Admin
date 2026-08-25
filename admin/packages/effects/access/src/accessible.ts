@@ -81,7 +81,8 @@ async function generateRoutes(
   mode: AccessModeType,
   options: GenerateMenuAndRoutesOptions,
 ) {
-  const { forbiddenComponent, roles, routes } = options;
+  const { accessCodes, forbiddenComponent, roles, routes } = options;
+  const frontendAccess = accessCodes ?? roles ?? [];
 
   let resultRoutes: RouteRecordRaw[] = routes;
   switch (mode) {
@@ -92,14 +93,14 @@ async function generateRoutes(
     case 'frontend': {
       resultRoutes = await generateRoutesByFrontend(
         routes,
-        roles || [],
+        frontendAccess,
         forbiddenComponent,
       );
       break;
     }
     case 'mixed': {
       const [frontend_resultRoutes, backend_resultRoutes] = await Promise.all([
-        generateRoutesByFrontend(routes, roles || [], forbiddenComponent),
+        generateRoutesByFrontend(routes, frontendAccess, forbiddenComponent),
         generateRoutesByBackend(options),
       ]);
       resultRoutes = mergeRoutesByName(

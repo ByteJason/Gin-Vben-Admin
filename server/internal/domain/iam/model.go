@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/authdomain"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
 )
 
 var (
@@ -281,6 +282,7 @@ func (m Menu) NormalizeMenu() (Menu, error) {
 
 type Permission struct {
 	ID, Name, Method, Path string
+	TenantID, OrgID        string
 	Active                 bool
 }
 
@@ -289,6 +291,7 @@ type Permission struct {
 // be used by adapters, but a request must resolve to one effective pair.
 type Policy struct {
 	Subject, RoleID, PermissionID, Domain string
+	OrgID                                 string
 	Method, Path, Action, Object          string
 	Effect                                Effect
 }
@@ -496,7 +499,21 @@ func (m *MemoryPolicyStore) ListPolicies(ctx context.Context) ([]Policy, error) 
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return append([]Policy(nil), m.policies...), nil
+	requestScope, scoped := tenant.FromContext(ctx)
+	out := make([]Policy, 0, len(m.policies))
+	for _, policy := range m.policies {
+		if scoped && policy.Domain != "" && policy.Domain != requestScope.TenantID {
+			continue
+		}
+		if scoped && requestScope.Organization == "" && policy.OrgID != "" {
+			continue
+		}
+		if scoped && requestScope.Organization != "" && policy.OrgID != "" && policy.OrgID != requestScope.Organization {
+			continue
+		}
+		out = append(out, policy)
+	}
+	return out, nil
 }
 
 func (m *MemoryPolicyStore) ListDataScopes(ctx context.Context) ([]DataScope, error) {
@@ -505,8 +522,18 @@ func (m *MemoryPolicyStore) ListDataScopes(ctx context.Context) ([]DataScope, er
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	requestScope, scoped := tenant.FromContext(ctx)
 	out := make([]DataScope, 0, len(m.scopes))
 	for _, scope := range m.scopes {
+		if scoped && scope.Domain != "" && scope.Domain != requestScope.TenantID {
+			continue
+		}
+		if scoped && requestScope.Organization == "" && scope.OrgID != "" {
+			continue
+		}
+		if scoped && requestScope.Organization != "" && scope.OrgID != "" && scope.OrgID != requestScope.Organization {
+			continue
+		}
 		out = append(out, cloneScope(scope))
 	}
 	return out, nil
@@ -532,6 +559,20 @@ func (a *memoryAuthorizer) Authorize(ctx context.Context, subject Subject, reque
 	policies, err := a.store.ListPolicies(ctx)
 	if err != nil {
 		return false, err
+	}
+	return EvaluatePolicies(policies, subject, request)
+}
+
+// EvaluatePolicies applies the canonical IAM decision rules to an already
+// loaded policy snapshot. Callers that resolve a bounded collection of
+// permissions can reuse one repository read without bypassing wildcard,
+// tenant-domain, or deny-wins semantics.
+func EvaluatePolicies(policies []Policy, subject Subject, request Request) (bool, error) {
+	if subject.Superuser {
+		return true, nil
+	}
+	if strings.TrimSpace(subject.UserID) == "" {
+		return false, ErrInvalidSubject
 	}
 	allowed := false
 	for _, policy := range policies {
@@ -562,6 +603,11 @@ func policyMatches(policy Policy, subject Subject, request Request) bool {
 		return false
 	}
 	if policy.Domain != "" {
+		// A tenant-bound policy never matches a request without a validated
+		// domain, and both subject/request domains must agree when supplied.
+		if subject.Domain == "" && request.Domain == "" {
+			return false
+		}
 		if subject.Domain != "" && policy.Domain != subject.Domain {
 			return false
 		}
@@ -617,7 +663,10 @@ func pathMatches(policy, request string) bool {
 	}
 	if strings.HasSuffix(policy, "/*") {
 		prefix := strings.TrimSuffix(policy, "*")
-		return strings.HasPrefix(request, prefix)
+		// A collection prefix includes both its root and descendants. Keeping
+		// the slash in the descendant comparison prevents sibling prefixes
+		// such as /items-archive from matching /items/*.
+		return request == strings.TrimSuffix(prefix, "/") || strings.HasPrefix(request, prefix)
 	}
 	pp, rp := strings.Split(strings.Trim(policy, "/"), "/"), strings.Split(strings.Trim(request, "/"), "/")
 	if len(pp) != len(rp) {

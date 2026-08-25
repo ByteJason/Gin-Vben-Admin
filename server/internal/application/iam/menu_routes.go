@@ -95,10 +95,15 @@ func BuildMenuRoutes(menus []domain.Menu) ([]MenuRoute, error) {
 		}
 		path := menu.Path
 		if parentPath != "" {
-			path = strings.TrimPrefix(path, parentPath)
-			path = strings.TrimPrefix(path, "/")
-			if path == "" {
-				path = menu.Path
+			// A product grouping path (for example /configuration) may own
+			// established child URLs under a different prefix (/system/*).
+			// Preserve those absolute URLs; only relativize true descendants.
+			if strings.HasPrefix(path, strings.TrimSuffix(parentPath, "/")+"/") {
+				path = strings.TrimPrefix(path, parentPath)
+				path = strings.TrimPrefix(path, "/")
+				if path == "" {
+					path = menu.Path
+				}
 			}
 		}
 		route := MenuRoute{

@@ -41,3 +41,27 @@ func TestServiceUsesComponentRegistryByDefault(t *testing.T) {
 		t.Fatalf("ValidateComponent() error=%v", err)
 	}
 }
+
+func TestStaticComponentRegistryCoversSeededProductionPages(t *testing.T) {
+	registry := NewStaticComponentRegistry()
+	for _, component := range []string{
+		"/dashboard/analytics/index.vue",
+		"/iam/users/index.vue",
+		"/iam/roles/index.vue",
+		"/iam/menus/index.vue",
+		"/iam/permissions/index.vue",
+		"/system/settings/index.vue",
+		"/system/dictionary/index.vue",
+		"/system/mail/index.vue",
+		"/system/files/index.vue",
+		"/system/observability/index.vue",
+		"/system/monitor/index.vue",
+		"/system/audit/index.vue",
+		"/system/tasks/index.vue",
+		"/system/import-export/index.vue",
+	} {
+		if err := registry.Validate(component); err != nil {
+			t.Errorf("seeded component %q is not registered: %v", component, err)
+		}
+	}
+}

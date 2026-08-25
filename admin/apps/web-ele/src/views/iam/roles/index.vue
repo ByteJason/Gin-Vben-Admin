@@ -9,10 +9,13 @@ import type {
 
 import { computed, nextTick, onMounted, reactive, ref } from 'vue';
 
+import { useAccess } from '@vben/access';
+import { ManagementPage } from '@vben/common-ui';
+
 import {
   createIAMRoleApi,
-  listIAMPermissionsApi,
   listIAMDataScopesApi,
+  listIAMPermissionsApi,
   listIAMRolesApi,
   replaceIAMRoleDataScopesApi,
   replaceIAMRolePermissionsApi,
@@ -20,6 +23,21 @@ import {
   roleDataScopeIdsLimit,
 } from '#/api/core/iam';
 import { $t } from '#/locales';
+
+const { hasAccessByCodes } = useAccess();
+const canManage = computed(() => hasAccessByCodes(['iam:roles:manage']));
+const canReadPermissions = computed(() =>
+  hasAccessByCodes(['iam:permissions:read']),
+);
+const canReadDataScopes = computed(() =>
+  hasAccessByCodes(['iam:data-scopes:read']),
+);
+const canEditPermissions = computed(
+  () => canManage.value && canReadPermissions.value,
+);
+const canEditDataScopes = computed(
+  () => canManage.value && canReadDataScopes.value,
+);
 
 const roles = ref<IAMRole[]>([]);
 const loading = ref(false);
@@ -75,6 +93,7 @@ function clearRoleForm() {
 }
 
 function openCreateRole() {
+  if (!canManage.value) return;
   clearRoleForm();
   feedback.value = '';
   roleFormOpen.value = true;
@@ -87,6 +106,7 @@ function closeRoleForm() {
 }
 
 async function loadPermissions() {
+  if (!canReadPermissions.value) return;
   permissionLoading.value = true;
   permissionError.value = '';
   try {
@@ -103,6 +123,7 @@ async function loadPermissions() {
 }
 
 async function openPermissionEditor(role: IAMRole) {
+  if (!canEditPermissions.value) return;
   permissionRole.value = role;
   permissionSelection.value = Array.from(
     new Set(
@@ -125,6 +146,7 @@ function closePermissionEditor() {
 }
 
 async function submitPermissions() {
+  if (!canEditPermissions.value) return;
   if (!permissionRole.value) return;
   permissionError.value = '';
   if (permissionSelection.value.length > 200) {
@@ -185,6 +207,7 @@ function parseDataScopeIds(value: string) {
 }
 
 async function loadRoleDataScopes() {
+  if (!canReadDataScopes.value) return;
   if (!dataScopeRole.value) return;
   dataScopesLoading.value = true;
   dataScopeError.value = '';
@@ -206,6 +229,7 @@ async function loadRoleDataScopes() {
 }
 
 async function openDataScopeEditor(role: IAMRole) {
+  if (!canEditDataScopes.value) return;
   dataScopeRole.value = role;
   dataScopeBindings.value = [];
   dataScopeError.value = '';
@@ -223,6 +247,7 @@ function closeDataScopeEditor() {
 }
 
 function addDataScopeBinding() {
+  if (!canEditDataScopes.value) return;
   if (dataScopeBindings.value.length >= roleDataScopeBindingLimit) {
     dataScopeError.value = String($t('page.iam.roleDataScopeBindingLimit'));
     return;
@@ -231,11 +256,13 @@ function addDataScopeBinding() {
 }
 
 function removeDataScopeBinding(index: number) {
+  if (!canEditDataScopes.value) return;
   if (dataScopeSaving.value) return;
   dataScopeBindings.value.splice(index, 1);
 }
 
 async function submitDataScopes() {
+  if (!canEditDataScopes.value) return;
   if (!dataScopeRole.value) return;
   dataScopeError.value = '';
   const seenResources = new Set<string>();
@@ -308,6 +335,7 @@ async function loadRoles() {
 }
 
 async function submitRole() {
+  if (!canManage.value) return;
   roleError.value = '';
   const validationError = validateRoleForm();
   if (validationError) {
@@ -340,10 +368,10 @@ function roleScopeLabel(scope?: string) {
   switch (scope) {
     case 'all':
       return String($t('page.iam.roleScopeAll'));
-    case 'org':
-      return String($t('page.iam.roleScopeOrg'));
     case 'custom':
       return String($t('page.iam.roleScopeCustom'));
+    case 'org':
+      return String($t('page.iam.roleScopeOrg'));
     default:
       return String($t('page.iam.roleScopeOwn'));
   }
@@ -353,7 +381,7 @@ onMounted(loadRoles);
 </script>
 
 <template>
-  <main
+  <ManagementPage
     class="iam-roles-page"
     :aria-busy="loading"
     aria-labelledby="iam-roles-title"
@@ -365,8 +393,15 @@ onMounted(loadRoles);
         <p class="description">{{ $t('page.iam.rolesDescription') }}</p>
       </div>
       <div class="heading-actions">
-        <span class="scope-chip">{{ $t('page.iam.manage') }}</span>
-        <button class="primary" type="button" @click="openCreateRole">
+        <span v-if="canManage" class="scope-chip">{{
+          $t('page.iam.manage')
+        }}</span>
+        <button
+          v-if="canManage"
+          class="primary"
+          type="button"
+          @click="openCreateRole"
+        >
           {{ $t('page.iam.roleCreate') }}
         </button>
       </div>
@@ -448,6 +483,7 @@ onMounted(loadRoles);
               <td>{{ (role.permissionIds ?? []).length }}</td>
               <td>
                 <button
+                  v-if="canEditPermissions"
                   class="secondary compact"
                   type="button"
                   @click="openPermissionEditor(role)"
@@ -455,6 +491,7 @@ onMounted(loadRoles);
                   {{ $t('page.iam.rolePermissionEdit') }}
                 </button>
                 <button
+                  v-if="canEditDataScopes"
                   class="secondary compact"
                   type="button"
                   @click="openDataScopeEditor(role)"
@@ -469,7 +506,7 @@ onMounted(loadRoles);
     </section>
 
     <section
-      v-if="roleFormOpen"
+      v-if="roleFormOpen && canManage"
       id="iam-role-form"
       class="modal-backdrop"
       :aria-label="$t('page.iam.roleCreateTitle')"
@@ -579,7 +616,7 @@ onMounted(loadRoles);
     </section>
 
     <section
-      v-if="permissionEditorOpen"
+      v-if="permissionEditorOpen && canEditPermissions"
       id="iam-role-permission-editor"
       class="modal-backdrop rolePermissionEditor"
       :aria-label="$t('page.iam.rolePermissionTitle')"
@@ -645,10 +682,8 @@ onMounted(loadRoles);
             />
             <span>
               <strong>{{ permission.name }}</strong>
-              <small
-                >{{ permission.id }} · {{ permission.method }}
-                {{ permission.path }}</small
-              >
+              <small>{{ permission.id }} · {{ permission.method }}
+                {{ permission.path }}</small>
             </span>
           </label>
         </fieldset>
@@ -681,7 +716,7 @@ onMounted(loadRoles);
     </section>
 
     <section
-      v-if="dataScopeEditorOpen"
+      v-if="dataScopeEditorOpen && canEditDataScopes"
       id="iam-role-data-scope-editor"
       class="modal-backdrop roleDataScopeEditor"
       :aria-label="$t('page.iam.roleDataScopeTitle')"
@@ -795,7 +830,7 @@ onMounted(loadRoles);
                   :disabled="dataScopeSaving"
                   :placeholder="$t('page.iam.roleDataScopeIdsHelp')"
                   rows="2"
-                />
+                ></textarea>
                 <small>
                   {{ parseDataScopeIds(binding.idsText).length }}/{{
                     roleDataScopeIdsLimit
@@ -837,14 +872,11 @@ onMounted(loadRoles);
         </footer>
       </div>
     </section>
-  </main>
+  </ManagementPage>
 </template>
 
 <style scoped>
 .iam-roles-page {
-  max-width: 1180px;
-  padding: 24px;
-  margin: 0 auto;
   color: hsl(var(--foreground));
 }
 
@@ -903,19 +935,19 @@ h2 {
   align-items: center;
   min-height: 28px;
   padding: 4px 10px;
-  border-radius: 999px;
   font-size: 0.78rem;
   font-weight: 650;
+  border-radius: 999px;
 }
 
 .scope-chip {
   color: hsl(var(--primary));
-  background: hsl(var(--primary) / 0.1);
+  background: hsl(var(--primary) / 10%);
 }
 
 .status-pill[data-status='active'] {
-  color: hsl(142 70% 30%);
-  background: hsl(142 70% 45% / 0.14);
+  color: hsl(142deg 70% 30%);
+  background: hsl(142deg 70% 45% / 14%);
 }
 
 .status-pill[data-status='disabled'] {
@@ -945,9 +977,9 @@ h2 {
 
 .data-scope-toolbar {
   display: flex;
+  gap: 12px;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
   margin-top: 12px;
 }
 
@@ -977,8 +1009,8 @@ h2 {
   width: 100%;
   min-height: 72px;
   padding: 7px 10px;
-  color: hsl(var(--foreground));
   font: inherit;
+  color: hsl(var(--foreground));
   resize: vertical;
   background: hsl(var(--background));
   border: 1px solid hsl(var(--border));
@@ -986,8 +1018,8 @@ h2 {
 }
 
 .data-scope-row small {
-  color: hsl(var(--muted-foreground));
   font-weight: 400;
+  color: hsl(var(--muted-foreground));
 }
 
 .permission-list {
@@ -1005,9 +1037,9 @@ h2 {
   gap: 10px;
   align-items: flex-start;
   padding: 10px 12px;
+  cursor: pointer;
   border: 1px solid hsl(var(--border));
   border-radius: 10px;
-  cursor: pointer;
 }
 
 .permission-option input {
@@ -1051,10 +1083,6 @@ textarea:focus-visible {
 }
 
 @media (max-width: 720px) {
-  .iam-roles-page {
-    padding: 16px;
-  }
-
   .page-heading {
     flex-direction: column;
   }
@@ -1109,13 +1137,13 @@ textarea:disabled {
 }
 
 .feedback-error {
-  color: hsl(0 65% 36%);
-  background: hsl(0 75% 55% / 0.1);
+  color: hsl(0deg 65% 36%);
+  background: hsl(0deg 75% 55% / 10%);
 }
 
 .feedback-success {
-  color: hsl(142 70% 28%);
-  background: hsl(142 70% 45% / 0.13);
+  color: hsl(142deg 70% 28%);
+  background: hsl(142deg 70% 45% / 13%);
 }
 
 .sr-status,
@@ -1125,9 +1153,9 @@ textarea:disabled {
   height: 1px;
   padding: 0;
   overflow: hidden;
-  clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+  clip-path: inset(50%);
 }
 
 .table-card {
@@ -1144,8 +1172,8 @@ textarea:disabled {
 }
 
 .result-count {
-  color: hsl(var(--muted-foreground));
   font-size: 0.85rem;
+  color: hsl(var(--muted-foreground));
 }
 
 .table-wrap {
@@ -1201,7 +1229,7 @@ tr:last-child td {
   display: grid;
   place-items: center;
   padding: 20px;
-  background: hsl(222 47% 11% / 0.46);
+  background: hsl(222deg 47% 11% / 46%);
 }
 
 .role-dialog {
@@ -1212,12 +1240,12 @@ tr:last-child td {
   background: hsl(var(--card));
   border: 1px solid hsl(var(--border));
   border-radius: 14px;
-  box-shadow: 0 24px 80px hsl(222 47% 11% / 0.28);
+  box-shadow: 0 24px 80px hsl(222deg 47% 11% / 28%);
 }
 
 .dialog-heading {
-  justify-content: space-between;
   gap: 16px;
+  justify-content: space-between;
   margin-bottom: 14px;
 }
 
@@ -1240,9 +1268,9 @@ tr:last-child td {
 .field {
   display: grid;
   gap: 6px;
-  color: hsl(var(--muted-foreground));
   font-size: 0.82rem;
   font-weight: 650;
+  color: hsl(var(--muted-foreground));
 }
 
 .field input,
@@ -1276,8 +1304,8 @@ tr:last-child td {
 }
 
 .switch-row small {
-  color: hsl(var(--muted-foreground));
   font-weight: 400;
+  color: hsl(var(--muted-foreground));
 }
 
 .switch-row input {
@@ -1288,16 +1316,12 @@ tr:last-child td {
 
 .dialog-actions {
   grid-column: 1 / -1;
-  justify-content: flex-end;
   gap: 10px;
+  justify-content: flex-end;
   padding-top: 4px;
 }
 
 @media (max-width: 720px) {
-  .iam-roles-page {
-    padding: 16px;
-  }
-
   .page-heading {
     display: grid;
   }

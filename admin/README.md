@@ -1,6 +1,6 @@
 # 管理端前端（admin）
 
-当前接口版本：`0.2.0-dev`
+当前接口版本：`1.0.0-dev`
 
 本目录是独立的 pnpm workspace。全新 clone 提供三套 UI 模板和一套安装页面：
 
@@ -11,6 +11,8 @@
 
 前端通过 `/api` 访问根目录的 Gin 服务 `server/`。
 
+生产菜单、默认首页、兼容路由、访问码和页面布局契约统一维护在 [`../docs/admin-information-architecture.md`](../docs/admin-information-architecture.md)，三套 UI 必须保持业务语义等价。
+
 ## 初始化与验证
 
 ```text
@@ -20,6 +22,8 @@ pnpm run init
 先在另一个终端进入 `server/` 并运行 `go run ./cmd/api/main.go`。`pnpm run init` 必须在本目录执行，但不需要预先运行 `pnpm install`：init 只使用 Node.js 内置模块。它先通过 `127.0.0.1` 检查普通 API 的 health、安装状态和 `/install` 页面，再交互选择 `antd`、`ele` 或 `naive`；确认后原子保留所选应用，将另外两套移动到仓库根目录 `.runtime/install/ui-backup/<transaction>/`，写入 `.ui-profile.json`，并对缩减后的 workspace 自动执行 `pnpm install --frozen-lockfile`。安装路由只接受真实 loopback 来源和 loopback Host，不信任代理头；请始终使用 init 输出的本机 URL。
 
 UI 移动、依赖安装或 UI 重置中断后，再次运行对应的 init 命令会从最小未完成步骤继续，不会重新选择 UI。网页安装事务也会在服务重启后恢复到可重试状态，且不会把密码或 DSN 写入事务文件。
+
+网页安装失败时，页面会保留当前输入并显示失败步骤、稳定原因标识、数据库代码（若有）、任务 ID；菜单或权限种子与旧数据冲突时还会显示安全的资源类型和资源 ID。服务端终端可按任务 ID 查找 `installation.job.failed`，结构化日志不会输出 SQL、DSN 或凭据。
 
 旧版 Windows 若在 `INSTALLER_BUILD_FAILED` 后留下严格一致的 profile、旧 receipt 和 `.runtime/init-backup/<transaction>/`，新版 init 会把备份迁入当前布局、隔离旧 receipt，并只重试所选 UI 的依赖。迁移中断可直接重跑，输出 `INIT_LEGACY_MIGRATION=resumed|completed`；也可直接运行 `pnpm run init -- --reset --confirm-reset` 恢复三套 UI，无需先安装依赖。任何冲突、符号链接、额外条目或 receipt/backup 不匹配都会以 `LEGACY_PREPARED_STATE_INVALID` 保持现场，不会运行 pnpm。
 
@@ -54,7 +58,7 @@ pnpm run dev
 以下状态由程序维护，**不要手动删除、改名或编辑**：
 
 | 路径 | 作用 |
-|---|---|
+| --- | --- |
 | `admin/.ui-profile.json` | 记录唯一选择的 UI，并驱动通用命令分发 |
 | `.runtime/install/` | 事务根目录；内部短期租约、清理墓碑、`environment-backup/` 等均由程序维护，请勿删除或编辑 |
 | `.runtime/install/.installed` | 最后原子写入的安装完成标记和 build 门禁 |
@@ -76,7 +80,6 @@ pnpm run dev
 | `.runtime/init-backup/` | 旧版 UI 暂存目录；合法目标由迁移器接管，冲突时保持不变 |
 | `.runtime/init-recovery/` | 旧版历史恢复记录；迁移过程中原样保留 |
 
-遇到中断时重新运行 init 或重新打开安装页，让程序恢复这些状态。Docker 在已有 profile 时自动使用它；全新 CI 可显式传入 `ADMIN_UI=antd|ele|naive`，显式值与 profile 不一致时输出 `UI_PROFILE_MISMATCH`。
-若网页安装需要替换已有 `.env`，`environment-backup/` 仅在事务期间以 `0600` 权限保存原文件用于补偿，并在完成标记提交后精确清理；不要复制或提交它。
+遇到中断时重新运行 init 或重新打开安装页，让程序恢复这些状态。Docker 在已有 profile 时自动使用它；全新 CI 可显式传入 `ADMIN_UI=antd|ele|naive`，显式值与 profile 不一致时输出 `UI_PROFILE_MISMATCH`。若网页安装需要替换已有 `.env`，`environment-backup/` 仅在事务期间以 `0600` 权限保存原文件用于补偿，并在完成标记提交后精确清理；不要复制或提交它。
 
 init 会使用 Node.js 内置文件 API，将所选模板的 `.env.development.example` 和 `.env.production.example` 原子复制为对应本地环境文件；已有本地文件保持原字节。所选目录的写权限、模板类型与可读性会在移动 UI 前检查。旧版本完成安装但缺少整个文件时，通用 `dev/build/preview` 分发器会在启动前自动补齐；已有旧文件缺少标题时由共享 Vite 配置提供默认值，不改写其中的自定义地址或敏感字段。开发环境默认 API 地址为 `/api`，即使本地环境文件意外缺失也会回退到同源 `/api`，再由 Vite 代理转发到 Gin 的 `/api` 根路径（`http://localhost:8080/api`）。普通用户与源码工作区都只使用通用的 profile 驱动命令。

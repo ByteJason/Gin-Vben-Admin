@@ -105,6 +105,13 @@ func (s *IdentityInstaller) initializeWithReference(ctx context.Context, databas
 	}
 	if err := store.Initialize(ctx, reference, username, passwordHash); err != nil {
 		_ = store.Close()
+		var diagnostic installer.FailureDiagnosticProvider
+		if errors.As(err, &diagnostic) {
+			if retainReceiptOnFailure {
+				return receipt, err
+			}
+			return installer.IdentityReceipt{}, err
+		}
 		if retainReceiptOnFailure {
 			return receipt, ErrIdentityInstallation
 		}
@@ -133,13 +140,14 @@ func (s *IdentityInstaller) Rollback(ctx context.Context, receipt installer.Iden
 		// supplied database credentials instead.
 		return nil
 	}
-	if err := s.rollbackWithDatabase(ctx, database, receipt); err != nil {
+	err := s.rollbackWithDatabase(ctx, database, receipt)
+	if err != nil && !errors.Is(err, installer.ErrIdentityNotOwned) {
 		return err
 	}
 	s.mutex.Lock()
 	delete(s.pending, receipt.Reference)
 	s.mutex.Unlock()
-	return nil
+	return err
 }
 
 // RecoverRollback reconnects with freshly re-entered credentials and uses
@@ -149,13 +157,14 @@ func (s *IdentityInstaller) RecoverRollback(ctx context.Context, database instal
 	if s == nil || s.open == nil || strings.TrimSpace(receipt.Reference) == "" {
 		return ErrIdentityInstallation
 	}
-	if err := s.rollbackWithDatabase(ctx, database, receipt); err != nil {
+	err := s.rollbackWithDatabase(ctx, database, receipt)
+	if err != nil && !errors.Is(err, installer.ErrIdentityNotOwned) {
 		return err
 	}
 	s.mutex.Lock()
 	delete(s.pending, receipt.Reference)
 	s.mutex.Unlock()
-	return nil
+	return err
 }
 
 // Finalize forgets the database connection material retained only for a
@@ -185,6 +194,9 @@ func (s *IdentityInstaller) rollbackWithDatabase(ctx context.Context, database i
 	rollbackErr := store.Rollback(ctx, receipt.Reference)
 	closeErr := store.Close()
 	if rollbackErr != nil {
+		if errors.Is(rollbackErr, installer.ErrIdentityNotOwned) && closeErr == nil {
+			return installer.ErrIdentityNotOwned
+		}
 		return ErrIdentityInstallation
 	}
 	if closeErr != nil {

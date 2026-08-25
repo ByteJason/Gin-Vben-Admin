@@ -41,7 +41,9 @@ for (const app of apps) {
     for (const token of ['listFilesApi', 'uploadFileApi', 'downloadFileApi', 'deleteFileApi', 'cleanupDryRunApi']) assert.match(read(apiPath), new RegExp(token), `${app}/${token}`);
     for (const token of ['upload', 'preview', 'download', 'delete', 'MIME', 'size', 'ACL', 'loading', 'empty', 'error']) assert.match(read(viewPath), new RegExp(token, 'i'), `${app}/${token}`);
     assert.match(read(routePath), /views\/system\/files\/index\.vue/);
-    assert.match(read(routePath), /path:\s*'files'/);
+    assert.match(read(routePath), /name:\s*'menu-system-files'/);
+    assert.match(read(routePath), /authority:\s*\['system:files:read'\]/);
+    assert.match(read(routePath), /path:\s*'\/system\/files'/);
   });
   for (const locale of ['zh-CN', 'en-US']) {
     test(`B10.6 ${app}/${locale} has file center copy`, () => {

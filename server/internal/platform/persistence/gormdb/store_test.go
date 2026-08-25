@@ -2,10 +2,39 @@ package gormdb
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestAggregatePoolStatsPreservesInUseWaitsAndZeroMaximum(t *testing.T) {
+	got := aggregatePoolStats([]sql.DBStats{
+		{OpenConnections: 3, InUse: 2, Idle: 1, MaxOpenConnections: 0, WaitCount: 4, WaitDuration: 2 * time.Millisecond, MaxIdleClosed: 5},
+		{OpenConnections: 7, InUse: 3, Idle: 4, MaxOpenConnections: 11, WaitCount: 6, WaitDuration: 3 * time.Millisecond, MaxIdleTimeClosed: 7, MaxLifetimeClosed: 8},
+	})
+	if got.Open != 10 || got.InUse != 5 || got.Idle != 5 || got.Max != 0 {
+		t.Fatalf("pool totals = %#v", got)
+	}
+	if got.WaitCount != 10 || got.WaitDurationMS != 5 || got.MaxIdleClosed != 5 || got.MaxIdleTimeClosed != 7 || got.MaxLifetimeClosed != 8 {
+		t.Fatalf("pool wait/closure counters = %#v", got)
+	}
+}
+
+func TestDatabaseRuntimeStatsExposeOnlyDriverModeAndPool(t *testing.T) {
+	store, err := Open(Options{Driver: "postgres", Mode: ModeSingle, DSN: "host=127.0.0.1 port=1 user=fixture dbname=fixture sslmode=disable"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	stats, err := store.DatabaseRuntimeStats(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stats.DriverAvailable || stats.Driver != "postgres" || !stats.ModeAvailable || stats.Mode != string(ModeSingle) || !stats.PoolAvailable {
+		t.Fatalf("runtime identity/stats = %#v", stats)
+	}
+}
 
 func TestOptionsValidateSupportedTopologies(t *testing.T) {
 	tests := []struct {

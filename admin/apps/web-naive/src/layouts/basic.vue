@@ -26,58 +26,7 @@ import { $t } from '#/locales';
 import { useAuthStore } from '#/store';
 import LoginForm from '#/views/_core/authentication/login.vue';
 
-const notifications = ref<NotificationItem[]>([
-  {
-    id: 1,
-    avatar: 'https://avatar.vercel.sh/vercel.svg?text=VB',
-    date: '3小时前',
-    isRead: true,
-    message: '描述信息描述信息描述信息',
-    title: '收到了 14 份新周报',
-  },
-  {
-    id: 2,
-    avatar: 'https://avatar.vercel.sh/1',
-    date: '刚刚',
-    isRead: false,
-    message: '描述信息描述信息描述信息',
-    title: '朱偏右 回复了你',
-  },
-  {
-    id: 3,
-    avatar: 'https://avatar.vercel.sh/1',
-    date: '2024-01-01',
-    isRead: false,
-    message: '描述信息描述信息描述信息',
-    title: '曲丽丽 评论了你',
-  },
-  {
-    id: 4,
-    avatar: 'https://avatar.vercel.sh/satori',
-    date: '1天前',
-    isRead: false,
-    message: '描述信息描述信息描述信息',
-    title: '代办提醒',
-  },
-  {
-    id: 5,
-    avatar: 'https://avatar.vercel.sh/satori',
-    date: '1天前',
-    isRead: false,
-    message: '描述信息描述信息描述信息',
-    title: '跳转Workspace示例',
-    link: '/workspace',
-  },
-  {
-    id: 6,
-    avatar: 'https://avatar.vercel.sh/satori',
-    date: '1天前',
-    isRead: false,
-    message: '描述信息描述信息描述信息',
-    title: '跳转上游前端文档示例',
-    link: VBEN_DOC_URL,
-  },
-]);
+const notifications = ref<NotificationItem[]>([]);
 
 const router = useRouter();
 const userStore = useUserStore();
@@ -88,24 +37,40 @@ const { isDark } = usePreferences();
 const showDot = computed(() =>
   notifications.value.some((item) => !item.isRead),
 );
+const showProfileEntry = import.meta.env.DEV;
 
 const menus = computed(() => [
+  ...(showProfileEntry
+    ? [
+        {
+          handler: () => {
+            router.push({ name: 'Profile' });
+          },
+          icon: 'lucide:user',
+          text: $t('page.auth.profile'),
+        },
+      ]
+    : []),
   {
     handler: () => {
-      router.push({ name: 'Profile' });
+      router.push({ name: 'VbenAbout' });
     },
-    icon: 'lucide:user',
-    text: $t('page.auth.profile'),
+    icon: 'lucide:info',
+    text: $t('demos.vben.about'),
   },
-  {
-    handler: () => {
-      openWindow(VBEN_DOC_URL, {
-        target: '_blank',
-      });
-    },
-    icon: BookOpenText,
-    text: `Vue Vben Admin ${$t('ui.widgets.document')}`,
-  },
+  ...(import.meta.env.DEV
+    ? [
+        {
+          handler: () => {
+            openWindow(VBEN_DOC_URL, {
+              target: '_blank',
+            });
+          },
+          icon: BookOpenText,
+          text: `Vue Vben Admin ${$t('ui.widgets.document')}`,
+        },
+      ]
+    : []),
   {
     handler: () => {
       openWindow(GIN_VBEN_ADMIN_GITHUB_URL, {

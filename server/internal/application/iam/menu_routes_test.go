@@ -83,3 +83,43 @@ func TestMenuWriterRejectsCyclesAndProtectsChildrenOnDelete(t *testing.T) {
 		t.Fatalf("delete child error=%v", err)
 	}
 }
+
+func TestBuildMenuRoutesPreservesExistingAbsoluteChildURLAcrossProductGroups(t *testing.T) {
+	routes, err := BuildMenuRoutes([]domain.Menu{
+		{ID: "menu-system-config", Name: "系统配置", Path: "/configuration", Type: domain.MenuTypeDirectory, Visible: true, Active: true},
+		{ID: "menu-system-settings", ParentID: "menu-system-config", Name: "系统设置", Path: "/system/settings", Type: domain.MenuTypeMenu, Component: "/system/settings/index.vue", Visible: true, Active: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != 1 || len(routes[0].Children) != 1 || routes[0].Children[0].Path != "/system/settings" {
+		t.Fatalf("routes=%+v", routes)
+	}
+}
+
+func TestFilterMenusByAccessCodesKeepsContainersAndPublicNodesWithoutLeakingHiddenBranches(t *testing.T) {
+	menus := []domain.Menu{
+		{ID: "restricted-group", Name: "Restricted", Path: "/restricted", Type: domain.MenuTypeDirectory, Permission: "group.read", Visible: true, Active: true},
+		{ID: "allowed-child", ParentID: "restricted-group", Name: "Allowed", Path: "/restricted/allowed", Type: domain.MenuTypeMenu, Component: "/iam/users/index.vue", Permission: "users.read", Visible: true, Active: true},
+		{ID: "denied-child", ParentID: "restricted-group", Name: "Denied", Path: "/restricted/denied", Type: domain.MenuTypeMenu, Component: "/iam/roles/index.vue", Permission: "roles.read", Visible: true, Active: true},
+		{ID: "public", Name: "Public", Path: "/public", Type: domain.MenuTypeMenu, Component: "/iam/permissions/index.vue", Visible: true, Active: true},
+		{ID: "empty-group", Name: "Empty", Path: "/empty", Type: domain.MenuTypeDirectory, Visible: true, Active: true},
+		{ID: "hidden-group", Name: "Hidden", Path: "/hidden", Type: domain.MenuTypeDirectory, Visible: false, Active: true},
+		{ID: "hidden-public-child", ParentID: "hidden-group", Name: "Hidden child", Path: "/hidden/child", Type: domain.MenuTypeMenu, Component: "/iam/menus/index.vue", Visible: true, Active: true},
+	}
+
+	routes, err := BuildMenuRoutes(filterMenusByAccessCodes(menus, []string{"users.read"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != 2 || routes[0].Name != "public" || routes[1].Name != "restricted-group" || len(routes[1].Children) != 1 || routes[1].Children[0].Name != "allowed-child" {
+		t.Fatalf("filtered routes=%+v", routes)
+	}
+	withoutCodes, err := BuildMenuRoutes(filterMenusByAccessCodes(menus, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(withoutCodes) != 1 || withoutCodes[0].Name != "public" {
+		t.Fatalf("zero-code routes should retain only public leaves: %+v", withoutCodes)
+	}
+}

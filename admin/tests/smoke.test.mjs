@@ -278,7 +278,7 @@ test('all management templates expose equivalent observability settings', () => 
       'observability.tracing.endpoint',
       'observability.tracing.protocol',
       'observability.tracing.sample_rate',
-      '<section',
+      '<ManagementPage',
       'aria-labelledby="observability-title"',
       'aria-live="polite"',
     ]) {
