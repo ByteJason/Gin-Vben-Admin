@@ -118,6 +118,18 @@ func TestCapabilityProbeRejectsNonVersionSingleTokens(t *testing.T) {
 	}
 }
 
+func TestCapabilityCommandInvocationUsesWindowsShellForPNPMShims(t *testing.T) {
+	command, args := capabilityCommandInvocation("windows", "pnpm", []string{"--version"})
+	if command == "pnpm" || len(args) != 5 || args[0] != "/d" || args[1] != "/s" || args[2] != "/c" || args[3] != "pnpm" || args[4] != "--version" {
+		t.Fatalf("Windows pnpm invocation = (%q, %#v), want cmd.exe /d /s /c pnpm --version", command, args)
+	}
+
+	command, args = capabilityCommandInvocation("darwin", "pnpm", []string{"--version"})
+	if command != "pnpm" || len(args) != 1 || args[0] != "--version" {
+		t.Fatalf("POSIX pnpm invocation = (%q, %#v), want direct argv", command, args)
+	}
+}
+
 type commandRunnerStub struct {
 	outputs map[string]string
 	errors  map[string]error

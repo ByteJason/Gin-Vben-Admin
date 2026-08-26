@@ -165,6 +165,30 @@ func TestCommandUIInitializerBoundsOutputAndDoesNotExposeCommandFailure(t *testi
 	}
 }
 
+func TestCommandUIInitializerStderrOnlyEarlyExitKeepsStableLaunchFailure(t *testing.T) {
+	root := uiInitializerWorkspaceFixture(t)
+	stateDirectory := uiInitializerStateDirectoryFixture(t)
+	runner := &uiInitializerCommandRunnerStub{
+		stderr: "INIT_ERROR=PNPM_VERSION_UNSUPPORTED\nnode: executable was not found at C:\\private\\secret\\node.exe\nTOKEN=secret\n",
+		err:    errors.New("exit status 1 with private command details"),
+	}
+	initializer, err := newCommandUIInitializer(root, stateDirectory, 8080, runner, []string{"PATH=/fixture/bin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = initializer.Prepare(context.Background(), installstate.UIAntd, nil)
+	var failure *installer.UIPreparationFailure
+	if !errors.As(err, &failure) {
+		t.Fatalf("Prepare() error = %T %v, want *UIPreparationFailure", err, err)
+	}
+	if failure.ErrorKey != "ui_pnpm_version_unsupported" || failure.Step != "launch" || failure.Reason != "pnpm_version_unsupported" {
+		t.Fatalf("stderr-only early exit failure = %#v, want stable launch classification", failure)
+	}
+	if strings.Contains(err.Error(), "private") || strings.Contains(err.Error(), "TOKEN") {
+		t.Fatalf("stderr-only early exit leaked command detail: %v", err)
+	}
+}
+
 func TestCommandUIInitializerReturnsAllowlistedStructuredFailure(t *testing.T) {
 	root := uiInitializerWorkspaceFixture(t)
 	stateDirectory := uiInitializerStateDirectoryFixture(t)
@@ -332,29 +356,73 @@ func TestCommandUIInitializerPreservesContextCancellation(t *testing.T) {
 	}
 }
 
-func TestBuildUIInitializerCommandUsesFixedWindowsShellForPNPMCommandFile(t *testing.T) {
-	root := `C:\fixture root`
-	args := []string{"--dir", `C:\fixture root\admin`, "run", "init", "--", "--ui", "ele", "--confirm-cleanup", "--no-open", "--port", "8080"}
+func TestBuildUIInitializerCommandUsesDirectNodeArgvOnWindows(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "Gin Vben Admin")
+	args := []string{"--ui", "ele", "--confirm-cleanup", "--no-open", "--port", "8080"}
 	invocation, err := buildUIInitializerCommand("windows", root, args, []string{"Path=C:\\bin"})
 	if err != nil {
 		t.Fatalf("buildUIInitializerCommand(windows) error = %v", err)
 	}
-	if invocation.Name != "cmd.exe" || invocation.Dir != root || len(invocation.Args) != 4 || !reflect.DeepEqual(invocation.Args[:3], []string{"/d", "/s", "/c"}) {
-		t.Fatalf("windows invocation = %#v", invocation)
+	wantScript := filepath.Join(root, "admin", "scripts", "init.mjs")
+	wantArgs := append([]string{wantScript}, args...)
+	if invocation.Name != "node" || invocation.Dir != root || !reflect.DeepEqual(invocation.Args, wantArgs) {
+		t.Fatalf("windows invocation = %#v, want direct node argv %#v in %q", invocation, wantArgs, root)
 	}
-	commandLine := invocation.Args[3]
-	for _, expected := range []string{"call pnpm.cmd", `"C:\fixture root\admin"`, `"--ui"`, `"ele"`} {
-		if !strings.Contains(commandLine, expected) {
-			t.Fatalf("windows command line missing %q: %q", expected, commandLine)
-		}
+	joined := strings.Join(invocation.Args, "\x00")
+	if strings.Contains(joined, "pnpm.cmd") || strings.Contains(joined, "pnpm.exe") || strings.Contains(joined, "cmd.exe") {
+		t.Fatalf("windows invocation unexpectedly depends on a shell or pnpm shim: %#v", invocation)
 	}
-	if _, err := buildUIInitializerCommand("windows", `C:\fixture&calc`, args, nil); !errors.Is(err, ErrWorkspaceRootInvalid) {
-		t.Fatalf("unsafe Windows path error = %v, want ErrWorkspaceRootInvalid", err)
+	specialRoot := filepath.Join(root, "fixture&calc")
+	special, err := buildUIInitializerCommand("windows", specialRoot, args, nil)
+	if err != nil || special.Name != "node" || !strings.Contains(special.Args[0], "fixture&calc") {
+		t.Fatalf("Windows special-character path invocation = %#v, err=%v", special, err)
 	}
 
 	unix, err := buildUIInitializerCommand("linux", "/fixture root", args, nil)
 	if err != nil || unix.Name != "pnpm" || !reflect.DeepEqual(unix.Args, args) {
 		t.Fatalf("unix invocation = (%#v, %v), want direct pnpm argv", unix, err)
+	}
+}
+
+func TestBuildUIInitializerCommandWindowsShimChoiceDoesNotChangeNodeInvocation(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "Gin Vben Admin")
+	args := []string{"--ui", "antd", "--confirm-cleanup", "--no-open", "--port", "8080"}
+	var baseline uiInitializerCommand
+	for index, shimPath := range []string{`C:\tools\pnpm-cmd-only`, `C:\tools\pnpm-exe-only`} {
+		invocation, err := buildUIInitializerCommand("windows", root, args, []string{"PATH=" + shimPath})
+		if err != nil {
+			t.Fatalf("buildUIInitializerCommand(windows, shim=%q) error = %v", shimPath, err)
+		}
+		if index == 0 {
+			baseline = invocation
+			continue
+		}
+		if invocation.Name != baseline.Name || !reflect.DeepEqual(invocation.Args, baseline.Args) || invocation.Dir != baseline.Dir {
+			t.Fatalf("Windows shim choice changed initializer invocation: baseline=%#v got=%#v", baseline, invocation)
+		}
+	}
+}
+
+func TestCommandUIInitializerUsesNodeEntrypointOnWindows(t *testing.T) {
+	root := uiInitializerWorkspaceFixture(t)
+	stateDirectory := uiInitializerStateDirectoryFixture(t)
+	runner := &uiInitializerCommandRunnerStub{
+		stdout: "INIT_STAGE=prepare:preflight\nINIT_STAGE=prepare:complete\n",
+	}
+	initializer, err := newCommandUIInitializer(root, stateDirectory, 8080, runner, []string{"PATH=C:\\tools"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	initializer.operatingSystem = "windows"
+	if err := initializer.Prepare(context.Background(), installstate.UIEle, nil); err != nil {
+		t.Fatalf("Prepare() error = %v", err)
+	}
+	want := []string{
+		filepath.Join(root, "admin", "scripts", "init.mjs"),
+		"--ui", "ele", "--confirm-cleanup", "--no-open", "--port", "8080",
+	}
+	if runner.invocation.Name != "node" || !reflect.DeepEqual(runner.invocation.Args, want) {
+		t.Fatalf("Windows prepare invocation = %#v, want node argv %#v", runner.invocation, want)
 	}
 }
 

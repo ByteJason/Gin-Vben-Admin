@@ -3,6 +3,7 @@ package installplatform
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"regexp"
 	"runtime"
@@ -144,6 +145,7 @@ var (
 )
 
 func (systemCommandRunner) Version(ctx context.Context, command string, args ...string) (string, error) {
+	command, args = capabilityCommandInvocation(runtime.GOOS, command, args)
 	output, err := exec.CommandContext(ctx, command, args...).Output()
 	if err != nil {
 		return "", err
@@ -152,6 +154,25 @@ func (systemCommandRunner) Version(ctx context.Context, command string, args ...
 		output = output[:512]
 	}
 	return string(output), nil
+}
+
+// capabilityCommandInvocation keeps the capability probe aligned with the
+// launcher used by Windows command shims.  npm-style pnpm installations often
+// expose a .cmd file (and sometimes an extensionless shim) rather than a PE
+// executable; CreateProcess cannot execute a batch file directly, while
+// cmd.exe resolves both forms through PATHEXT.
+func capabilityCommandInvocation(operatingSystem, command string, args []string) (string, []string) {
+	if operatingSystem != "windows" || !strings.EqualFold(command, "pnpm") {
+		return command, append([]string(nil), args...)
+	}
+	shell := os.Getenv("COMSPEC")
+	if shell == "" {
+		shell = "cmd.exe"
+	}
+	commandArgs := make([]string, 0, len(args)+4)
+	commandArgs = append(commandArgs, "/d", "/s", "/c", "pnpm")
+	commandArgs = append(commandArgs, args...)
+	return shell, commandArgs
 }
 
 func parseToolVersion(tool, output string) string {

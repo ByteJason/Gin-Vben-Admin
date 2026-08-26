@@ -130,10 +130,19 @@ func (i *CommandUIInitializer) run(ctx context.Context, action installer.UIPrepa
 	if i == nil || i.runner == nil || i.workspaceRoot == "" || i.adminRoot == "" {
 		return ErrUIInitializerCommandFailed
 	}
-	pnpmArgs := append([]string{
-		"--dir", i.adminRoot, "run", "init", "--",
-	}, commandArgs...)
-	invocation, buildErr := buildUIInitializerCommand(i.operatingSystem, i.workspaceRoot, pnpmArgs, i.environment)
+	// On Windows, execute the Node entrypoint directly.  Passing a quoted
+	// `cmd.exe /c call pnpm.cmd ...` string through os/exec applies two
+	// different argument parsers (Go and cmd.exe); paths containing spaces can
+	// then be changed before init.mjs starts.  The Node entrypoint itself uses
+	// the shared pnpm command builder for dependency installation, so this
+	// boundary does not need a shell or a pnpm shim.
+	commandLineArgs := commandArgs
+	if i.operatingSystem != "windows" {
+		commandLineArgs = append([]string{
+			"--dir", i.adminRoot, "run", "init", "--",
+		}, commandArgs...)
+	}
+	invocation, buildErr := buildUIInitializerCommand(i.operatingSystem, i.workspaceRoot, commandLineArgs, i.environment)
 	if buildErr != nil {
 		return buildErr
 	}
@@ -146,7 +155,9 @@ func (i *CommandUIInitializer) run(ctx context.Context, action installer.UIPrepa
 		return ctxErr
 	}
 	if err != nil {
-		failure := uiInitializerFailure(action, stdout.diagnosticSnapshot())
+		diagnostic := stdout.diagnosticSnapshot()
+		mergeUIInitializerDiagnostics(&diagnostic, stderr.diagnosticSnapshot())
+		failure := uiInitializerFailure(action, diagnostic)
 		return fmt.Errorf("%w: %w", ErrUIInitializerCommandFailed, failure)
 	}
 	return nil
@@ -203,37 +214,43 @@ func canonicalizeUIInitializerStateDirectory(stateDirectory string) (string, err
 	return filepath.Clean(canonical), nil
 }
 
-func buildUIInitializerCommand(operatingSystem, workspaceRoot string, pnpmArgs, environment []string) (uiInitializerCommand, error) {
+func buildUIInitializerCommand(operatingSystem, workspaceRoot string, scriptArgs, environment []string) (uiInitializerCommand, error) {
 	invocation := uiInitializerCommand{
 		Name: "pnpm",
-		Args: append([]string(nil), pnpmArgs...),
+		Args: append([]string(nil), scriptArgs...),
 		Dir:  workspaceRoot,
 		Env:  append([]string(nil), environment...),
 	}
 	if operatingSystem != "windows" {
 		return invocation, nil
 	}
-	if !safeWindowsUIInitializerArgument(workspaceRoot) {
-		return uiInitializerCommand{}, ErrWorkspaceRootInvalid
-	}
-	var commandLine strings.Builder
-	commandLine.WriteString("call pnpm.cmd")
-	for _, argument := range pnpmArgs {
-		if !safeWindowsUIInitializerArgument(argument) {
-			return uiInitializerCommand{}, ErrWorkspaceRootInvalid
-		}
-		commandLine.WriteByte(' ')
-		commandLine.WriteByte('"')
-		commandLine.WriteString(argument)
-		commandLine.WriteByte('"')
-	}
-	invocation.Name = "cmd.exe"
-	invocation.Args = []string{"/d", "/s", "/c", commandLine.String()}
+	// Keep every path and option as a separate argv element.  This avoids the
+	// cmd.exe quoting rules entirely and works with pnpm.cmd, pnpm.exe, and
+	// other Windows shims because pnpm is only needed by the Node script later.
+	invocation.Name = "node"
+	invocation.Args = append([]string{
+		filepath.Join(workspaceRoot, "admin", "scripts", "init.mjs"),
+	}, scriptArgs...)
 	return invocation, nil
 }
 
-func safeWindowsUIInitializerArgument(value string) bool {
-	return value != "" && !strings.ContainsAny(value, "\x00\r\n\"&|<>^%!()")
+func mergeUIInitializerDiagnostics(target *uiInitializerDiagnostic, source uiInitializerDiagnostic) {
+	if target == nil {
+		return
+	}
+	if target.lastStep == "" {
+		target.lastStep = source.lastStep
+	}
+	if target.errorCode == "" {
+		target.errorCode = source.errorCode
+	}
+	if target.scope == "" {
+		target.scope = source.scope
+	}
+	if target.operation == "" {
+		target.operation = source.operation
+	}
+	target.dependencyLog = target.dependencyLog || source.dependencyLog
 }
 
 func validUIInitializerSelection(ui installstate.UI) bool {
