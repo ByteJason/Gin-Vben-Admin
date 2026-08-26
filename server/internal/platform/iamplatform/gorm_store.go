@@ -82,7 +82,15 @@ func (s *GORMStore) findUser(ctx context.Context, id string, authorization bool)
 		}
 		return domain.User{}, ErrStoreUnavailable
 	}
-	roles, err := s.roleIDsFrom(database, tenantID, numericID)
+	// Build the relation query from a fresh resolver session. Reusing the
+	// completed user query carries its WHERE/LIMIT statement into `user_roles`.
+	// Select the same read/write route explicitly so authorization still pins
+	// to the primary while ordinary profile reads retain replica routing.
+	roleDatabase := s.read(ctx)
+	if authorization {
+		roleDatabase = s.write(ctx)
+	}
+	roles, err := s.roleIDsFrom(roleDatabase, tenantID, numericID)
 	if err != nil {
 		return domain.User{}, err
 	}
