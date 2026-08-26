@@ -259,6 +259,8 @@ test('UI preparation announces only backend-supported job steps', () => {
 
   assert.deepEqual(Object.keys(labels), [
     'queued',
+    'request',
+    'launch',
     'preflight',
     'workspace',
     'dependencies',
@@ -267,6 +269,25 @@ test('UI preparation announces only backend-supported job steps', () => {
     'failed',
   ]);
   assert.equal(labels.workspace, '暂存模板并写入界面配置');
+});
+
+test('installation capabilities wire contract includes version compatibility', () => {
+  const contract = readFileSync(
+    join(root, '../../../contracts/openapi/install-v1.yaml'),
+    'utf8',
+  );
+  assert.match(contract, /\/api\/system\/install\/v1\/capabilities:/);
+  assert.match(contract, /InstallationCapabilitiesEnvelope:/);
+  assert.match(contract, /InstallationToolCapability:/);
+  assert.match(
+    contract,
+    /required:\s*\[id, available, compatible\]/,
+  );
+  assert.match(contract, /requiredVersion:/);
+  assert.match(
+    contract,
+    /enum:\s*\[not_available, version_unreadable, version_unsupported\]/,
+  );
 });
 
 test('recoverable UI status dispatches prepare and reset actions separately', () => {
@@ -322,6 +343,8 @@ test('a rejected UI action releases pending controls through the common failure 
     {
       action: 'prepare',
       currentStep: 'request',
+      failureReason: 'request_unavailable',
+      failureStep: 'request',
       errorKey: 'ui_preparation_conflict',
       logPath: undefined,
       selectedUi: 'naive',
@@ -409,8 +432,28 @@ test('UI action diagnostics expose stable keys and repository-relative logs only
   );
   assert.match(
     renderProgress,
-    /uiPrepareLogPath\.textContent\s*=\s*safeUIActionLogPath\(job\.logPath\)/,
+    /job\.failureStep\s*===\s*'dependencies'[\s\S]*?safeUIActionLogPath\(job\.logPath\)[\s\S]*?uiPrepareLogPath\.textContent\s*=\s*logPath/,
   );
+  for (const field of [
+    'job.failureStep',
+    'job.failureReason',
+    'job.failureScope',
+    'job.failureOperation',
+    'job.id',
+  ]) {
+    assert.match(renderProgress, new RegExp(field.replace('.', '\\.')));
+  }
+  assert.doesNotMatch(renderProgress, /尚未移动或修改管理界面模板/);
+  assert.match(renderProgress, /job\.logPath[\s\S]*?uiPrepareLogPath/);
+});
+
+test('required UI tools must be both available and version-compatible', () => {
+  const script = readFileSync(join(root, 'src/app.js'), 'utf8');
+  const renderCapabilities = readFunction(script, 'renderCapabilities');
+
+  assert.match(renderCapabilities, /tool\.available\s*&&\s*tool\.compatible/);
+  assert.match(renderCapabilities, /version_unsupported/);
+  assert.match(renderCapabilities, /requiredVersion/);
 });
 
 test('capability re-probes disable UI actions before awaiting new results', () => {

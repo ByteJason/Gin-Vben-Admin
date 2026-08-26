@@ -22,9 +22,15 @@ import {
   installURL,
   migrateLegacyPreparedState,
   preflightInitialization,
+  preflightInitializationResume,
+  preflightLegacyPreparedMigration,
+  preflightReset,
+  preflightSafeLocalRecovery,
   recoverSafeLocalState,
+  recoverInitializationPreflightArtifacts,
   reset,
   rootFromScript,
+  stableInitializationErrorCode,
   statePaths,
 } from './init-state.mjs';
 import { buildDependencySupervisorCommand } from './dependency-launch.mjs';
@@ -54,6 +60,28 @@ function parseArgs(argv) {
   if (options.selectedUi && !UI_PROFILES[options.selectedUi]) throw new Error('UI_INVALID');
   if (!Number.isInteger(options.port) || options.port < 1 || options.port > 65535) throw new Error('PORT_INVALID');
   return options;
+}
+
+function parseRuntimeVersion(value) {
+  const match = /^(?:v)?([0-9]+)\.([0-9]+)\.([0-9]+)/.exec(String(value || ''));
+  return match ? match.slice(1).map(Number) : null;
+}
+
+function versionAtLeast(version, major, minor, patch = 0) {
+  if (!version || version[0] !== major) return false;
+  return version[1] > minor || (version[1] === minor && version[2] >= patch);
+}
+
+function assertRuntimeCompatibility(environment = process.env) {
+  const node = parseRuntimeVersion(process.versions.node);
+  if (!versionAtLeast(node, 22, 18) && !versionAtLeast(node, 24, 12)) {
+    throw new Error('NODE_VERSION_UNSUPPORTED');
+  }
+  const userAgent = environment.npm_config_user_agent || environment.NPM_CONFIG_USER_AGENT || '';
+  const pnpmMatch = /(?:^|\s)pnpm\/([^\s]+)/.exec(userAgent);
+  if (!pnpmMatch) return;
+  const pnpm = parseRuntimeVersion(pnpmMatch[1]);
+  if (!pnpm || pnpm[0] < 11) throw new Error('PNPM_VERSION_UNSUPPORTED');
 }
 
 async function confirm(message, explicit) {
@@ -136,7 +164,6 @@ async function installDependencies() {
     throw new Error('DEPENDENCY_INSTALL_FAILED');
   }
   stdout.write('正在安装所选 UI 的依赖；中断前台 init 后，后台监督进程仍会安全完成本次安装。\n');
-  stdout.write('INIT_DEPENDENCY_LOG=.runtime/install/dependency-install.log\n');
   const location = statePaths(root);
   mkdirSync(location.stateRoot, { recursive: true, mode: 0o700 });
   let logDescriptor;
@@ -146,6 +173,7 @@ async function installDependencies() {
     if (logDescriptor !== undefined) closeSync(logDescriptor);
     throw new Error('DEPENDENCY_INSTALL_FAILED');
   }
+  stdout.write('INIT_DEPENDENCY_LOG=.runtime/install/dependency-install.log\n');
   const invocation = buildDependencySupervisorCommand({
     execPath: process.execPath,
     platform: process.platform,
@@ -223,7 +251,9 @@ async function main() {
       stdout.write(`${usage()}\n`);
       return 0;
     }
+    assertRuntimeCompatibility();
     port = options.port;
+    if (!options.check) await recoverInitializationPreflightArtifacts(root);
     let current = inspectState(root);
     if (options.check) {
       if (current.state === STATES.INCONSISTENT) printStateGuidance(current);
@@ -240,10 +270,62 @@ async function main() {
       print({ ...current, next: 'ALREADY_INSTALLED', port });
       return 0;
     }
+    let admissionPlan = null;
+    let preflightStageReported = false;
+    if (!options.reset && options.selectedUi && current.state === STATES.PRISTINE) {
+      printStage('prepare', 'preflight');
+      preflightStageReported = true;
+      admissionPlan = await preflightInitialization(root, options.selectedUi);
+    } else {
+      const continuationUI = current.selectedUi ?? current.profile?.selectedUi;
+      const resumable = current.state === STATES.UI_PREPARED || (
+        current.state === STATES.INSTALLING
+        && [
+          STATE_REASONS.SOURCE_MOVE_TRANSACTION_PRESENT,
+          STATE_REASONS.DEPENDENCIES_PENDING,
+          STATE_REASONS.RESET_TRANSACTION_PRESENT,
+        ].includes(current.reason)
+      );
+      const resetContinuation = current.state === STATES.INSTALLING
+        && current.reason === STATE_REASONS.RESET_TRANSACTION_PRESENT;
+      // An ordinary init must preserve an interrupted reset and print the
+      // dedicated reset continuation command below. Only --reset may inspect
+      // and mutate that transaction through the reset-specific preflight.
+      if (continuationUI && resumable && (!resetContinuation || options.reset)) {
+        printStage(options.reset ? 'reset' : 'prepare', 'preflight');
+        preflightStageReported = true;
+        if (options.reset) await preflightReset(root);
+        else if (current.state === STATES.INSTALLING) await preflightInitializationResume(root);
+        else {
+          await preflightInitialization(root, continuationUI, {
+            allowPartialLayout: true,
+          });
+        }
+      }
+    }
+    if (current.reason === STATE_REASONS.LEGACY_PREPARED_MIGRATION_PENDING) {
+      if (!preflightStageReported) printStage(options.reset ? 'reset' : 'prepare', 'preflight');
+      preflightStageReported = true;
+      await preflightLegacyPreparedMigration(root, {
+        resetAfterMigration: options.reset,
+      });
+    }
+    if (
+      !options.reset
+      && current.state === STATES.INCONSISTENT
+      && [STATE_REASONS.RECEIPT_WITHOUT_PROFILE, STATE_REASONS.RUNTIME_WITHOUT_PROFILE].includes(current.reason)
+    ) {
+      if (!preflightStageReported) printStage('prepare', 'preflight');
+      preflightStageReported = true;
+      await preflightSafeLocalRecovery(root);
+      if (options.selectedUi && !admissionPlan) {
+        admissionPlan = await preflightInitialization(root, options.selectedUi);
+      }
+    }
     releaseAdminLease = await acquireAdminInitLease(root);
     ensureInstallerApplyIdle(root);
     if (options.reset) {
-      printStage('reset', 'preflight');
+      if (!preflightStageReported) printStage('reset', 'preflight');
       await confirm('Confirm reset: restore staged templates and remove the UI profile.', options.confirmReset);
       printStage('reset', 'workspace');
     }
@@ -261,6 +343,8 @@ async function main() {
     }
     if (options.reset) {
       if (current.state === STATES.INSTALLED) throw new Error('RESET_UNAVAILABLE_INSTALLED');
+      const resetUI = current.selectedUi ?? current.profile?.selectedUi;
+      if (resetUI) await preflightReset(root);
       const result = await reset(root);
       printStage('reset', 'complete');
       print({ ...result, next: 'RESET_COMPLETE', port });
@@ -290,6 +374,9 @@ async function main() {
     }
     if (current.state === STATES.UI_PREPARED) {
       await verifyOrdinaryAPI(port);
+      await preflightInitialization(root, current.profile.selectedUi, {
+        allowPartialLayout: true,
+      });
       printStage('prepare', 'dependencies');
       const prepared = await ensureDependenciesPrepared(current.profile);
       return openInstaller(prepared, options);
@@ -303,8 +390,11 @@ async function main() {
 
     await verifyOrdinaryAPI(port);
     const selectedUi = options.selectedUi;
-    printStage('prepare', 'preflight');
-    const plan = preflightInitialization(root, selectedUi);
+    if (!admissionPlan) {
+      if (!preflightStageReported) printStage('prepare', 'preflight');
+      admissionPlan = await preflightInitialization(root, selectedUi);
+    }
+    const plan = admissionPlan;
     stdout.write(`Selected: ${selectedUi}; retain: ${plan.retain}; stage: ${plan.stage.join(', ')}\n`);
     stdout.write(`INIT_PREFLIGHT=ok\nINIT_PLAN_RETAIN=${plan.retain}\nINIT_PLAN_STAGE=${plan.stage.join(',')}\nINIT_PLAN_BACKUP=${plan.backup}\n`);
     await confirm('Confirm cleanup:', options.confirmCleanup);
@@ -318,16 +408,32 @@ async function main() {
     const prepared = await ensureDependenciesPrepared(result.profile);
     return openInstaller(prepared, options);
   } catch (error) {
-    const code = error instanceof Error ? error.message : 'INIT_FAILED';
-    const current = code === 'INSTALL_STATE_DIR_INVALID'
-      ? { state: STATES.INCONSISTENT, profile: null, reason: STATE_REASONS.INSTALL_STATE_DIR_INVALID }
-      : inspectState(root);
+    const code = stableInitializationErrorCode(error);
+    let current = { state: STATES.INCONSISTENT, profile: null, reason: STATE_REASONS.INSTALL_STATE_DIR_INVALID };
+    if (code !== 'INSTALL_STATE_DIR_INVALID') {
+      try {
+        current = inspectState(root);
+      } catch {
+        // Keep the fixed, credential-free fallback when filesystem state can no
+        // longer be inspected after a TOCTOU race.
+      }
+    }
     if (code === 'PREFLIGHT_FAILED') stdout.write('INIT_PREFLIGHT=failed\n');
+    if (code === 'PREFLIGHT_FAILED' && error && typeof error === 'object') {
+      if (['admin_root', 'admin_apps', 'selected_ui', 'state_root', 'ui_backup'].includes(error.scope)) {
+        stdout.write(`INIT_FAILURE_SCOPE=${error.scope}\n`);
+      }
+      if (['read', 'create', 'write', 'sync', 'link', 'rename', 'delete', 'cross_directory_rename', 'execute', 'lock'].includes(error.operation)) {
+        stdout.write(`INIT_FAILURE_OPERATION=${error.operation}\n`);
+      }
+    }
     const argumentError = ['UI_INVALID', 'ARGUMENT_INVALID', 'PORT_INVALID', 'CLEANUP_CONFIRMATION_REQUIRED', 'RESET_CONFIRMATION_REQUIRED', 'INSTALL_STATE_DIR_INVALID'].includes(code);
     const stateError = code.startsWith('RESET_')
       || code === 'TEMPLATE_LAYOUT_INVALID'
       || code === 'PREFLIGHT_FAILED'
       || code === 'INITIALIZATION_RESUME_INVALID'
+      || code === 'INITIALIZATION_OPERATION_FAILED'
+      || code === 'RECOVERY_VALIDATION_FAILED'
       || code === 'LEGACY_MIGRATION_INVALID'
       || code === 'INIT_BUSY';
     const next = argumentError ? 'PROVIDE_INPUT' : code === 'INIT_BUSY' ? 'WAIT_FOR_INITIALIZATION' : 'RECOVER_INITIALIZATION';

@@ -605,6 +605,39 @@ func TestUIPreparationProgressAndResetUseDedicatedProvider(t *testing.T) {
 	}
 }
 
+func TestUIPreparationProgressReturnsSafeStructuredFailureDiagnostic(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	provider := &uiPreparationProviderStub{job: installer.UIPreparationJob{
+		ID: "ui-prepare-job-failed", Action: installer.UIPreparationActionPrepare,
+		State: installer.UIPreparationJobFailed, CurrentStep: "failed", Progress: 10,
+		ErrorKey: "ui_preflight_failed", FailureStep: "preflight",
+		FailureReason: "preflight_failed", FailureScope: "admin_apps",
+		FailureOperation: "cross_directory_rename",
+	}}
+	handler := NewHandler(statusProviderStub{})
+	handler.SetUIPreparationProvider(provider)
+	router := gin.New()
+	RegisterRoutes(router, handler)
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/system/install/v1/ui/progress/ui-prepare-job-failed", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("progress response = %d %s", response.Code, response.Body.String())
+	}
+	for _, expected := range []string{
+		`"errorKey":"ui_preflight_failed"`, `"failureStep":"preflight"`,
+		`"failureReason":"preflight_failed"`, `"failureScope":"admin_apps"`,
+		`"failureOperation":"cross_directory_rename"`,
+	} {
+		if !strings.Contains(response.Body.String(), expected) {
+			t.Fatalf("progress response missing %s: %s", expected, response.Body.String())
+		}
+	}
+	if strings.Contains(response.Body.String(), "dependency-install.log") {
+		t.Fatalf("preflight response exposed irrelevant dependency log: %s", response.Body.String())
+	}
+}
+
 type statusProviderStub struct {
 	status installer.Status
 	err    error

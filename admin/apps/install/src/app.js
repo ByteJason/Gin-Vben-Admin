@@ -11,7 +11,7 @@ const uiPrepareEndpoint = '/api/system/install/v1/ui/prepare';
 const uiProgressEndpoint = '/api/system/install/v1/ui/progress';
 const uiResetEndpoint = '/api/system/install/v1/ui/reset';
 const missingUIToolsMessage =
-  '准备管理界面需要本机可用的 Node.js 与 pnpm；安装后重新检查运行能力。';
+  '准备管理界面需要 Node.js ^22.18.0 或 ^24.12.0，以及 pnpm >=11.0.0；升级后重新检查运行能力。';
 const installationCompletedMessage =
   '安装已完成。请停止旧服务端，回到仓库根目录，并按下方两个终端命令分别重启服务端和启动管理端；管理端先运行 pnpm install，再运行 pnpm run dev。';
 
@@ -43,7 +43,19 @@ const uiPrepareProgressPanel = document.querySelector(
 );
 const uiPrepareProgress = document.querySelector('#ui-prepare-progress');
 const uiPrepareDiagnostics = document.querySelector('#ui-prepare-diagnostics');
+const uiPrepareJobId = document.querySelector('#ui-prepare-job-id');
+const uiPrepareFailureStep = document.querySelector('#ui-prepare-failure-step');
+const uiPrepareFailureReason = document.querySelector(
+  '#ui-prepare-failure-reason',
+);
+const uiPrepareFailureScope = document.querySelector(
+  '#ui-prepare-failure-scope',
+);
+const uiPrepareFailureOperation = document.querySelector(
+  '#ui-prepare-failure-operation',
+);
 const uiPrepareErrorKey = document.querySelector('#ui-prepare-error-key');
+const uiPrepareLogItem = document.querySelector('#ui-prepare-log-item');
 const uiPrepareLogPath = document.querySelector('#ui-prepare-log-path');
 const selectionPanel = document.querySelector('#selection-panel');
 const resetUIButton = document.querySelector('#reset-ui-button');
@@ -122,12 +134,52 @@ const stepLabels = {
 };
 const uiStepLabels = {
   queued: '等待准备界面',
+  request: '提交或读取任务状态',
+  launch: '启动本机准备命令',
   preflight: '检查模板与目录',
   workspace: '暂存模板并写入界面配置',
   dependencies: '安装所选界面依赖',
   reset: '恢复全部界面模板',
   complete: '界面准备完成',
   failed: '界面准备失败',
+};
+const uiFailureReasonLabels = {
+  api_unavailable: '本机服务端自检接口不可访问',
+  process_failed: '本机准备进程未正常启动或退出',
+  dependency_install_failed: '所选界面的依赖安装失败',
+  dependency_transaction_invalid: '依赖安装完成后的状态校验失败',
+  init_busy: '已有初始化或安装任务正在执行',
+  init_lease_failed: '初始化锁或心跳文件无法创建',
+  install_state_dir_invalid: '初始化状态目录无效或不可访问',
+  node_version_unsupported: 'Node.js 版本不满足项目要求',
+  pnpm_version_unsupported: 'pnpm 版本不满足项目要求（需要 11 或更高版本）',
+  preflight_failed: '目录或文件操作能力预检失败',
+  request_unavailable: '界面任务状态暂时不可读取',
+  reset_in_progress: '检测到未完成的管理界面重置任务',
+  state_inconsistent: '初始化状态不一致，需要先按提示恢复',
+  initialization_in_progress: '初始化事务仍在执行或等待恢复',
+  initialization_operation_failed:
+    '初始化文件操作失败，权限或文件占用可能在预检后发生了变化',
+  template_layout_invalid: '三套管理界面模板结构不完整',
+};
+const uiFailureScopeLabels = {
+  admin_apps: '管理界面模板父目录',
+  admin_root: '管理端根目录（admin）',
+  selected_ui: '所选管理界面目录',
+  state_root: '初始化状态目录（.runtime/install）',
+  ui_backup: '界面模板到备份目录的移动路径',
+};
+const uiFailureOperationLabels = {
+  create: '创建临时文件或目录',
+  cross_directory_rename: '跨目录重命名（需位于同一磁盘卷）',
+  delete: '删除临时文件或目录',
+  execute: '进入并编辑目录',
+  link: '创建原子发布所需的硬链接',
+  lock: '创建初始化锁',
+  read: '读取文件或目录',
+  rename: '重命名文件或目录',
+  sync: '同步文件或目录元数据',
+  write: '写入并同步文件',
 };
 
 let currentPlan = null;
@@ -368,15 +420,24 @@ function renderCapabilities(capabilities) {
   const items = Array.isArray(capabilities.tools) ? capabilities.tools : [];
   uiCapabilitiesLoaded = true;
   requiredUIToolsAvailable = ['node', 'pnpm'].every((id) =>
-    items.some((tool) => tool.id === id && tool.available),
+    items.some((tool) => tool.id === id && tool.available && tool.compatible),
   );
   const nodes = items.map((tool) => {
     const item = document.createElement('li');
     const name = document.createElement('strong');
     const state = document.createElement('span');
     name.textContent = String(tool.id || 'tool').toUpperCase();
-    state.textContent = tool.available ? tool.version || '可用' : '未检测到';
-    state.dataset.available = tool.available ? 'true' : 'false';
+    const unsupported =
+      tool.available &&
+      tool.compatible === false &&
+      tool.reason === 'version_unsupported';
+    state.textContent = !tool.available
+      ? '未检测到'
+      : unsupported
+        ? `${tool.version || '未知版本'}（需要 ${tool.requiredVersion || '受支持版本'}）`
+        : tool.version || '可用';
+    state.dataset.available =
+      tool.available && tool.compatible ? 'true' : 'false';
     item.append(name, state);
     return item;
   });
@@ -459,12 +520,9 @@ function setUIActionProgress(value, description) {
 function safeUIActionLogPath(value) {
   if (typeof value !== 'string' || value.length > 240) return '—';
   const normalized = value.replaceAll('\\', '/');
-  if (
-    !normalized.startsWith('.runtime/install/') ||
-    normalized.split('/').some((part) => part === '..' || part === '.')
-  )
-    return '—';
-  return normalized;
+  return normalized === '.runtime/install/dependency-install.log'
+    ? normalized
+    : '—';
 }
 
 function renderUIActionProgress(job) {
@@ -482,15 +540,46 @@ function renderUIActionProgress(job) {
     selectedUi.textContent = uiLabels[job.selectedUi] || job.selectedUi;
   }
   if (job?.state === 'failed') {
-    showUIActionMessage(`${action}失败，请按错误标识处理后重试。`, 'error');
+    const failedStep =
+      uiStepLabels[job.failureStep] || job.failureStep || '未识别阶段';
+    const failedReason =
+      uiFailureReasonLabels[job.failureReason] ||
+      job.failureReason ||
+      '未返回稳定失败原因';
+    const failureScope =
+      uiFailureScopeLabels[job.failureScope] || job.failureScope || '—';
+    const failureOperation =
+      uiFailureOperationLabels[job.failureOperation] ||
+      job.failureOperation ||
+      '—';
+    showUIActionMessage(
+      `${action}失败：${failedReason}。请修正后重试。`,
+      'error',
+    );
+    uiPrepareJobId.textContent = String(job.id || '—');
+    uiPrepareFailureStep.textContent = failedStep;
+    uiPrepareFailureReason.textContent = failedReason;
+    uiPrepareFailureScope.textContent = failureScope;
+    uiPrepareFailureOperation.textContent = failureOperation;
     uiPrepareErrorKey.textContent = String(job.errorKey || 'unknown');
-    uiPrepareLogPath.textContent = safeUIActionLogPath(job.logPath);
+    const logPath =
+      job.failureStep === 'dependencies'
+        ? safeUIActionLogPath(job.logPath)
+        : '—';
+    uiPrepareLogPath.textContent = logPath;
+    uiPrepareLogItem.hidden = logPath === '—';
     uiPrepareDiagnostics.hidden = false;
     return;
   }
   uiPrepareDiagnostics.hidden = true;
+  uiPrepareJobId.textContent = '—';
+  uiPrepareFailureStep.textContent = '—';
+  uiPrepareFailureReason.textContent = '—';
+  uiPrepareFailureScope.textContent = '—';
+  uiPrepareFailureOperation.textContent = '—';
   uiPrepareErrorKey.textContent = '—';
   uiPrepareLogPath.textContent = '—';
+  uiPrepareLogItem.hidden = true;
   if (job?.state === 'completed' || job?.state === 'succeeded') {
     setUIActionProgress(100, `${action}完成，100%`);
     showUIActionMessage(`${action}已完成。`, 'success');
@@ -499,6 +588,29 @@ function renderUIActionProgress(job) {
 
 function completedUIAction(job) {
   return job?.state === 'completed' || job?.state === 'succeeded';
+}
+
+function renderUIRequestUnavailable(action, selectedUiChoice = '') {
+  const label = action === 'reset' ? '重置管理界面' : '准备管理界面';
+  if (selectedUiChoice) {
+    selectUIChoice(selectedUiChoice);
+    selectedUi.textContent =
+      uiLabels[selectedUiChoice] || selectedUiChoice;
+  }
+  showUIActionMessage(
+    `${label}的任务状态暂时不可读取；任务可能仍在执行，请重新检查。`,
+    'error',
+  );
+  uiPrepareJobId.textContent = '—';
+  uiPrepareFailureStep.textContent = '任务请求或进度读取';
+  uiPrepareFailureReason.textContent =
+    uiFailureReasonLabels.request_unavailable;
+  uiPrepareFailureScope.textContent = '—';
+  uiPrepareFailureOperation.textContent = '—';
+  uiPrepareErrorKey.textContent = 'request_unavailable';
+  uiPrepareLogPath.textContent = '—';
+  uiPrepareLogItem.hidden = true;
+  uiPrepareDiagnostics.hidden = false;
 }
 
 async function postUIActionRequest(target, payload, fetcher = fetch) {
@@ -569,6 +681,8 @@ async function runUIAction(target, payload) {
       state: 'failed',
       selectedUi: payload.selectedUi,
       currentStep: 'request',
+      failureStep: 'request',
+      failureReason: 'request_unavailable',
       errorKey:
         accepted?.errorKey || envelope?.errorKey || 'request_unavailable',
       logPath: accepted?.logPath,
@@ -585,7 +699,7 @@ async function requestUIPreparation(event) {
   if (uiActionPending) return;
   const selectedUi = selectedUIChoice();
   if (!requiredUIToolsAvailable) {
-    showUIActionMessage('请先安装并启用 Node.js 与 pnpm。', 'error');
+    showUIActionMessage(missingUIToolsMessage, 'error');
     uiPrepareResult.focus();
     return;
   }
@@ -604,13 +718,7 @@ async function requestUIPreparation(event) {
       confirmCleanup: true,
     });
   } catch {
-    showUIActionMessage(
-      '界面准备进度暂不可用；当前选择已保留，请重新检查后继续。',
-      'error',
-    );
-    uiPrepareErrorKey.textContent = 'request_unavailable';
-    uiPrepareLogPath.textContent = '.runtime/install/dependency-install.log';
-    uiPrepareDiagnostics.hidden = false;
+    renderUIRequestUnavailable('prepare', selectedUi);
     retryButton.hidden = false;
     setUIActionPending(false);
     uiPrepareResult.focus();
@@ -620,7 +728,7 @@ async function requestUIPreparation(event) {
 async function requestUIReset(confirmFirst = true) {
   if (uiActionPending) return;
   if (!requiredUIToolsAvailable) {
-    showUIActionMessage('请先安装并启用 Node.js 与 pnpm。', 'error');
+    showUIActionMessage(missingUIToolsMessage, 'error');
     uiPrepareResult.focus();
     return;
   }
@@ -645,13 +753,7 @@ async function requestUIReset(confirmFirst = true) {
   try {
     await runUIAction(uiResetEndpoint, { confirmReset: true });
   } catch {
-    showUIActionMessage(
-      '界面重置进度暂不可用，请重新检查状态后继续。',
-      'error',
-    );
-    uiPrepareErrorKey.textContent = 'request_unavailable';
-    uiPrepareLogPath.textContent = '.runtime/install/dependency-install.log';
-    uiPrepareDiagnostics.hidden = false;
+    renderUIRequestUnavailable('reset');
     uiPrepareTitle.textContent = '继续恢复三套界面模板';
     uiPrepareHint.textContent = '恢复全部界面模板并清除当前选择';
     resumeUIResetButton.hidden = false;

@@ -57,6 +57,67 @@ func TestCapabilityProbeHonorsCanceledRequest(t *testing.T) {
 	}
 }
 
+func TestCapabilityProbeMarksUnsupportedRequiredToolVersions(t *testing.T) {
+	runner := commandRunnerStub{outputs: map[string]string{
+		"go": "go version go1.24.6 linux/amd64\n", "node": "v24.11.0\n",
+		"pnpm": "10.14.0\n", "docker": "Docker version 29.0.0, build fixture\n",
+	}}
+
+	got, err := NewCapabilityProbe(runner, "windows", "amd64").Probe(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := got.Tools[1]
+	pnpm := got.Tools[2]
+	if !node.Available || node.Compatible || node.RequiredVersion != "^22.18.0 || ^24.12.0" || node.Reason != "version_unsupported" {
+		t.Fatalf("Node capability = %#v", node)
+	}
+	if !pnpm.Available || pnpm.Compatible || pnpm.RequiredVersion != ">=11.0.0" || pnpm.Reason != "version_unsupported" {
+		t.Fatalf("pnpm capability = %#v", pnpm)
+	}
+}
+
+func TestCapabilityProbeRejectsUnboundedOrPathLikeVersionTokens(t *testing.T) {
+	runner := commandRunnerStub{outputs: map[string]string{
+		"go":     "go version go1.24.6/Users/example/private linux/amd64\n",
+		"node":   "v" + strings.Repeat("2", 80) + "\n",
+		"pnpm":   "11.16.0\\private\\wrapper\n",
+		"docker": "Docker version 29.0.0/var/private, build fixture\n",
+	}}
+
+	got, err := NewCapabilityProbe(runner, "linux", "amd64").Probe(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range got.Tools {
+		if tool.Available || tool.Version != "" || tool.Reason != "version_unreadable" {
+			t.Fatalf("capability %q = %#v, want bounded credential-free unreadable result", tool.ID, tool)
+		}
+	}
+}
+
+func TestCapabilityProbeRejectsNonVersionSingleTokens(t *testing.T) {
+	runner := commandRunnerStub{outputs: map[string]string{
+		"go":     "go version goPASSWORD linux/amd64\n",
+		"node":   "password\n",
+		"pnpm":   "token_secret\n",
+		"docker": "Docker version credential, build fixture\n",
+	}}
+
+	got, err := NewCapabilityProbe(runner, "linux", "amd64").Probe(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range got.Tools {
+		if tool.Available || tool.Version != "" || tool.Reason != "version_unreadable" {
+			t.Fatalf("capability %q = %#v, want a rejected non-version token", tool.ID, tool)
+		}
+	}
+	if strings.Contains(got.String(), "password") || strings.Contains(got.String(), "secret") || strings.Contains(got.String(), "credential") {
+		t.Fatalf("capabilities leaked non-version runner output: %s", got.String())
+	}
+}
+
 type commandRunnerStub struct {
 	outputs map[string]string
 	errors  map[string]error

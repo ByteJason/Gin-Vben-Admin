@@ -8,10 +8,12 @@ type PlatformCapability struct {
 }
 
 type ToolCapability struct {
-	ID        string `json:"id"`
-	Available bool   `json:"available"`
-	Version   string `json:"version,omitempty"`
-	Reason    string `json:"reason,omitempty"`
+	ID              string `json:"id"`
+	Available       bool   `json:"available"`
+	Compatible      bool   `json:"compatible"`
+	Version         string `json:"version,omitempty"`
+	RequiredVersion string `json:"requiredVersion,omitempty"`
+	Reason          string `json:"reason,omitempty"`
 }
 
 type Capabilities struct {

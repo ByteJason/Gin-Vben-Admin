@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -145,7 +146,8 @@ func (i *CommandUIInitializer) run(ctx context.Context, action installer.UIPrepa
 		return ctxErr
 	}
 	if err != nil {
-		return ErrUIInitializerCommandFailed
+		failure := uiInitializerFailure(action, stdout.diagnosticSnapshot())
+		return fmt.Errorf("%w: %w", ErrUIInitializerCommandFailed, failure)
 	}
 	return nil
 }
@@ -274,7 +276,9 @@ func allowedUIInitializerEnvironmentKey(key string) bool {
 	switch upper {
 	case "PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "TMP", "TEMP",
 		"SYSTEMROOT", "COMSPEC", "PATHEXT", "APPDATA", "LOCALAPPDATA",
-		"PNPM_HOME", "LANG", "XDG_CACHE_HOME", "NO_COLOR", "FORCE_COLOR":
+		"USERPROFILE", "HOMEDRIVE", "HOMEPATH", "PUBLIC", "PROGRAMDATA",
+		"PNPM_HOME", "COREPACK_HOME", "LANG", "XDG_CACHE_HOME", "XDG_CONFIG_HOME",
+		"XDG_DATA_HOME", "NO_COLOR", "FORCE_COLOR":
 		return true
 	default:
 		return false
@@ -291,6 +295,15 @@ type uiInitializerOutput struct {
 	report   func(installer.UIPreparationProgress)
 	line     []byte
 	overflow bool
+	details  uiInitializerDiagnostic
+}
+
+type uiInitializerDiagnostic struct {
+	lastStep      string
+	errorCode     string
+	scope         string
+	operation     string
+	dependencyLog bool
 }
 
 func newUIInitializerOutput(action installer.UIPreparationAction, report func(installer.UIPreparationProgress)) *uiInitializerOutput {
@@ -306,22 +319,20 @@ func (o *uiInitializerOutput) Write(value []byte) (int, error) {
 		}
 		_, _ = o.retained.Write(value[:remaining])
 	}
-	if o.report != nil {
-		for _, character := range value {
-			if character == '\n' {
-				o.emitLineLocked()
-				continue
-			}
-			if o.overflow {
-				continue
-			}
-			if len(o.line) == maxUIInitializerStageBytes {
-				o.line = o.line[:0]
-				o.overflow = true
-				continue
-			}
-			o.line = append(o.line, character)
+	for _, character := range value {
+		if character == '\n' {
+			o.emitLineLocked()
+			continue
 		}
+		if o.overflow {
+			continue
+		}
+		if len(o.line) == maxUIInitializerStageBytes {
+			o.line = o.line[:0]
+			o.overflow = true
+			continue
+		}
+		o.line = append(o.line, character)
 	}
 	return len(value), nil
 }
@@ -340,15 +351,133 @@ func (o *uiInitializerOutput) finish() {
 	}
 }
 
+func (o *uiInitializerOutput) diagnosticSnapshot() uiInitializerDiagnostic {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.details
+}
+
 func (o *uiInitializerOutput) emitLineLocked() {
 	if !o.overflow {
 		line := strings.TrimSuffix(string(o.line), "\r")
 		if progress, ok := parseUIInitializerStage(o.action, line); ok {
-			o.report(progress)
+			o.details.lastStep = progress.CurrentStep
+			if o.report != nil {
+				o.report(progress)
+			}
+		} else {
+			o.parseDiagnosticLineLocked(line)
 		}
 	}
 	o.line = o.line[:0]
 	o.overflow = false
+}
+
+func (o *uiInitializerOutput) parseDiagnosticLineLocked(line string) {
+	switch {
+	case strings.HasPrefix(line, "INIT_ERROR="):
+		if value := strings.TrimPrefix(line, "INIT_ERROR="); allowedUIInitializerErrorCode(value) {
+			o.details.errorCode = value
+		}
+	case strings.HasPrefix(line, "INIT_FAILURE_SCOPE="):
+		if value := strings.TrimPrefix(line, "INIT_FAILURE_SCOPE="); allowedUIInitializerScope(value) {
+			o.details.scope = value
+		}
+	case strings.HasPrefix(line, "INIT_FAILURE_OPERATION="):
+		if value := strings.TrimPrefix(line, "INIT_FAILURE_OPERATION="); allowedUIInitializerOperation(value) {
+			o.details.operation = value
+		}
+	case line == "INIT_DEPENDENCY_LOG="+uiInitializerLogPath:
+		o.details.dependencyLog = true
+	}
+}
+
+func allowedUIInitializerErrorCode(value string) bool {
+	switch value {
+	case "NONE", "PREFLIGHT_FAILED", "TEMPLATE_LAYOUT_INVALID", "API_UNAVAILABLE", "INIT_BUSY",
+		"INIT_LEASE_FAILED", "INSTALL_STATE_DIR_INVALID", "NODE_VERSION_UNSUPPORTED",
+		"PNPM_VERSION_UNSUPPORTED", "DEPENDENCY_INSTALL_FAILED", "DEPENDENCY_TRANSACTION_INVALID",
+		"DEPENDENCY_INSTALL_BUSY", "SOURCE_MOVE_STATE_INVALID", "INITIALIZATION_RESUME_INVALID",
+		"RESET_LAYOUT_INVALID", "RESET_RECEIPT_UNAVAILABLE", "RESET_TRANSACTION_INVALID",
+		"RESET_UNAVAILABLE", "RESET_UNAVAILABLE_INSTALLED", "LEGACY_MIGRATION_INVALID",
+		"RECOVERY_VALIDATION_FAILED", "RUNTIME_ENV_APP_INVALID", "RUNTIME_ENV_PROFILE_INVALID",
+		"RUNTIME_ENV_TARGET_INVALID", "RUNTIME_ENV_TEMPLATE_INVALID", "UI_INVALID",
+		"UI_PACKAGE_MISMATCH", "UI_PROFILE_INVALID", "UI_PROFILE_MISMATCH", "UI_PROFILE_REQUIRED",
+		"RESET_IN_PROGRESS", "STATE_INCONSISTENT", "INITIALIZATION_IN_PROGRESS", "INITIALIZATION_OPERATION_FAILED":
+		return true
+	default:
+		return false
+	}
+}
+
+func allowedUIInitializerScope(value string) bool {
+	switch value {
+	case "admin_root", "admin_apps", "selected_ui", "state_root", "ui_backup":
+		return true
+	default:
+		return false
+	}
+}
+
+func allowedUIInitializerOperation(value string) bool {
+	switch value {
+	case "read", "create", "write", "sync", "link", "rename", "delete", "cross_directory_rename", "execute", "lock":
+		return true
+	default:
+		return false
+	}
+}
+
+func uiInitializerFailure(action installer.UIPreparationAction, diagnostic uiInitializerDiagnostic) *installer.UIPreparationFailure {
+	failure := &installer.UIPreparationFailure{
+		ErrorKey:  "ui_prepare_failed",
+		Step:      "launch",
+		Reason:    "process_failed",
+		Scope:     diagnostic.scope,
+		Operation: diagnostic.operation,
+	}
+	if action == installer.UIPreparationActionReset {
+		failure.ErrorKey = "ui_reset_failed"
+	}
+	hasTrustedStep := diagnostic.lastStep != ""
+	if hasTrustedStep {
+		failure.Step = diagnostic.lastStep
+	}
+	if diagnostic.errorCode != "" && diagnostic.errorCode != "NONE" {
+		failure.Reason = strings.ToLower(diagnostic.errorCode)
+	}
+	if action == installer.UIPreparationActionPrepare {
+		setClassification := func(errorKey, defaultStep string) {
+			failure.ErrorKey = errorKey
+			if !hasTrustedStep {
+				failure.Step = defaultStep
+			}
+		}
+		switch diagnostic.errorCode {
+		case "PREFLIGHT_FAILED":
+			setClassification("ui_preflight_failed", "preflight")
+		case "TEMPLATE_LAYOUT_INVALID":
+			setClassification("ui_template_layout_invalid", "preflight")
+		case "API_UNAVAILABLE":
+			setClassification("ui_api_unavailable", "preflight")
+		case "INIT_BUSY":
+			setClassification("ui_initialization_busy", "preflight")
+		case "INIT_LEASE_FAILED":
+			setClassification("ui_initialization_lease_failed", "preflight")
+		case "INSTALL_STATE_DIR_INVALID":
+			setClassification("ui_state_directory_invalid", "preflight")
+		case "NODE_VERSION_UNSUPPORTED":
+			setClassification("ui_node_version_unsupported", "launch")
+		case "PNPM_VERSION_UNSUPPORTED":
+			setClassification("ui_pnpm_version_unsupported", "launch")
+		case "DEPENDENCY_INSTALL_FAILED", "DEPENDENCY_TRANSACTION_INVALID":
+			setClassification("ui_dependency_install_failed", "dependencies")
+		case "SOURCE_MOVE_STATE_INVALID", "INITIALIZATION_RESUME_INVALID":
+			setClassification("ui_workspace_prepare_failed", "workspace")
+		}
+	}
+	failure.DependencyLog = diagnostic.dependencyLog && failure.Step == "dependencies"
+	return failure
 }
 
 func parseUIInitializerStage(action installer.UIPreparationAction, line string) (installer.UIPreparationProgress, bool) {

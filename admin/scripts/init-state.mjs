@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
-import { link, open, rename, rm, rmdir } from 'node:fs/promises';
+import { link, mkdir, open, rename, rm, rmdir } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
@@ -9,6 +9,13 @@ import { processStartToken, validProcessStartToken } from './process-identity.mj
 
 const TRANSACTION_ID_PATTERN = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 const RECEIPT_TEMP_PATTERN = /^receipt\.json\.tmp-[1-9][0-9]*-[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+const PREFLIGHT_FILE_PATTERN = /^\.gin-vben-preflight-[1-9][0-9]*-[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}(?:\.(?:linked|renamed))?$/i;
+const PREFLIGHT_DIRECTORY_PATTERN = /^\.gin-vben-preflight-(?:transfer|target)-[1-9][0-9]*-[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+const PREFLIGHT_FILE_CONTENTS = 'gin-vben-admin-preflight\n';
+// A second init process may inspect a directory while the first process is
+// still using its reversible probe. Keep the active paths in-process and use
+// the PID embedded in the name to avoid deleting another process's probe.
+const ACTIVE_PREFLIGHT_ARTIFACTS = new Set();
 const ADMIN_INIT_LEASE_MAX_UNKNOWN_AGE_MS = 60_000;
 const ADMIN_INIT_HEARTBEAT_INTERVAL_MS = 5_000;
 const ADMIN_INIT_HEARTBEAT_STALE_MS = 60_000;
@@ -17,6 +24,45 @@ const ADMIN_INIT_IDENTITY_UNAVAILABLE_MAX_AGE_MS = 86_400_000;
 const DEPENDENCY_INSTALL_OWNER = 'admin-dependency-install';
 const DEPENDENCY_IDENTITY_UNAVAILABLE_MAX_AGE_MS = 86_400_000;
 const INSTALL_STATE_DIRECTORY_ENV = 'GIN_VBEN_INSTALL_STATE_DIR';
+const STABLE_INITIALIZATION_ERROR_CODES = new Set([
+  'API_UNAVAILABLE',
+  'ARGUMENT_INVALID',
+  'CLEANUP_CONFIRMATION_REQUIRED',
+  'DEPENDENCY_INSTALL_BUSY',
+  'DEPENDENCY_INSTALL_FAILED',
+  'DEPENDENCY_TRANSACTION_INVALID',
+  'INITIALIZATION_IN_PROGRESS',
+  'INITIALIZATION_OPERATION_FAILED',
+  'INITIALIZATION_RESUME_INVALID',
+  'INIT_BUSY',
+  'INIT_LEASE_FAILED',
+  'INSTALL_STATE_DIR_INVALID',
+  'LEGACY_MIGRATION_INVALID',
+  'NODE_VERSION_UNSUPPORTED',
+  'PNPM_VERSION_UNSUPPORTED',
+  'PORT_INVALID',
+  'PREFLIGHT_FAILED',
+  'RECOVERY_VALIDATION_FAILED',
+  'RESET_CONFIRMATION_REQUIRED',
+  'RESET_IN_PROGRESS',
+  'RESET_LAYOUT_INVALID',
+  'RESET_RECEIPT_UNAVAILABLE',
+  'RESET_TRANSACTION_INVALID',
+  'RESET_UNAVAILABLE',
+  'RESET_UNAVAILABLE_INSTALLED',
+  'RUNTIME_ENV_APP_INVALID',
+  'RUNTIME_ENV_PROFILE_INVALID',
+  'RUNTIME_ENV_TARGET_INVALID',
+  'RUNTIME_ENV_TEMPLATE_INVALID',
+  'SOURCE_MOVE_STATE_INVALID',
+  'STATE_INCONSISTENT',
+  'TEMPLATE_LAYOUT_INVALID',
+  'UI_INVALID',
+  'UI_PACKAGE_MISMATCH',
+  'UI_PROFILE_INVALID',
+  'UI_PROFILE_MISMATCH',
+  'UI_PROFILE_REQUIRED',
+]);
 
 export const UI_PROFILES = Object.freeze({
   antd: { packageName: '@vben/web-antd', appDirectory: 'apps/web-antd' },
@@ -56,6 +102,13 @@ export const STATE_REASONS = Object.freeze({
   MARKER_LOCK_PRESENT: 'MARKER_LOCK_PRESENT',
   INSTALL_STATE_DIR_INVALID: 'INSTALL_STATE_DIR_INVALID',
 });
+
+export function stableInitializationErrorCode(error) {
+  const candidate = error instanceof Error ? error.message : error?.message;
+  return STABLE_INITIALIZATION_ERROR_CODES.has(candidate)
+    ? candidate
+    : 'INITIALIZATION_OPERATION_FAILED';
+}
 
 export function installURL(port) {
   return `http://127.0.0.1:${port}/install`;
@@ -1915,47 +1968,645 @@ function assertBackupRootAvailable(backupRoot) {
   }
   if (state.kind !== 'present') throw new Error('PREFLIGHT_FAILED');
   assertWritableDirectory(existing);
+  return existing;
 }
 
-// preflightInitialization is intentionally read-only. It validates all fixed
-// source paths and the nearest existing backup parent before the user confirms
-// template movement, so a broken .runtime path cannot leave a transaction.
-export function preflightInitialization(root, selectedUi) {
-  const profile = profileFor(selectedUi);
-  if (!profile) throw new Error('UI_INVALID');
-  assertTemplateLayout(root);
-  const location = statePaths(root);
+class InitializationPreflightError extends Error {
+  constructor(scope, operation) {
+    super('PREFLIGHT_FAILED');
+    this.name = 'InitializationPreflightError';
+    this.scope = scope;
+    this.operation = operation;
+  }
+}
+
+function preflightCheck(scope, operation, check) {
   try {
-    assertWritableDirectory(root);
-    assertWritableDirectory(join(root, 'apps'));
-    for (const entry of Object.values(UI_PROFILES)) {
-      accessSync(join(root, entry.appDirectory), fsConstants.R_OK | fsConstants.X_OK);
+    return check();
+  } catch (error) {
+    if (error instanceof InitializationPreflightError) throw error;
+    throw new InitializationPreflightError(scope, operation);
+  }
+}
+
+async function probeDirectoryCapabilities(directory, scope, operations, options = {}) {
+  await recoverDirectoryPreflightArtifacts(directory, scope, operations);
+  const id = `${process.pid}-${randomUUID()}`;
+  const created = join(directory, `.gin-vben-preflight-${id}`);
+  const linked = `${created}.linked`;
+  const renamed = `${created}.renamed`;
+  const artifacts = [created, linked, renamed];
+  artifacts.forEach((artifact) => ACTIVE_PREFLIGHT_ARTIFACTS.add(artifact));
+  let handle;
+  let operation = 'create';
+  let failure;
+  try {
+    handle = await operations.open(created, 'wx', 0o600);
+    operation = 'write';
+    await handle.writeFile(PREFLIGHT_FILE_CONTENTS);
+    await handle.sync();
+    await handle.close();
+    handle = null;
+    if (options.requireLink !== false) {
+      operation = 'link';
+      await operations.link(created, linked);
+      operation = 'sync';
+      await operations.syncDirectory(directory);
+      operation = 'delete';
+      await operations.remove(linked);
     }
-    const selectedDirectory = join(root, profile.appDirectory);
-    assertWritableDirectory(selectedDirectory);
-    for (const mode of RUNTIME_ENV_MODES) {
-      const template = join(selectedDirectory, `.env.${mode}.example`);
-      if (!plainFile(template)) throw new Error('PREFLIGHT_FAILED');
-      accessSync(template, fsConstants.R_OK);
-      const target = join(selectedDirectory, `.env.${mode}`);
-      const targetState = strictPathState(target);
-      if (targetState.kind === 'error') throw new Error('PREFLIGHT_FAILED');
-      if (targetState.kind === 'present') {
-        if (!targetState.stat.isFile() || targetState.stat.isSymbolicLink()) throw new Error('PREFLIGHT_FAILED');
-        readFileSync(target);
+    operation = 'rename';
+    await operations.rename(created, renamed);
+    operation = 'sync';
+    await operations.syncDirectory(directory);
+    operation = 'delete';
+    await operations.remove(renamed);
+    operation = 'sync';
+    await operations.syncDirectory(directory);
+  } catch {
+    failure = new InitializationPreflightError(scope, operation);
+  } finally {
+    let cleanupFailed = false;
+    try {
+      await handle?.close();
+    } catch {
+      cleanupFailed = true;
+    }
+    for (const artifact of [created, linked, renamed]) {
+      try {
+        await operations.cleanup(artifact, { force: true });
+      } catch (error) {
+        if (error?.code !== 'ENOENT') cleanupFailed = true;
       }
     }
-    assertBackupRootAvailable(location.backupRoot);
-  } catch (error) {
-    if (error instanceof Error && error.message === 'TEMPLATE_LAYOUT_INVALID') throw error;
-    throw new Error('PREFLIGHT_FAILED');
+    artifacts.forEach((artifact) => ACTIVE_PREFLIGHT_ARTIFACTS.delete(artifact));
+    if (!failure && cleanupFailed) failure = new InitializationPreflightError(scope, 'delete');
   }
+  if (failure) throw failure;
+}
+
+async function probeUIBackupTransfer(appsRoot, backupParent, operations, options = {}) {
+  const sourceScope = options.sourceScope ?? 'admin_apps';
+  const targetScope = options.targetScope ?? 'ui_backup';
+  const failureScope = options.failureScope ?? 'ui_backup';
+  await recoverDirectoryPreflightArtifacts(appsRoot, sourceScope, operations);
+  if (backupParent !== appsRoot) {
+    await recoverDirectoryPreflightArtifacts(backupParent, targetScope, operations);
+  }
+  const id = `${process.pid}-${randomUUID()}`;
+  const source = join(appsRoot, `.gin-vben-preflight-transfer-${id}`);
+  const target = join(backupParent, `.gin-vben-preflight-target-${id}`);
+  const artifacts = [source, target];
+  artifacts.forEach((artifact) => ACTIVE_PREFLIGHT_ARTIFACTS.add(artifact));
+  let operation = 'create';
+  let failure;
+  try {
+    await operations.mkdir(source, { mode: 0o700 });
+    operation = 'cross_directory_rename';
+    await operations.rename(source, target);
+    await operations.rename(target, source);
+    operation = 'sync';
+    await operations.syncDirectory(appsRoot);
+    if (backupParent !== appsRoot) await operations.syncDirectory(backupParent);
+    operation = 'delete';
+    await operations.remove(source, { force: true, recursive: true });
+    operation = 'sync';
+    await operations.syncDirectory(appsRoot);
+    if (backupParent !== appsRoot) await operations.syncDirectory(backupParent);
+  } catch {
+    failure = new InitializationPreflightError(failureScope, operation);
+  } finally {
+    let cleanupFailed = false;
+    for (const artifact of [source, target]) {
+      try {
+        await operations.cleanup(artifact, { force: true, recursive: true });
+      } catch (error) {
+        if (error?.code !== 'ENOENT') cleanupFailed = true;
+      }
+    }
+    artifacts.forEach((artifact) => ACTIVE_PREFLIGHT_ARTIFACTS.delete(artifact));
+    if (!failure && cleanupFailed) failure = new InitializationPreflightError(failureScope, 'delete');
+  }
+  if (failure) throw failure;
+}
+
+function preflightArtifactOwnerPid(name) {
+  const match = String(name).match(/^\.gin-vben-preflight-(?:(?:transfer|target)-)?([1-9][0-9]*)-/i);
+  if (!match) return null;
+  const pid = Number(match[1]);
+  return Number.isSafeInteger(pid) && pid > 0 ? pid : null;
+}
+
+async function recoverDirectoryPreflightArtifacts(directory, scope, operations) {
+  const state = strictPathState(directory);
+  if (state.kind === 'missing') return;
+  if (state.kind === 'error') throw new InitializationPreflightError(scope, 'read');
+  if (!state.stat.isDirectory() || state.stat.isSymbolicLink()) return;
+  let entries;
+  try {
+    entries = readdirSync(directory, { withFileTypes: true });
+  } catch {
+    throw new InitializationPreflightError(scope, 'read');
+  }
+  let removed = false;
+  for (const entry of entries) {
+    const preflightFile = PREFLIGHT_FILE_PATTERN.test(entry.name);
+    const preflightDirectory = PREFLIGHT_DIRECTORY_PATTERN.test(entry.name);
+    if (!preflightFile && !preflightDirectory) continue;
+    const target = join(directory, entry.name);
+    const ownerPid = preflightArtifactOwnerPid(entry.name);
+    if (ACTIVE_PREFLIGHT_ARTIFACTS.has(target) || (ownerPid && ownerPid !== process.pid && processAlive(ownerPid))) continue;
+    let safe = false;
+    try {
+      const stat = lstatSync(target);
+      if (preflightFile && stat.isFile() && !stat.isSymbolicLink()) {
+        const contents = readFileSync(target, 'utf8');
+        // Only remove a probe when its complete sentinel is present. A
+        // prefix/empty match could otherwise delete a user-created file that
+        // merely happens to use the reserved-looking name after a crash.
+        safe = contents === PREFLIGHT_FILE_CONTENTS;
+      } else if (preflightDirectory && stat.isDirectory() && !stat.isSymbolicLink()) {
+        safe = readdirSync(target).length === 0;
+      }
+    } catch (error) {
+      if (error?.code === 'ENOENT') continue;
+      throw new InitializationPreflightError(scope, 'read');
+    }
+    if (!safe) throw new InitializationPreflightError(scope, 'read');
+    try {
+      await operations.cleanup(target, { force: false, recursive: preflightDirectory });
+      removed = true;
+    } catch {
+      throw new InitializationPreflightError(scope, 'delete');
+    }
+  }
+  if (removed) {
+    try {
+      await operations.syncDirectory(directory);
+    } catch {
+      throw new InitializationPreflightError(scope, 'sync');
+    }
+  }
+}
+
+async function recoverBackupPreflightArtifacts(root, operations) {
+  const backupRoot = statePaths(root).backupRoot;
+  const state = strictPathState(backupRoot);
+  if (state.kind === 'missing') return;
+  if (state.kind === 'error') throw new InitializationPreflightError('ui_backup', 'read');
+  if (!state.stat.isDirectory() || state.stat.isSymbolicLink()) return;
+  await recoverDirectoryPreflightArtifacts(backupRoot, 'ui_backup', operations);
+  let entries;
+  try {
+    entries = readdirSync(backupRoot, { withFileTypes: true });
+  } catch {
+    throw new InitializationPreflightError('ui_backup', 'read');
+  }
+  for (const entry of entries) {
+    if (!TRANSACTION_ID_PATTERN.test(entry.name) || !entry.isDirectory() || entry.isSymbolicLink()) continue;
+    const transactionDirectory = join(backupRoot, entry.name);
+    await recoverDirectoryPreflightArtifacts(transactionDirectory, 'ui_backup', operations);
+    const appsDirectory = join(transactionDirectory, 'apps');
+    const appsState = strictPathState(appsDirectory);
+    if (appsState.kind === 'error') throw new InitializationPreflightError('ui_backup', 'read');
+    if (appsState.kind === 'present' && appsState.stat.isDirectory() && !appsState.stat.isSymbolicLink()) {
+      await recoverDirectoryPreflightArtifacts(appsDirectory, 'ui_backup', operations);
+    }
+  }
+}
+
+async function recoverUUIDPreflightArtifacts(directory, scope, operations, includeApps = false) {
+  const state = strictPathState(directory);
+  if (state.kind === 'missing') return;
+  if (state.kind === 'error') throw new InitializationPreflightError(scope, 'read');
+  if (!state.stat.isDirectory() || state.stat.isSymbolicLink()) return;
+  await recoverDirectoryPreflightArtifacts(directory, scope, operations);
+  let entries;
+  try {
+    entries = readdirSync(directory, { withFileTypes: true });
+  } catch {
+    throw new InitializationPreflightError(scope, 'read');
+  }
+  for (const entry of entries) {
+    if (!TRANSACTION_ID_PATTERN.test(entry.name) || !entry.isDirectory() || entry.isSymbolicLink()) continue;
+    const child = join(directory, entry.name);
+    await recoverDirectoryPreflightArtifacts(child, scope, operations);
+    if (!includeApps) continue;
+    const apps = join(child, 'apps');
+    const appsState = strictPathState(apps);
+    if (appsState.kind === 'error') throw new InitializationPreflightError(scope, 'read');
+    if (appsState.kind === 'present' && appsState.stat.isDirectory() && !appsState.stat.isSymbolicLink()) {
+      await recoverDirectoryPreflightArtifacts(apps, scope, operations);
+    }
+  }
+}
+
+export async function recoverInitializationPreflightArtifacts(root, options = {}) {
+  const operations = initializationPreflightOperations(options);
+  const location = statePaths(root);
+  // Only strict transaction namespaces need eager cleanup before inspectState.
+  // Other directories recover their probes lazily when that operation is
+  // actually selected, so merely opening the installer stays side-effect free.
+  await recoverBackupPreflightArtifacts(root, operations);
+  await recoverUUIDPreflightArtifacts(location.legacyBackupRoot, 'ui_backup', operations, true);
+  await recoverUUIDPreflightArtifacts(location.legacyReceiptIsolationRoot, 'state_root', operations);
+}
+
+export async function preflightSafeLocalRecovery(root, options = {}) {
+  const operations = initializationPreflightOperations(options);
+  await recoverInitializationPreflightArtifacts(root, options);
+  const current = inspectState(root);
+  if (![STATE_REASONS.RECEIPT_WITHOUT_PROFILE, STATE_REASONS.RUNTIME_WITHOUT_PROFILE].includes(current.reason)) {
+    return { required: false };
+  }
+  const location = statePaths(root);
+  if (
+    existsSync(location.profile)
+    || existsSync(location.transaction)
+    || existsSync(location.marker)
+    || !pristineTemplateLayout(root)
+  ) throw new Error('RECOVERY_VALIDATION_FAILED');
+  const localState = [location.receipt, location.runtime].filter(pathPresent);
+  if (localState.length === 0 || localState.some((source) => !plainFile(source))) {
+    throw new Error('RECOVERY_VALIDATION_FAILED');
+  }
+  const recoveryParent = preflightCheck('state_root', 'create', () => assertBackupRootAvailable(location.recoveryRoot));
+  preflightCheck('admin_root', 'execute', () => assertWritableDirectory(root));
+  for (const source of localState) preflightExistingFile(source, 'admin_root', 'rename', operations);
+  await probeDirectoryCapabilities(root, 'admin_root', operations, { requireLink: false });
+  if (recoveryParent !== root) {
+    await probeDirectoryCapabilities(recoveryParent, 'state_root', operations, { requireLink: false });
+  }
+  await probeUIBackupTransfer(root, recoveryParent, operations, {
+    sourceScope: 'admin_root',
+    targetScope: 'state_root',
+    failureScope: 'state_root',
+  });
+  for (const source of localState) {
+    preflightCheck('state_root', 'cross_directory_rename', () => {
+      if (operations.deviceOf(source) !== operations.deviceOf(recoveryParent)) {
+        throw new Error('PREFLIGHT_FAILED');
+      }
+    });
+  }
+  return { required: true, reason: current.reason };
+}
+
+export async function preflightLegacyPreparedMigration(root, options = {}) {
+  const operations = initializationPreflightOperations(options);
+  await recoverInitializationPreflightArtifacts(root, options);
+  const location = statePaths(root);
+  const hasMigration = pathPresent(location.legacyMigration);
+  let migration = hasMigration ? parseLegacyMigration(location.legacyMigration) : null;
+  if (hasMigration && (!migration || !validLegacyMigrationCheckpoint(root, migration))) {
+    throw new Error('LEGACY_MIGRATION_INVALID');
+  }
+  if (!migration) {
+    const candidate = legacyPreparedCandidate(root);
+    if (!candidate) return { required: false };
+    migration = legacyMigrationFor(candidate.receipt);
+  }
+  const profile = parseProfile(location.profile);
+  if (!profile || profile.selectedUi !== migration.selectedUi) throw new Error('LEGACY_MIGRATION_INVALID');
+  const selectedDirectory = join(root, profile.appDirectory);
+  const resetAfterMigration = options.resetAfterMigration === true;
+  const stateParent = preflightCheck('state_root', 'create', () => assertBackupRootAvailable(location.stateRoot));
+  preflightCheck('admin_root', 'execute', () => assertWritableDirectory(root));
+  if (resetAfterMigration) {
+    // A legacy reset only reads the selected workspace while restoring the
+    // staged templates. It does not publish runtime env files or write into
+    // the selected app, so forward-only env templates and its hard-link
+    // capability must not block a valid reset.
+    preflightCheck('selected_ui', 'read', () => {
+      if (!plainDirectory(selectedDirectory)) throw new Error('PREFLIGHT_FAILED');
+      accessSync(selectedDirectory, fsConstants.R_OK | fsConstants.X_OK);
+    });
+  } else {
+    preflightCheck('selected_ui', 'execute', () => assertWritableDirectory(selectedDirectory));
+    preflightCheck('selected_ui', 'read', () => assertSelectedUIRuntimeInputs(root, profile));
+  }
+  preflightExistingFile(location.profile, 'admin_root', resetAfterMigration ? 'delete' : 'write', operations);
+  preflightExistingFile(location.transaction, 'state_root', resetAfterMigration ? 'delete' : 'write', operations);
+  await probeDirectoryCapabilities(root, 'admin_root', operations, { requireLink: false });
+  if (!resetAfterMigration) await probeDirectoryCapabilities(selectedDirectory, 'selected_ui', operations);
+  preflightExistingFile(location.legacyMigration, 'state_root', 'delete', operations);
+  await probeDirectoryCapabilities(stateParent, 'state_root', operations);
+
+  const oldBackup = join(location.legacyBackupRoot, migration.transactionId);
+  const newBackup = join(location.backupRoot, migration.transactionId);
+  const oldBackupPresent = pathPresent(oldBackup);
+  if (oldBackupPresent) {
+    const newBackupParent = preflightCheck('ui_backup', 'create', () => assertBackupRootAvailable(location.backupRoot));
+    preflightCheck('ui_backup', 'execute', () => assertWritableDirectory(location.legacyBackupRoot));
+    await probeDirectoryCapabilities(location.legacyBackupRoot, 'ui_backup', operations, { requireLink: false });
+    if (newBackupParent !== stateParent && newBackupParent !== location.legacyBackupRoot) {
+      await probeDirectoryCapabilities(newBackupParent, 'ui_backup', operations, { requireLink: false });
+    }
+    await probeUIBackupTransfer(location.legacyBackupRoot, newBackupParent, operations, {
+      sourceScope: 'ui_backup',
+      targetScope: 'ui_backup',
+    });
+    preflightCheck('ui_backup', 'cross_directory_rename', () => {
+      if (operations.deviceOf(oldBackup) !== operations.deviceOf(newBackupParent)) {
+        throw new Error('PREFLIGHT_FAILED');
+      }
+    });
+  } else if (!pathPresent(newBackup)) {
+    throw new Error('LEGACY_MIGRATION_INVALID');
+  }
+  const activeBackup = oldBackupPresent ? oldBackup : newBackup;
+  await probeDirectoryCapabilities(activeBackup, 'ui_backup', operations, { requireLink: false });
+  preflightExistingFile(join(activeBackup, 'receipt.json'), 'ui_backup', resetAfterMigration ? 'delete' : 'write', operations);
+
+  if (options.resetAfterMigration) {
+    const appsRoot = join(root, 'apps');
+    const backupApps = join(activeBackup, 'apps');
+    preflightCheck('admin_apps', 'execute', () => assertWritableDirectory(appsRoot));
+    await probeDirectoryCapabilities(appsRoot, 'admin_apps', operations, { requireLink: false });
+    await probeUIBackupTransfer(backupApps, appsRoot, operations, {
+      sourceScope: 'ui_backup',
+      targetScope: 'admin_apps',
+    });
+    for (const move of migration.moves) {
+      const source = join(activeBackup, move.backup);
+      preflightCheck('ui_backup', 'cross_directory_rename', () => {
+        if (operations.deviceOf(source) !== operations.deviceOf(appsRoot)) {
+          throw new Error('PREFLIGHT_FAILED');
+        }
+      });
+    }
+  }
+
+  if (pathPresent(location.receipt)) {
+    const isolationParent = preflightCheck('state_root', 'create', () => assertBackupRootAvailable(location.legacyReceiptIsolationRoot));
+    preflightExistingFile(location.receipt, 'admin_root', 'rename', operations);
+    if (isolationParent !== root && isolationParent !== stateParent) {
+      await probeDirectoryCapabilities(isolationParent, 'state_root', operations, { requireLink: false });
+    }
+    await probeUIBackupTransfer(root, isolationParent, operations, {
+      sourceScope: 'admin_root',
+      targetScope: 'state_root',
+      failureScope: 'state_root',
+    });
+    preflightCheck('state_root', 'cross_directory_rename', () => {
+      if (operations.deviceOf(location.receipt) !== operations.deviceOf(isolationParent)) {
+        throw new Error('PREFLIGHT_FAILED');
+      }
+    });
+  }
+  return { required: true, transactionId: migration.transactionId };
+}
+
+function initializationPreflightOperations(options = {}) {
+  return {
+    access: options.access ?? accessSync,
+    deviceOf: options.deviceOf ?? ((target) => lstatSync(target).dev),
+    link: options.link ?? link,
+    mkdir: options.mkdir ?? mkdir,
+    open: options.open ?? open,
+    remove: options.remove ?? rm,
+    rename: options.rename ?? rename,
+    syncDirectory: options.syncDirectory ?? syncDirectory,
+    cleanup: options.cleanup ?? rm,
+    platform: options.platform ?? process.platform,
+  };
+}
+
+function preflightExistingFile(target, scope, operation, operations) {
+  const state = strictPathState(target);
+  if (state.kind === 'missing') return false;
+  if (state.kind === 'error') throw new InitializationPreflightError(scope, 'read');
+  if (!state.stat.isFile() || state.stat.isSymbolicLink()) {
+    throw new InitializationPreflightError(scope, operation);
+  }
+  // On POSIX, replacing, deleting, or renaming a file is governed by the
+  // containing directory; a read-only file can still be edited atomically or
+  // removed when that directory is writable. Keep a read check for atomic
+  // writes because the state validator has to parse the existing record. On
+  // Windows the target's read-only attribute also blocks replacement,
+  // deletion, and rename, so add W_OK for those operations.
+  preflightCheck(scope, operation, () => {
+    operations.access(dirname(target), fsConstants.W_OK | fsConstants.X_OK);
+    let targetMode = operation === 'write' ? fsConstants.R_OK : 0;
+    if (operations.platform === 'win32' && operation !== 'read') targetMode |= fsConstants.W_OK;
+    if (targetMode !== 0) operations.access(target, targetMode);
+  });
+  return true;
+}
+
+function assertSelectedUIRuntimeInputs(root, profile) {
+  const selectedDirectory = join(root, profile.appDirectory);
+  for (const mode of RUNTIME_ENV_MODES) {
+    const template = join(selectedDirectory, `.env.${mode}.example`);
+    if (!plainFile(template)) throw new Error('PREFLIGHT_FAILED');
+    accessSync(template, fsConstants.R_OK);
+    const target = join(selectedDirectory, `.env.${mode}`);
+    const targetState = strictPathState(target);
+    if (targetState.kind === 'error') throw new Error('PREFLIGHT_FAILED');
+    if (targetState.kind === 'present') {
+      if (!targetState.stat.isFile() || targetState.stat.isSymbolicLink()) throw new Error('PREFLIGHT_FAILED');
+      readFileSync(target);
+    }
+  }
+}
+
+// preflightInitialization performs real, reversible capability probes before
+// any initialization lease, transaction, profile or UI source move is created.
+// Native Node filesystem calls keep the same behavior on macOS, Windows and
+// Linux and catch ACL, filesystem-feature and cross-volume failures that
+// access(2) alone cannot prove. Actual template moves remain journaled because
+// another process can still acquire a file lock after this reversible probe.
+export async function preflightInitialization(root, selectedUi, options = {}) {
+  const profile = profileFor(selectedUi);
+  if (!profile) throw new Error('UI_INVALID');
+  const allowPartialLayout = options.allowPartialLayout === true;
+  if (!allowPartialLayout) assertTemplateLayout(root);
+  const location = statePaths(root);
+  const appsRoot = join(root, 'apps');
+  const selectedDirectory = join(root, profile.appDirectory);
+  const operations = initializationPreflightOperations(options);
+
+  preflightCheck('admin_root', 'execute', () => assertWritableDirectory(root));
+  preflightCheck('admin_apps', 'execute', () => assertWritableDirectory(appsRoot));
+  for (const [ui, entry] of Object.entries(UI_PROFILES)) {
+    const directory = join(root, entry.appDirectory);
+    if (allowPartialLayout && ui !== selectedUi && !unselectedWorkspaceSurfacePresent(root, entry)) continue;
+    preflightCheck(ui === selectedUi ? 'selected_ui' : 'admin_apps', 'read', () => {
+      accessSync(directory, fsConstants.R_OK | fsConstants.X_OK);
+      accessSync(join(directory, 'package.json'), fsConstants.R_OK);
+    });
+  }
+  preflightCheck('selected_ui', 'execute', () => assertWritableDirectory(selectedDirectory));
+  preflightCheck('selected_ui', 'read', () => assertSelectedUIRuntimeInputs(root, profile));
+  const backupParent = preflightCheck('state_root', 'create', () => assertBackupRootAvailable(location.backupRoot));
+  for (const [ui, entry] of Object.entries(UI_PROFILES)) {
+    if (ui === selectedUi) continue;
+    const source = join(root, entry.appDirectory);
+    if (allowPartialLayout && !unselectedWorkspaceSurfacePresent(root, entry)) continue;
+    preflightCheck('ui_backup', 'cross_directory_rename', () => {
+      if (operations.deviceOf(source) !== operations.deviceOf(backupParent)) {
+        throw new Error('PREFLIGHT_FAILED');
+      }
+    });
+  }
+  await probeDirectoryCapabilities(root, 'admin_root', operations, { requireLink: false });
+  await probeDirectoryCapabilities(appsRoot, 'admin_apps', operations, { requireLink: false });
+  await probeDirectoryCapabilities(selectedDirectory, 'selected_ui', operations);
+  await probeDirectoryCapabilities(backupParent, 'state_root', operations);
+  await probeUIBackupTransfer(appsRoot, backupParent, operations);
+
   return {
     profile,
     retain: profile.appDirectory,
     stage: Object.entries(UI_PROFILES).filter(([ui]) => ui !== selectedUi).map(([, entry]) => entry.appDirectory),
     backup: '.runtime/install/ui-backup/<transaction>',
   };
+}
+
+export async function preflightInitializationResume(root, options = {}) {
+  const location = statePaths(root);
+  const transaction = validTransaction(location.transaction);
+  if (!transaction || transaction.owner !== 'admin-init') {
+    throw new Error('INITIALIZATION_RESUME_INVALID');
+  }
+  const operations = initializationPreflightOperations(options);
+  await recoverBackupPreflightArtifacts(root, operations);
+  assertInitializationResume(root, transaction);
+  const profile = profileFor(transaction.selectedUi);
+  if (!profile) throw new Error('INITIALIZATION_RESUME_INVALID');
+
+  const appsRoot = join(root, 'apps');
+  const selectedDirectory = join(root, profile.appDirectory);
+  const transactionDirectory = join(location.backupRoot, transaction.id);
+  const backupApps = join(location.backupRoot, transaction.id, 'apps');
+  const transactionParent = preflightCheck('ui_backup', 'create', () => assertBackupRootAvailable(transactionDirectory));
+  const pendingMoves = transaction.phase === 'moving_ui'
+    ? transaction.moves.filter((move) => existsSync(join(root, move.source)))
+    : [];
+  const backupParent = pendingMoves.length > 0
+    ? preflightCheck('ui_backup', 'create', () => assertBackupRootAvailable(backupApps))
+    : null;
+
+  preflightCheck('admin_root', 'execute', () => assertWritableDirectory(root));
+  if (pendingMoves.length > 0) {
+    preflightCheck('admin_apps', 'execute', () => assertWritableDirectory(appsRoot));
+  }
+  preflightCheck('selected_ui', 'execute', () => assertWritableDirectory(selectedDirectory));
+  preflightCheck('selected_ui', 'read', () => assertSelectedUIRuntimeInputs(root, profile));
+  preflightCheck('state_root', 'execute', () => assertWritableDirectory(location.stateRoot));
+  preflightExistingFile(location.profile, 'admin_root', 'write', operations);
+  preflightExistingFile(location.transaction, 'state_root', 'write', operations);
+  if (transaction.phase === 'dependencies_pending') {
+    preflightExistingFile(join(transactionDirectory, 'receipt.json'), 'ui_backup', 'write', operations);
+  }
+
+  await probeDirectoryCapabilities(root, 'admin_root', operations, { requireLink: false });
+  if (pendingMoves.length > 0) {
+    await probeDirectoryCapabilities(appsRoot, 'admin_apps', operations, { requireLink: false });
+  }
+  await probeDirectoryCapabilities(selectedDirectory, 'selected_ui', operations);
+  await probeDirectoryCapabilities(location.stateRoot, 'state_root', operations);
+  if (transactionParent !== location.stateRoot) {
+    await probeDirectoryCapabilities(transactionParent, 'ui_backup', operations, { requireLink: false });
+  }
+  if (backupParent && backupParent !== location.stateRoot && backupParent !== transactionParent) {
+    await probeDirectoryCapabilities(backupParent, 'ui_backup', operations, { requireLink: false });
+  }
+  if (backupParent) await probeUIBackupTransfer(appsRoot, backupParent, operations);
+
+  for (const move of pendingMoves) {
+    const source = join(root, move.source);
+    preflightCheck('ui_backup', 'cross_directory_rename', () => {
+      if (operations.deviceOf(source) !== operations.deviceOf(backupParent)) {
+        throw new Error('PREFLIGHT_FAILED');
+      }
+    });
+  }
+  return { profile, transactionId: transaction.id };
+}
+
+export async function preflightReset(root, options = {}) {
+  const location = statePaths(root);
+  const operations = initializationPreflightOperations(options);
+  await recoverBackupPreflightArtifacts(root, operations);
+  assertAppsRoot(root, 'RESET_LAYOUT_INVALID');
+  const transactionPresent = strictPathPresent(location.transaction, 'INIT_BUSY');
+  const pending = transactionPresent ? validTransaction(location.transaction) : null;
+  if (transactionPresent && !pending) throw new Error('INIT_BUSY');
+  if (pending?.owner === 'server-installer') throw new Error('INIT_BUSY');
+
+  let transaction = pending;
+  if (transaction?.owner === 'admin-init' && transaction.phase !== 'resetting_ui') {
+    assertInitializationResume(root, transaction);
+    transaction = { ...transaction, phase: 'resetting_ui' };
+  }
+  if (!transaction) {
+    const current = inspectState(root);
+    if (current.state !== STATES.UI_PREPARED || !current.profile) throw new Error('RESET_UNAVAILABLE');
+    const receipt = backupReceipt(root, current.profile);
+    if (!receipt) throw new Error('RESET_RECEIPT_UNAVAILABLE');
+    transaction = {
+      schema: 1,
+      owner: 'admin-init',
+      id: receipt.transactionId,
+      selectedUi: receipt.selectedUi,
+      phase: 'resetting_ui',
+      moves: receipt.moves,
+    };
+  }
+  const backup = resetBackupState(root, transaction);
+  if (!backup) throw new Error('RESET_LAYOUT_INVALID');
+
+  const appsRoot = join(root, 'apps');
+  const backupDirectoryPresent = plainDirectory(backup.directory);
+  preflightCheck('admin_root', 'execute', () => assertWritableDirectory(root));
+  preflightCheck('state_root', 'execute', () => assertWritableDirectory(location.stateRoot));
+  if (!backup.allRestored) {
+    preflightCheck('admin_apps', 'execute', () => assertWritableDirectory(appsRoot));
+  }
+  if (backupDirectoryPresent) {
+    preflightCheck('ui_backup', 'execute', () => assertWritableDirectory(location.backupRoot));
+    preflightCheck('ui_backup', 'execute', () => assertWritableDirectory(backup.directory));
+  }
+  preflightExistingFile(location.profile, 'admin_root', 'delete', operations);
+  preflightExistingFile(location.transaction, 'state_root', 'delete', operations);
+  if (backupDirectoryPresent) {
+    preflightExistingFile(backup.receiptFile, 'ui_backup', 'delete', operations);
+    let backupEntries;
+    try {
+      backupEntries = readdirSync(backup.directory, { withFileTypes: true });
+    } catch {
+      throw new InitializationPreflightError('ui_backup', 'read');
+    }
+    for (const entry of backupEntries) {
+      if (RECEIPT_TEMP_PATTERN.test(entry.name)) {
+        preflightExistingFile(join(backup.directory, entry.name), 'ui_backup', 'delete', operations);
+      }
+    }
+  }
+
+  await probeDirectoryCapabilities(root, 'admin_root', operations, { requireLink: false });
+  await probeDirectoryCapabilities(location.stateRoot, 'state_root', operations);
+  if (!backup.allRestored) {
+    await probeDirectoryCapabilities(appsRoot, 'admin_apps', operations, { requireLink: false });
+  }
+  if (backupDirectoryPresent) {
+    await probeDirectoryCapabilities(location.backupRoot, 'ui_backup', operations, { requireLink: false });
+    await probeDirectoryCapabilities(backup.directory, 'ui_backup', operations, { requireLink: false });
+  }
+  if (!backup.allRestored && plainDirectory(backup.appsDirectory)) {
+    await probeUIBackupTransfer(backup.appsDirectory, appsRoot, operations);
+    for (const move of transaction.moves) {
+      const source = join(backup.directory, move.backup);
+      if (!existsSync(source)) continue;
+      preflightCheck('ui_backup', 'cross_directory_rename', () => {
+        if (operations.deviceOf(source) !== operations.deviceOf(appsRoot)) {
+          throw new Error('PREFLIGHT_FAILED');
+        }
+      });
+    }
+  }
+  return { transactionId: transaction.id };
 }
 
 function assertInitializationResume(root, transaction) {
@@ -2034,8 +2685,12 @@ export async function initialize(root, selectedUi) {
   if (!profile) throw new Error('UI_INVALID');
   const current = inspectState(root);
   if (!pending && current.state !== STATES.PRISTINE) return { ...current, repeated: true };
-  if (pending) assertInitializationResume(root, pending);
-  else preflightInitialization(root, selectedUi);
+  if (pending) {
+    assertInitializationResume(root, pending);
+    await preflightInitializationResume(root);
+  } else {
+    await preflightInitialization(root, selectedUi);
+  }
   assertAppsRoot(root, pending ? 'INITIALIZATION_RESUME_INVALID' : 'SOURCE_MOVE_STATE_INVALID');
 
   let transaction = pending;

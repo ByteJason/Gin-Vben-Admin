@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { cpSync, existsSync, linkSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { accessSync, constants as fsConstants, cpSync, existsSync, linkSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, parse } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
+import { link as linkAsync, open as openAsync, rename as renameAsync, rm as rmAsync } from 'node:fs/promises';
 import test from 'node:test';
 
 import {
@@ -11,8 +12,14 @@ import {
   ensureSelectedUIRuntimeEnv,
   ensureInstallerApplyIdle,
   migrateLegacyPreparedState,
+  preflightInitialization,
+  preflightInitializationResume,
+  preflightLegacyPreparedMigration,
+  preflightReset,
+  preflightSafeLocalRecovery,
   recoverSafeLocalState,
   reset as resetInitialization,
+  stableInitializationErrorCode,
   syncDirectory,
 } from '../scripts/init-state.mjs';
 
@@ -342,6 +349,13 @@ test('init probes health, install status, and the install page on the ordinary A
   }
 });
 
+test('init error boundary normalizes post-preflight filesystem races without exposing paths', () => {
+  const raw = new Error("EACCES: permission denied, rename '/private/admin/.ui-profile.json.tmp-1' -> '/private/admin/.ui-profile.json'");
+  assert.equal(stableInitializationErrorCode(raw), 'INITIALIZATION_OPERATION_FAILED');
+  assert.equal(stableInitializationErrorCode(new Error('PREFLIGHT_FAILED')), 'PREFLIGHT_FAILED');
+  assert.equal(stableInitializationErrorCode({ message: '/private/TOKEN=secret' }), 'INITIALIZATION_OPERATION_FAILED');
+});
+
 test('init stages non-selected templates, writes the fixed profile schema, and is idempotent', () => {
   const root = fixture();
   try {
@@ -610,6 +624,92 @@ test('legacy migration and direct reset respect a live Go apply lease before any
         dispose(root);
       }
     });
+  }
+});
+
+test('legacy migration preflight proves the real backup transfer before publishing a lease or journal', async () => {
+  const fixtureState = legacyPreparedFixture({ selectedUi: 'ele' });
+  const { legacyBackup, root } = fixtureState;
+  try {
+    const repository = fixtureRepositories.get(root);
+    const before = filesystemSnapshot(repository);
+    await assert.rejects(
+      () => preflightLegacyPreparedMigration(root, {
+        deviceOf: (target) => statSync(target).dev + (target === legacyBackup ? 1 : 0),
+      }),
+      (error) => error?.message === 'PREFLIGHT_FAILED'
+        && error?.scope === 'ui_backup'
+        && error?.operation === 'cross_directory_rename',
+    );
+    assert.deepEqual(filesystemSnapshot(repository), before);
+    assert.equal(existsSync(adminLeasePath(root)), false);
+    assert.equal(existsSync(join(root, '..', '.runtime', 'install', 'legacy-prepared-migration.json')), false);
+  } finally {
+    dispose(root);
+  }
+});
+
+test('legacy migration preflights the selected UI continuation before moving legacy state', () => {
+  const fixtureState = legacyPreparedFixture({ selectedUi: 'ele' });
+  const { legacyBackup, receiptBytes, root } = fixtureState;
+  try {
+    rmSync(join(root, 'apps', 'web-ele', '.env.production.example'));
+    const result = run(root, 'init.mjs', ['--no-open']);
+
+    assert.equal(result.status, 3, output(result));
+    assert.match(output(result), /INIT_ERROR=PREFLIGHT_FAILED/);
+    assert.equal(readFileSync(join(root, '.ui-init-receipt.json'), 'utf8'), receiptBytes);
+    assert.equal(existsSync(legacyBackup), true);
+    assert.equal(existsSync(join(root, '..', '.runtime', 'install', 'legacy-prepared-migration.json')), false);
+    assert.equal(existsSync(adminLeasePath(root)), false);
+  } finally {
+    dispose(root);
+  }
+});
+
+test('orphan recovery preflight fails before moving local state or creating the admin lease', async () => {
+  const root = fixture();
+  try {
+    writeFileSync(join(root, '.ui-init-receipt.json'), '{"legacy":true}\n');
+    const repository = fixtureRepositories.get(root);
+    const before = filesystemSnapshot(repository);
+    await assert.rejects(
+      () => preflightSafeLocalRecovery(root, {
+        open: async (target, ...args) => {
+          if (parse(String(target)).dir === root && String(target).includes('.gin-vben-preflight-')) {
+            throw Object.assign(new Error('denied'), { code: 'EACCES' });
+          }
+          return openAsync(target, ...args);
+        },
+      }),
+      (error) => error?.message === 'PREFLIGHT_FAILED'
+        && error?.scope === 'admin_root'
+        && error?.operation === 'create',
+    );
+    assert.deepEqual(filesystemSnapshot(repository), before);
+    assert.equal(existsSync(adminLeasePath(root)), false);
+  } finally {
+    dispose(root);
+  }
+});
+
+test('orphan recovery with a UI choice preflights the later UI preparation before moving local state', () => {
+  const root = fixture();
+  try {
+    const receipt = join(root, '.ui-init-receipt.json');
+    const receiptBytes = '{"legacy":true}\n';
+    writeFileSync(receipt, receiptBytes);
+    rmSync(join(root, 'apps', 'web-antd', '.env.development.example'));
+
+    const result = run(root, 'init.mjs', ['--ui', 'antd', '--confirm-cleanup', '--no-open']);
+
+    assert.equal(result.status, 3, output(result));
+    assert.match(output(result), /INIT_ERROR=PREFLIGHT_FAILED/);
+    assert.equal(readFileSync(receipt, 'utf8'), receiptBytes);
+    assert.equal(existsSync(join(root, '..', '.runtime', 'install', 'recovery')), false);
+    assert.equal(existsSync(adminLeasePath(root)), false);
+  } finally {
+    dispose(root);
   }
 });
 
@@ -1139,6 +1239,28 @@ test('reset directly restores an exact legacy partial without installing depende
   }
 });
 
+test('legacy reset preflight does not require forward-only selected UI inputs', async () => {
+  const legacy = legacyPreparedFixture();
+  try {
+    const selectedDirectory = join(legacy.root, 'apps', 'web-ele');
+    rmSync(join(selectedDirectory, '.env.development.example'));
+    rmSync(join(selectedDirectory, '.env.production.example'));
+    const selectedProbePrefix = join(selectedDirectory, '.gin-vben-preflight-');
+    await assert.doesNotReject(() => preflightLegacyPreparedMigration(legacy.root, {
+      resetAfterMigration: true,
+      platform: 'linux',
+      link: async (source, target) => {
+        if (String(source).startsWith(selectedProbePrefix)) {
+          throw new Error('selected UI link should not be probed for reset');
+        }
+        return linkAsync(source, target);
+      },
+    }));
+  } finally {
+    dispose(legacy.root);
+  }
+});
+
 test('legacy partial reset requires confirmation before writing any migration state', () => {
   const legacy = legacyPreparedFixture();
   const { root } = legacy;
@@ -1478,7 +1600,7 @@ test('prepared reset rejects a symlinked admin apps parent without moving backup
     const result = run(root, 'init.mjs', ['--reset', '--confirm-reset', '--no-open']);
 
     assert.equal(result.status, 3, output(result));
-    assert.match(output(result), /INIT_ERROR=(?:INITIALIZATION_RESUME_INVALID|RESET_LAYOUT_INVALID)/);
+    assert.match(output(result), /INIT_ERROR=RESET_LAYOUT_INVALID/);
     assert.deepEqual(protectedPaths.map(filesystemSnapshot), before);
   } finally {
     rmSync(externalParent, { force: true, recursive: true });
@@ -1600,6 +1722,22 @@ test('init installs the reduced workspace with a frozen lockfile after UI select
     assert.equal(existsSync(join(root, 'apps', 'web-naive')), true);
     assert.equal(existsSync(join(root, 'apps', 'web-antd')), false);
     assert.equal(existsSync(join(root, 'apps', 'web-ele')), false);
+  } finally {
+    dispose(root);
+  }
+});
+
+test('dependency log is announced only after the log file opens successfully', () => {
+  const root = fixture();
+  try {
+    const logPath = join(root, '..', '.runtime', 'install', 'dependency-install.log');
+    mkdirSync(logPath, { recursive: true });
+    const result = run(root, 'init.mjs', ['--ui', 'antd', '--confirm-cleanup', '--no-open'], {
+      INIT_DEPENDENCY_INSTALL_TEST_MODE: '',
+    });
+    assert.equal(result.status, 1, output(result));
+    assert.match(output(result), /INIT_ERROR=DEPENDENCY_INSTALL_FAILED/);
+    assert.doesNotMatch(output(result), /INIT_DEPENDENCY_LOG=/);
   } finally {
     dispose(root);
   }
@@ -2957,7 +3095,7 @@ test('dependency lease inspection faults and invalid bytes are always fail-close
   }
 });
 
-test('init completes a read-only path preflight before confirmation or source moves', () => {
+test('init completes a reversible capability preflight before confirmation or source moves', () => {
   const root = fixture();
   try {
     writeFileSync(join(root, '..', '.runtime'), 'not-a-directory');
@@ -2988,6 +3126,443 @@ test('init rejects an invalid selected runtime env template before creating a tr
     assert.equal(existsSync(join(root, '..', '.runtime', 'install', 'transaction.json')), false);
     assert.equal(existsSync(join(root, '.ui-profile.json')), false);
     for (const ui of ['antd', 'ele', 'naive']) assert.equal(existsSync(join(root, 'apps', `web-${ui}`)), true);
+  } finally {
+    dispose(root);
+  }
+});
+
+test('UI permission preflight proves create capability and removes every probe before failing', async () => {
+  const root = fixture();
+  try {
+    const repository = fixtureRepositories.get(root);
+    const before = filesystemSnapshot(repository);
+    const denied = Object.assign(new Error('private path detail'), { code: 'EACCES' });
+
+    await assert.rejects(
+      () => preflightInitialization(root, 'ele', {
+        open: async (target, ...args) => {
+          if (String(target).includes('.gin-vben-preflight-')) throw denied;
+          return openAsync(target, ...args);
+        },
+      }),
+      (error) => error?.message === 'PREFLIGHT_FAILED'
+        && error?.scope === 'admin_root'
+        && error?.operation === 'create',
+    );
+
+    assert.deepEqual(filesystemSnapshot(repository), before);
+    assert.equal(existsSync(join(repository, '.runtime', 'install')), false);
+  } finally {
+    dispose(root);
+  }
+});
+
+test('UI permission preflight detects cross-volume template moves before creating initialization state', async () => {
+  const root = fixture();
+  try {
+    const repository = fixtureRepositories.get(root);
+    const before = filesystemSnapshot(repository);
+    const crossDevice = Object.assign(new Error('/private/source -> /private/target'), { code: 'EXDEV' });
+
+    await assert.rejects(
+      () => preflightInitialization(root, 'antd', {
+        rename: async (source, target) => {
+          if (String(source).includes('.gin-vben-preflight-transfer-')) throw crossDevice;
+          return renameAsync(source, target);
+        },
+      }),
+      (error) => error?.message === 'PREFLIGHT_FAILED'
+        && error?.scope === 'ui_backup'
+        && error?.operation === 'cross_directory_rename',
+    );
+
+    assert.deepEqual(filesystemSnapshot(repository), before);
+    assert.equal(existsSync(join(repository, '.runtime', 'install')), false);
+  } finally {
+    dispose(root);
+  }
+});
+
+test('UI permission preflight verifies hard-link and directory-sync capabilities', async () => {
+  for (const [operation, scope, override] of [
+    ['link', 'selected_ui', { link: async () => { throw Object.assign(new Error('unsupported'), { code: 'EOPNOTSUPP' }); } }],
+    ['sync', 'admin_root', { syncDirectory: async () => { throw Object.assign(new Error('denied'), { code: 'EACCES' }); } }],
+  ]) {
+    const root = fixture();
+    try {
+      const repository = fixtureRepositories.get(root);
+      const before = filesystemSnapshot(repository);
+      await assert.rejects(
+        () => preflightInitialization(root, 'ele', override),
+        (error) => error?.message === 'PREFLIGHT_FAILED'
+          && error?.scope === scope
+          && error?.operation === operation,
+      );
+      assert.deepEqual(filesystemSnapshot(repository), before);
+      assert.equal(existsSync(join(repository, '.runtime', 'install')), false);
+    } finally {
+      dispose(root);
+    }
+  }
+});
+
+test('UI permission preflight treats transfer cleanup as a required capability', async () => {
+  const root = fixture();
+  try {
+    const repository = fixtureRepositories.get(root);
+    const before = filesystemSnapshot(repository);
+    await assert.rejects(
+      () => preflightInitialization(root, 'naive', {
+        remove: async (target, options) => {
+          if (String(target).includes('.gin-vben-preflight-transfer-')) {
+            throw Object.assign(new Error('locked'), { code: 'EPERM' });
+          }
+          return rmAsync(target, options);
+        },
+      }),
+      (error) => error?.message === 'PREFLIGHT_FAILED'
+        && error?.scope === 'ui_backup'
+        && error?.operation === 'delete',
+    );
+    assert.deepEqual(filesystemSnapshot(repository), before);
+  } finally {
+    dispose(root);
+  }
+});
+
+test('UI permission preflight treats probe cleanup failures as a required capability', async () => {
+  const root = fixture();
+  try {
+    let reportedFailure = false;
+    await assert.rejects(
+      () => preflightInitialization(root, 'antd', {
+        cleanup: async (target, options) => {
+          if (!reportedFailure && String(target).includes('.gin-vben-preflight-')) {
+            reportedFailure = true;
+            await rmAsync(target, options);
+            throw Object.assign(new Error('cleanup acknowledgement failed'), { code: 'EIO' });
+          }
+          return rmAsync(target, options);
+        },
+      }),
+      (error) => error?.message === 'PREFLIGHT_FAILED'
+        && error?.scope === 'admin_root'
+        && error?.operation === 'delete',
+    );
+    assert.equal(reportedFailure, true);
+    assert.deepEqual(
+      readdirSync(root).filter((name) => name.startsWith('.gin-vben-preflight-')),
+      [],
+    );
+  } finally {
+    dispose(root);
+  }
+});
+
+test('preflight never removes a matching-name file with an incomplete sentinel', async () => {
+  const root = fixture();
+  try {
+    const probe = join(
+      root,
+      `.gin-vben-preflight-${process.pid}-12345678-1234-1234-1234-123456789abc`,
+    );
+    writeFileSync(probe, 'gin-vben-admin-preflight');
+    await assert.rejects(
+      () => preflightInitialization(root, 'antd'),
+      (error) => error?.message === 'PREFLIGHT_FAILED'
+        && error?.scope === 'admin_root'
+        && error?.operation === 'read',
+    );
+    assert.equal(readFileSync(probe, 'utf8'), 'gin-vben-admin-preflight');
+  } finally {
+    dispose(root);
+  }
+});
+
+test('resume preflight probes the actual transaction backup directory', async () => {
+  const root = fixture();
+  try {
+    const transaction = {
+      schema: 1,
+      owner: 'admin-init',
+      id: '12345678-1234-1234-1234-123456789abc',
+      selectedUi: 'antd',
+      phase: 'moving_ui',
+      moves: [
+        { source: 'apps/web-ele', backup: 'apps/web-ele' },
+        { source: 'apps/web-naive', backup: 'apps/web-naive' },
+      ],
+    };
+    const stateRoot = join(root, '..', '.runtime', 'install');
+    const backupApps = join(stateRoot, 'ui-backup', transaction.id, 'apps');
+    mkdirSync(backupApps, { recursive: true });
+    renameSync(join(root, 'apps', 'web-ele'), join(backupApps, 'web-ele'));
+    writeFileSync(join(stateRoot, 'transaction.json'), `${JSON.stringify(transaction, null, 2)}\n`);
+    const repository = fixtureRepositories.get(root);
+    const before = filesystemSnapshot(repository);
+
+    await assert.rejects(
+      () => preflightInitializationResume(root, {
+        open: async (target, ...args) => {
+          if (String(target).startsWith(backupApps) && String(target).includes('.gin-vben-preflight-')) {
+            throw Object.assign(new Error('denied'), { code: 'EACCES' });
+          }
+          return openAsync(target, ...args);
+        },
+      }),
+      (error) => error?.message === 'PREFLIGHT_FAILED'
+        && error?.scope === 'ui_backup'
+        && error?.operation === 'create',
+    );
+    assert.deepEqual(filesystemSnapshot(repository), before);
+  } finally {
+    dispose(root);
+  }
+});
+
+test('dependency resume preflight probes the transaction receipt parent', async () => {
+  const root = fixture();
+  try {
+    const transaction = {
+      schema: 1,
+      owner: 'admin-init',
+      id: '12345678-1234-1234-1234-123456789abc',
+      selectedUi: 'antd',
+      phase: 'dependencies_pending',
+      moves: [
+        { source: 'apps/web-ele', backup: 'apps/web-ele' },
+        { source: 'apps/web-naive', backup: 'apps/web-naive' },
+      ],
+    };
+    const stateRoot = join(root, '..', '.runtime', 'install');
+    const transactionDirectory = join(stateRoot, 'ui-backup', transaction.id);
+    const backupApps = join(transactionDirectory, 'apps');
+    mkdirSync(backupApps, { recursive: true });
+    renameSync(join(root, 'apps', 'web-ele'), join(backupApps, 'web-ele'));
+    renameSync(join(root, 'apps', 'web-naive'), join(backupApps, 'web-naive'));
+    writeFileSync(join(stateRoot, 'transaction.json'), `${JSON.stringify(transaction, null, 2)}\n`);
+    const repository = fixtureRepositories.get(root);
+    const before = filesystemSnapshot(repository);
+
+    await assert.rejects(
+      () => preflightInitializationResume(root, {
+        open: async (target, ...args) => {
+          if (
+            String(target).includes('.gin-vben-preflight-')
+            && parse(String(target)).dir === transactionDirectory
+          ) {
+            throw Object.assign(new Error('denied'), { code: 'EACCES' });
+          }
+          return openAsync(target, ...args);
+        },
+      }),
+      (error) => error?.message === 'PREFLIGHT_FAILED'
+        && error?.scope === 'ui_backup'
+        && error?.operation === 'create',
+    );
+    assert.deepEqual(filesystemSnapshot(repository), before);
+  } finally {
+    dispose(root);
+  }
+});
+
+test('dependency resume preflight checks the existing transaction file before replacement or deletion', async () => {
+  const root = fixture();
+  try {
+    const transaction = {
+      schema: 1,
+      owner: 'admin-init',
+      id: '12345678-1234-1234-1234-123456789abc',
+      selectedUi: 'antd',
+      phase: 'dependencies_pending',
+      moves: [
+        { source: 'apps/web-ele', backup: 'apps/web-ele' },
+        { source: 'apps/web-naive', backup: 'apps/web-naive' },
+      ],
+    };
+    const stateRoot = join(root, '..', '.runtime', 'install');
+    const transactionDirectory = join(stateRoot, 'ui-backup', transaction.id);
+    const backupApps = join(transactionDirectory, 'apps');
+    mkdirSync(backupApps, { recursive: true });
+    renameSync(join(root, 'apps', 'web-ele'), join(backupApps, 'web-ele'));
+    renameSync(join(root, 'apps', 'web-naive'), join(backupApps, 'web-naive'));
+    const transactionFile = join(stateRoot, 'transaction.json');
+    writeFileSync(transactionFile, `${JSON.stringify(transaction, null, 2)}\n`);
+
+    await assert.rejects(
+      () => preflightInitializationResume(root, {
+        access: (target, mode) => {
+          if (target === transactionFile) throw Object.assign(new Error('denied'), { code: 'EACCES' });
+          return accessSync(target, mode);
+        },
+      }),
+      (error) => error?.message === 'PREFLIGHT_FAILED'
+        && error?.scope === 'state_root'
+        && error?.operation === 'write',
+    );
+  } finally {
+    dispose(root);
+  }
+});
+
+test('resume preflight removes its own stale probes after delete permission is restored', async () => {
+  const root = fixture();
+  try {
+    const transaction = {
+      schema: 1,
+      owner: 'admin-init',
+      id: '12345678-1234-1234-1234-123456789abc',
+      selectedUi: 'antd',
+      phase: 'moving_ui',
+      moves: [
+        { source: 'apps/web-ele', backup: 'apps/web-ele' },
+        { source: 'apps/web-naive', backup: 'apps/web-naive' },
+      ],
+    };
+    const stateRoot = join(root, '..', '.runtime', 'install');
+    const backupApps = join(stateRoot, 'ui-backup', transaction.id, 'apps');
+    mkdirSync(backupApps, { recursive: true });
+    renameSync(join(root, 'apps', 'web-ele'), join(backupApps, 'web-ele'));
+    writeFileSync(join(stateRoot, 'transaction.json'), `${JSON.stringify(transaction, null, 2)}\n`);
+    const denyProbeDelete = async (target, ...args) => {
+      if (parse(String(target)).dir === backupApps && String(target).includes('.gin-vben-preflight-')) {
+        throw Object.assign(new Error('denied'), { code: 'EACCES' });
+      }
+      return rmAsync(target, ...args);
+    };
+
+    await assert.rejects(
+      () => preflightInitializationResume(root, {
+        cleanup: denyProbeDelete,
+        remove: denyProbeDelete,
+      }),
+      (error) => error?.message === 'PREFLIGHT_FAILED'
+        && error?.scope === 'ui_backup'
+        && error?.operation === 'delete',
+    );
+    assert.ok(readdirSync(backupApps).some((name) => name.startsWith('.gin-vben-preflight-')));
+
+    await preflightInitializationResume(root);
+
+    assert.equal(readdirSync(backupApps).some((name) => name.startsWith('.gin-vben-preflight-')), false);
+  } finally {
+    dispose(root);
+  }
+});
+
+test('reset preflight ignores forward-only runtime env templates', async () => {
+  const root = fixture();
+  try {
+    const prepared = run(root, 'init.mjs', ['--ui', 'antd', '--confirm-cleanup', '--no-open']);
+    assert.equal(prepared.status, 0, output(prepared));
+    rmSync(join(root, 'apps', 'web-antd', '.env.development.example'));
+    await preflightReset(root);
+
+    const resetResult = run(root, 'init.mjs', ['--reset', '--confirm-reset', '--no-open']);
+    assert.equal(resetResult.status, 0, output(resetResult));
+    assert.match(output(resetResult), /INIT_NEXT=RESET_COMPLETE/);
+  } finally {
+    dispose(root);
+  }
+});
+
+test('POSIX reset preflight checks the parent for deletion instead of requiring target write bits', async () => {
+  const root = fixture();
+  try {
+    const prepared = run(root, 'init.mjs', ['--ui', 'antd', '--confirm-cleanup', '--no-open']);
+    assert.equal(prepared.status, 0, output(prepared));
+    const profile = join(root, '.ui-profile.json');
+    const targetCalls = [];
+    const parentCalls = [];
+    await assert.doesNotReject(() => preflightReset(root, {
+      platform: 'linux',
+      access: (target, mode) => {
+        if (target === profile) {
+          targetCalls.push(mode);
+        }
+        if (target === root) {
+          parentCalls.push(mode);
+        }
+        return accessSync(target, mode);
+      },
+    }));
+    assert.equal(targetCalls.length, 0);
+    assert.ok(parentCalls.length > 0);
+    assert.ok(parentCalls.every((mode) => (mode & fsConstants.W_OK) !== 0));
+  } finally {
+    dispose(root);
+  }
+});
+
+test('Windows reset preflight checks a read-only target before deletion', async () => {
+  const root = fixture();
+  try {
+    const prepared = run(root, 'init.mjs', ['--ui', 'antd', '--confirm-cleanup', '--no-open']);
+    assert.equal(prepared.status, 0, output(prepared));
+    const profile = join(root, '.ui-profile.json');
+    await assert.rejects(
+      () => preflightReset(root, {
+        platform: 'win32',
+        access: (target, mode) => {
+          if (target === profile && (mode & fsConstants.W_OK)) throw new Error('read-only target');
+          return accessSync(target, mode);
+        },
+      }),
+      (error) => error?.message === 'PREFLIGHT_FAILED'
+        && error?.scope === 'admin_root'
+        && error?.operation === 'delete',
+    );
+  } finally {
+    dispose(root);
+  }
+});
+
+test('reset preflight removes its own stale transaction probes after permission is restored', async () => {
+  const root = fixture();
+  try {
+    const prepared = run(root, 'init.mjs', ['--ui', 'antd', '--confirm-cleanup', '--no-open']);
+    assert.equal(prepared.status, 0, output(prepared));
+    const backupRoot = join(root, '..', '.runtime', 'install', 'ui-backup');
+    const [transactionId] = readdirSync(backupRoot);
+    const transactionDirectory = join(backupRoot, transactionId);
+    const denyProbeDelete = async (target, ...args) => {
+      if (parse(String(target)).dir === transactionDirectory && String(target).includes('.gin-vben-preflight-')) {
+        throw Object.assign(new Error('denied'), { code: 'EACCES' });
+      }
+      return rmAsync(target, ...args);
+    };
+
+    await assert.rejects(
+      () => preflightReset(root, {
+        cleanup: denyProbeDelete,
+        remove: denyProbeDelete,
+      }),
+      (error) => error?.message === 'PREFLIGHT_FAILED'
+        && error?.scope === 'ui_backup'
+        && error?.operation === 'delete',
+    );
+    assert.ok(readdirSync(transactionDirectory).some((name) => name.startsWith('.gin-vben-preflight-')));
+
+    await preflightReset(root);
+
+    assert.equal(readdirSync(transactionDirectory).some((name) => name.startsWith('.gin-vben-preflight-')), false);
+  } finally {
+    dispose(root);
+  }
+});
+
+test('init rejects an unsupported pnpm major before creating local state', () => {
+  const root = fixture();
+  try {
+    const repository = fixtureRepositories.get(root);
+    const before = filesystemSnapshot(repository);
+    const result = run(root, 'init.mjs', ['--ui', 'antd', '--confirm-cleanup', '--no-open'], {
+      npm_config_user_agent: 'pnpm/10.14.0 npm/? node/v24.19.0 win32 x64',
+    });
+
+    assert.equal(result.status, 1, output(result));
+    assert.match(output(result), /INIT_ERROR=PNPM_VERSION_UNSUPPORTED/);
+    assert.deepEqual(filesystemSnapshot(repository), before);
   } finally {
     dispose(root);
   }
@@ -3738,6 +4313,26 @@ test('an installed selected UI remains runnable when git pull restores partial u
   }
 });
 
+test('a prepared selected UI remains resumable when git pull restores only partial unselected paths', () => {
+  const root = fixture();
+  try {
+    const prepared = run(root, 'init.mjs', ['--ui', 'antd', '--confirm-cleanup', '--no-open']);
+    assert.equal(prepared.status, 0, output(prepared));
+    const pulledDirectory = join(root, 'apps', 'web-ele', 'src');
+    mkdirSync(pulledDirectory, { recursive: true });
+    writeFileSync(join(pulledDirectory, 'pulled.ts'), 'export const pulled = true;\n');
+
+    const resumed = run(root, 'init.mjs', ['--no-open']);
+
+    assert.equal(resumed.status, 0, output(resumed));
+    assert.match(output(resumed), /INIT_STATE=ui_prepared/);
+    assert.match(output(resumed), /INIT_SELECTED_UI=antd/);
+    assert.equal(existsSync(join(root, 'apps', 'web-ele', 'package.json')), false);
+  } finally {
+    dispose(root);
+  }
+});
+
 test('a fresh clone with a tracked single-UI profile still installs local dependencies', () => {
   const root = fixture();
   try {
@@ -3761,7 +4356,7 @@ test('a fresh clone with a tracked single-UI profile still installs local depend
     assert.equal(result.status, 0, output(result));
     assert.deepEqual(
       [...output(result).matchAll(/^INIT_STAGE=(.+)$/gm)].map((match) => match[1]),
-      ['prepare:dependencies', 'prepare:complete'],
+      ['prepare:preflight', 'prepare:dependencies', 'prepare:complete'],
     );
     assert.equal(readFileSync(log, 'utf8'), 'install --frozen-lockfile');
     assert.match(output(result), /INIT_NEXT=OPEN_INSTALLER/);
@@ -3977,7 +4572,7 @@ test('rerun completes a UI move transaction interrupted between templates', () =
     assert.equal(resumed.status, 0, output(resumed));
     assert.deepEqual(
       [...output(resumed).matchAll(/^INIT_STAGE=(.+)$/gm)].map((match) => match[1]),
-      ['prepare:workspace', 'prepare:dependencies', 'prepare:complete'],
+      ['prepare:preflight', 'prepare:workspace', 'prepare:dependencies', 'prepare:complete'],
     );
     assert.match(output(resumed), /INIT_STATE=ui_prepared/);
     assert.match(output(resumed), /INIT_SELECTED_UI=antd/);
@@ -4337,6 +4932,47 @@ test('ordinary init reports the reset continuation command without reversing a r
     assert.equal(readFileSync(transactionPath, 'utf8'), transactionBytes);
     assert.equal(existsSync(join(root, 'apps', 'web-ele')), true);
     assert.equal(existsSync(join(root, 'apps', 'web-naive')), false);
+  } finally {
+    dispose(root);
+  }
+});
+
+test('reset preflight resumes after backup cleanup completed before profile and transaction cleanup', () => {
+  const root = fixture();
+  try {
+    assert.equal(run(root, 'init.mjs', ['--ui', 'antd', '--confirm-cleanup', '--no-open']).status, 0);
+    const stateRoot = join(root, '..', '.runtime', 'install');
+    const backupRoot = join(stateRoot, 'ui-backup');
+    const [transactionId] = readdirSync(backupRoot);
+    const transactionDirectory = join(backupRoot, transactionId);
+    const moves = [
+      { source: 'apps/web-ele', backup: 'apps/web-ele' },
+      { source: 'apps/web-naive', backup: 'apps/web-naive' },
+    ];
+    for (const move of moves) {
+      renameSync(join(transactionDirectory, move.backup), join(root, move.source));
+    }
+    rmSync(transactionDirectory, { recursive: true });
+    writeFileSync(join(stateRoot, 'transaction.json'), `${JSON.stringify({
+      schema: 1,
+      owner: 'admin-init',
+      id: transactionId,
+      selectedUi: 'antd',
+      phase: 'resetting_ui',
+      moves,
+    }, null, 2)}\n`);
+
+    const result = run(root, 'init.mjs', ['--reset', '--confirm-reset', '--no-open']);
+
+    assert.equal(result.status, 0, output(result));
+    assert.match(output(result), /INIT_STATE=pristine/);
+    assert.match(output(result), /INIT_NEXT=RESET_COMPLETE/);
+    assert.equal(existsSync(join(root, '.ui-profile.json')), false);
+    assert.equal(existsSync(join(stateRoot, 'transaction.json')), false);
+    assert.equal(existsSync(transactionDirectory), false);
+    for (const ui of ['antd', 'ele', 'naive']) {
+      assert.equal(existsSync(join(root, 'apps', `web-${ui}`)), true);
+    }
   } finally {
     dispose(root);
   }

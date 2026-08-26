@@ -31,6 +31,33 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+  /api/system/install/v1/capabilities:
+    get:
+      tags: [Installation]
+      operationId: getInstallationCapabilities
+      summary: 获取本机平台与安装工具版本兼容性
+      responses:
+        '200':
+          description: 运行能力检测成功
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstallationCapabilitiesEnvelope'
+        '500':
+          description: 运行能力不可读
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstallationCapabilitiesErrorEnvelope'
+        '503':
+          description: 安装服务未接通
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstallationCapabilitiesErrorEnvelope'
   /api/system/install/v1/ui/prepare:
     post:
       tags: [Installation]
@@ -499,6 +526,85 @@ components:
         installedAt:
           type: string
           format: date-time
+    InstallationCapabilitiesEnvelope:
+      type: object
+      required: [code, message, data, traceId, meta]
+      properties:
+        code:
+          type: integer
+          const: 0
+        message:
+          type: string
+          const: success
+        data:
+          $ref: '#/components/schemas/InstallationCapabilities'
+        traceId:
+          type: string
+        meta:
+          $ref: '#/components/schemas/ResponseMeta'
+    InstallationCapabilities:
+      type: object
+      additionalProperties: false
+      required: [platform, tools]
+      properties:
+        platform:
+          $ref: '#/components/schemas/InstallationPlatformCapability'
+        tools:
+          type: array
+          items:
+            $ref: '#/components/schemas/InstallationToolCapability'
+    InstallationPlatformCapability:
+      type: object
+      additionalProperties: false
+      required: [os, arch]
+      properties:
+        os:
+          type: string
+          minLength: 1
+          maxLength: 32
+        arch:
+          type: string
+          minLength: 1
+          maxLength: 32
+    InstallationToolCapability:
+      type: object
+      additionalProperties: false
+      required: [id, available, compatible]
+      properties:
+        id:
+          type: string
+          enum: [go, node, pnpm, docker]
+        available:
+          type: boolean
+        compatible:
+          type: boolean
+        version:
+          type: string
+          maxLength: 64
+        requiredVersion:
+          type: string
+          maxLength: 64
+        reason:
+          type: string
+          enum: [not_available, version_unreadable, version_unsupported]
+    InstallationCapabilitiesErrorEnvelope:
+      type: object
+      required: [code, message, data, traceId, meta]
+      properties:
+        code:
+          type: integer
+          enum: [40001, 50000]
+        message:
+          type: string
+          enum:
+            - installation service unavailable
+            - installation capabilities unavailable
+        data:
+          type: 'null'
+        traceId:
+          type: string
+        meta:
+          $ref: '#/components/schemas/ResponseMeta'
     UIPrepareRequest:
       type: object
       additionalProperties: false
@@ -554,17 +660,79 @@ components:
           readOnly: true
         currentStep:
           type: string
-          enum: [queued, preflight, workspace, dependencies, reset, complete, failed]
+          enum: [queued, launch, preflight, workspace, dependencies, reset, complete, failed]
         progress:
           type: integer
           minimum: 0
           maximum: 100
         errorKey:
           type: string
-          pattern: '^[a-z][a-z0-9_]{1,63}$'
+          enum:
+            - ui_prepare_failed
+            - ui_reset_failed
+            - ui_preflight_failed
+            - ui_template_layout_invalid
+            - ui_api_unavailable
+            - ui_initialization_busy
+            - ui_initialization_lease_failed
+            - ui_state_directory_invalid
+            - ui_node_version_unsupported
+            - ui_pnpm_version_unsupported
+            - ui_dependency_install_failed
+            - ui_workspace_prepare_failed
+        failureStep:
+          type: string
+          enum: [launch, preflight, workspace, dependencies, reset]
+          description: 失败前最后一个可信阶段
+        failureReason:
+          type: string
+          enum:
+            - process_failed
+            - preflight_failed
+            - template_layout_invalid
+            - api_unavailable
+            - init_busy
+            - init_lease_failed
+            - install_state_dir_invalid
+            - node_version_unsupported
+            - pnpm_version_unsupported
+            - dependency_install_failed
+            - dependency_transaction_invalid
+            - source_move_state_invalid
+            - initialization_resume_invalid
+            - dependency_install_busy
+            - reset_layout_invalid
+            - reset_receipt_unavailable
+            - reset_transaction_invalid
+            - reset_unavailable
+            - reset_unavailable_installed
+            - legacy_migration_invalid
+            - recovery_validation_failed
+            - runtime_env_app_invalid
+            - runtime_env_profile_invalid
+            - runtime_env_target_invalid
+            - runtime_env_template_invalid
+            - ui_invalid
+            - ui_package_mismatch
+            - ui_profile_invalid
+            - ui_profile_mismatch
+            - ui_profile_required
+            - reset_in_progress
+            - state_inconsistent
+            - initialization_in_progress
+            - initialization_operation_failed
+          description: 来自初始化命令白名单输出的稳定原因，不包含自由文本
+        failureScope:
+          type: string
+          enum: [admin_root, admin_apps, selected_ui, state_root, ui_backup]
+          description: 权限失败涉及的逻辑目录范围，不暴露绝对路径
+        failureOperation:
+          type: string
+          enum: [read, create, write, sync, link, rename, delete, cross_directory_rename, execute, lock]
         logPath:
           type: string
           const: .runtime/install/dependency-install.log
+          description: 仅依赖安装阶段确实创建诊断日志时返回
         lastUpdated:
           type: string
           format: date-time

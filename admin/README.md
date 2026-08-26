@@ -11,6 +11,8 @@
 
 前端通过 `/api` 访问根目录的 Gin 服务 `server/`。
 
+初始化脚本要求 Node.js `^22.18.0` 或 `^24.12.0`，以及 pnpm `>=11.0.0`（仓库锁定 `pnpm@11.16.0`）。如果能力卡片把 Node/pnpm 标为不兼容，脚本会在任何事务、锁或模板移动前停止；请先用本机已有的 Corepack 或 pnpm 升级，再重新打开安装页。
+
 生产菜单、默认首页、兼容路由、访问码和页面布局契约统一维护在 [`../docs/admin-information-architecture.md`](../docs/admin-information-architecture.md)，三套 UI 必须保持业务语义等价。
 
 ## 初始化与验证
@@ -85,4 +87,4 @@ pnpm run dev
 
 遇到中断时重新运行 init 或重新打开安装页，让程序恢复这些状态。Docker 在已有 profile 时自动使用它；全新 CI 可显式传入 `ADMIN_UI=antd|ele|naive`，显式值与 profile 不一致时输出 `UI_PROFILE_MISMATCH`。若网页安装需要替换已有 `.env`，`environment-backup/` 仅在事务期间以 `0600` 权限保存原文件用于补偿，并在完成标记提交后精确清理；不要复制或提交它。
 
-init 会使用 Node.js 内置文件 API，将所选模板的 `.env.development.example` 和 `.env.production.example` 原子复制为对应本地环境文件；已有本地文件保持原字节。所选目录的写权限、模板类型与可读性会在移动 UI 前检查。旧版本完成安装但缺少整个文件时，通用 `dev/build/preview` 分发器会在启动前自动补齐；已有旧文件缺少标题时由共享 Vite 配置提供默认值，不改写其中的自定义地址或敏感字段。开发环境默认 API 地址为 `/api`，即使本地环境文件意外缺失也会回退到同源 `/api`，再由 Vite 代理转发到 Gin 的 `/api` 根路径（`http://localhost:8080/api`）。普通用户与源码工作区都只使用通用的 profile 驱动命令。
+init 会使用 Node.js 内置文件 API，将所选模板的 `.env.development.example` 和 `.env.production.example` 原子复制为对应本地环境文件；已有本地文件保持原字节。任何初始化锁、事务、profile 或 UI 模板移动发生前，程序都会用随机临时哨兵实际验证创建、写入并同步、硬链接、目录同步、重命名、删除以及模板到备份目录的跨目录移动能力；探针结束后立即清理，因此能在 Windows ACL/文件系统限制、macOS/Linux 权限或跨磁盘卷移动不受支持时提前停止。另一个进程仍可能在预检后临时占用文件，所以真实移动继续使用可恢复事务，修复占用后可直接重试。安装页会显示稳定的失败阶段、原因、逻辑目录范围、所需操作和任务 ID；只有已经进入依赖安装阶段且日志已成功创建时才显示 `.runtime/install/dependency-install.log`。旧版本完成安装但缺少整个文件时，通用 `dev/build/preview` 分发器会在启动前自动补齐；已有旧文件缺少标题时由共享 Vite 配置提供默认值，不改写其中的自定义地址或敏感字段。开发环境默认 API 地址为 `/api`，即使本地环境文件意外缺失也会回退到同源 `/api`，再由 Vite 代理转发到 Gin 的 `/api` 根路径（`http://localhost:8080/api`）。普通用户与源码工作区都只使用通用的 profile 驱动命令。

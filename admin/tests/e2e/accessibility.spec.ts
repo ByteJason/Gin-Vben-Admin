@@ -38,9 +38,9 @@ async function fulfillInstallerAPI(
       ? {
           platform: { arch: 'test', os: 'test' },
           tools: [
-            { available: true, id: 'go', version: 'test' },
-            { available: true, id: 'node', version: 'test' },
-            { available: true, id: 'pnpm', version: 'test' },
+            { available: true, compatible: true, id: 'go', version: 'test' },
+            { available: true, compatible: true, id: 'node', version: 'test' },
+            { available: true, compatible: true, id: 'pnpm', version: 'test' },
           ],
         }
       : null;
@@ -219,9 +219,9 @@ test('UI selection prepares one template, prevents duplicate work, and resets be
       await fulfillJSON(route, {
         platform: { arch: 'test', os: 'test' },
         tools: [
-          { available: true, id: 'go', version: 'test' },
-          { available: true, id: 'node', version: 'test' },
-          { available: true, id: 'pnpm', version: 'test' },
+          { available: true, compatible: true, id: 'go', version: 'test' },
+          { available: true, compatible: true, id: 'node', version: 'test' },
+          { available: true, compatible: true, id: 'pnpm', version: 'test' },
         ],
       });
       return;
@@ -335,10 +335,10 @@ test('missing Node.js or pnpm blocks UI preparation regardless of response order
         platform: { arch: 'test', os: 'test' },
         tools:
           capabilityCalls === 1
-            ? [{ available: true, id: 'go', version: 'test' }]
+            ? [{ available: true, compatible: true, id: 'go', version: 'test' }]
             : [
-                { available: true, id: 'node', version: 'test' },
-                { available: true, id: 'pnpm', version: 'test' },
+                { available: true, compatible: true, id: 'node', version: 'test' },
+                { available: true, compatible: true, id: 'pnpm', version: 'test' },
               ],
       });
       return;
@@ -361,7 +361,10 @@ test('missing Node.js or pnpm blocks UI preparation regardless of response order
   await page.locator('#confirm-cleanup').check();
   await expect(page.locator('#prepare-ui-button')).toBeDisabled();
   await expect(page.locator('#ui-prepare-result')).toContainText(
-    'Node.js 与 pnpm',
+    'Node.js ^22.18.0 或 ^24.12.0',
+  );
+  await expect(page.locator('#ui-prepare-result')).toContainText(
+    'pnpm >=11.0.0',
   );
   const retryButton = page.locator('#retry-button');
   await expect(retryButton).toBeVisible();
@@ -376,7 +379,7 @@ test('missing Node.js or pnpm blocks UI preparation regardless of response order
   );
 });
 
-test('failed UI preparation exposes a stable key and relative log path', async ({
+test('failed UI preflight exposes structured diagnostics without an unrelated log', async ({
   page,
 }, testInfo) => {
   test.skip(testInfo.project.name !== 'installer');
@@ -396,8 +399,8 @@ test('failed UI preparation exposes a stable key and relative log path', async (
       await fulfillJSON(route, {
         platform: { arch: 'test', os: 'test' },
         tools: [
-          { available: true, id: 'node', version: 'test' },
-          { available: true, id: 'pnpm', version: 'test' },
+          { available: true, compatible: true, id: 'node', version: 'test' },
+          { available: true, compatible: true, id: 'pnpm', version: 'test' },
         ],
       });
       return;
@@ -421,10 +424,13 @@ test('failed UI preparation exposes a stable key and relative log path', async (
       await fulfillJSON(route, {
         action: 'prepare',
         currentStep: 'failed',
-        errorKey: 'ui_prepare_failed',
+        errorKey: 'ui_preflight_failed',
+        failureOperation: 'cross_directory_rename',
+        failureReason: 'preflight_failed',
+        failureScope: 'ui_backup',
+        failureStep: 'preflight',
         id: 'failed-ui-job',
-        logPath: '.runtime/install/dependency-install.log',
-        progress: 45,
+        progress: 10,
         selectedUi: 'naive',
         state: 'failed',
       });
@@ -439,13 +445,24 @@ test('failed UI preparation exposes a stable key and relative log path', async (
   await page.locator('#prepare-ui-button').click();
   await expect(page.locator('#ui-prepare-diagnostics')).toBeVisible();
   await expect(page.locator('#ui-prepare-error-key')).toHaveText(
-    'ui_prepare_failed',
+    'ui_preflight_failed',
   );
-  await expect(page.locator('#ui-prepare-log-path')).toHaveText(
-    '.runtime/install/dependency-install.log',
+  await expect(page.locator('#ui-prepare-job-id')).toHaveText('failed-ui-job');
+  await expect(page.locator('#ui-prepare-failure-step')).toHaveText(
+    '检查模板与目录',
   );
+  await expect(page.locator('#ui-prepare-failure-reason')).toHaveText(
+    '目录或文件操作能力预检失败',
+  );
+  await expect(page.locator('#ui-prepare-failure-operation')).toContainText(
+    '跨目录重命名',
+  );
+  await expect(page.locator('#ui-prepare-log-item')).toBeHidden();
   await expect(page.locator('#ui-prepare-result')).toContainText(
-    '准备管理界面失败',
+    '目录或文件操作能力预检失败',
+  );
+  await expect(page.locator('#ui-prepare-result')).not.toContainText(
+    '尚未移动或修改管理界面模板',
   );
   await expect(page.locator('#prepare-ui-button')).toBeEnabled();
 });
@@ -495,8 +512,8 @@ test('refresh resumes an interrupted reset without submitting prepare', async ({
       await fulfillJSON(route, {
         platform: { arch: 'test', os: 'test' },
         tools: [
-          { available: true, id: 'node', version: 'test' },
-          { available: true, id: 'pnpm', version: 'test' },
+          { available: true, compatible: true, id: 'node', version: 'test' },
+          { available: true, compatible: true, id: 'pnpm', version: 'test' },
         ],
       });
       return;

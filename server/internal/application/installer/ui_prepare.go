@@ -44,18 +44,43 @@ type UIResetRequest struct {
 }
 
 // UIPreparationJob is a bounded, credential-free view of one local UI
-// initializer execution. Command output stays in LogPath and is never copied
-// into the public snapshot.
+// initializer execution. Free-form command output is never copied into the
+// public snapshot; LogPath is present only for a dependency-stage failure.
 type UIPreparationJob struct {
-	ID          string                `json:"id"`
-	Action      UIPreparationAction   `json:"action"`
-	State       UIPreparationJobState `json:"state"`
-	SelectedUI  installstate.UI       `json:"selectedUi,omitempty"`
-	CurrentStep string                `json:"currentStep"`
-	Progress    int                   `json:"progress"`
-	ErrorKey    string                `json:"errorKey,omitempty"`
-	LogPath     string                `json:"logPath,omitempty"`
-	LastUpdated time.Time             `json:"lastUpdated"`
+	ID               string                `json:"id"`
+	Action           UIPreparationAction   `json:"action"`
+	State            UIPreparationJobState `json:"state"`
+	SelectedUI       installstate.UI       `json:"selectedUi,omitempty"`
+	CurrentStep      string                `json:"currentStep"`
+	Progress         int                   `json:"progress"`
+	ErrorKey         string                `json:"errorKey,omitempty"`
+	FailureStep      string                `json:"failureStep,omitempty"`
+	FailureReason    string                `json:"failureReason,omitempty"`
+	FailureScope     string                `json:"failureScope,omitempty"`
+	FailureOperation string                `json:"failureOperation,omitempty"`
+	LogPath          string                `json:"logPath,omitempty"`
+	LastUpdated      time.Time             `json:"lastUpdated"`
+}
+
+// UIPreparationFailure is the credential-free diagnostic contract returned by
+// a platform runner. Every field is a stable identifier; free-form child
+// output, command lines and absolute paths must never cross this boundary.
+type UIPreparationFailure struct {
+	ErrorKey      string
+	Step          string
+	Reason        string
+	Scope         string
+	Operation     string
+	DependencyLog bool
+}
+
+const uiPreparationDependencyLogPath = ".runtime/install/dependency-install.log"
+
+func (f *UIPreparationFailure) Error() string {
+	if f == nil || !allowedUIPreparationErrorKey(f.ErrorKey) {
+		return "UI preparation failed"
+	}
+	return f.ErrorKey
 }
 
 // UIPreparationProgress is the only process output allowed across the
@@ -280,7 +305,7 @@ func (s *UIPreparationJobService) completedPrepare(ui installstate.UI) (UIPrepar
 	job := UIPreparationJob{
 		ID: id, Action: UIPreparationActionPrepare, State: UIPreparationJobSucceeded,
 		SelectedUI: ui, CurrentStep: "complete", Progress: 100,
-		LogPath: s.runner.LogPath(), LastUpdated: now,
+		LastUpdated: now,
 	}
 	s.jobs[id] = job
 	s.pruneLocked(id)
@@ -308,7 +333,7 @@ func (s *UIPreparationJobService) enqueue(action UIPreparationAction, ui install
 	now := s.now().UTC()
 	job := UIPreparationJob{
 		ID: id, Action: action, State: UIPreparationJobQueued, SelectedUI: ui,
-		CurrentStep: "queued", Progress: 0, LogPath: s.runner.LogPath(), LastUpdated: now,
+		CurrentStep: "queued", Progress: 0, LastUpdated: now,
 	}
 	s.jobs[id] = job
 	s.active = id
@@ -324,7 +349,7 @@ func (s *UIPreparationJobService) enqueue(action UIPreparationAction, ui install
 }
 
 func (s *UIPreparationJobService) run(id string, action UIPreparationAction, ui installstate.UI) {
-	s.updateState(id, UIPreparationJobRunning, "preflight", 5, "")
+	s.updateState(id, UIPreparationJobRunning, "launch", 5, "")
 	report := func(progress UIPreparationProgress) {
 		if !validUIPreparationStep(progress.CurrentStep) || progress.Progress < 0 || progress.Progress > 99 {
 			return
@@ -342,7 +367,16 @@ func (s *UIPreparationJobService) run(id string, action UIPreparationAction, ui 
 		if action == UIPreparationActionReset {
 			errorKey = "ui_reset_failed"
 		}
-		s.updateState(id, UIPreparationJobFailed, "failed", -1, errorKey)
+		failure := UIPreparationFailure{
+			ErrorKey: errorKey,
+			Step:     "launch",
+			Reason:   "process_failed",
+		}
+		var structured *UIPreparationFailure
+		if errors.As(err, &structured) {
+			failure = normalizedUIPreparationFailure(*structured, failure)
+		}
+		s.updateFailure(id, failure)
 		return
 	}
 	s.updateState(id, UIPreparationJobSucceeded, "complete", 100, "")
@@ -350,10 +384,106 @@ func (s *UIPreparationJobService) run(id string, action UIPreparationAction, ui 
 
 func validUIPreparationStep(step string) bool {
 	switch step {
-	case "queued", "preflight", "workspace", "dependencies", "reset", "complete", "failed":
+	case "queued", "launch", "preflight", "workspace", "dependencies", "reset", "complete", "failed":
 		return true
 	default:
 		return false
+	}
+}
+
+func normalizedUIPreparationFailure(candidate, fallback UIPreparationFailure) UIPreparationFailure {
+	trustedError := allowedUIPreparationErrorKey(candidate.ErrorKey)
+	trustedReason := allowedUIPreparationFailureReason(candidate.Reason)
+	if trustedError {
+		fallback.ErrorKey = candidate.ErrorKey
+	}
+	if validUIPreparationStep(candidate.Step) && candidate.Step != "queued" && candidate.Step != "complete" && candidate.Step != "failed" {
+		fallback.Step = candidate.Step
+	}
+	if trustedReason {
+		fallback.Reason = candidate.Reason
+	}
+	if allowedUIPreparationFailureScope(candidate.Scope) {
+		fallback.Scope = candidate.Scope
+	}
+	if allowedUIPreparationFailureOperation(candidate.Operation) {
+		fallback.Operation = candidate.Operation
+	}
+	fallback.DependencyLog = candidate.DependencyLog && fallback.Step == "dependencies" && trustedError && trustedReason
+	return fallback
+}
+
+func allowedUIPreparationErrorKey(value string) bool {
+	switch value {
+	case "ui_prepare_failed", "ui_reset_failed", "ui_preflight_failed", "ui_template_layout_invalid",
+		"ui_api_unavailable", "ui_initialization_busy", "ui_initialization_lease_failed",
+		"ui_state_directory_invalid", "ui_node_version_unsupported", "ui_pnpm_version_unsupported",
+		"ui_dependency_install_failed", "ui_workspace_prepare_failed":
+		return true
+	default:
+		return false
+	}
+}
+
+func allowedUIPreparationFailureReason(value string) bool {
+	switch value {
+	case "process_failed", "preflight_failed", "template_layout_invalid", "api_unavailable",
+		"init_busy", "init_lease_failed", "install_state_dir_invalid", "node_version_unsupported",
+		"pnpm_version_unsupported", "dependency_install_failed", "dependency_transaction_invalid",
+		"source_move_state_invalid", "initialization_resume_invalid", "dependency_install_busy",
+		"reset_layout_invalid", "reset_receipt_unavailable", "reset_transaction_invalid",
+		"reset_unavailable", "reset_unavailable_installed", "legacy_migration_invalid",
+		"recovery_validation_failed", "runtime_env_app_invalid", "runtime_env_profile_invalid",
+		"runtime_env_target_invalid", "runtime_env_template_invalid", "ui_invalid",
+		"ui_package_mismatch", "ui_profile_invalid", "ui_profile_mismatch", "ui_profile_required",
+		"reset_in_progress", "state_inconsistent", "initialization_in_progress", "initialization_operation_failed":
+		return true
+	default:
+		return false
+	}
+}
+
+func allowedUIPreparationFailureScope(value string) bool {
+	switch value {
+	case "admin_root", "admin_apps", "selected_ui", "state_root", "ui_backup":
+		return true
+	default:
+		return false
+	}
+}
+
+func allowedUIPreparationFailureOperation(value string) bool {
+	switch value {
+	case "read", "create", "write", "sync", "link", "rename", "delete", "cross_directory_rename", "execute", "lock":
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *UIPreparationJobService) updateFailure(id string, failure UIPreparationFailure) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	job, ok := s.jobs[id]
+	if !ok {
+		return
+	}
+	job.State = UIPreparationJobFailed
+	job.CurrentStep = "failed"
+	job.ErrorKey = failure.ErrorKey
+	job.FailureStep = failure.Step
+	job.FailureReason = failure.Reason
+	job.FailureScope = failure.Scope
+	job.FailureOperation = failure.Operation
+	if failure.DependencyLog && s.runner.LogPath() == uiPreparationDependencyLogPath {
+		job.LogPath = uiPreparationDependencyLogPath
+	} else {
+		job.LogPath = ""
+	}
+	job.LastUpdated = s.now().UTC()
+	s.jobs[id] = job
+	if s.active == id {
+		s.active = ""
 	}
 }
 

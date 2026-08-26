@@ -47,7 +47,7 @@ func TestUIPreparationJobServiceRunsPrepareAsynchronouslyWithServiceContext(t *t
 	got := eventuallyUIPreparationJob(t, service, job.ID, func(got UIPreparationJob) bool {
 		return got.State == UIPreparationJobSucceeded
 	})
-	if got.CurrentStep != "complete" || got.Progress != 100 || got.ErrorKey != "" || got.LogPath != runner.logPath {
+	if got.CurrentStep != "complete" || got.Progress != 100 || got.ErrorKey != "" || got.LogPath != "" {
 		t.Fatalf("completed Progress() = %#v", got)
 	}
 	if runner.prepareUI() != installstate.UIEle {
@@ -269,8 +269,123 @@ func TestUIPreparationJobServiceRunsConfirmedResetAndSurfacesStableFailure(t *te
 	got := eventuallyUIPreparationJob(t, service, job.ID, func(got UIPreparationJob) bool {
 		return got.State == UIPreparationJobFailed
 	})
-	if got.CurrentStep != "failed" || got.ErrorKey != "ui_reset_failed" || got.Progress == 100 || got.LogPath != runner.logPath {
+	if got.CurrentStep != "failed" || got.ErrorKey != "ui_reset_failed" || got.Progress == 100 || got.LogPath != "" {
 		t.Fatalf("failed reset Progress() = %#v", got)
+	}
+}
+
+func TestUIPreparationJobServicePreservesStructuredFailureWithoutLeakingIrrelevantLog(t *testing.T) {
+	runner := newControllableUIPreparationRunner()
+	service := NewUIPreparationJobService(runner, profileProviderStub{}, markerReaderStub{})
+	t.Cleanup(func() { _ = service.Close() })
+
+	job, err := service.StartPrepare(context.Background(), UIPrepareRequest{
+		SelectedUI:     installstate.UIEle,
+		ConfirmCleanup: true,
+	})
+	if err != nil {
+		t.Fatalf("StartPrepare() error = %v", err)
+	}
+	<-runner.started
+	runner.release(&UIPreparationFailure{
+		ErrorKey:      "ui_preflight_failed",
+		Step:          "preflight",
+		Reason:        "preflight_failed",
+		Scope:         "admin_apps",
+		Operation:     "cross_directory_rename",
+		DependencyLog: false,
+	})
+
+	got := eventuallyUIPreparationJob(t, service, job.ID, func(got UIPreparationJob) bool {
+		return got.State == UIPreparationJobFailed
+	})
+	if got.ErrorKey != "ui_preflight_failed" || got.FailureStep != "preflight" ||
+		got.FailureReason != "preflight_failed" || got.FailureScope != "admin_apps" ||
+		got.FailureOperation != "cross_directory_rename" {
+		t.Fatalf("failed Progress() = %#v, want structured preflight diagnostic", got)
+	}
+	if got.LogPath != "" {
+		t.Fatalf("preflight LogPath = %q, want no unrelated dependency log", got.LogPath)
+	}
+}
+
+func TestUIPreparationJobServiceExposesDependencyLogOnlyForDependencyFailure(t *testing.T) {
+	runner := newControllableUIPreparationRunner()
+	service := NewUIPreparationJobService(runner, profileProviderStub{}, markerReaderStub{})
+	t.Cleanup(func() { _ = service.Close() })
+
+	job, err := service.StartPrepare(context.Background(), UIPrepareRequest{
+		SelectedUI:     installstate.UIAntd,
+		ConfirmCleanup: true,
+	})
+	if err != nil {
+		t.Fatalf("StartPrepare() error = %v", err)
+	}
+	<-runner.started
+	runner.release(&UIPreparationFailure{
+		ErrorKey:      "ui_dependency_install_failed",
+		Step:          "dependencies",
+		Reason:        "dependency_install_failed",
+		DependencyLog: true,
+	})
+
+	got := eventuallyUIPreparationJob(t, service, job.ID, func(got UIPreparationJob) bool {
+		return got.State == UIPreparationJobFailed
+	})
+	if got.ErrorKey != "ui_dependency_install_failed" || got.FailureStep != "dependencies" ||
+		got.LogPath != runner.logPath {
+		t.Fatalf("dependency failure Progress() = %#v", got)
+	}
+}
+
+func TestUIPreparationJobServiceRejectsUnlistedFailureFieldsAndRunnerLogPath(t *testing.T) {
+	runner := newControllableUIPreparationRunner()
+	runner.logPath = "/private/secret/install.log"
+	service := NewUIPreparationJobService(runner, profileProviderStub{}, markerReaderStub{})
+	t.Cleanup(func() { _ = service.Close() })
+
+	job, err := service.StartPrepare(context.Background(), UIPrepareRequest{
+		SelectedUI:     installstate.UIAntd,
+		ConfirmCleanup: true,
+	})
+	if err != nil {
+		t.Fatalf("StartPrepare() error = %v", err)
+	}
+	<-runner.started
+	runner.release(&UIPreparationFailure{
+		ErrorKey:      "private_error_key",
+		Step:          "dependencies",
+		Reason:        "encoded_private_value",
+		Scope:         "private_scope",
+		Operation:     "private_operation",
+		DependencyLog: true,
+	})
+
+	got := eventuallyUIPreparationJob(t, service, job.ID, func(got UIPreparationJob) bool {
+		return got.State == UIPreparationJobFailed
+	})
+	if got.ErrorKey != "ui_prepare_failed" || got.FailureStep != "dependencies" ||
+		got.FailureReason != "process_failed" || got.FailureScope != "" ||
+		got.FailureOperation != "" || got.LogPath != "" {
+		t.Fatalf("unlisted diagnostic crossed application boundary: %#v", got)
+	}
+}
+
+func TestUIPreparationFailureAllowsInterruptedStateAndOperationReasons(t *testing.T) {
+	fallback := UIPreparationFailure{
+		ErrorKey: "ui_prepare_failed",
+		Step:     "launch",
+		Reason:   "process_failed",
+	}
+	for _, reason := range []string{"reset_in_progress", "state_inconsistent", "initialization_in_progress", "initialization_operation_failed"} {
+		got := normalizedUIPreparationFailure(UIPreparationFailure{
+			ErrorKey: "ui_prepare_failed",
+			Step:     "preflight",
+			Reason:   reason,
+		}, fallback)
+		if got.Reason != reason {
+			t.Fatalf("normalized reason = %q, want %q", got.Reason, reason)
+		}
 	}
 }
 

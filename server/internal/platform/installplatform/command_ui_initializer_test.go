@@ -27,7 +27,9 @@ func TestCommandUIInitializerRunsShellFreePrepareWithFilteredEnvironmentAndStabl
 	}, "\n") + "\n"}
 	initializer, err := newCommandUIInitializer(root, stateDirectory, 9090, runner, []string{
 		"PATH=/fixture/bin", "HOME=/fixture/home", "LANG=zh_CN.UTF-8", "LC_ALL=C",
-		"PNPM_HOME=/fixture/pnpm", "DATABASE_PASSWORD=private-db", "NPM_TOKEN=private-npm",
+		"USERPROFILE=C:\\Users\\fixture", "HOMEDRIVE=C:", "HOMEPATH=\\Users\\fixture",
+		"PNPM_HOME=/fixture/pnpm", "COREPACK_HOME=/fixture/corepack",
+		"DATABASE_PASSWORD=private-db", "NPM_TOKEN=private-npm",
 		"NODE_OPTIONS=--require=/private/hook.mjs", "GIN_VBEN_INSTALL_STATE_DIR=/private/override",
 	})
 	if err != nil {
@@ -47,7 +49,7 @@ func TestCommandUIInitializerRunsShellFreePrepareWithFilteredEnvironmentAndStabl
 		t.Fatalf("invocation = %#v, calls=%d, want pnpm %#v in %q", runner.invocation, runner.calls, wantArgs, root)
 	}
 	joinedEnvironment := strings.Join(runner.invocation.Env, "\n")
-	for _, allowed := range []string{"PATH=/fixture/bin", "HOME=/fixture/home", "LANG=zh_CN.UTF-8", "LC_ALL=C", "PNPM_HOME=/fixture/pnpm"} {
+	for _, allowed := range []string{"PATH=/fixture/bin", "HOME=/fixture/home", "LANG=zh_CN.UTF-8", "LC_ALL=C", "USERPROFILE=C:\\Users\\fixture", "HOMEDRIVE=C:", "HOMEPATH=\\Users\\fixture", "PNPM_HOME=/fixture/pnpm", "COREPACK_HOME=/fixture/corepack"} {
 		if !strings.Contains(joinedEnvironment, allowed) {
 			t.Fatalf("filtered environment missing %q: %q", allowed, joinedEnvironment)
 		}
@@ -160,6 +162,158 @@ func TestCommandUIInitializerBoundsOutputAndDoesNotExposeCommandFailure(t *testi
 	}
 	if runner.stdoutRetained > maxUIInitializerOutputBytes || runner.stderrRetained > maxUIInitializerOutputBytes {
 		t.Fatalf("retained output = (%d, %d), max=%d", runner.stdoutRetained, runner.stderrRetained, maxUIInitializerOutputBytes)
+	}
+}
+
+func TestCommandUIInitializerReturnsAllowlistedStructuredFailure(t *testing.T) {
+	root := uiInitializerWorkspaceFixture(t)
+	stateDirectory := uiInitializerStateDirectoryFixture(t)
+	runner := &uiInitializerCommandRunnerStub{
+		stdout: strings.Join([]string{
+			"INIT_STAGE=prepare:preflight",
+			"INIT_PREFLIGHT=failed",
+			"INIT_FAILURE_SCOPE=admin_apps",
+			"INIT_FAILURE_OPERATION=cross_directory_rename",
+			"INIT_REASON=NONE",
+			"INIT_ERROR=PREFLIGHT_FAILED",
+		}, "\n") + "\n",
+		err: errors.New("exit status 3 with /private/path TOKEN=secret"),
+	}
+	initializer, err := newCommandUIInitializer(root, stateDirectory, 8080, runner, []string{"PATH=/fixture/bin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = initializer.Prepare(context.Background(), installstate.UIEle, nil)
+	var failure *installer.UIPreparationFailure
+	if !errors.As(err, &failure) {
+		t.Fatalf("Prepare() error = %T %v, want *UIPreparationFailure", err, err)
+	}
+	if failure.ErrorKey != "ui_preflight_failed" || failure.Step != "preflight" ||
+		failure.Reason != "preflight_failed" || failure.Scope != "admin_apps" ||
+		failure.Operation != "cross_directory_rename" || failure.DependencyLog {
+		t.Fatalf("structured failure = %#v", failure)
+	}
+	if strings.Contains(err.Error(), "private") || strings.Contains(err.Error(), "TOKEN") {
+		t.Fatalf("structured failure leaked process detail: %v", err)
+	}
+}
+
+func TestCommandUIInitializerMarksDependencyLogOnlyAfterDependencyStage(t *testing.T) {
+	root := uiInitializerWorkspaceFixture(t)
+	stateDirectory := uiInitializerStateDirectoryFixture(t)
+	runner := &uiInitializerCommandRunnerStub{
+		stdout: "INIT_STAGE=prepare:dependencies\nINIT_DEPENDENCY_LOG=.runtime/install/dependency-install.log\nINIT_ERROR=DEPENDENCY_INSTALL_FAILED\n",
+		err:    errors.New("exit status 1"),
+	}
+	initializer, err := newCommandUIInitializer(root, stateDirectory, 8080, runner, []string{"PATH=/fixture/bin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = initializer.Prepare(context.Background(), installstate.UIAntd, nil)
+	var failure *installer.UIPreparationFailure
+	if !errors.As(err, &failure) {
+		t.Fatalf("Prepare() error = %T %v, want *UIPreparationFailure", err, err)
+	}
+	if failure.ErrorKey != "ui_dependency_install_failed" || failure.Step != "dependencies" ||
+		failure.Reason != "dependency_install_failed" || !failure.DependencyLog {
+		t.Fatalf("dependency failure = %#v", failure)
+	}
+}
+
+func TestCommandUIInitializerKeepsTrustedDependencyStageWhenBusy(t *testing.T) {
+	root := uiInitializerWorkspaceFixture(t)
+	stateDirectory := uiInitializerStateDirectoryFixture(t)
+	runner := &uiInitializerCommandRunnerStub{
+		stdout: "INIT_STAGE=prepare:dependencies\nINIT_DEPENDENCY_LOG=.runtime/install/dependency-install.log\nINIT_ERROR=INIT_BUSY\n",
+		err:    errors.New("exit status 3"),
+	}
+	initializer, err := newCommandUIInitializer(root, stateDirectory, 8080, runner, []string{"PATH=/fixture/bin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = initializer.Prepare(context.Background(), installstate.UIAntd, nil)
+	var failure *installer.UIPreparationFailure
+	if !errors.As(err, &failure) {
+		t.Fatalf("Prepare() error = %T %v, want *UIPreparationFailure", err, err)
+	}
+	if failure.ErrorKey != "ui_initialization_busy" || failure.Step != "dependencies" ||
+		failure.Reason != "init_busy" || !failure.DependencyLog {
+		t.Fatalf("busy dependency failure = %#v", failure)
+	}
+}
+
+func TestCommandUIInitializerDiscardsUnknownMachineDiagnosticIdentifiers(t *testing.T) {
+	root := uiInitializerWorkspaceFixture(t)
+	stateDirectory := uiInitializerStateDirectoryFixture(t)
+	runner := &uiInitializerCommandRunnerStub{
+		stdout: "INIT_ERROR=TOKEN_SECRET_PAYLOAD\nINIT_REASON=ENCODED_PRIVATE_VALUE\n",
+		err:    errors.New("exit status 1"),
+	}
+	initializer, err := newCommandUIInitializer(root, stateDirectory, 8080, runner, []string{"PATH=/fixture/bin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = initializer.Prepare(context.Background(), installstate.UIAntd, nil)
+	var failure *installer.UIPreparationFailure
+	if !errors.As(err, &failure) {
+		t.Fatalf("Prepare() error = %T %v, want *UIPreparationFailure", err, err)
+	}
+	if failure.ErrorKey != "ui_prepare_failed" || failure.Step != "launch" ||
+		failure.Reason != "process_failed" {
+		t.Fatalf("unknown diagnostic was not discarded: %#v", failure)
+	}
+}
+
+func TestCommandUIInitializerKeepsAllowlistedInterruptedAndOperationReasons(t *testing.T) {
+	for _, code := range []string{"RESET_IN_PROGRESS", "STATE_INCONSISTENT", "INITIALIZATION_IN_PROGRESS", "INITIALIZATION_OPERATION_FAILED"} {
+		t.Run(code, func(t *testing.T) {
+			root := uiInitializerWorkspaceFixture(t)
+			stateDirectory := uiInitializerStateDirectoryFixture(t)
+			runner := &uiInitializerCommandRunnerStub{
+				stdout: "INIT_ERROR=" + code + "\n",
+				err:    errors.New("exit status 3"),
+			}
+			initializer, err := newCommandUIInitializer(root, stateDirectory, 8080, runner, []string{"PATH=/fixture/bin"})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			err = initializer.Prepare(context.Background(), installstate.UIAntd, nil)
+			var failure *installer.UIPreparationFailure
+			if !errors.As(err, &failure) {
+				t.Fatalf("Prepare() error = %T %v, want *UIPreparationFailure", err, err)
+			}
+			if failure.Reason != strings.ToLower(code) {
+				t.Fatalf("failure reason = %q, want %q", failure.Reason, strings.ToLower(code))
+			}
+		})
+	}
+}
+
+func TestCommandUIInitializerClassifiesUnsupportedPNPMBeforePreparation(t *testing.T) {
+	root := uiInitializerWorkspaceFixture(t)
+	stateDirectory := uiInitializerStateDirectoryFixture(t)
+	runner := &uiInitializerCommandRunnerStub{
+		stdout: "INIT_REASON=NONE\nINIT_ERROR=PNPM_VERSION_UNSUPPORTED\n",
+		err:    errors.New("exit status 1"),
+	}
+	initializer, err := newCommandUIInitializer(root, stateDirectory, 8080, runner, []string{"PATH=/fixture/bin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = initializer.Prepare(context.Background(), installstate.UIAntd, nil)
+	var failure *installer.UIPreparationFailure
+	if !errors.As(err, &failure) {
+		t.Fatalf("Prepare() error = %T %v, want *UIPreparationFailure", err, err)
+	}
+	if failure.ErrorKey != "ui_pnpm_version_unsupported" || failure.Step != "launch" ||
+		failure.Reason != "pnpm_version_unsupported" || failure.DependencyLog {
+		t.Fatalf("pnpm failure = %#v", failure)
 	}
 }
 
