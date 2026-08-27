@@ -43,8 +43,8 @@ func (r *GORMRepository) Create(ctx context.Context, value organization.Organiza
 		value.Status = "active"
 	}
 	if value.ParentID != "" {
-		var parent organizationRow
-		if err := r.db.Read(ctx).Where("tenant_id = ? AND id = ?", scope.TenantID, value.ParentID).Take(&parent).Error; err != nil {
+		_, err := gorm.G[organizationRow](r.db.Read(ctx)).Where("tenant_id = ? AND id = ?", scope.TenantID, value.ParentID).Take(ctx)
+		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return organization.ErrOrganizationNotFound
 			}
@@ -52,7 +52,7 @@ func (r *GORMRepository) Create(ctx context.Context, value organization.Organiza
 		}
 	}
 	row := organizationRow{ID: value.ID, TenantID: scope.TenantID, ParentID: nullable(value.ParentID), Name: value.Name, Status: value.Status}
-	if err := r.db.Write(ctx).Create(&row).Error; err != nil {
+	if err := gorm.G[organizationRow](r.db.Write(ctx)).Create(ctx, &row); err != nil {
 		return ErrStoreUnavailable
 	}
 	return nil
@@ -67,7 +67,7 @@ func (r *GORMRepository) Get(ctx context.Context, id string) (organization.Organ
 		return organization.Organization{}, ErrStoreUnavailable
 	}
 	var row organizationRow
-	if err := r.db.Read(ctx).Where("tenant_id = ? AND id = ?", scope.TenantID, strings.TrimSpace(id)).Take(&row).Error; err != nil {
+	if row, err = gorm.G[organizationRow](r.db.Read(ctx)).Where("tenant_id = ? AND id = ?", scope.TenantID, strings.TrimSpace(id)).Take(ctx); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return organization.Organization{}, organization.ErrOrganizationNotFound
 		}
@@ -84,14 +84,14 @@ func (r *GORMRepository) List(ctx context.Context, parentID string) ([]organizat
 	if r == nil || r.db == nil {
 		return nil, ErrStoreUnavailable
 	}
-	query := r.db.Read(ctx).Where("tenant_id = ?", scope.TenantID).Order("name ASC")
+	query := gorm.G[organizationRow](r.db.Read(ctx)).Where("tenant_id = ?", scope.TenantID).Order("name ASC")
 	if strings.TrimSpace(parentID) == "" {
 		query = query.Where("parent_id IS NULL")
 	} else {
 		query = query.Where("parent_id = ?", strings.TrimSpace(parentID))
 	}
-	var rows []organizationRow
-	if err := query.Find(&rows).Error; err != nil {
+	rows, err := query.Find(ctx)
+	if err != nil {
 		return nil, ErrStoreUnavailable
 	}
 	out := make([]organization.Organization, 0, len(rows))
@@ -118,4 +118,3 @@ func toDomain(row organizationRow) organization.Organization {
 }
 
 var _ organization.Repository = (*GORMRepository)(nil)
-var _ = tenant.ErrCrossTenant

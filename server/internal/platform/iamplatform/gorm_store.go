@@ -17,6 +17,7 @@ import (
 	mysqldriver "github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var (
@@ -71,12 +72,12 @@ func (s *GORMStore) findUser(ctx context.Context, id string, authorization bool)
 	if err != nil {
 		return domain.User{}, err
 	}
-	var row userRow
 	database := s.read(ctx)
 	if authorization {
 		database = s.write(ctx)
 	}
-	if err := database.Table("users").Where("tenant_id = ? AND id = ?", tenantID, numericID).Take(&row).Error; err != nil {
+	row, err := gorm.G[userRow](database).Where("tenant_id = ? AND id = ?", tenantID, numericID).Take(ctx)
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return domain.User{}, domain.ErrResourceNotFound
 		}
@@ -113,29 +114,41 @@ func (s *GORMStore) SaveUser(ctx context.Context, user domain.User) error {
 	if user.Active {
 		status = "active"
 	}
-	var existing userRow
-	if err := s.read(ctx).Table("users").Where("tenant_id = ? AND id = ?", tenantID, numericID).Take(&existing).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return domain.ErrResourceNotFound
-		}
-		return ErrStoreUnavailable
-	}
 	values, err := profileUpdateValues(user)
 	if err != nil {
 		return err
 	}
 	values["status"] = status
-	result := s.write(ctx).Table("users").Where("tenant_id = ? AND id = ?", tenantID, numericID).Updates(values)
-	if result.Error != nil {
-		return ErrStoreUnavailable
-	}
-	if err := s.write(ctx).Exec("DELETE FROM user_roles WHERE tenant_id = ? AND user_id = ?", tenantID, numericID).Error; err != nil {
-		return ErrStoreUnavailable
-	}
-	for _, roleID := range user.RoleIDs {
-		if err := s.write(ctx).Table("user_roles").Create(map[string]any{"tenant_id": tenantID, "user_id": numericID, "role_id": roleID}).Error; err != nil {
+	// Profile and role replacement are one logical mutation. Keep both on the
+	// primary transaction so a failed relation write cannot leave a partially
+	// updated account (and no replica precheck can race a just-created user).
+	err = s.db.WithinTransaction(ctx, func(tx *gorm.DB) error {
+		rows, updateErr := gorm.G[userRow](tx).Where("tenant_id = ? AND id = ?", tenantID, numericID).Set(clause.Assignments(values)).Update(ctx)
+		if updateErr != nil {
 			return ErrStoreUnavailable
 		}
+		if rows == 0 {
+			return domain.ErrResourceNotFound
+		}
+		if _, deleteErr := gorm.G[userRoleRow](tx).Where("tenant_id = ? AND user_id = ?", tenantID, numericID).Delete(ctx); deleteErr != nil {
+			return ErrStoreUnavailable
+		}
+		roleRows := make([]userRoleRow, 0, len(user.RoleIDs))
+		for _, roleID := range user.RoleIDs {
+			roleRows = append(roleRows, userRoleRow{TenantID: tenantID, UserID: numericID, RoleID: roleID})
+		}
+		if len(roleRows) > 0 {
+			if createErr := gorm.G[userRoleRow](tx).CreateInBatches(ctx, &roleRows, 100); createErr != nil {
+				return ErrStoreUnavailable
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, domain.ErrResourceNotFound) {
+			return err
+		}
+		return ErrStoreUnavailable
 	}
 	return nil
 }
@@ -173,12 +186,12 @@ func (s *GORMStore) CreateUser(ctx context.Context, user domain.User) (domain.Us
 	values["org_id"] = nullableString(user.OrgID)
 	values["password_hash"] = user.PasswordHash
 	values["status"] = statusValue(user.Active)
-	result := s.write(ctx).Table("users").Create(values)
-	if err := mapUserWriteError(result.Error); err != nil {
+	row := userRowFromValues(values)
+	if err := mapUserWriteError(gorm.G[userRow](s.write(ctx)).Create(ctx, &row)); err != nil {
 		return domain.User{}, err
 	}
-	var row userRow
-	if err := s.write(ctx).Table("users").Where("tenant_id = ? AND username_normalized = ?", scope.TenantID, user.UsernameNormalized).Take(&row).Error; err != nil {
+	row, err = gorm.G[userRow](s.write(ctx)).Where("tenant_id = ? AND username_normalized = ?", scope.TenantID, user.UsernameNormalized).Take(ctx)
+	if err != nil {
 		return domain.User{}, ErrStoreUnavailable
 	}
 	return row.toDomain(nil), nil
@@ -216,11 +229,11 @@ func (s *GORMStore) UpdateUser(ctx context.Context, user domain.User) (domain.Us
 	}
 	values["org_id"] = nullableString(user.OrgID)
 	values["status"] = statusValue(user.Active)
-	result := s.write(ctx).Table("users").Where("tenant_id = ? AND id = ?", scope.TenantID, numericID).Updates(values)
-	if err := mapUserWriteError(result.Error); err != nil {
+	rows, updateErr := gorm.G[userRow](s.write(ctx)).Where("tenant_id = ? AND id = ?", scope.TenantID, numericID).Set(clause.Assignments(values)).Update(ctx)
+	if err := mapUserWriteError(updateErr); err != nil {
 		return domain.User{}, err
 	}
-	if result.RowsAffected == 0 {
+	if rows == 0 {
 		return domain.User{}, domain.ErrResourceNotFound
 	}
 	return s.FindUser(ctx, user.ID)
@@ -241,8 +254,8 @@ func (s *GORMStore) SoftDeleteUser(ctx context.Context, id string) (domain.User,
 	if err != nil {
 		return domain.User{}, err
 	}
-	var row userRow
-	if err := s.write(ctx).Table("users").Where("tenant_id = ? AND id = ?", scope.TenantID, numericID).Take(&row).Error; err != nil {
+	row, err := gorm.G[userRow](s.write(ctx)).Where("tenant_id = ? AND id = ?", scope.TenantID, numericID).Take(ctx)
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return domain.User{}, domain.ErrResourceNotFound
 		}
@@ -252,11 +265,11 @@ func (s *GORMStore) SoftDeleteUser(ctx context.Context, id string) (domain.User,
 		return domain.User{}, tenant.ErrOrganizationDenied
 	}
 	if row.Status != "disabled" {
-		result := s.write(ctx).Table("users").Where("tenant_id = ? AND id = ?", scope.TenantID, numericID).Updates(map[string]any{"status": "disabled"})
-		if err := mapUserWriteError(result.Error); err != nil {
+		rows, updateErr := gorm.G[userRow](s.write(ctx)).Where("tenant_id = ? AND id = ?", scope.TenantID, numericID).Set(clause.Assignments(map[string]any{"status": "disabled"})).Update(ctx)
+		if err := mapUserWriteError(updateErr); err != nil {
 			return domain.User{}, err
 		}
-		if result.RowsAffected == 0 {
+		if rows == 0 {
 			// The row may have disappeared between the read and the update;
 			// do not turn that race into a false successful deletion.
 			return domain.User{}, domain.ErrResourceNotFound
@@ -289,31 +302,30 @@ func (s *GORMStore) UpdateUserPassword(ctx context.Context, id, passwordHash str
 	if err != nil {
 		return domain.User{}, err
 	}
-	query := s.write(ctx).Table("users").Where("tenant_id = ? AND id = ?", scope.TenantID, numericID)
+	query := gorm.G[userRow](s.write(ctx)).Where("tenant_id = ? AND id = ?", scope.TenantID, numericID)
 	if !scope.PlatformAdmin && scope.Organization != "" {
 		query = query.Where("org_id = ?", scope.Organization)
 	}
-	var row userRow
-	queryResult := query.Take(&row)
-	if queryResult.Error != nil {
-		if errors.Is(queryResult.Error, gorm.ErrRecordNotFound) {
+	row, queryErr := query.Take(ctx)
+	if queryErr != nil {
+		if errors.Is(queryErr, gorm.ErrRecordNotFound) {
 			return domain.User{}, domain.ErrResourceNotFound
 		}
 		return domain.User{}, ErrStoreUnavailable
 	}
 	changedAt = changedAt.UTC()
-	updateQuery := s.write(ctx).Table("users").Where("tenant_id = ? AND id = ?", scope.TenantID, numericID)
+	updateQuery := gorm.G[userRow](s.write(ctx)).Where("tenant_id = ? AND id = ?", scope.TenantID, numericID)
 	if !scope.PlatformAdmin && scope.Organization != "" {
 		updateQuery = updateQuery.Where("org_id = ?", scope.Organization)
 	}
-	result := updateQuery.Updates(map[string]any{
+	rows, updateErr := updateQuery.Set(clause.Assignments(map[string]any{
 		"password_hash":       passwordHash,
 		"password_changed_at": changedAt,
-	})
-	if err := mapUserWriteError(result.Error); err != nil {
+	})).Update(ctx)
+	if err := mapUserWriteError(updateErr); err != nil {
 		return domain.User{}, err
 	}
-	if result.RowsAffected == 0 {
+	if rows == 0 {
 		return domain.User{}, domain.ErrResourceNotFound
 	}
 	row.PasswordHash = passwordHash
@@ -385,11 +397,9 @@ func (s *GORMStore) UpdateUserStatuses(ctx context.Context, changes []domain.Use
 			if parseErr != nil {
 				return domain.ErrInvalidUser
 			}
-			var row userRow
-			query := tx.Table("users").Where("tenant_id = ? AND id = ?", scope.TenantID, numeric)
-			queryResult := query.Take(&row)
-			if queryResult.Error != nil {
-				if errors.Is(queryResult.Error, gorm.ErrRecordNotFound) {
+			row, queryErr := gorm.G[userRow](tx).Where("tenant_id = ? AND id = ?", scope.TenantID, numeric).Take(ctx)
+			if queryErr != nil {
+				if errors.Is(queryErr, gorm.ErrRecordNotFound) {
 					continue
 				}
 				return ErrStoreUnavailable
@@ -399,11 +409,11 @@ func (s *GORMStore) UpdateUserStatuses(ctx context.Context, changes []domain.Use
 			}
 			desired := statusValue(change.Active)
 			if row.Status != desired {
-				result := tx.Table("users").Where("tenant_id = ? AND id = ?", scope.TenantID, numeric).Updates(map[string]any{"status": desired})
-				if result.Error != nil {
+				rows, updateErr := gorm.G[userRow](tx).Where("tenant_id = ? AND id = ?", scope.TenantID, numeric).Set(clause.Assignments(map[string]any{"status": desired})).Update(ctx)
+				if updateErr != nil {
 					return ErrStoreUnavailable
 				}
-				if result.RowsAffected == 0 {
+				if rows == 0 {
 					return domain.ErrResourceNotFound
 				}
 				row.Status = desired
@@ -444,8 +454,8 @@ func (s *GORMStore) ListUsers(ctx context.Context) ([]domain.User, error) {
 	if err != nil {
 		return nil, err
 	}
-	var rows []userRow
-	if err := s.read(ctx).Table("users").Where("tenant_id = ?", tenantID).Order("id ASC").Find(&rows).Error; err != nil {
+	rows, err := gorm.G[userRow](s.read(ctx)).Where("tenant_id = ?", tenantID).Order("id ASC").Find(ctx)
+	if err != nil {
 		return nil, ErrStoreUnavailable
 	}
 	out := make([]domain.User, 0, len(rows))
@@ -482,7 +492,7 @@ func (s *GORMStore) ListUsersPage(ctx context.Context, filter domain.UserListQue
 		filter.OrgID = scope.Organization
 	}
 	tenantID := scope.TenantID
-	base := s.read(ctx).Table("users").Where("tenant_id = ?", tenantID)
+	base := gorm.G[userRow](s.read(ctx)).Where("tenant_id = ?", tenantID)
 	if filter.Keyword != "" {
 		pattern := "%" + strings.ToLower(filter.Keyword) + "%"
 		base = base.Where("LOWER(username) LIKE ? OR LOWER(COALESCE(nickname, '')) LIKE ? OR LOWER(COALESCE(email, '')) LIKE ?", pattern, pattern, pattern)
@@ -499,8 +509,8 @@ func (s *GORMStore) ListUsersPage(ctx context.Context, filter domain.UserListQue
 	if filter.OrgID != "" {
 		base = base.Where("org_id = ?", filter.OrgID)
 	}
-	var total int64
-	if err := base.Session(&gorm.Session{}).Count(&total).Error; err != nil {
+	total, err := base.Count(ctx, "*")
+	if err != nil {
 		return domain.UserPage{}, ErrStoreUnavailable
 	}
 	sortKey, descending := filter.SortKey()
@@ -515,7 +525,8 @@ func (s *GORMStore) ListUsersPage(ctx context.Context, filter domain.UserListQue
 	}
 	var rows []userRow
 	offset := (filter.Page - 1) * filter.PageSize
-	if err := base.Order(order).Order("id ASC").Limit(filter.PageSize).Offset(offset).Find(&rows).Error; err != nil {
+	rows, err = base.Order(order).Order("id ASC").Limit(filter.PageSize).Offset(offset).Find(ctx)
+	if err != nil {
 		return domain.UserPage{}, ErrStoreUnavailable
 	}
 	items := make([]domain.User, 0, len(rows))
@@ -537,8 +548,8 @@ func (s *GORMStore) FindRole(ctx context.Context, id string) (domain.Role, error
 	if err != nil {
 		return domain.Role{}, err
 	}
-	var row roleRow
-	if err := s.read(ctx).Table("roles").Where("tenant_id = ? AND id = ?", tenantID, id).Take(&row).Error; err != nil {
+	row, err := gorm.G[roleRow](s.read(ctx)).Where("tenant_id = ? AND id = ?", tenantID, id).Take(ctx)
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return domain.Role{}, domain.ErrResourceNotFound
 		}
@@ -565,7 +576,7 @@ func (s *GORMStore) SaveRole(ctx context.Context, role domain.Role) error {
 	if role.Active {
 		status = "active"
 	}
-	return s.upsert(ctx, "roles", map[string]any{"tenant_id": tenantID, "id": role.ID}, map[string]any{"tenant_id": tenantID, "id": role.ID, "name": role.Name, "status": status, "data_scope": role.DataScope, "org_id": nullableString(role.OrgID)})
+	return s.upsertRole(ctx, roleRow{ID: role.ID, TenantID: tenantID, OrgID: nullableStringPtr(role.OrgID), Name: role.Name, Status: status, DataScope: string(role.DataScope)})
 }
 
 // AssignRoleUsers replaces one role's user_roles rows in a primary transaction.
@@ -607,11 +618,9 @@ func (s *GORMStore) AssignRoleUsers(ctx context.Context, roleID string, userIDs 
 	}
 	var updated domain.Role
 	err = s.db.WithinTransaction(ctx, func(tx *gorm.DB) error {
-		var roleRowValue roleRow
-		roleQuery := tx.Table("roles").Where("tenant_id = ? AND id = ?", scope.TenantID, roleID)
-		queryResult := roleQuery.Take(&roleRowValue)
-		if queryResult.Error != nil {
-			if errors.Is(queryResult.Error, gorm.ErrRecordNotFound) {
+		roleRowValue, queryErr := gorm.G[roleRow](tx).Where("tenant_id = ? AND id = ?", scope.TenantID, roleID).Take(ctx)
+		if queryErr != nil {
+			if errors.Is(queryErr, gorm.ErrRecordNotFound) {
 				return domain.ErrResourceNotFound
 			}
 			return ErrStoreUnavailable
@@ -623,11 +632,13 @@ func (s *GORMStore) AssignRoleUsers(ctx context.Context, roleID string, userIDs 
 
 		var users []userRow
 		if len(numericIDs) > 0 {
-			userQuery := tx.Table("users").Where("tenant_id = ? AND id IN ?", scope.TenantID, numericIDs)
+			userQuery := gorm.G[userRow](tx).Where("tenant_id = ? AND id IN ?", scope.TenantID, numericIDs)
 			if !scope.PlatformAdmin && scope.Organization != "" {
 				userQuery = userQuery.Where("org_id = ?", scope.Organization)
 			}
-			if result := userQuery.Find(&users); result.Error != nil {
+			var findErr error
+			users, findErr = userQuery.Find(ctx)
+			if findErr != nil {
 				return ErrStoreUnavailable
 			}
 			if len(users) != len(numericIDs) {
@@ -635,22 +646,19 @@ func (s *GORMStore) AssignRoleUsers(ctx context.Context, roleID string, userIDs 
 			}
 		}
 
-		deleteSQL := "DELETE FROM user_roles WHERE tenant_id = ? AND role_id = ?"
-		deleteArgs := []any{scope.TenantID, roleID}
+		deleteQuery := gorm.G[userRoleRow](tx).Where("tenant_id = ? AND role_id = ?", scope.TenantID, roleID)
 		if !scope.PlatformAdmin && scope.Organization != "" {
-			deleteSQL += " AND org_id = ?"
-			deleteArgs = append(deleteArgs, scope.Organization)
+			deleteQuery = deleteQuery.Where("org_id = ?", scope.Organization)
 		}
-		if result := tx.Exec(deleteSQL, deleteArgs...); result.Error != nil {
+		if _, deleteErr := deleteQuery.Delete(ctx); deleteErr != nil {
 			return ErrStoreUnavailable
 		}
+		assignments := make([]userRoleRow, 0, len(users))
 		for _, user := range users {
-			if result := tx.Table("user_roles").Create(map[string]any{
-				"tenant_id": scope.TenantID,
-				"user_id":   user.ID,
-				"role_id":   roleID,
-				"org_id":    nullableString(stringValue(user.OrgID)),
-			}); result.Error != nil {
+			assignments = append(assignments, userRoleRow{TenantID: scope.TenantID, UserID: user.ID, RoleID: roleID, OrgID: nullableStringPtr(stringValue(user.OrgID))})
+		}
+		if len(assignments) > 0 {
+			if createErr := gorm.G[userRoleRow](tx).CreateInBatches(ctx, &assignments, 100); createErr != nil {
 				return ErrStoreUnavailable
 			}
 		}
@@ -699,10 +707,9 @@ func (s *GORMStore) AssignRolePermissions(ctx context.Context, roleID string, pe
 	}
 	var updated domain.Role
 	err = s.db.WithinTransaction(ctx, func(tx *gorm.DB) error {
-		var roleRowValue roleRow
-		roleQuery := tx.Table("roles").Where("tenant_id = ? AND id = ?", scope.TenantID, roleID)
-		if result := roleQuery.Take(&roleRowValue); result.Error != nil {
-			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		roleRowValue, queryErr := gorm.G[roleRow](tx).Where("tenant_id = ? AND id = ?", scope.TenantID, roleID).Take(ctx)
+		if queryErr != nil {
+			if errors.Is(queryErr, gorm.ErrRecordNotFound) {
 				return domain.ErrResourceNotFound
 			}
 			return ErrStoreUnavailable
@@ -711,23 +718,19 @@ func (s *GORMStore) AssignRolePermissions(ctx context.Context, roleID string, pe
 			return tenant.ErrOrganizationDenied
 		}
 
-		type permissionRelationRow struct {
-			ID     string
-			Method string
-			Path   string
-			OrgID  *string `gorm:"column:org_id"`
-		}
-		var permissions []permissionRelationRow
+		var permissions []permissionRow
 		if len(normalized) > 0 {
-			permissionQuery := tx.Table("permissions").Select("id, method, path, org_id").Where("tenant_id = ? AND id IN ?", scope.TenantID, normalized)
-			if result := permissionQuery.Find(&permissions); result.Error != nil {
+			permissionQuery := gorm.G[permissionRow](tx).Where("tenant_id = ? AND id IN ?", scope.TenantID, normalized)
+			var findErr error
+			permissions, findErr = permissionQuery.Find(ctx)
+			if findErr != nil {
 				return ErrStoreUnavailable
 			}
 			if len(permissions) != len(normalized) {
 				return domain.ErrResourceNotFound
 			}
 		}
-		byID := make(map[string]permissionRelationRow, len(permissions))
+		byID := make(map[string]permissionRow, len(permissions))
 		for _, permission := range permissions {
 			if !scope.PlatformAdmin && scope.Organization != "" && stringValue(permission.OrgID) != "" && stringValue(permission.OrgID) != scope.Organization {
 				return tenant.ErrOrganizationDenied
@@ -735,25 +738,22 @@ func (s *GORMStore) AssignRolePermissions(ctx context.Context, roleID string, pe
 			byID[permission.ID] = permission
 		}
 
-		deleteSQL := "DELETE FROM iam_policies WHERE tenant_id = ? AND role_id = ?"
-		deleteArgs := []any{scope.TenantID, roleID}
+		deleteQuery := gorm.G[iamPolicyWriteRow](tx).Where("tenant_id = ? AND role_id = ?", scope.TenantID, roleID)
 		if scope.Organization == "" {
-			deleteSQL += " AND org_id IS NULL"
+			deleteQuery = deleteQuery.Where("org_id IS NULL")
 		} else {
-			deleteSQL += " AND org_id = ?"
-			deleteArgs = append(deleteArgs, scope.Organization)
+			deleteQuery = deleteQuery.Where("org_id = ?", scope.Organization)
 		}
-		if result := tx.Exec(deleteSQL, deleteArgs...); result.Error != nil {
+		if _, deleteErr := deleteQuery.Delete(ctx); deleteErr != nil {
 			return ErrStoreUnavailable
 		}
+		policyRows := make([]iamPolicyWriteRow, 0, len(normalized))
 		for _, permissionID := range normalized {
 			permission := byID[permissionID]
-			values := map[string]any{
-				"tenant_id": scope.TenantID, "role_id": roleID, "domain": scope.TenantID,
-				"method": permission.Method, "path": permission.Path, "effect": domain.EffectAllow,
-				"org_id": nullableString(scope.Organization),
-			}
-			if result := tx.Table("iam_policies").Create(values); result.Error != nil {
+			policyRows = append(policyRows, iamPolicyWriteRow{TenantID: scope.TenantID, RoleID: stringPtr(roleID), Domain: scope.TenantID, Method: permission.Method, Path: permission.Path, Effect: string(domain.EffectAllow), OrgID: nullableStringPtr(scope.Organization)})
+		}
+		if len(policyRows) > 0 {
+			if createErr := gorm.G[iamPolicyWriteRow](tx).CreateInBatches(ctx, &policyRows, 100); createErr != nil {
 				return ErrStoreUnavailable
 			}
 		}
@@ -791,10 +791,9 @@ func (s *GORMStore) AssignRoleDataScopes(ctx context.Context, roleID string, bin
 	}
 	var updated domain.Role
 	err = s.db.WithinTransaction(ctx, func(tx *gorm.DB) error {
-		var roleRowValue roleRow
-		roleQuery := tx.Table("roles").Where("tenant_id = ? AND id = ?", scope.TenantID, roleID)
-		if result := roleQuery.Take(&roleRowValue); result.Error != nil {
-			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		roleRowValue, queryErr := gorm.G[roleRow](tx).Where("tenant_id = ? AND id = ?", scope.TenantID, roleID).Take(ctx)
+		if queryErr != nil {
+			if errors.Is(queryErr, gorm.ErrRecordNotFound) {
 				return domain.ErrResourceNotFound
 			}
 			return ErrStoreUnavailable
@@ -802,17 +801,16 @@ func (s *GORMStore) AssignRoleDataScopes(ctx context.Context, roleID string, bin
 		if !scope.PlatformAdmin && scope.Organization != "" && stringValue(roleRowValue.OrgID) != "" && stringValue(roleRowValue.OrgID) != scope.Organization {
 			return tenant.ErrOrganizationDenied
 		}
-		deleteSQL := "DELETE FROM iam_data_scopes WHERE tenant_id = ? AND role_id = ?"
-		deleteArgs := []any{scope.TenantID, roleID}
+		deleteQuery := gorm.G[iamDataScopeWriteRow](tx).Where("tenant_id = ? AND role_id = ?", scope.TenantID, roleID)
 		if scope.Organization == "" {
-			deleteSQL += " AND org_id IS NULL"
+			deleteQuery = deleteQuery.Where("org_id IS NULL")
 		} else {
-			deleteSQL += " AND org_id = ?"
-			deleteArgs = append(deleteArgs, scope.Organization)
+			deleteQuery = deleteQuery.Where("org_id = ?", scope.Organization)
 		}
-		if result := tx.Exec(deleteSQL, deleteArgs...); result.Error != nil {
+		if _, deleteErr := deleteQuery.Delete(ctx); deleteErr != nil {
 			return ErrStoreUnavailable
 		}
+		scopeRows := make([]iamDataScopeWriteRow, 0, len(normalized))
 		for _, binding := range normalized {
 			if err := domain.ValidateDataScope(domain.DataScope{RoleID: roleID, Domain: scope.TenantID, Resource: binding.Resource, Scope: binding.Scope, IDs: binding.IDs}); err != nil {
 				return err
@@ -821,12 +819,10 @@ func (s *GORMStore) AssignRoleDataScopes(ctx context.Context, roleID string, bin
 			if marshalErr != nil {
 				return marshalErr
 			}
-			values := map[string]any{
-				"tenant_id": scope.TenantID, "role_id": roleID, "domain": scope.TenantID,
-				"resource": binding.Resource, "scope": binding.Scope, "ids": ids,
-				"org_id": nullableString(scope.Organization),
-			}
-			if result := tx.Table("iam_data_scopes").Create(values); result.Error != nil {
+			scopeRows = append(scopeRows, iamDataScopeWriteRow{TenantID: scope.TenantID, RoleID: stringPtr(roleID), Domain: scope.TenantID, Resource: binding.Resource, Scope: string(binding.Scope), IDs: ids, OrgID: nullableStringPtr(scope.Organization)})
+		}
+		if len(scopeRows) > 0 {
+			if createErr := gorm.G[iamDataScopeWriteRow](tx).CreateInBatches(ctx, &scopeRows, 100); createErr != nil {
 				return ErrStoreUnavailable
 			}
 		}
@@ -836,7 +832,7 @@ func (s *GORMStore) AssignRoleDataScopes(ctx context.Context, roleID string, bin
 		} else if len(normalized) > 1 {
 			roleScope = domain.ScopeCustom
 		}
-		if result := tx.Table("roles").Where("tenant_id = ? AND id = ?", scope.TenantID, roleID).Updates(map[string]any{"data_scope": roleScope}); result.Error != nil {
+		if _, updateErr := gorm.G[roleRow](tx).Where("tenant_id = ? AND id = ?", scope.TenantID, roleID).Set(clause.Assignments(map[string]any{"data_scope": roleScope})).Update(ctx); updateErr != nil {
 			return ErrStoreUnavailable
 		}
 		updated = roleRowValue.toDomain(nil)
@@ -860,8 +856,8 @@ func (s *GORMStore) ListRoles(ctx context.Context) ([]domain.Role, error) {
 	if err != nil {
 		return nil, err
 	}
-	var rows []roleRow
-	if err := scopedRoleListQuery(s.read(ctx).Table("roles"), scope).Order("id ASC").Find(&rows).Error; err != nil {
+	rows, err := gorm.G[roleRow](s.read(ctx)).Scopes(scopedRoleScope(scope)).Order("id ASC").Find(ctx)
+	if err != nil {
 		return nil, ErrStoreUnavailable
 	}
 	out := make([]domain.Role, 0, len(rows))
@@ -885,6 +881,17 @@ func scopedRoleListQuery(query *gorm.DB, scope tenant.Context) *gorm.DB {
 	return query
 }
 
+func scopedRoleScope(scope tenant.Context) func(*gorm.Statement) {
+	return func(statement *gorm.Statement) {
+		statement.AddClause(clause.Where{Exprs: []clause.Expression{
+			clause.Eq{Column: clause.Column{Name: "tenant_id"}, Value: scope.TenantID},
+		}})
+		if !scope.PlatformAdmin && scope.Organization != "" {
+			statement.AddClause(clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: "(org_id = ? OR org_id IS NULL)", Vars: []any{scope.Organization}}}})
+		}
+	}
+}
+
 func (s *GORMStore) SaveMenu(ctx context.Context, menu domain.Menu) error {
 	if s == nil || s.db == nil {
 		return ErrStoreUnavailable
@@ -906,13 +913,7 @@ func (s *GORMStore) SaveMenu(ctx context.Context, menu domain.Menu) error {
 	if menu.OrgID == "" {
 		menu.OrgID = scope.Organization
 	}
-	return s.upsert(ctx, "menus", map[string]any{"tenant_id": scope.TenantID, "id": menu.ID}, map[string]any{
-		"tenant_id": scope.TenantID, "org_id": nullableString(menu.OrgID), "id": menu.ID,
-		"parent_id": nullableString(menu.ParentID), "name": menu.Name, "path": menu.Path,
-		"menu_type": string(menu.Type), "component": nullableString(menu.Component), "redirect": nullableString(menu.Redirect),
-		"icon": nullableString(menu.Icon), "permission": nullableString(menu.Permission), "sort_order": menu.Sort,
-		"visible": menu.Visible, "status": statusValue(menu.Active), "keep_alive": menu.KeepAlive, "external": menu.External,
-	})
+	return s.upsertMenu(ctx, menuWriteRow{ID: menu.ID, TenantID: scope.TenantID, OrgID: nullableStringPtr(menu.OrgID), ParentID: nullableStringPtr(menu.ParentID), Name: menu.Name, Path: menu.Path, MenuType: string(menu.Type), Component: nullableStringPtr(menu.Component), Redirect: nullableStringPtr(menu.Redirect), Icon: nullableStringPtr(menu.Icon), Permission: nullableStringPtr(menu.Permission), SortOrder: menu.Sort, Visible: menu.Visible, Status: statusValue(menu.Active), KeepAlive: menu.KeepAlive, External: menu.External})
 }
 
 func (s *GORMStore) ListMenus(ctx context.Context) ([]domain.Menu, error) {
@@ -923,12 +924,12 @@ func (s *GORMStore) ListMenus(ctx context.Context) ([]domain.Menu, error) {
 	if err != nil {
 		return nil, err
 	}
-	var rows []menuRow
-	query := s.read(ctx).Table("menus").Where("tenant_id = ?", scope.TenantID)
+	query := gorm.G[menuRow](s.read(ctx)).Where("tenant_id = ?", scope.TenantID)
 	if !scope.PlatformAdmin && scope.Organization != "" {
 		query = query.Where("(org_id = ? OR org_id IS NULL)", scope.Organization)
 	}
-	if err := query.Order("sort_order ASC, id ASC").Find(&rows).Error; err != nil {
+	rows, err := query.Order("sort_order ASC, id ASC").Find(ctx)
+	if err != nil {
 		return nil, ErrStoreUnavailable
 	}
 	out := make([]domain.Menu, 0, len(rows))
@@ -950,12 +951,12 @@ func (s *GORMStore) FindMenu(ctx context.Context, id string) (domain.Menu, error
 	if err != nil {
 		return domain.Menu{}, err
 	}
-	query := s.read(ctx).Table("menus").Where("tenant_id = ? AND id = ?", scope.TenantID, id)
+	query := gorm.G[menuRow](s.read(ctx)).Where("tenant_id = ? AND id = ?", scope.TenantID, id)
 	if !scope.PlatformAdmin && scope.Organization != "" {
 		query = query.Where("(org_id = ? OR org_id IS NULL)", scope.Organization)
 	}
-	var row menuRow
-	if err := query.Take(&row).Error; err != nil {
+	row, err := query.Take(ctx)
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return domain.Menu{}, domain.ErrResourceNotFound
 		}
@@ -976,26 +977,27 @@ func (s *GORMStore) DeleteMenu(ctx context.Context, id string) error {
 		return domain.ErrInvalidMenu
 	}
 	return s.db.WithinTransaction(ctx, func(tx *gorm.DB) error {
-		where := tx.Table("menus").Where("tenant_id = ? AND id = ?", scope.TenantID, id)
+		where := gorm.G[menuRow](tx).Where("tenant_id = ? AND id = ?", scope.TenantID, id)
 		if !scope.PlatformAdmin && scope.Organization != "" {
 			where = where.Where("(org_id = ? OR org_id IS NULL)", scope.Organization)
 		}
-		var count int64
-		if result := where.Count(&count); result.Error != nil {
+		count, countErr := where.Count(ctx, "*")
+		if countErr != nil {
 			return ErrStoreUnavailable
 		} else if count == 0 {
 			return domain.ErrResourceNotFound
 		}
-		childQuery := tx.Table("menus").Where("tenant_id = ? AND parent_id = ?", scope.TenantID, id)
+		childQuery := gorm.G[menuRow](tx).Where("tenant_id = ? AND parent_id = ?", scope.TenantID, id)
 		if !scope.PlatformAdmin && scope.Organization != "" {
 			childQuery = childQuery.Where("(org_id = ? OR org_id IS NULL)", scope.Organization)
 		}
-		if result := childQuery.Count(&count); result.Error != nil {
+		count, countErr = childQuery.Count(ctx, "*")
+		if countErr != nil {
 			return ErrStoreUnavailable
 		} else if count > 0 {
 			return domain.ErrMenuHasChildren
 		}
-		if result := where.Delete(&menuRow{}); result.Error != nil {
+		if _, deleteErr := where.Delete(ctx); deleteErr != nil {
 			return ErrStoreUnavailable
 		}
 		return nil
@@ -1025,28 +1027,29 @@ func (s *GORMStore) ReorderMenus(ctx context.Context, items []domain.MenuOrder) 
 				return domain.ErrInvalidMenu
 			}
 			seen[item.ID] = struct{}{}
-			where := tx.Table("menus").Where("tenant_id = ? AND id = ?", scope.TenantID, item.ID)
+			where := gorm.G[menuRow](tx).Where("tenant_id = ? AND id = ?", scope.TenantID, item.ID)
 			if !scope.PlatformAdmin && scope.Organization != "" {
 				where = where.Where("(org_id = ? OR org_id IS NULL)", scope.Organization)
 			}
-			var count int64
-			if result := where.Count(&count); result.Error != nil {
+			count, countErr := where.Count(ctx, "*")
+			if countErr != nil {
 				return ErrStoreUnavailable
 			} else if count == 0 {
 				return domain.ErrResourceNotFound
 			}
 			if item.ParentID != "" {
-				parent := tx.Table("menus").Where("tenant_id = ? AND id = ?", scope.TenantID, item.ParentID)
+				parent := gorm.G[menuRow](tx).Where("tenant_id = ? AND id = ?", scope.TenantID, item.ParentID)
 				if !scope.PlatformAdmin && scope.Organization != "" {
 					parent = parent.Where("(org_id = ? OR org_id IS NULL)", scope.Organization)
 				}
-				if result := parent.Count(&count); result.Error != nil {
+				count, countErr = parent.Count(ctx, "*")
+				if countErr != nil {
 					return ErrStoreUnavailable
 				} else if count == 0 {
 					return domain.ErrResourceNotFound
 				}
 			}
-			if result := where.Updates(map[string]any{"parent_id": nullableString(item.ParentID), "sort_order": item.Sort}); result.Error != nil {
+			if _, updateErr := where.Set(clause.Assignments(map[string]any{"parent_id": nullableString(item.ParentID), "sort_order": item.Sort})).Update(ctx); updateErr != nil {
 				return ErrStoreUnavailable
 			}
 		}
@@ -1073,10 +1076,7 @@ func (s *GORMStore) SavePermission(ctx context.Context, permission domain.Permis
 	if organization == "" {
 		organization = scope.Organization
 	}
-	return s.upsert(ctx, "permissions", map[string]any{"tenant_id": scope.TenantID, "id": permission.ID}, map[string]any{
-		"tenant_id": scope.TenantID, "org_id": nullableString(organization), "id": permission.ID,
-		"name": permission.Name, "method": permission.Method, "path": permission.Path, "status": statusValue(permission.Active),
-	})
+	return s.upsertPermission(ctx, permissionRow{ID: permission.ID, TenantID: scope.TenantID, OrgID: nullableStringPtr(organization), Name: permission.Name, Method: permission.Method, Path: permission.Path, Status: statusValue(permission.Active)})
 }
 
 func (s *GORMStore) ListPermissions(ctx context.Context) ([]domain.Permission, error) {
@@ -1087,10 +1087,10 @@ func (s *GORMStore) ListPermissions(ctx context.Context) ([]domain.Permission, e
 	if err != nil {
 		return nil, err
 	}
-	var rows []permissionRow
-	query := s.write(ctx).Table("permissions").Where("tenant_id = ?", scope.TenantID)
-	query = organizationReadQuery(query, "org_id", scope)
-	if err := query.Order("id ASC").Find(&rows).Error; err != nil {
+	query := gorm.G[permissionRow](s.write(ctx)).Where("tenant_id = ?", scope.TenantID)
+	query = query.Scopes(organizationReadScope("org_id", scope))
+	rows, err := query.Order("id ASC").Find(ctx)
+	if err != nil {
 		return nil, ErrStoreUnavailable
 	}
 	out := make([]domain.Permission, 0, len(rows))
@@ -1145,11 +1145,8 @@ func (s *GORMStore) SavePolicy(ctx context.Context, policy domain.Policy) error 
 	if effect == "" {
 		effect = domain.EffectDeny
 	}
-	result := s.write(ctx).Table("iam_policies").Create(map[string]any{
-		"tenant_id": scope.TenantID, "org_id": nullableString(organization), "user_id": userID,
-		"role_id": nullableString(policy.RoleID), "domain": policy.Domain, "method": method, "path": path, "effect": effect,
-	})
-	if result.Error != nil {
+	row := iamPolicyWriteRow{TenantID: scope.TenantID, OrgID: nullableStringPtr(organization), UserID: numericPointer(userID), RoleID: nullableStringPtr(policy.RoleID), Domain: policy.Domain, Method: method, Path: path, Effect: string(effect)}
+	if err := gorm.G[iamPolicyWriteRow](s.write(ctx)).Create(ctx, &row); err != nil {
 		return ErrStoreUnavailable
 	}
 	return nil
@@ -1163,10 +1160,10 @@ func (s *GORMStore) ListPolicies(ctx context.Context) ([]domain.Policy, error) {
 	if err != nil {
 		return nil, err
 	}
-	var rows []policyRow
-	query := s.write(ctx).Table("iam_policies").Where("tenant_id = ?", scope.TenantID)
-	query = organizationReadQuery(query, "org_id", scope)
-	if err := query.Order("id ASC").Find(&rows).Error; err != nil {
+	query := gorm.G[policyRow](s.write(ctx)).Where("tenant_id = ?", scope.TenantID)
+	query = query.Scopes(organizationReadScope("org_id", scope))
+	rows, err := query.Order("id ASC").Find(ctx)
+	if err != nil {
 		return nil, ErrStoreUnavailable
 	}
 	out := make([]domain.Policy, 0, len(rows))
@@ -1206,11 +1203,8 @@ func (s *GORMStore) SaveDataScope(ctx context.Context, scope domain.DataScope) e
 			return err
 		}
 	}
-	result := s.write(ctx).Table("iam_data_scopes").Create(map[string]any{
-		"tenant_id": tenantID, "user_id": userID, "role_id": nullableString(scope.RoleID), "domain": scope.Domain,
-		"resource": scope.Resource, "scope": scope.Scope, "ids": ids, "org_id": nullableString(scope.OrgID),
-	})
-	if result.Error != nil {
+	row := iamDataScopeWriteRow{TenantID: tenantID, UserID: numericPointer(userID), RoleID: nullableStringPtr(scope.RoleID), Domain: scope.Domain, Resource: scope.Resource, Scope: string(scope.Scope), IDs: ids, OrgID: nullableStringPtr(scope.OrgID)}
+	if err := gorm.G[iamDataScopeWriteRow](s.write(ctx)).Create(ctx, &row); err != nil {
 		return ErrStoreUnavailable
 	}
 	return nil
@@ -1224,9 +1218,9 @@ func (s *GORMStore) ListDataScopes(ctx context.Context) ([]domain.DataScope, err
 	if err != nil {
 		return nil, err
 	}
-	var rows []scopeRow
-	query := s.authorizationDataScopesQuery(ctx, scope)
-	if err := query.Order("id ASC").Find(&rows).Error; err != nil {
+	query := gorm.G[scopeRow](s.write(ctx)).Where("tenant_id = ?", scope.TenantID).Scopes(organizationReadScope("org_id", scope))
+	rows, err := query.Order("id ASC").Find(ctx)
+	if err != nil {
 		return nil, ErrStoreUnavailable
 	}
 	out := make([]domain.DataScope, 0, len(rows))
@@ -1264,8 +1258,8 @@ func (s *GORMStore) roleIDsFrom(database *gorm.DB, tenantID string, userID uint6
 	if database == nil {
 		return nil, ErrStoreUnavailable
 	}
-	var rows []struct{ RoleID string }
-	if err := database.Table("user_roles").Select("role_id").Where("tenant_id = ? AND user_id = ?", tenantID, userID).Order("role_id ASC").Find(&rows).Error; err != nil {
+	rows, err := gorm.G[roleIDRow](database).Select("role_id").Where("tenant_id = ? AND user_id = ?", tenantID, userID).Order("role_id ASC").Find(dbContext(database))
+	if err != nil {
 		return nil, ErrStoreUnavailable
 	}
 	roles := make([]string, 0, len(rows))
@@ -1290,9 +1284,8 @@ func (s *GORMStore) ListActiveRoleIDsForUser(ctx context.Context, userID string)
 	if err != nil {
 		return nil, err
 	}
-	var rows []activeRoleIDRow
-	query := activeRoleIDsQuery(s.write(ctx), scope, numericUserID)
-	if err := query.Order("ur.role_id ASC").Find(&rows).Error; err != nil {
+	rows, err := activeRoleIDsGeneric(s.write(ctx), ctx, scope, numericUserID)
+	if err != nil {
 		return nil, ErrStoreUnavailable
 	}
 	roles := make([]string, 0, len(rows))
@@ -1300,6 +1293,38 @@ func (s *GORMStore) ListActiveRoleIDsForUser(ctx context.Context, userID string)
 		roles = append(roles, row.RoleID)
 	}
 	return roles, nil
+}
+
+func activeRoleIDsGeneric(database *gorm.DB, ctx context.Context, scope tenant.Context, userID uint64) ([]activeRoleIDRow, error) {
+	if database == nil {
+		return nil, ErrStoreUnavailable
+	}
+	// GORM's generic JoinTarget is association-oriented and cannot describe
+	// these scalar-ID relations without adding ORM associations to the schema
+	// models. Build the fixed, identifier-only FROM/JOIN clause as a GORM
+	// clause option instead; the terminal query and scan remain gorm.G[T].
+	from := clause.From{
+		Tables: []clause.Table{{Name: "user_roles AS ur", Raw: true}},
+		Joins: []clause.Join{{
+			Table: clause.Table{Name: "roles AS r", Raw: true},
+			ON: clause.Where{Exprs: []clause.Expression{
+				clause.Expr{SQL: "r.tenant_id = ur.tenant_id AND r.id = ur.role_id"},
+			}},
+		}},
+	}
+	query := gorm.G[activeRoleIDRow](database, from).Select("ur.role_id").Where("ur.tenant_id = ? AND ur.user_id = ? AND r.status = ?", scope.TenantID, userID, "active")
+	if !scope.PlatformAdmin {
+		if scope.Organization == "" {
+			query = query.Where("r.org_id IS NULL AND ur.org_id IS NULL")
+		} else {
+			query = query.Where("(r.org_id IS NULL OR r.org_id = ?) AND (ur.org_id IS NULL OR ur.org_id = ?)", scope.Organization, scope.Organization)
+		}
+	}
+	rows, err := query.Order("ur.role_id ASC").Find(ctx)
+	if err != nil {
+		return nil, ErrStoreUnavailable
+	}
+	return rows, nil
 }
 
 type activeRoleIDRow struct {
@@ -1325,19 +1350,27 @@ func (s *GORMStore) rolePermissionIDs(ctx context.Context, tenantID, roleID stri
 	if s == nil || s.db == nil {
 		return nil, ErrStoreUnavailable
 	}
-	query := s.read(ctx).Table("iam_policies AS ip").
-		Select("p.id").
-		Joins("JOIN permissions AS p ON p.tenant_id = ip.tenant_id AND p.method = ip.method AND p.path = ip.path").
-		Where("ip.tenant_id = ? AND ip.role_id = ? AND ip.effect = ? AND p.status = ?", tenantID, roleID, domain.EffectAllow, "active")
-	if scope, err := tenant.RequireContext(ctx); err == nil {
-		if scope.Organization == "" {
-			query = query.Where("ip.org_id IS NULL AND p.org_id IS NULL")
-		} else {
-			query = query.Where("(ip.org_id = ? OR ip.org_id IS NULL) AND (p.org_id = ? OR p.org_id IS NULL)", scope.Organization, scope.Organization)
-		}
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return nil, err
 	}
-	var rows []struct{ ID string }
-	if err := query.Order("p.id ASC").Find(&rows).Error; err != nil {
+	from := clause.From{
+		Tables: []clause.Table{{Name: "iam_policies AS ip", Raw: true}},
+		Joins: []clause.Join{{
+			Table: clause.Table{Name: "permissions AS p", Raw: true},
+			ON: clause.Where{Exprs: []clause.Expression{
+				clause.Expr{SQL: "p.tenant_id = ip.tenant_id AND p.method = ip.method AND p.path = ip.path"},
+			}},
+		}},
+	}
+	query := gorm.G[permissionIDRow](s.read(ctx), from).Select("p.id").Where("ip.tenant_id = ? AND ip.role_id = ? AND ip.effect = ? AND p.status = ?", tenantID, roleID, domain.EffectAllow, "active")
+	if scope.Organization == "" {
+		query = query.Where("ip.org_id IS NULL AND p.org_id IS NULL")
+	} else {
+		query = query.Where("(ip.org_id = ? OR ip.org_id IS NULL) AND (p.org_id = ? OR p.org_id IS NULL)", scope.Organization, scope.Organization)
+	}
+	rows, err := query.Order("p.id ASC").Find(ctx)
+	if err != nil {
 		return nil, ErrStoreUnavailable
 	}
 	permissionIDs := make([]string, 0, len(rows))
@@ -1355,10 +1388,43 @@ func (s *GORMStore) read(ctx context.Context) *gorm.DB {
 }
 
 func organizationReadQuery(query *gorm.DB, column string, scope tenant.Context) *gorm.DB {
+	column, ok := organizationColumn(column)
+	if !ok {
+		// Organization scoping is an internal identifier; fail closed rather
+		// than interpolating an arbitrary column into a SQL predicate.
+		return query.Where("1 = 0")
+	}
 	if scope.Organization == "" {
 		return query.Where(column + " IS NULL")
 	}
 	return query.Where("("+column+" = ? OR "+column+" IS NULL)", scope.Organization)
+}
+
+func organizationReadScope(column string, scope tenant.Context) func(*gorm.Statement) {
+	return func(statement *gorm.Statement) {
+		column, ok := organizationColumn(column)
+		if !ok {
+			statement.AddClause(clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: "1 = 0"}}})
+			return
+		}
+		if scope.Organization == "" {
+			statement.AddClause(clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: column + " IS NULL"}}})
+			return
+		}
+		statement.AddClause(clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: "(" + column + " = ? OR " + column + " IS NULL)", Vars: []any{scope.Organization}}}})
+	}
+}
+
+// organizationColumn returns the only organization column accepted by the
+// scope helpers. Keep this whitelist closed because the value is embedded in
+// SQL expressions by both the compatibility and generic query paths.
+func organizationColumn(column string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(column)) {
+	case "org_id":
+		return "org_id", true
+	default:
+		return "", false
+	}
 }
 
 func (s *GORMStore) write(ctx context.Context) *gorm.DB {
@@ -1368,26 +1434,60 @@ func (s *GORMStore) write(ctx context.Context) *gorm.DB {
 	return s.db.Write(ctx)
 }
 
-func (s *GORMStore) upsert(ctx context.Context, table string, key, values map[string]any) error {
-	db := s.write(ctx)
+func dbContext(db *gorm.DB) context.Context {
+	if db != nil && db.Statement != nil && db.Statement.Context != nil {
+		return db.Statement.Context
+	}
+	return context.Background()
+}
+
+func (s *GORMStore) upsertRole(ctx context.Context, row roleRow) error {
+	return upsertRecord(ctx, s.write(ctx), map[string]any{"tenant_id": row.TenantID, "id": row.ID}, map[string]any{
+		"tenant_id": row.TenantID, "id": row.ID, "name": row.Name, "status": row.Status,
+		"data_scope": row.DataScope, "org_id": row.OrgID,
+	}, &row)
+}
+
+func (s *GORMStore) upsertMenu(ctx context.Context, row menuWriteRow) error {
+	return upsertRecord(ctx, s.write(ctx), map[string]any{"tenant_id": row.TenantID, "id": row.ID}, map[string]any{
+		"tenant_id": row.TenantID, "org_id": row.OrgID, "id": row.ID, "parent_id": row.ParentID,
+		"name": row.Name, "path": row.Path, "menu_type": row.MenuType, "component": row.Component,
+		"redirect": row.Redirect, "icon": row.Icon, "permission": row.Permission, "sort_order": row.SortOrder,
+		"visible": row.Visible, "status": row.Status, "keep_alive": row.KeepAlive, "external": row.External,
+	}, &row)
+}
+
+func (s *GORMStore) upsertPermission(ctx context.Context, row permissionRow) error {
+	return upsertRecord(ctx, s.write(ctx), map[string]any{"tenant_id": row.TenantID, "id": row.ID}, map[string]any{
+		"tenant_id": row.TenantID, "org_id": row.OrgID, "id": row.ID, "name": row.Name,
+		"method": row.Method, "path": row.Path, "status": row.Status,
+	}, &row)
+}
+
+// upsertRecord keeps the explicit update-then-create semantics of the legacy
+// adapters while making the terminal operations typed. The caller supplies a
+// concrete persistence/projection value, so no map-backed Create reaches the
+// database.
+func upsertRecord[T any](ctx context.Context, db *gorm.DB, key, values map[string]any, record *T) error {
 	if db == nil {
 		return ErrStoreUnavailable
 	}
-	result := db.Table(table).Where(key).Updates(values)
-	if result.Error != nil {
+	query := gorm.G[T](db).Where(key)
+	rows, err := query.Set(clause.Assignments(values)).Update(ctx)
+	if err != nil {
 		return ErrStoreUnavailable
 	}
-	if result.RowsAffected > 0 {
+	if rows > 0 {
 		return nil
 	}
-	var count int64
-	if err := db.Table(table).Where(key).Count(&count).Error; err != nil {
+	count, err := query.Count(ctx, "*")
+	if err != nil {
 		return ErrStoreUnavailable
 	}
 	if count > 0 {
 		return nil
 	}
-	if err := db.Table(table).Create(values).Error; err != nil {
+	if err := gorm.G[T](db).Create(ctx, record); err != nil {
 		return ErrStoreUnavailable
 	}
 	return nil
@@ -1406,6 +1506,25 @@ func nullableString(value string) any {
 		return nil
 	}
 	return value
+}
+
+func nullableStringPtr(value string) *string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return &value
+}
+
+func numericPointer(value any) *uint64 {
+	switch typed := value.(type) {
+	case uint64:
+		return &typed
+	case *uint64:
+		return typed
+	default:
+		return nil
+	}
 }
 
 func statusValue(active bool) string {
@@ -1432,6 +1551,17 @@ type userRow struct {
 	LastLoginAt        *time.Time `gorm:"column:last_login_at"`
 	PasswordChangedAt  *time.Time `gorm:"column:password_changed_at"`
 }
+
+func (userRow) TableName() string { return "users" }
+
+type userRoleRow struct {
+	UserID   uint64  `gorm:"column:user_id"`
+	RoleID   string  `gorm:"column:role_id"`
+	TenantID string  `gorm:"column:tenant_id"`
+	OrgID    *string `gorm:"column:org_id"`
+}
+
+func (userRoleRow) TableName() string { return "user_roles" }
 
 func (row userRow) toDomain(roleIDs []string) domain.User {
 	nickname := stringValue(row.Nickname)
@@ -1490,6 +1620,37 @@ func profileUpdateValues(user domain.User) (map[string]any, error) {
 		values["email_normalized"] = nil
 	}
 	return values, nil
+}
+
+func userRowFromValues(values map[string]any) userRow {
+	row := userRow{
+		TenantID:     mapString(values["tenant_id"]),
+		Username:     mapString(values["username"]),
+		PasswordHash: mapString(values["password_hash"]),
+		Status:       mapString(values["status"]),
+	}
+	row.UsernameNormalized = mapStringPtr(values["username_normalized"])
+	row.Email = mapStringPtr(values["email"])
+	row.EmailNormalized = mapStringPtr(values["email_normalized"])
+	row.Nickname = mapStringPtr(values["nickname"])
+	row.Avatar = mapStringPtr(values["avatar"])
+	row.Phone = mapStringPtr(values["phone"])
+	row.OrgID = mapStringPtr(values["org_id"])
+	return row
+}
+
+func mapString(value any) string {
+	if text, ok := value.(string); ok {
+		return text
+	}
+	return ""
+}
+
+func mapStringPtr(value any) *string {
+	if text, ok := value.(string); ok {
+		return &text
+	}
+	return nil
 }
 
 func mapUserProfileError(err error) error {
@@ -1554,6 +1715,8 @@ type roleRow struct {
 	DataScope string `gorm:"column:data_scope"`
 }
 
+func (roleRow) TableName() string { return "roles" }
+
 func (row roleRow) toDomain(userIDs []string) domain.Role {
 	return domain.Role{
 		ID: row.ID, Name: row.Name, TenantID: row.TenantID, OrgID: stringValue(row.OrgID),
@@ -1580,6 +1743,29 @@ type menuRow struct {
 	External   bool
 }
 
+func (menuRow) TableName() string { return "menus" }
+
+type menuWriteRow struct {
+	ID         string  `gorm:"column:id;primaryKey"`
+	TenantID   string  `gorm:"column:tenant_id"`
+	OrgID      *string `gorm:"column:org_id"`
+	ParentID   *string `gorm:"column:parent_id"`
+	Name       string  `gorm:"column:name"`
+	Path       string  `gorm:"column:path"`
+	MenuType   string  `gorm:"column:menu_type"`
+	Component  *string `gorm:"column:component"`
+	Redirect   *string `gorm:"column:redirect"`
+	Icon       *string `gorm:"column:icon"`
+	Permission *string `gorm:"column:permission"`
+	SortOrder  int     `gorm:"column:sort_order"`
+	Visible    bool    `gorm:"column:visible"`
+	Status     string  `gorm:"column:status"`
+	KeepAlive  bool    `gorm:"column:keep_alive"`
+	External   bool    `gorm:"column:external"`
+}
+
+func (menuWriteRow) TableName() string { return "menus" }
+
 func (row menuRow) toDomain() domain.Menu {
 	menuType := domain.MenuType(row.MenuType.String)
 	if menuType == "" {
@@ -1603,6 +1789,49 @@ type permissionRow struct {
 	Path     string
 	Status   string
 }
+
+func (permissionRow) TableName() string { return "permissions" }
+
+type iamPolicyWriteRow struct {
+	ID       uint64  `gorm:"column:id;primaryKey"`
+	TenantID string  `gorm:"column:tenant_id"`
+	OrgID    *string `gorm:"column:org_id"`
+	UserID   *uint64 `gorm:"column:user_id"`
+	RoleID   *string `gorm:"column:role_id"`
+	Domain   string  `gorm:"column:domain"`
+	Method   string  `gorm:"column:method"`
+	Path     string  `gorm:"column:path"`
+	Effect   string  `gorm:"column:effect"`
+}
+
+func (iamPolicyWriteRow) TableName() string { return "iam_policies" }
+
+type iamDataScopeWriteRow struct {
+	ID       uint64  `gorm:"column:id;primaryKey"`
+	TenantID string  `gorm:"column:tenant_id"`
+	OrgID    *string `gorm:"column:org_id"`
+	UserID   *uint64 `gorm:"column:user_id"`
+	RoleID   *string `gorm:"column:role_id"`
+	Domain   string  `gorm:"column:domain"`
+	Resource string  `gorm:"column:resource"`
+	Scope    string  `gorm:"column:scope"`
+	IDs      []byte  `gorm:"column:ids"`
+}
+
+func (iamDataScopeWriteRow) TableName() string { return "iam_data_scopes" }
+
+type roleIDRow struct {
+	RoleID string `gorm:"column:role_id"`
+}
+
+func (roleIDRow) TableName() string { return "user_roles" }
+
+type permissionIDRow struct {
+	ID string `gorm:"column:id"`
+}
+
+func (permissionIDRow) TableName() string { return "permissions" }
+
 type policyRow struct {
 	UserID sql.NullInt64  `gorm:"column:user_id"`
 	RoleID sql.NullString `gorm:"column:role_id"`
@@ -1612,7 +1841,11 @@ type policyRow struct {
 	Path   string
 	Effect string
 }
+
+func (policyRow) TableName() string { return "iam_policies" }
+
 type scopeRow struct {
+	TenantID string         `gorm:"column:tenant_id"`
 	UserID   sql.NullInt64  `gorm:"column:user_id"`
 	RoleID   sql.NullString `gorm:"column:role_id"`
 	OrgID    sql.NullString `gorm:"column:org_id"`
@@ -1621,6 +1854,8 @@ type scopeRow struct {
 	Scope    string
 	IDs      []byte
 }
+
+func (scopeRow) TableName() string { return "iam_data_scopes" }
 
 var (
 	_ interface {

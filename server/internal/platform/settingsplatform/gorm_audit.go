@@ -2,6 +2,7 @@ package settingsplatform
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strconv"
 	"time"
@@ -9,24 +10,15 @@ import (
 	settingsapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/settings"
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/persistence/gormdb"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/persistence/model"
+	"gorm.io/gorm"
 )
 
 type GORMAuditSink struct{ db *gormdb.Store }
 
 func NewGORMAuditSink(db *gormdb.Store) *GORMAuditSink { return &GORMAuditSink{db: db} }
 
-type settingsAuditRecord struct {
-	UserID    *uint64           `gorm:"column:user_id"`
-	EventType string            `gorm:"column:event_type"`
-	Category  string            `gorm:"column:category"`
-	Outcome   string            `gorm:"column:outcome"`
-	Metadata  map[string]string `gorm:"column:metadata;serializer:json"`
-	CreatedAt time.Time         `gorm:"column:created_at"`
-	TenantID  string            `gorm:"column:tenant_id"`
-	OrgID     string            `gorm:"column:org_id"`
-}
-
-func (settingsAuditRecord) TableName() string { return "auth_audit_events" }
+type settingsAuditRecord = model.AuthAuditEvent
 
 func (s *GORMAuditSink) Record(ctx context.Context, event settingsapp.AuditEvent) error {
 	if s == nil || s.db == nil {
@@ -41,10 +33,18 @@ func (s *GORMAuditSink) Record(ctx context.Context, event settingsapp.AuditEvent
 		userID = &parsed
 	}
 	metadata := map[string]string{"key": event.Key, "version": strconv.FormatInt(event.Version, 10)}
-	record := settingsAuditRecord{UserID: userID, EventType: "settings." + event.Action, Category: "operation", Outcome: "success", Metadata: metadata, CreatedAt: time.Now().UTC()}
-	record.TenantID = scope.TenantID
-	record.OrgID = scope.Organization
-	if err := s.db.Write(ctx).Create(&record).Error; err != nil {
+	encoded, err := json.Marshal(metadata)
+	if err != nil {
+		return errors.New("settings audit sink unavailable")
+	}
+	metadataValue := model.JSONValue(encoded)
+	orgID := scope.Organization
+	var orgPtr *string
+	if orgID != "" {
+		orgPtr = &orgID
+	}
+	record := settingsAuditRecord{UserID: userID, EventType: "settings." + event.Action, Category: "operation", Outcome: "success", Metadata: &metadataValue, CreatedAt: time.Now().UTC(), TenantID: scope.TenantID, OrgID: orgPtr}
+	if err := gorm.G[settingsAuditRecord](s.db.Write(ctx)).Create(ctx, &record); err != nil {
 		return errors.New("settings audit sink unavailable")
 	}
 	return nil

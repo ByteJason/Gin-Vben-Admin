@@ -11,7 +11,10 @@ import (
 
 	mailapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/mail"
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/persistence/gormdb"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/persistence/gormquery"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/persistence/model"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type GORMAccountRepository struct{ db *gormdb.Store }
@@ -28,83 +31,22 @@ func NewGORMMessageRepository(db *gormdb.Store) *GORMMessageRepository {
 	return &GORMMessageRepository{db: db}
 }
 
-type smtpAccountRecord struct {
-	ID                 string     `gorm:"column:id;primaryKey"`
-	TenantID           string     `gorm:"column:tenant_id"`
-	OrgID              string     `gorm:"column:org_id"`
-	AccountName        string     `gorm:"column:account_name"`
-	Enabled            bool       `gorm:"column:enabled"`
-	Host               string     `gorm:"column:host"`
-	Port               int        `gorm:"column:port"`
-	Username           string     `gorm:"column:username"`
-	PasswordCiphertext []byte     `gorm:"column:password_ciphertext"`
-	Weight             int        `gorm:"column:weight"`
-	FromEmail          string     `gorm:"column:from_email"`
-	FromName           string     `gorm:"column:from_name"`
-	ImplicitTLS        bool       `gorm:"column:implicit_tls"`
-	CreatedAt          time.Time  `gorm:"column:created_at"`
-	UpdatedAt          time.Time  `gorm:"column:updated_at"`
-	DeletedAt          *time.Time `gorm:"column:deleted_at"`
-}
-
-func (smtpAccountRecord) TableName() string { return "smtp_accounts" }
-
-type emailMessageRecord struct {
-	ID                string     `gorm:"column:id;primaryKey"`
-	TenantID          string     `gorm:"column:tenant_id"`
-	OrgID             string     `gorm:"column:org_id"`
-	SMTPAccountID     string     `gorm:"column:smtp_account_id"`
-	SenderID          string     `gorm:"column:sender_id"`
-	Subject           string     `gorm:"column:subject"`
-	BodyCiphertext    []byte     `gorm:"column:body_ciphertext"`
-	BodyDigest        string     `gorm:"column:body_digest"`
-	Status            string     `gorm:"column:status"`
-	AttemptCount      int        `gorm:"column:attempt_count"`
-	ProviderMessageID string     `gorm:"column:provider_message_id"`
-	LastErrorCode     string     `gorm:"column:last_error_code"`
-	SentAt            *time.Time `gorm:"column:sent_at"`
-	IdempotencyKey    string     `gorm:"column:idempotency_key"`
-	CreatedAt         time.Time  `gorm:"column:created_at"`
-	UpdatedAt         time.Time  `gorm:"column:updated_at"`
-	DeletedAt         *time.Time `gorm:"column:deleted_at"`
-}
-
-func (emailMessageRecord) TableName() string { return "email_messages" }
-
-type emailRecipientRecord struct {
-	ID        string     `gorm:"column:id;primaryKey"`
-	MessageID string     `gorm:"column:message_id"`
-	Kind      string     `gorm:"column:kind"`
-	Address   string     `gorm:"column:address"`
-	CreatedAt time.Time  `gorm:"column:created_at"`
-	UpdatedAt time.Time  `gorm:"column:updated_at"`
-	DeletedAt *time.Time `gorm:"column:deleted_at"`
-}
-
-func (emailRecipientRecord) TableName() string { return "email_recipients" }
-
-type emailAttemptRecord struct {
-	ID        string     `gorm:"column:id;primaryKey"`
-	MessageID string     `gorm:"column:message_id"`
-	AccountID string     `gorm:"column:account_id"`
-	AttemptNo int        `gorm:"column:attempt_no"`
-	Stage     string     `gorm:"column:stage"`
-	Code      string     `gorm:"column:code"`
-	CreatedAt time.Time  `gorm:"column:created_at"`
-	UpdatedAt time.Time  `gorm:"column:updated_at"`
-	DeletedAt *time.Time `gorm:"column:deleted_at"`
-}
-
-func (emailAttemptRecord) TableName() string { return "email_delivery_attempts" }
+// Mail repositories use the canonical persistence models directly. Nullable
+// foreign-key-like IDs stay pointers so a NULL from a fresh schema is decoded
+// without lossy zero-value coercion; relation integrity remains application
+// owned rather than database-enforced.
+type smtpAccountRecord = model.SMTPAccount
+type emailMessageRecord = model.EmailMessage
+type emailRecipientRecord = model.EmailRecipient
+type emailAttemptRecord = model.EmailDeliveryAttempt
 
 func (r *GORMAccountRepository) List(ctx context.Context, tenantID, orgID string) ([]mailapp.Account, error) {
 	if r == nil || r.db == nil {
 		return nil, errors.New("mail repository is not initialized")
 	}
-	query := r.db.Read(ctx).Where("deleted_at IS NULL")
-	query = accountScope(query, tenantID, orgID)
-	var records []smtpAccountRecord
-	if err := query.Order("created_at ASC").Find(&records).Error; err != nil {
+	query := gorm.G[smtpAccountRecord](r.db.Read(ctx)).Scopes(accountScope(tenantID, orgID)).Where("deleted_at IS NULL")
+	records, err := query.Order("created_at ASC").Find(ctx)
+	if err != nil {
 		return nil, err
 	}
 	items := make([]mailapp.Account, 0, len(records))
@@ -119,9 +61,9 @@ func (r *GORMAccountRepository) Get(ctx context.Context, id string, scope ...str
 		return mailapp.Account{}, errors.New("mail repository is not initialized")
 	}
 	tenantID, orgID := optionalScope(scope)
-	var record smtpAccountRecord
-	query := accountScope(r.db.Read(ctx), tenantID, orgID).Where("id = ? AND deleted_at IS NULL", strings.TrimSpace(id))
-	if err := query.First(&record).Error; err != nil {
+	query := gorm.G[smtpAccountRecord](r.db.Read(ctx)).Scopes(accountScope(tenantID, orgID)).Where("id = ? AND deleted_at IS NULL", strings.TrimSpace(id))
+	record, err := query.First(ctx)
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return mailapp.Account{}, mailapp.ErrAccountNotFound
 		}
@@ -134,8 +76,10 @@ func (r *GORMAccountRepository) Create(ctx context.Context, account mailapp.Acco
 	if r == nil || r.db == nil {
 		return mailapp.Account{}, errors.New("mail repository is not initialized")
 	}
-	var existing smtpAccountRecord
-	duplicate := r.db.Read(ctx).Where("tenant_id = ? AND deleted_at IS NULL AND (account_name = ? OR (host = ? AND port = ? AND username = ?))", account.TenantID, account.Name, account.Host, account.Port, account.Username).First(&existing).Error
+	// Duplicate detection participates in the following write, so pin it to
+	// the primary and avoid a replica-lag false negative immediately after an
+	// account was created.
+	_, duplicate := gorm.G[smtpAccountRecord](r.db.Write(ctx)).Where("tenant_id = ? AND deleted_at IS NULL AND (account_name = ? OR (host = ? AND port = ? AND username = ?))", account.TenantID, account.Name, account.Host, int32(account.Port), account.Username).First(ctx)
 	if duplicate == nil {
 		return mailapp.Account{}, mailapp.ErrAccountConflict
 	}
@@ -143,7 +87,7 @@ func (r *GORMAccountRepository) Create(ctx context.Context, account mailapp.Acco
 		return mailapp.Account{}, duplicate
 	}
 	record := fromAccount(account)
-	if err := r.db.Write(ctx).Create(&record).Error; err != nil {
+	if err := createAccount(ctx, r.db.Write(ctx), record); err != nil {
 		return mailapp.Account{}, err
 	}
 	return toAccount(record), nil
@@ -153,15 +97,14 @@ func (r *GORMAccountRepository) Update(ctx context.Context, account mailapp.Acco
 	if r == nil || r.db == nil {
 		return mailapp.Account{}, errors.New("mail repository is not initialized")
 	}
-	var record smtpAccountRecord
-	if err := accountScope(r.db.Write(ctx), account.TenantID, account.OrgID).Where("id = ? AND deleted_at IS NULL", account.ID).First(&record).Error; err != nil {
+	record, err := gorm.G[smtpAccountRecord](r.db.Write(ctx)).Scopes(accountScope(account.TenantID, account.OrgID)).Where("id = ? AND deleted_at IS NULL", account.ID).First(ctx)
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return mailapp.Account{}, mailapp.ErrAccountNotFound
 		}
 		return mailapp.Account{}, err
 	}
-	var duplicate smtpAccountRecord
-	dupErr := r.db.Read(ctx).Where("tenant_id = ? AND deleted_at IS NULL AND id <> ? AND (account_name = ? OR (host = ? AND port = ? AND username = ?))", account.TenantID, account.ID, account.Name, account.Host, account.Port, account.Username).First(&duplicate).Error
+	_, dupErr := gorm.G[smtpAccountRecord](r.db.Write(ctx)).Where("tenant_id = ? AND deleted_at IS NULL AND id <> ? AND (account_name = ? OR (host = ? AND port = ? AND username = ?))", account.TenantID, account.ID, account.Name, account.Host, int32(account.Port), account.Username).First(ctx)
 	if dupErr == nil {
 		return mailapp.Account{}, mailapp.ErrAccountConflict
 	}
@@ -169,7 +112,7 @@ func (r *GORMAccountRepository) Update(ctx context.Context, account mailapp.Acco
 		return mailapp.Account{}, dupErr
 	}
 	record = fromAccount(account)
-	if err := r.db.Write(ctx).Model(&smtpAccountRecord{}).Where("id = ?", account.ID).Updates(map[string]any{"tenant_id": record.TenantID, "org_id": record.OrgID, "account_name": record.AccountName, "enabled": record.Enabled, "host": record.Host, "port": record.Port, "username": record.Username, "password_ciphertext": record.PasswordCiphertext, "weight": record.Weight, "from_email": record.FromEmail, "from_name": record.FromName, "implicit_tls": record.ImplicitTLS, "updated_at": record.UpdatedAt}).Error; err != nil {
+	if _, err := gorm.G[smtpAccountRecord](r.db.Write(ctx)).Where("id = ?", account.ID).Set(clause.Assignments(map[string]any{"tenant_id": record.TenantID, "org_id": record.OrgID, "account_name": record.AccountName, "enabled": record.Enabled, "host": record.Host, "port": record.Port, "username": record.Username, "password_ciphertext": record.PasswordCiphertext, "weight": record.Weight, "from_email": record.FromEmail, "from_name": record.FromName, "implicit_tls": record.ImplicitTLS, "updated_at": record.UpdatedAt})).Update(ctx); err != nil {
 		return mailapp.Account{}, err
 	}
 	return toAccount(record), nil
@@ -179,11 +122,11 @@ func (r *GORMAccountRepository) SoftDelete(ctx context.Context, id, tenantID, or
 	if r == nil || r.db == nil {
 		return errors.New("mail repository is not initialized")
 	}
-	result := accountScope(r.db.Write(ctx), tenantID, orgID).Where("id = ? AND deleted_at IS NULL", strings.TrimSpace(id)).Model(&smtpAccountRecord{}).Updates(map[string]any{"deleted_at": at, "updated_at": at})
-	if result.Error != nil {
-		return result.Error
+	rows, err := gorm.G[smtpAccountRecord](r.db.Write(ctx)).Scopes(accountScope(tenantID, orgID)).Where("id = ? AND deleted_at IS NULL", strings.TrimSpace(id)).Set(clause.Assignments(map[string]any{"deleted_at": at, "updated_at": at})).Update(ctx)
+	if err != nil {
+		return err
 	}
-	if result.RowsAffected == 0 {
+	if rows == 0 {
 		return mailapp.ErrAccountNotFound
 	}
 	return nil
@@ -195,12 +138,12 @@ func (r *GORMMessageRepository) CreateMessage(ctx context.Context, message maila
 	}
 	record := fromMessage(message)
 	err := r.db.WithinTransaction(ctx, func(tx *gorm.DB) error {
-		if err := tx.Create(&record).Error; err != nil {
+		if err := createMessage(ctx, tx, record); err != nil {
 			return err
 		}
 		for _, recipient := range message.Recipients {
 			item := emailRecipientRecord{ID: newRecordID(), MessageID: message.ID, Kind: recipient.Kind, Address: recipient.Address, CreatedAt: message.CreatedAt, UpdatedAt: message.UpdatedAt}
-			if err := tx.Create(&item).Error; err != nil {
+			if err := createRecipient(ctx, tx, item); err != nil {
 				return err
 			}
 		}
@@ -221,7 +164,7 @@ func (r *GORMMessageRepository) Update(ctx context.Context, message mailapp.Emai
 		return mailapp.EmailMessage{}, errors.New("mail repository is not initialized")
 	}
 	record := fromMessage(message)
-	if err := r.db.Write(ctx).Model(&emailMessageRecord{}).Where("id = ? AND tenant_id = ? AND deleted_at IS NULL", message.ID, message.TenantID).Updates(map[string]any{"smtp_account_id": record.SMTPAccountID, "sender_id": record.SenderID, "subject": record.Subject, "body_ciphertext": record.BodyCiphertext, "body_digest": record.BodyDigest, "status": record.Status, "attempt_count": record.AttemptCount, "provider_message_id": record.ProviderMessageID, "last_error_code": record.LastErrorCode, "sent_at": record.SentAt, "idempotency_key": record.IdempotencyKey, "updated_at": record.UpdatedAt}).Error; err != nil {
+	if _, err := gorm.G[emailMessageRecord](r.db.Write(ctx)).Where("id = ? AND tenant_id = ? AND deleted_at IS NULL", message.ID, message.TenantID).Set(clause.Assignments(map[string]any{"smtp_account_id": record.SMTPAccountID, "sender_id": record.SenderID, "subject": record.Subject, "body_ciphertext": record.BodyCiphertext, "body_digest": record.BodyDigest, "status": record.Status, "attempt_count": record.AttemptCount, "provider_message_id": record.ProviderMessageID, "last_error_code": record.LastErrorCode, "sent_at": record.SentAt, "idempotency_key": record.IdempotencyKey, "updated_at": record.UpdatedAt})).Update(ctx); err != nil {
 		return mailapp.EmailMessage{}, err
 	}
 	return r.Get(ctx, message.ID, message.TenantID, message.OrgID)
@@ -231,12 +174,12 @@ func (r *GORMMessageRepository) List(ctx context.Context, tenantID, orgID string
 	if r == nil || r.db == nil {
 		return mailapp.MessagePage{}, errors.New("mail repository is not initialized")
 	}
-	query := messageScope(r.db.Read(ctx), tenantID, orgID).Where("deleted_at IS NULL")
+	query := gorm.G[emailMessageRecord](r.db.Read(ctx)).Scopes(messageScope(tenantID, orgID)).Where("deleted_at IS NULL")
 	if strings.TrimSpace(filter.Status) != "" {
 		query = query.Where("status = ?", strings.TrimSpace(filter.Status))
 	}
-	var total int64
-	if err := query.Model(&emailMessageRecord{}).Count(&total).Error; err != nil {
+	total, err := query.Count(ctx, "*")
+	if err != nil {
 		return mailapp.MessagePage{}, err
 	}
 	limit := filter.Limit
@@ -246,8 +189,8 @@ func (r *GORMMessageRepository) List(ctx context.Context, tenantID, orgID string
 	if limit == 0 {
 		limit = 50
 	}
-	var records []emailMessageRecord
-	if err := query.Order("created_at DESC").Limit(limit).Offset(filter.Offset).Find(&records).Error; err != nil {
+	records, err := query.Order("created_at DESC").Limit(limit).Offset(filter.Offset).Find(ctx)
+	if err != nil {
 		return mailapp.MessagePage{}, err
 	}
 	items := make([]mailapp.MessageView, 0, len(records))
@@ -267,8 +210,8 @@ func (r *GORMMessageRepository) Get(ctx context.Context, id string, scope ...str
 		return mailapp.EmailMessage{}, errors.New("mail repository is not initialized")
 	}
 	tenantID, orgID := optionalScope(scope)
-	var record emailMessageRecord
-	if err := messageScope(r.db.Read(ctx), tenantID, orgID).Where("id = ? AND deleted_at IS NULL", strings.TrimSpace(id)).First(&record).Error; err != nil {
+	record, err := gorm.G[emailMessageRecord](r.db.Read(ctx)).Scopes(messageScope(tenantID, orgID)).Where("id = ? AND deleted_at IS NULL", strings.TrimSpace(id)).First(ctx)
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return mailapp.EmailMessage{}, mailapp.ErrMessageNotFound
 		}
@@ -285,8 +228,8 @@ func (r *GORMMessageRepository) GetByIdempotency(ctx context.Context, tenantID, 
 	if r == nil || r.db == nil {
 		return mailapp.EmailMessage{}, mailapp.ErrRepositoryFailure
 	}
-	var record emailMessageRecord
-	if err := messageScope(r.db.Read(ctx), tenantID, "").Where("idempotency_key = ? AND deleted_at IS NULL", key).First(&record).Error; err != nil {
+	record, err := gorm.G[emailMessageRecord](r.db.Read(ctx)).Scopes(messageScope(tenantID, "")).Where("idempotency_key = ? AND deleted_at IS NULL", key).First(ctx)
+	if err != nil {
 		return mailapp.EmailMessage{}, mailapp.ErrMessageNotFound
 	}
 	recipients, err := r.recipients(ctx, record.ID)
@@ -297,8 +240,8 @@ func (r *GORMMessageRepository) GetByIdempotency(ctx context.Context, tenantID, 
 }
 
 func (r *GORMMessageRepository) recipients(ctx context.Context, messageID string) ([]mailapp.Recipient, error) {
-	var records []emailRecipientRecord
-	if err := r.db.Read(ctx).Where("message_id = ? AND deleted_at IS NULL", messageID).Order("created_at ASC").Find(&records).Error; err != nil {
+	records, err := gorm.G[emailRecipientRecord](r.db.Read(ctx)).Where("message_id = ? AND deleted_at IS NULL", messageID).Order("created_at ASC").Find(ctx)
+	if err != nil {
 		return nil, err
 	}
 	items := make([]mailapp.Recipient, 0, len(records))
@@ -312,22 +255,64 @@ func (r *GORMMessageRepository) Append(ctx context.Context, attempt mailapp.Atte
 	if r == nil || r.db == nil {
 		return errors.New("mail repository is not initialized")
 	}
-	record := emailAttemptRecord{ID: attempt.ID, MessageID: attempt.MessageID, AccountID: attempt.AccountID, AttemptNo: attempt.AttemptNo, Stage: attempt.Stage, Code: attempt.Code, CreatedAt: attempt.CreatedAt, UpdatedAt: attempt.CreatedAt}
-	return r.db.Write(ctx).Create(&record).Error
+	record := emailAttemptRecord{ID: attempt.ID, MessageID: attempt.MessageID, AccountID: attempt.AccountID, AttemptNo: int32(attempt.AttemptNo), Stage: attempt.Stage, Code: attempt.Code, CreatedAt: attempt.CreatedAt, UpdatedAt: attempt.CreatedAt}
+	return createAttempt(ctx, r.db.Write(ctx), record)
 }
 
-func accountScope(query *gorm.DB, tenantID, orgID string) *gorm.DB {
-	if strings.TrimSpace(tenantID) != "" {
-		query = query.Where("tenant_id = ?", tenantID)
-	}
-	if strings.TrimSpace(orgID) != "" {
-		query = query.Where("org_id = ?", orgID)
-	}
-	return query
+// The canonical mail models retain database defaults for fresh-install DDL.
+// Runtime inputs, however, carry explicit zero values (notably Enabled=false
+// and Weight=0), so use the typed assignment-create helper to avoid GORM
+// replacing those values with the model default during the Create callback.
+func createAccount(ctx context.Context, db *gorm.DB, record smtpAccountRecord) error {
+	return gormquery.CreateValues[smtpAccountRecord](ctx, db, map[string]any{
+		"id": record.ID, "tenant_id": record.TenantID, "org_id": record.OrgID,
+		"account_name": record.AccountName, "enabled": record.Enabled, "host": record.Host,
+		"port": record.Port, "username": record.Username, "password_ciphertext": record.PasswordCiphertext,
+		"weight": record.Weight, "from_email": record.FromEmail, "from_name": record.FromName,
+		"implicit_tls": record.ImplicitTLS, "created_at": record.CreatedAt, "updated_at": record.UpdatedAt,
+		"deleted_at": record.DeletedAt,
+	})
 }
 
-func messageScope(query *gorm.DB, tenantID, orgID string) *gorm.DB {
-	return accountScope(query, tenantID, orgID)
+func createMessage(ctx context.Context, db *gorm.DB, record emailMessageRecord) error {
+	return gormquery.CreateValues[emailMessageRecord](ctx, db, map[string]any{
+		"id": record.ID, "tenant_id": record.TenantID, "org_id": record.OrgID,
+		"smtp_account_id": record.SMTPAccountID, "sender_id": record.SenderID, "subject": record.Subject,
+		"body_ciphertext": record.BodyCiphertext, "body_digest": record.BodyDigest, "status": record.Status,
+		"attempt_count": record.AttemptCount, "provider_message_id": record.ProviderMessageID,
+		"last_error_code": record.LastErrorCode, "sent_at": record.SentAt, "idempotency_key": record.IdempotencyKey,
+		"created_at": record.CreatedAt, "updated_at": record.UpdatedAt, "deleted_at": record.DeletedAt,
+	})
+}
+
+func createRecipient(ctx context.Context, db *gorm.DB, record emailRecipientRecord) error {
+	return gormquery.CreateValues[emailRecipientRecord](ctx, db, map[string]any{
+		"id": record.ID, "message_id": record.MessageID, "kind": record.Kind, "address": record.Address,
+		"created_at": record.CreatedAt, "updated_at": record.UpdatedAt, "deleted_at": record.DeletedAt,
+	})
+}
+
+func createAttempt(ctx context.Context, db *gorm.DB, record emailAttemptRecord) error {
+	return gormquery.CreateValues[emailAttemptRecord](ctx, db, map[string]any{
+		"id": record.ID, "message_id": record.MessageID, "account_id": record.AccountID,
+		"attempt_no": record.AttemptNo, "stage": record.Stage, "code": record.Code,
+		"created_at": record.CreatedAt, "updated_at": record.UpdatedAt, "deleted_at": record.DeletedAt,
+	})
+}
+
+func accountScope(tenantID, orgID string) func(*gorm.Statement) {
+	return func(stmt *gorm.Statement) {
+		if strings.TrimSpace(tenantID) != "" {
+			stmt.AddClause(clause.Where{Exprs: []clause.Expression{clause.Eq{Column: clause.Column{Name: "tenant_id"}, Value: tenantID}}})
+		}
+		if strings.TrimSpace(orgID) != "" {
+			stmt.AddClause(clause.Where{Exprs: []clause.Expression{clause.Eq{Column: clause.Column{Name: "org_id"}, Value: orgID}}})
+		}
+	}
+}
+
+func messageScope(tenantID, orgID string) func(*gorm.Statement) {
+	return accountScope(tenantID, orgID)
 }
 
 func optionalScope(scope []string) (string, string) {
@@ -342,19 +327,50 @@ func optionalScope(scope []string) (string, string) {
 }
 
 func toAccount(record smtpAccountRecord) mailapp.Account {
-	return mailapp.Account{ID: record.ID, TenantID: record.TenantID, OrgID: record.OrgID, Name: record.AccountName, Enabled: record.Enabled, Host: record.Host, Port: record.Port, Username: record.Username, PasswordConfigured: len(record.PasswordCiphertext) > 0, PasswordCiphertext: append([]byte(nil), record.PasswordCiphertext...), Weight: record.Weight, FromEmail: record.FromEmail, FromName: record.FromName, ImplicitTLS: record.ImplicitTLS, CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt, DeletedAt: record.DeletedAt}
+	password := binaryBytes(record.PasswordCiphertext)
+	return mailapp.Account{ID: record.ID, TenantID: record.TenantID, OrgID: stringValue(record.OrgID), Name: record.AccountName, Enabled: record.Enabled, Host: record.Host, Port: int(record.Port), Username: record.Username, PasswordConfigured: len(password) > 0, PasswordCiphertext: password, Weight: int(record.Weight), FromEmail: record.FromEmail, FromName: record.FromName, ImplicitTLS: record.ImplicitTLS, CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt, DeletedAt: record.DeletedAt}
 }
 
 func fromAccount(account mailapp.Account) smtpAccountRecord {
-	return smtpAccountRecord{ID: account.ID, TenantID: account.TenantID, OrgID: account.OrgID, AccountName: account.Name, Enabled: account.Enabled, Host: account.Host, Port: account.Port, Username: account.Username, PasswordCiphertext: append([]byte(nil), account.PasswordCiphertext...), Weight: account.Weight, FromEmail: account.FromEmail, FromName: account.FromName, ImplicitTLS: account.ImplicitTLS, CreatedAt: account.CreatedAt, UpdatedAt: account.UpdatedAt, DeletedAt: account.DeletedAt}
+	return smtpAccountRecord{ID: account.ID, TenantID: account.TenantID, OrgID: stringPtrIfNonEmpty(account.OrgID), AccountName: account.Name, Enabled: account.Enabled, Host: account.Host, Port: int32(account.Port), Username: account.Username, PasswordCiphertext: binaryPtr(account.PasswordCiphertext), Weight: int32(account.Weight), FromEmail: account.FromEmail, FromName: account.FromName, ImplicitTLS: account.ImplicitTLS, CreatedAt: account.CreatedAt, UpdatedAt: account.UpdatedAt, DeletedAt: account.DeletedAt}
 }
 
 func toMessage(record emailMessageRecord, recipients []mailapp.Recipient) mailapp.EmailMessage {
-	return mailapp.EmailMessage{ID: record.ID, TenantID: record.TenantID, OrgID: record.OrgID, SMTPAccountID: record.SMTPAccountID, SenderID: record.SenderID, Subject: record.Subject, Recipients: append([]mailapp.Recipient(nil), recipients...), BodyCiphertext: append([]byte(nil), record.BodyCiphertext...), BodyDigest: record.BodyDigest, Status: mailapp.Status(record.Status), AttemptCount: record.AttemptCount, ProviderMessageID: record.ProviderMessageID, LastErrorCode: record.LastErrorCode, SentAt: record.SentAt, IdempotencyKey: record.IdempotencyKey, CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt, DeletedAt: record.DeletedAt}
+	return mailapp.EmailMessage{ID: record.ID, TenantID: record.TenantID, OrgID: stringValue(record.OrgID), SMTPAccountID: stringValue(record.SMTPAccountID), SenderID: stringValue(record.SenderID), Subject: record.Subject, Recipients: append([]mailapp.Recipient(nil), recipients...), BodyCiphertext: append([]byte(nil), record.BodyCiphertext...), BodyDigest: record.BodyDigest, Status: mailapp.Status(record.Status), AttemptCount: int(record.AttemptCount), ProviderMessageID: stringValue(record.ProviderMessageID), LastErrorCode: stringValue(record.LastErrorCode), SentAt: record.SentAt, IdempotencyKey: stringValue(record.IdempotencyKey), CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt, DeletedAt: record.DeletedAt}
 }
 
 func fromMessage(message mailapp.EmailMessage) emailMessageRecord {
-	return emailMessageRecord{ID: message.ID, TenantID: message.TenantID, OrgID: message.OrgID, SMTPAccountID: message.SMTPAccountID, SenderID: message.SenderID, Subject: message.Subject, BodyCiphertext: append([]byte(nil), message.BodyCiphertext...), BodyDigest: message.BodyDigest, Status: string(message.Status), AttemptCount: message.AttemptCount, ProviderMessageID: message.ProviderMessageID, LastErrorCode: message.LastErrorCode, SentAt: message.SentAt, IdempotencyKey: message.IdempotencyKey, CreatedAt: message.CreatedAt, UpdatedAt: message.UpdatedAt, DeletedAt: message.DeletedAt}
+	return emailMessageRecord{ID: message.ID, TenantID: message.TenantID, OrgID: stringPtrIfNonEmpty(message.OrgID), SMTPAccountID: stringPtrIfNonEmpty(message.SMTPAccountID), SenderID: stringPtrIfNonEmpty(message.SenderID), Subject: message.Subject, BodyCiphertext: model.BinaryValue(append([]byte(nil), message.BodyCiphertext...)), BodyDigest: message.BodyDigest, Status: string(message.Status), AttemptCount: int32(message.AttemptCount), ProviderMessageID: stringPtrIfNonEmpty(message.ProviderMessageID), LastErrorCode: stringPtrIfNonEmpty(message.LastErrorCode), SentAt: message.SentAt, IdempotencyKey: stringPtrIfNonEmpty(message.IdempotencyKey), CreatedAt: message.CreatedAt, UpdatedAt: message.UpdatedAt, DeletedAt: message.DeletedAt}
+}
+
+func stringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func stringPtrIfNonEmpty(value string) *string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return &value
+}
+
+func binaryBytes(value *model.BinaryValue) []byte {
+	if value == nil {
+		return nil
+	}
+	return append([]byte(nil), (*value)...)
+}
+
+func binaryPtr(value []byte) *model.BinaryValue {
+	if len(value) == 0 {
+		return nil
+	}
+	copyValue := model.BinaryValue(append([]byte(nil), value...))
+	return &copyValue
 }
 
 func messageView(message mailapp.EmailMessage) (mailapp.MessageView, error) {

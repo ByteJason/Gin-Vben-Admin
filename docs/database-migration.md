@@ -95,11 +95,15 @@ server/migrations/versions/client/v002_*.go
 
 ### TODO（vNext）
 
-逐领域将现有 `internal/platform/*_repository.go` 中的私有 row struct 和手写
-`Table`/`JOIN` 迁移到共享 `persistence/model` 与 `gorm.G[T]`；优先完成
-IAM/auth，再处理 settings、dictionary、file、mail、tasks、import/export。
-每一步保留 tenant/org 授权作用域与 DTO mapper，并补充 `Preload`/`Joins`
-基准测试。
+- 为后续版本迁移补充按模块的 `Up`/`Down` 与升级演练，基线 `schema.go` 保持不变。
+- 为用户端（`client`）首次持久化模型补充独立版本和端到端租户隔离测试；当前后台
+  与共享模型边界见上表。
+- 记录泛型迁移后仍需收敛的 projection 性能基线（p95 和数据库往返次数），目标是
+  相对基线回归不超过 10%。
+
+所有现有 Repository 的 CRUD 已切换到 `gorm.G[T]`；固定 projection 或迁移备注
+之外的手写 SQL 由 `scripts/check-sql-allowlist.py` 持续拦截。例外 ID、原因及测试
+命令见 [`docs/sql-allowlist.md`](./sql-allowlist.md)，新增例外必须先更新该清单。
 
 ## 关系与索引约定（必须遵守）
 

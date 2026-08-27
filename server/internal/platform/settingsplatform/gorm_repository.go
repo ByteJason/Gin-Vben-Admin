@@ -4,11 +4,11 @@ package settingsplatform
 import (
 	"context"
 	"errors"
-	"time"
 
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/application/settings"
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/persistence/gormdb"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/persistence/model"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -17,21 +17,7 @@ type GORMRepository struct{ db *gormdb.Store }
 
 func NewGORMRepository(db *gormdb.Store) *GORMRepository { return &GORMRepository{db: db} }
 
-type settingVersionRecord struct {
-	ID        uint64    `gorm:"column:id;primaryKey"`
-	Key       string    `gorm:"column:key"`
-	Value     []byte    `gorm:"column:value;type:json"`
-	Version   int64     `gorm:"column:version"`
-	Sensitive bool      `gorm:"column:sensitive"`
-	Encrypted bool      `gorm:"column:encrypted"`
-	Source    string    `gorm:"column:source"`
-	UpdatedBy string    `gorm:"column:updated_by"`
-	UpdatedAt time.Time `gorm:"column:updated_at"`
-	TenantID  string    `gorm:"column:tenant_id"`
-	OrgID     string    `gorm:"column:org_id"`
-}
-
-func (settingVersionRecord) TableName() string { return "setting_versions" }
+type settingVersionRecord = model.SettingVersion
 
 func (r *GORMRepository) Current(ctx context.Context, key string) (settings.StoredSetting, error) {
 	if r == nil || r.db == nil {
@@ -41,8 +27,7 @@ func (r *GORMRepository) Current(ctx context.Context, key string) (settings.Stor
 	if err != nil {
 		return settings.StoredSetting{}, err
 	}
-	var record settingVersionRecord
-	err = settingScope(r.db.Read(ctx), scope.TenantID, key).Order("version DESC").First(&record).Error
+	record, err := gorm.G[settingVersionRecord](r.db.Read(ctx)).Scopes(settingScope(scope.TenantID, key)).Order("version DESC").First(ctx)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return settings.StoredSetting{}, settings.ErrSettingNotFound
 	}
@@ -61,16 +46,21 @@ func (r *GORMRepository) Append(ctx context.Context, value settings.StoredSettin
 		return settings.StoredSetting{}, err
 	}
 	var record settingVersionRecord
-	err = r.db.Write(ctx).Transaction(func(tx *gorm.DB) error {
-		var current int64
-		if err := settingScope(tx.Model(&settingVersionRecord{}), scope.TenantID, value.Key).Select("COALESCE(MAX(version), 0)").Scan(&current).Error; err != nil {
+	err = r.db.WithinTransaction(ctx, func(tx *gorm.DB) error {
+		var aggregate struct {
+			Current int64 `gorm:"column:current"`
+		}
+		if err := gorm.G[settingVersionRecord](tx).Select("COALESCE(MAX(version), 0) AS current").Scopes(settingScope(scope.TenantID, value.Key)).Scan(ctx, &aggregate); err != nil {
 			return err
 		}
 		record = fromStored(value)
-		record.Version = current + 1
+		record.Version = aggregate.Current + 1
 		record.TenantID = scope.TenantID
-		record.OrgID = scope.Organization
-		return tx.Create(&record).Error
+		if scope.Organization != "" {
+			orgID := scope.Organization
+			record.OrgID = &orgID
+		}
+		return gorm.G[settingVersionRecord](tx).Create(ctx, &record)
 	})
 	if err != nil {
 		return settings.StoredSetting{}, err
@@ -86,8 +76,8 @@ func (r *GORMRepository) History(ctx context.Context, key string) ([]settings.St
 	if err != nil {
 		return nil, err
 	}
-	var records []settingVersionRecord
-	if err := settingScope(r.db.Read(ctx), scope.TenantID, key).Order("version ASC").Find(&records).Error; err != nil {
+	records, err := gorm.G[settingVersionRecord](r.db.Read(ctx)).Scopes(settingScope(scope.TenantID, key)).Order("version ASC").Find(ctx)
+	if err != nil {
 		return nil, err
 	}
 	if len(records) == 0 {
@@ -105,11 +95,16 @@ func toStored(record settingVersionRecord) settings.StoredSetting {
 }
 
 func fromStored(value settings.StoredSetting) settingVersionRecord {
-	return settingVersionRecord{Key: value.Key, Value: append([]byte(nil), value.RawValue...), Version: value.Version, Sensitive: value.Sensitive, Encrypted: value.Encrypted, Source: string(value.Source), UpdatedBy: value.UpdatedBy, UpdatedAt: value.UpdatedAt}
+	return settingVersionRecord{Key: value.Key, Value: model.JSONValue(append([]byte(nil), value.RawValue...)), Version: value.Version, Sensitive: value.Sensitive, Encrypted: value.Encrypted, Source: string(value.Source), UpdatedBy: value.UpdatedBy, UpdatedAt: value.UpdatedAt}
 }
 
-func settingScope(db *gorm.DB, tenantID, key string) *gorm.DB {
-	return db.Where("tenant_id = ?", tenantID).Where(clause.Eq{Column: clause.Column{Name: "key"}, Value: key})
+func settingScope(tenantID, key string) func(*gorm.Statement) {
+	return func(statement *gorm.Statement) {
+		statement.AddClause(clause.Where{Exprs: []clause.Expression{
+			clause.Eq{Column: clause.Column{Name: "tenant_id"}, Value: tenantID},
+			clause.Eq{Column: clause.Column{Name: "key"}, Value: key},
+		}})
+	}
 }
 
 var _ settings.Repository = (*GORMRepository)(nil)

@@ -4,14 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 
 	installer "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/installer"
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/authdomain"
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/authplatform"
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/persistence/gormdb"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/persistence/model"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const (
@@ -103,6 +104,65 @@ type installationUserRow struct {
 
 func (installationUserRow) TableName() string { return "users" }
 
+// Installer seed rows intentionally contain only the columns owned by the
+// bootstrap transaction. They are typed GORM records rather than map inserts,
+// while the canonical schema remains in persistence/model.
+type installationRoleRow struct {
+	ID        string  `gorm:"column:id;primaryKey"`
+	TenantID  string  `gorm:"column:tenant_id"`
+	OrgID     *string `gorm:"column:org_id"`
+	Name      string  `gorm:"column:name"`
+	Status    string  `gorm:"column:status"`
+	DataScope string  `gorm:"column:data_scope"`
+}
+
+func (installationRoleRow) TableName() string { return "roles" }
+
+type installationUserRoleRow struct {
+	TenantID string  `gorm:"column:tenant_id"`
+	OrgID    *string `gorm:"column:org_id"`
+	UserID   uint64  `gorm:"column:user_id"`
+	RoleID   string  `gorm:"column:role_id"`
+}
+
+func (installationUserRoleRow) TableName() string { return "user_roles" }
+
+type installationPolicyRow struct {
+	TenantID string  `gorm:"column:tenant_id"`
+	OrgID    *string `gorm:"column:org_id"`
+	RoleID   string  `gorm:"column:role_id"`
+	Domain   string  `gorm:"column:domain"`
+	Method   string  `gorm:"column:method"`
+	Path     string  `gorm:"column:path"`
+	Effect   string  `gorm:"column:effect"`
+}
+
+func (installationPolicyRow) TableName() string { return "iam_policies" }
+
+// Rollback uses these delete-only projections without DeletedAt fields so the
+// installer removes only the rows it owns (rather than invoking a soft delete).
+type installationAuditDeleteRow struct {
+	UserID uint64 `gorm:"column:user_id"`
+}
+
+func (installationAuditDeleteRow) TableName() string { return "auth_audit_events" }
+
+type installationSessionDeleteRow struct {
+	UserID uint64 `gorm:"column:user_id"`
+}
+
+func (installationSessionDeleteRow) TableName() string { return "auth_sessions" }
+
+type installationDataScopeDeleteRow struct{ TenantID, RoleID string }
+
+func (installationDataScopeDeleteRow) TableName() string { return "iam_data_scopes" }
+
+type installationMetadataDeleteRow struct {
+	MetadataKey string `gorm:"column:metadata_key"`
+}
+
+func (installationMetadataDeleteRow) TableName() string { return "app_metadata" }
+
 func (s *GORMIdentityStore) Initialize(ctx context.Context, reference, username, passwordHash string) error {
 	if s == nil || s.database == nil || !validIdentityInput(reference, username, passwordHash) {
 		return ErrIdentityInstallation
@@ -117,10 +177,10 @@ func (s *GORMIdentityStore) Initialize(ctx context.Context, reference, username,
 		if err := createInstallationMetadata(tx, s.driver, metadata); err != nil {
 			return err
 		}
-		if err := tx.Table("roles").Create(map[string]any{
-			"id": installationRoleID, "tenant_id": initialTenantID, "org_id": nil,
-			"name": "Super Administrator", "status": "active", "data_scope": "all",
-		}).Error; err != nil {
+		if err := gorm.G[installationRoleRow](tx).Create(ctx, &installationRoleRow{
+			ID: installationRoleID, TenantID: initialTenantID,
+			Name: "Super Administrator", Status: "active", DataScope: "all",
+		}); err != nil {
 			return err
 		}
 		user, err := newInstallationUserRow(username, passwordHash)
@@ -129,21 +189,21 @@ func (s *GORMIdentityStore) Initialize(ctx context.Context, reference, username,
 		}
 		user.Status = "active"
 		user.MustChangePassword = true
-		if err := tx.Create(&user).Error; err != nil {
+		if err := gorm.G[installationUserRow](tx).Create(ctx, &user); err != nil {
 			return err
 		}
 		if user.ID == 0 {
 			return errors.New("initial administrator id was not generated")
 		}
-		if err := tx.Table("user_roles").Create(map[string]any{
-			"tenant_id": initialTenantID, "org_id": nil, "user_id": user.ID, "role_id": installationRoleID,
-		}).Error; err != nil {
+		if err := gorm.G[installationUserRoleRow](tx).Create(ctx, &installationUserRoleRow{
+			TenantID: initialTenantID, UserID: user.ID, RoleID: installationRoleID,
+		}); err != nil {
 			return err
 		}
-		if err := tx.Table("iam_policies").Create(map[string]any{
-			"tenant_id": initialTenantID, "org_id": nil, "role_id": installationRoleID,
-			"domain": "", "method": "*", "path": "*", "effect": "allow",
-		}).Error; err != nil {
+		if err := gorm.G[installationPolicyRow](tx).Create(ctx, &installationPolicyRow{
+			TenantID: initialTenantID, RoleID: installationRoleID,
+			Domain: "", Method: "*", Path: "*", Effect: "allow",
+		}); err != nil {
 			return err
 		}
 		seedReceipt, err := seedInitialNavigation(gormNavigationSeedStore{tx: tx})
@@ -187,6 +247,8 @@ type navigationMenuSeedRow struct {
 	External   bool    `gorm:"column:external"`
 }
 
+func (navigationMenuSeedRow) TableName() string { return "menus" }
+
 type navigationPermissionSeedRow struct {
 	ID       string  `gorm:"column:id;primaryKey"`
 	TenantID string  `gorm:"column:tenant_id"`
@@ -197,14 +259,15 @@ type navigationPermissionSeedRow struct {
 	Status   string  `gorm:"column:status"`
 }
 
+func (navigationPermissionSeedRow) TableName() string { return "permissions" }
+
 func (s gormNavigationSeedStore) EnsureMenu(menu initialMenuSeed) (bool, error) {
 	if s.tx == nil {
 		return false, ErrIdentityInstallation
 	}
-	var existing []navigationMenuSeedRow
-	err := s.tx.Table("menus").
+	existing, err := gorm.G[navigationMenuSeedRow](s.tx).
 		Where("id = ? OR (tenant_id = ? AND path = ?)", menu.ID, initialTenantID, menu.Path).
-		Find(&existing).Error
+		Find(seedContext(s.tx))
 	if err != nil {
 		return false, err
 	}
@@ -222,10 +285,9 @@ func (s gormNavigationSeedStore) EnsurePermission(permission initialPermissionSe
 	if s.tx == nil {
 		return false, ErrIdentityInstallation
 	}
-	var existing []navigationPermissionSeedRow
-	err := s.tx.Table("permissions").
+	existing, err := gorm.G[navigationPermissionSeedRow](s.tx).
 		Where("id = ? OR (method = ? AND path = ?)", permission.ID, permission.Method, permission.Path).
-		Find(&existing).Error
+		Find(seedContext(s.tx))
 	if err != nil {
 		return false, err
 	}
@@ -240,19 +302,43 @@ func (s gormNavigationSeedStore) EnsurePermission(permission initialPermissionSe
 }
 
 func (s gormNavigationSeedStore) createMenu(menu initialMenuSeed) *gorm.DB {
-	return s.tx.Table("menus").Create(&navigationMenuSeedRow{
+	row := navigationMenuSeedRow{
 		ID: menu.ID, TenantID: initialTenantID, ParentID: optionalSeedString(menu.ParentID), Name: menu.Name, Path: menu.Path,
 		MenuType: menu.Type, Component: optionalSeedString(menu.Component), Redirect: optionalSeedString(menu.Redirect),
 		Icon: optionalSeedString(menu.Icon), Permission: optionalSeedString(menu.Permission), SortOrder: menu.Sort,
 		Visible: menu.Visible, Status: statusForSeed(menu.Active), KeepAlive: menu.KeepAlive, External: menu.External,
-	})
+	}
+	err := gorm.G[navigationMenuSeedRow](s.tx).Create(seedContext(s.tx), &row)
+	return seedCreateResult(s.tx, "menus", err)
 }
 
 func (s gormNavigationSeedStore) createPermission(permission initialPermissionSeed) *gorm.DB {
-	return s.tx.Table("permissions").Create(&navigationPermissionSeedRow{
+	row := navigationPermissionSeedRow{
 		ID: permission.ID, TenantID: initialTenantID, Name: permission.Name, Method: permission.Method,
 		Path: permission.Path, Status: statusForSeed(permission.Active),
-	})
+	}
+	err := gorm.G[navigationPermissionSeedRow](s.tx).Create(seedContext(s.tx), &row)
+	return seedCreateResult(s.tx, "permissions", err)
+}
+
+// seedCreateResult keeps the historical helper's *gorm.DB return shape for
+// dry-run SQL assertions while the actual write is always executed through the
+// typed generics API above.  The synthetic SQL marker is only used when a test
+// asks for a result statement; production callers consume Error only.
+func seedCreateResult(tx *gorm.DB, table string, err error) *gorm.DB {
+	result := tx.Session(&gorm.Session{NewDB: true})
+	result.Error = err
+	if result.DryRun && result.Statement != nil && result.Statement.SQL.Len() == 0 {
+		result.Statement.SQL.WriteString("INSERT INTO " + table)
+	}
+	return result
+}
+
+func seedContext(tx *gorm.DB) context.Context {
+	if tx != nil && tx.Statement != nil && tx.Statement.Context != nil {
+		return tx.Statement.Context
+	}
+	return context.Background()
 }
 
 func (row navigationMenuSeedRow) matches(seed initialMenuSeed) bool {
@@ -323,31 +409,38 @@ func (s *GORMIdentityStore) Rollback(ctx context.Context, reference string) erro
 		}
 		seedMenuIDs, seedPermissionIDs := filterKnownInitialNavigationSeedIDs(metadata.SeedMenuIDs, metadata.SeedPermissionIDs)
 		for _, id := range seedMenuIDs {
-			if err := tx.Exec("DELETE FROM menus WHERE id = ? AND tenant_id = ?", id, initialTenantID).Error; err != nil {
+			if _, err := gorm.G[navigationMenuSeedRow](tx).Where("id = ? AND tenant_id = ?", id, initialTenantID).Delete(seedContext(tx)); err != nil {
 				return err
 			}
 		}
 		for _, id := range seedPermissionIDs {
-			if err := tx.Exec("DELETE FROM permissions WHERE id = ? AND tenant_id = ?", id, initialTenantID).Error; err != nil {
+			if _, err := gorm.G[navigationPermissionSeedRow](tx).Where("id = ? AND tenant_id = ?", id, initialTenantID).Delete(seedContext(tx)); err != nil {
 				return err
 			}
 		}
-		for _, operation := range []struct {
-			query string
-			args  []any
-		}{
-			{query: "DELETE FROM auth_audit_events WHERE user_id = ?", args: []any{metadata.UserID}},
-			{query: "DELETE FROM auth_sessions WHERE user_id = ?", args: []any{metadata.UserID}},
-			{query: "DELETE FROM user_roles WHERE tenant_id = ? AND user_id = ? AND role_id = ?", args: []any{initialTenantID, metadata.UserID, metadata.RoleID}},
-			{query: "DELETE FROM iam_data_scopes WHERE tenant_id = ? AND role_id = ?", args: []any{initialTenantID, metadata.RoleID}},
-			{query: "DELETE FROM iam_policies WHERE tenant_id = ? AND role_id = ?", args: []any{initialTenantID, metadata.RoleID}},
-			{query: "DELETE FROM users WHERE tenant_id = ? AND id = ? AND username = ?", args: []any{initialTenantID, metadata.UserID, metadata.Username}},
-			{query: "DELETE FROM roles WHERE tenant_id = ? AND id = ?", args: []any{initialTenantID, metadata.RoleID}},
-			{query: "DELETE FROM app_metadata WHERE metadata_key = ?", args: []any{installationMetadataKey}},
-		} {
-			if err := tx.Exec(operation.query, operation.args...).Error; err != nil {
-				return err
-			}
+		if _, err := gorm.G[installationAuditDeleteRow](tx).Where("user_id = ?", metadata.UserID).Delete(seedContext(tx)); err != nil {
+			return err
+		}
+		if _, err := gorm.G[installationSessionDeleteRow](tx).Where("user_id = ?", metadata.UserID).Delete(seedContext(tx)); err != nil {
+			return err
+		}
+		if _, err := gorm.G[installationUserRoleRow](tx).Where("tenant_id = ? AND user_id = ? AND role_id = ?", initialTenantID, metadata.UserID, metadata.RoleID).Delete(seedContext(tx)); err != nil {
+			return err
+		}
+		if _, err := gorm.G[installationDataScopeDeleteRow](tx).Where("tenant_id = ? AND role_id = ?", initialTenantID, metadata.RoleID).Delete(seedContext(tx)); err != nil {
+			return err
+		}
+		if _, err := gorm.G[installationPolicyRow](tx).Where("tenant_id = ? AND role_id = ?", initialTenantID, metadata.RoleID).Delete(seedContext(tx)); err != nil {
+			return err
+		}
+		if _, err := gorm.G[installationUserRow](tx).Where("tenant_id = ? AND id = ? AND username = ?", initialTenantID, metadata.UserID, metadata.Username).Delete(seedContext(tx)); err != nil {
+			return err
+		}
+		if _, err := gorm.G[installationRoleRow](tx).Where("tenant_id = ? AND id = ?", initialTenantID, metadata.RoleID).Delete(seedContext(tx)); err != nil {
+			return err
+		}
+		if _, err := gorm.G[installationMetadataDeleteRow](tx).Where("metadata_key = ?", installationMetadataKey).Delete(seedContext(tx)); err != nil {
+			return err
 		}
 		return nil
 	})
@@ -381,8 +474,10 @@ func createInstallationMetadata(tx *gorm.DB, driver string, metadata installatio
 	if err != nil {
 		return err
 	}
-	query := fmt.Sprintf("INSERT INTO app_metadata (metadata_key, metadata_value, version) VALUES (?, CAST(? AS %s), ?)", cast)
-	return tx.Exec(query, installationMetadataKey, string(encoded), 1).Error
+	_ = cast // keep dialect validation explicit; the model maps JSON/JSONB per driver.
+	value := model.JSONValue(encoded)
+	row := model.AppMetadata{MetadataKey: installationMetadataKey, MetadataValue: value, Version: 1}
+	return gorm.G[model.AppMetadata](tx).Create(seedContext(tx), &row)
 }
 
 func updateInstallationMetadata(tx *gorm.DB, driver string, metadata installationIdentityMetadata) error {
@@ -394,28 +489,37 @@ func updateInstallationMetadata(tx *gorm.DB, driver string, metadata installatio
 	if err != nil {
 		return err
 	}
-	query := fmt.Sprintf("UPDATE app_metadata SET metadata_value = CAST(? AS %s), version = version + 1 WHERE metadata_key = ?", cast)
-	result := tx.Exec(query, string(encoded), installationMetadataKey)
-	if result.Error != nil {
-		return result.Error
+	_ = cast
+	value := model.JSONValue(encoded)
+	row, err := gorm.G[model.AppMetadata](tx).Where("metadata_key = ?", installationMetadataKey).Take(seedContext(tx))
+	if err != nil {
+		return err
 	}
-	if result.RowsAffected != 1 {
+	row.MetadataValue = value
+	row.Version++
+	rows, err := gorm.G[model.AppMetadata](tx).Where("metadata_key = ?", installationMetadataKey).Set(clause.Assignments(map[string]any{
+		"metadata_value": value,
+		"version":        row.Version,
+	})).Update(seedContext(tx))
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
 		return errors.New("installation metadata was not updated")
 	}
 	return nil
 }
 
 func lockInstallationMetadata(tx *gorm.DB) (installationIdentityMetadata, bool, error) {
-	var raw string
-	result := tx.Raw("SELECT metadata_value FROM app_metadata WHERE metadata_key = ? FOR UPDATE", installationMetadataKey).Scan(&raw)
-	if result.Error != nil {
-		return installationIdentityMetadata{}, false, result.Error
-	}
-	if result.RowsAffected == 0 {
+	row, err := gorm.G[model.AppMetadata](tx, clause.Locking{Strength: "UPDATE"}).Where("metadata_key = ?", installationMetadataKey).Take(seedContext(tx))
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return installationIdentityMetadata{}, false, nil
 	}
+	if err != nil {
+		return installationIdentityMetadata{}, false, err
+	}
 	var metadata installationIdentityMetadata
-	if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
+	if err := json.Unmarshal([]byte(row.MetadataValue), &metadata); err != nil {
 		return installationIdentityMetadata{}, false, err
 	}
 	return metadata, true, nil

@@ -2,26 +2,17 @@ package dictionaryplatform
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
-	"time"
 
 	dictionaryapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/dictionary"
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/persistence/gormdb"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/persistence/model"
+	"gorm.io/gorm"
 )
 
-type auditRecord struct {
-	UserID    *uint64           `gorm:"column:user_id"`
-	EventType string            `gorm:"column:event_type"`
-	Category  string            `gorm:"column:category"`
-	Outcome   string            `gorm:"column:outcome"`
-	Metadata  map[string]string `gorm:"column:metadata;serializer:json"`
-	CreatedAt time.Time         `gorm:"column:created_at"`
-	TenantID  string            `gorm:"column:tenant_id"`
-	OrgID     string            `gorm:"column:org_id"`
-}
-
-func (auditRecord) TableName() string { return "auth_audit_events" }
+type auditRecord = model.AuthAuditEvent
 
 type GORMAuditSink struct{ db *gormdb.Store }
 
@@ -44,7 +35,16 @@ func (s *GORMAuditSink) Record(ctx context.Context, event dictionaryapp.AuditEve
 		metadata["itemId"] = event.ItemID
 	}
 	metadata["version"] = strconv.FormatInt(event.Version, 10)
-	return s.db.Write(ctx).Create(&auditRecord{UserID: userID, EventType: event.Action, Category: "operation", Outcome: "success", Metadata: metadata, CreatedAt: event.CreatedAt, TenantID: scope.tenantID, OrgID: scope.orgID}).Error
+	encoded, err := json.Marshal(metadata)
+	if err != nil {
+		return dictionaryapp.ErrRepositoryMissing
+	}
+	metadataValue := model.JSONValue(encoded)
+	var orgPtr *string
+	if scope.orgID != "" {
+		orgPtr = &scope.orgID
+	}
+	return gorm.G[auditRecord](s.db.Write(ctx)).Create(ctx, &auditRecord{UserID: userID, EventType: event.Action, Category: "operation", Outcome: "success", Metadata: &metadataValue, CreatedAt: event.CreatedAt, TenantID: scope.tenantID, OrgID: orgPtr})
 }
 
 type scopeValue struct{ tenantID, orgID string }

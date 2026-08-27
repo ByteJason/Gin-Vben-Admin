@@ -4,6 +4,7 @@ package auditplatform
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strconv"
 	"strings"
@@ -12,29 +13,18 @@ import (
 	auditapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/audit"
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/persistence/gormdb"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/persistence/model"
+	"gorm.io/gorm"
 )
 
 type GORMRepository struct{ db *gormdb.Store }
 
 func NewGORMRepository(db *gormdb.Store) *GORMRepository { return &GORMRepository{db: db} }
 
-type auditRecord struct {
-	ID        uint64            `gorm:"column:id;primaryKey"`
-	UserID    *uint64           `gorm:"column:user_id"`
-	SessionID string            `gorm:"column:session_id"`
-	EventType string            `gorm:"column:event_type"`
-	Category  string            `gorm:"column:category"`
-	Outcome   string            `gorm:"column:outcome"`
-	RequestID string            `gorm:"column:request_id"`
-	IPAddress string            `gorm:"column:ip_address"`
-	UserAgent string            `gorm:"column:user_agent"`
-	Metadata  map[string]string `gorm:"column:metadata;serializer:json"`
-	CreatedAt time.Time         `gorm:"column:created_at"`
-	TenantID  string            `gorm:"column:tenant_id"`
-	OrgID     string            `gorm:"column:org_id"`
-}
-
-func (auditRecord) TableName() string { return "auth_audit_events" }
+// auditRecord is the shared persistence model. Keeping the repository on the
+// canonical model prevents schema-only row definitions from drifting away
+// from the migration source of truth.
+type auditRecord = model.AuthAuditEvent
 
 func (r *GORMRepository) Query(ctx context.Context, filter auditapp.Filter) ([]auditapp.Event, error) {
 	events, _, err := r.QueryPage(ctx, filter)
@@ -49,8 +39,7 @@ func (r *GORMRepository) QueryPage(ctx context.Context, filter auditapp.Filter) 
 	if err != nil {
 		return nil, 0, err
 	}
-	query := r.db.Read(ctx).Model(&auditRecord{})
-	query = query.Where("tenant_id = ?", scope.TenantID)
+	query := gorm.G[auditRecord](r.db.Read(ctx)).Where("tenant_id = ?", scope.TenantID)
 	if scope.Organization != "" {
 		query = query.Where("org_id = ?", scope.Organization)
 	}
@@ -92,15 +81,16 @@ func (r *GORMRepository) QueryPage(ctx context.Context, filter auditapp.Filter) 
 		query = query.Where("event_type LIKE ?", filter.Resource+".%")
 	}
 	var total int64
-	if err := query.Count(&total).Error; err != nil {
+	total, err = query.Count(ctx, "*")
+	if err != nil {
 		return nil, 0, errors.New("audit repository unavailable")
 	}
-	rows := make([]auditRecord, 0)
 	limit := filter.Offset + filter.Limit
 	if limit <= 0 {
 		limit = 50
 	}
-	if err := query.Order("created_at DESC").Offset(0).Limit(limit).Find(&rows).Error; err != nil {
+	rows, err := query.Order("created_at DESC").Offset(0).Limit(limit).Find(ctx)
+	if err != nil {
 		return nil, 0, errors.New("audit repository unavailable")
 	}
 	events := make([]auditapp.Event, 0, len(rows))
@@ -109,9 +99,14 @@ func (r *GORMRepository) QueryPage(ctx context.Context, filter auditapp.Filter) 
 		if row.UserID != nil {
 			actor = strconv.FormatUint(*row.UserID, 10)
 		}
-		details := make(map[string]any, len(row.Metadata))
-		for key, value := range row.Metadata {
-			details[key] = value
+		details := make(map[string]any)
+		if row.Metadata != nil {
+			var metadata map[string]any
+			if len(*row.Metadata) > 0 && json.Unmarshal(*row.Metadata, &metadata) == nil {
+				for key, value := range metadata {
+					details[key] = value
+				}
+			}
 		}
 		if row.SessionID != "" {
 			details["sessionId"] = row.SessionID
@@ -146,12 +141,14 @@ func (r *GORMRepository) CountBefore(ctx context.Context, cutoff time.Time) (int
 	if err != nil {
 		return 0, err
 	}
-	query := r.db.Read(ctx).Model(&auditRecord{}).Where("tenant_id = ?", scope.TenantID).Where("created_at < ?", cutoff)
+	query := gorm.G[auditRecord](r.db.Read(ctx)).Where("tenant_id = ?", scope.TenantID).Where("created_at < ?", cutoff)
 	if scope.Organization != "" {
 		query = query.Where("org_id = ?", scope.Organization)
 	}
 	var total int64
-	if err := query.Count(&total).Error; err != nil {
+	var countErr error
+	total, countErr = query.Count(ctx, "*")
+	if countErr != nil {
 		return 0, errors.New("audit repository unavailable")
 	}
 	return int(total), nil

@@ -7,6 +7,7 @@
 package migrations
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -224,23 +225,20 @@ func createTable(tx *gorm.DB, model any) error {
 func escapeSQLLiteral(value string) string { return strings.ReplaceAll(value, "'", "''") }
 
 func seedSchema(tx *gorm.DB) error {
-	insert := func(value any) error {
-		return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(value).Error
-	}
-	if err := insert(&AppMetadata{
+	if err := insertSeed(tx, &AppMetadata{
 		MetadataKey:   "product",
 		MetadataValue: JSONValue(`{"name":"gin-vben-admin"}`),
 		Version:       1,
 	}); err != nil {
 		return fmt.Errorf("seed app metadata: %w", err)
 	}
-	if err := insert(&Tenant{ID: "default", Name: "Default tenant", Status: "active"}); err != nil {
+	if err := insertSeed(tx, &Tenant{ID: "default", Name: "Default tenant", Status: "active"}); err != nil {
 		return fmt.Errorf("seed default tenant: %w", err)
 	}
-	if err := insert(&Organization{ID: "default-org", TenantID: "default", Name: "Default organization", Status: "active"}); err != nil {
+	if err := insertSeed(tx, &Organization{ID: "default-org", TenantID: "default", Name: "Default organization", Status: "active"}); err != nil {
 		return fmt.Errorf("seed default organization: %w", err)
 	}
-	if err := insert(&DictionaryType{
+	if err := insertSeed(tx, &DictionaryType{
 		ID: "system-common-status", TenantID: "", OrgID: "", Code: "common.status", NameZhCN: "通用状态", NameEnUS: "Common status",
 		Description: "系统预置状态字典", Status: "active", SortOrder: 0, SystemOwned: true,
 	}); err != nil {
@@ -250,12 +248,29 @@ func seedSchema(tx *gorm.DB) error {
 		{ID: "system-common-status-active", TenantID: "", OrgID: "", TypeCode: "common.status", Value: "active", LabelZhCN: "启用", LabelEnUS: "Active", Status: "active", SortOrder: 1, SystemOwned: true},
 		{ID: "system-common-status-disabled", TenantID: "", OrgID: "", TypeCode: "common.status", Value: "disabled", LabelZhCN: "停用", LabelEnUS: "Disabled", Status: "active", SortOrder: 2, SystemOwned: true},
 	} {
-		if err := insert(&item); err != nil {
+		if err := insertSeed(tx, &item); err != nil {
 			return fmt.Errorf("seed dictionary item %s: %w", item.ID, err)
 		}
 	}
-	if err := insert(&DictionaryCacheVersion{ID: "system-common-status-cache", TenantID: "", OrgID: "", TypeCode: "common.status", Version: 1}); err != nil {
+	if err := insertSeed(tx, &DictionaryCacheVersion{ID: "system-common-status-cache", TenantID: "", OrgID: "", TypeCode: "common.status", Version: 1}); err != nil {
 		return fmt.Errorf("seed dictionary cache version: %w", err)
 	}
 	return nil
+}
+
+// insertSeed keeps deterministic bootstrap rows on the same typed GORM
+// generics path as the runtime repositories.  The conflict clause makes the
+// fresh-install seed idempotent without issuing schema alterations.
+func insertSeed[T any](tx *gorm.DB, value *T) error {
+	if tx == nil {
+		return errors.New("migration database is not initialized")
+	}
+	return gorm.G[T](tx, clause.OnConflict{DoNothing: true}).Create(seedContext(tx), value)
+}
+
+func seedContext(tx *gorm.DB) context.Context {
+	if tx != nil && tx.Statement != nil && tx.Statement.Context != nil {
+		return tx.Statement.Context
+	}
+	return context.Background()
 }

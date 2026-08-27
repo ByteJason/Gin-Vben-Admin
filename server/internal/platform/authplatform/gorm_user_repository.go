@@ -13,6 +13,7 @@ import (
 	mysqldriver "github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // ErrUserLookup is returned when the persistence layer cannot complete a user
@@ -81,14 +82,13 @@ func (r *GORMUserRepository) FindByIdentifier(ctx context.Context, identifier st
 		return authdomain.User{}, err
 	}
 
-	var row gormUserRow
-	query := r.store.Write(ctx).Where("tenant_id = ?", tenantID)
+	query := gorm.G[gormUserRow](r.store.Write(ctx)).Where("tenant_id = ?", tenantID)
 	if identifierType == authdomain.IdentifierEmail {
 		query = query.Where("email_normalized = ?", normalized)
 	} else {
 		query = query.Where("username_normalized = ?", normalized)
 	}
-	err = query.First(&row).Error
+	row, err := query.First(ctx)
 	if err == nil {
 		return row.toDomain(), nil
 	}
@@ -120,7 +120,7 @@ func (r *GORMUserRepository) CreateUser(ctx context.Context, user authdomain.Use
 		status = "active"
 	}
 	row.Status = status
-	err = r.store.Write(ctx).Create(&row).Error
+	err = gorm.G[gormUserRow](r.store.Write(ctx)).Create(ctx, &row)
 	return mapUserWriteError(err)
 }
 
@@ -142,19 +142,19 @@ func (r *GORMUserRepository) UpdatePassword(ctx context.Context, identifier, pas
 	if identifierType == authdomain.IdentifierEmail {
 		column = "email_normalized"
 	}
-	result := r.store.Write(ctx).Model(&gormUserRow{}).
+	rows, err := gorm.G[gormUserRow](r.store.Write(ctx)).
 		Where("tenant_id = ? AND "+column+" = ?", tenantID, normalized).
-		Updates(map[string]any{
+		Set(clause.Assignments(map[string]any{
 			"password_hash":        passwordHash,
 			"failed_attempts":      0,
 			"locked_until":         nil,
 			"must_change_password": false,
 			"password_changed_at":  time.Now().UTC(),
-		})
-	if err := mapUserWriteError(result.Error); err != nil {
+		})).Update(ctx)
+	if err := mapUserWriteError(err); err != nil {
 		return err
 	}
-	if result.RowsAffected == 0 {
+	if rows == 0 {
 		return authdomain.ErrInvalidCredentials
 	}
 	return nil
