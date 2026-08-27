@@ -23,9 +23,13 @@ test('0.10 authentication contract exposes username/email identifiers and profil
     assert.match(auth, /identifier/);
     assert.match(auth, /AUTH_ENDPOINTS\.login/);
   }
-  for (const driver of ['mysql', 'postgres']) {
-    assert.equal(existsSync(join(root, `server/migrations/${driver}/000009_user_profile.up.sql`)), true);
-    assert.equal(existsSync(join(root, `server/migrations/${driver}/000009_user_profile.down.sql`)), true);
+  const schemaPath = join(root, 'server/migrations/schema.go');
+  const modelPath = join(root, 'server/internal/platform/persistence/model/identity_models.go');
+  assert.equal(existsSync(schemaPath), true, 'single GORM schema file');
+  assert.equal(existsSync(modelPath), true, 'identity persistence models');
+  const schema = readFileSync(modelPath, 'utf8');
+  for (const field of ['UsernameNormalized', 'EmailNormalized', 'Nickname', 'Avatar', 'Phone', 'LastLoginIP', 'LastLoginAt', 'PasswordChangedAt']) {
+    assert.match(schema, new RegExp(`\\b${field}\\b`), field);
   }
 });
 

@@ -69,14 +69,15 @@ func (s *DependencyCheckService) CheckDatabase(ctx context.Context, request Data
 	if err := validateDatabaseConnection(request); err != nil {
 		return DependencyCheck{}, err
 	}
+	driver := normalizeDatabaseDriver(request.Driver)
 	if s == nil || s.database == nil {
 		return DependencyCheck{}, errors.New("database connection probe is not configured")
 	}
 	result, err := s.database.CheckDatabase(ctx, request)
 	if err != nil {
-		return safeDependencyFailure("database", request.Driver, request.Mode), nil
+		return safeDependencyFailure("database", driver, request.Mode), nil
 	}
-	return sanitizeDependencyResult(result, "database", request.Driver, request.Mode), nil
+	return sanitizeDependencyResult(result, "database", driver, request.Mode), nil
 }
 
 func (s *DependencyCheckService) CheckRedis(ctx context.Context, request RedisConnection) (DependencyCheck, error) {
@@ -104,7 +105,7 @@ func contextError(ctx context.Context) error {
 }
 
 func validateDatabaseConnection(request DatabaseConnection) error {
-	driver := strings.ToLower(strings.TrimSpace(request.Driver))
+	driver := normalizeDatabaseDriver(request.Driver)
 	if driver != "mysql" && driver != "postgres" {
 		return fmt.Errorf("unsupported database driver %q", request.Driver)
 	}
@@ -125,6 +126,19 @@ func validateDatabaseConnection(request DatabaseConnection) error {
 		return fmt.Errorf("unsupported database mode %q", request.Mode)
 	}
 	return nil
+}
+
+// normalizeDatabaseDriver accepts the spellings used by the installer UI and
+// maps them to the canonical GORM dialect names.
+func normalizeDatabaseDriver(driver string) string {
+	switch strings.ToLower(strings.TrimSpace(driver)) {
+	case "pgsql", "postgresql", "pg":
+		return "postgres"
+	case "mysql":
+		return "mysql"
+	default:
+		return strings.ToLower(strings.TrimSpace(driver))
+	}
 }
 
 func validateRedisConnection(request RedisConnection) error {

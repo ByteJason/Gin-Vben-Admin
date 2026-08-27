@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	mysqldriver "github.com/go-sql-driver/mysql"
-	migratedatabase "github.com/golang-migrate/migrate/v4/database"
 
 	installer "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/installer"
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/migration"
@@ -117,7 +116,7 @@ func TestSchemaInstallerExtractsMySQLSQLStateFromMigrationError(t *testing.T) {
 		SQLState: [5]byte{'4', '2', '0', '0', '0'},
 		Message:  "CREATE command denied password=database-secret",
 	}
-	runner := &schemaRunnerStub{upErr: migratedatabase.Error{OrigErr: cause, Err: "migration failed"}}
+	runner := &schemaRunnerStub{upErr: schemaWrappedDatabaseError{cause: cause, message: "migration failed"}}
 	service := NewSchemaInstaller(func(string, string) (SchemaRunner, error) { return runner, nil })
 	_, err := service.Up(context.Background(), installer.DatabaseConnection{
 		Driver: "mysql", Mode: "single", Host: "127.0.0.1", Port: 3306,
@@ -182,13 +181,10 @@ func TestSchemaInstallerClassifiesMigrationSQLStateWithoutLeakingQuery(t *testin
 	t.Parallel()
 
 	cause := schemaSQLStateError{code: "42501"}
-	runner := &schemaRunnerStub{
-		upErr: migratedatabase.Error{
-			OrigErr: cause,
-			Err:     "migration failed",
-			Query:   []byte("SELECT 'password=database-secret'"),
-		},
-	}
+	runner := &schemaRunnerStub{upErr: schemaWrappedDatabaseError{
+		cause:   cause,
+		message: "migration failed; query=SELECT 'password=database-secret'",
+	}}
 	service := NewSchemaInstaller(func(string, string) (SchemaRunner, error) { return runner, nil })
 	_, err := service.Up(context.Background(), installer.DatabaseConnection{
 		Driver: "postgres", Mode: "single", Host: "127.0.0.1", Port: 5432,
@@ -211,6 +207,14 @@ type schemaSQLStateError struct{ code string }
 
 func (e schemaSQLStateError) Error() string    { return "database operation failed" }
 func (e schemaSQLStateError) SQLState() string { return e.code }
+
+type schemaWrappedDatabaseError struct {
+	cause   error
+	message string
+}
+
+func (e schemaWrappedDatabaseError) Error() string { return e.message }
+func (e schemaWrappedDatabaseError) Unwrap() error { return e.cause }
 
 type schemaRunnerStub struct {
 	status      migration.Status

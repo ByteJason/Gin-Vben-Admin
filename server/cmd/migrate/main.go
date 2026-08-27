@@ -1,4 +1,6 @@
-// Command migrate applies, reverts, or inspects the embedded server migrations.
+// Command migrate creates, drops, or inspects the single fresh-install GORM
+// schema registered from the shared persistence models. Future versioned
+// upgrades remain explicit CLI operations rather than startup-time AutoMigrate.
 package main
 
 import (

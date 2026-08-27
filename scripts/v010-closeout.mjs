@@ -4,8 +4,8 @@ import { spawnSync } from "node:child_process";
 /**
  * 0.10.0-dev version-closeout contract.
  *
- * The default check is offline and deterministic. It verifies the dual-driver
- * migration assets, installer retry/rollback surface, and the existing DEC-025
+ * The default check is offline and deterministic. It verifies the single
+ * fresh-install GORM registry and persistence models (with both supported drivers), installer retry/rollback surface, and the existing DEC-025
  * performance contract without opening sockets or mutating a database. A real
  * migration rehearsal remains opt-in through MIGRATION_SMOKE_INTEGRATION=1 and
  * --integration, matching the repository's isolated-loopback guard.
@@ -48,24 +48,52 @@ function source(path) {
 
 function migrationAssets() {
   const drivers = ["mysql", "postgres"];
-  const files = [];
-  for (const driver of drivers) {
-    for (const direction of ["up", "down"]) {
-      const path = `server/migrations/${driver}/000013_file_objects.${direction}.sql`;
-      if (!existsSync(join(ROOT, path))) throw new Error(`missing ${path}`);
-      const content = source(path);
-      if (!/file_objects/i.test(content)) throw new Error(`invalid ${path}`);
-      if (direction === "down" && !/drop\s+table/i.test(content)) {
-        throw new Error(`down migration is not reversible: ${path}`);
-      }
-      files.push(path);
-    }
+  const modelFiles = [
+    "server/internal/platform/persistence/model/types.go",
+    "server/internal/platform/persistence/model/shared_models.go",
+    "server/internal/platform/persistence/model/identity_models.go",
+    "server/internal/platform/persistence/model/admin_iam_models.go",
+    "server/internal/platform/persistence/model/audit_models.go",
+    "server/internal/platform/persistence/model/admin_settings_models.go",
+    "server/internal/platform/persistence/model/admin_file_models.go",
+    "server/internal/platform/persistence/model/admin_mail_models.go",
+    "server/internal/platform/persistence/model/admin_dictionary_models.go",
+    "server/internal/platform/persistence/model/admin_tasks_models.go",
+    "server/internal/platform/persistence/model/admin_importexport_models.go",
+    "server/internal/platform/persistence/model/registry.go",
+    "server/internal/platform/persistence/model/comments.go",
+    "server/internal/platform/persistence/model/relations.go",
+  ];
+  const files = ["server/migrations/schema.go", ...modelFiles];
+  for (const file of files) {
+    if (!existsSync(join(ROOT, file))) throw new Error(`missing ${file}`);
   }
-  const migrationTests = run("go", ["-C", "server", "test", "./migrations", "-count=1"]);
+  const schema = source("server/migrations/schema.go");
+  const models = modelFiles.map(source).join("\n");
+  for (const token of ["CreateSchema", "DropSchema", "CreateTable", "TableNames", "Models"]) {
+    if (!schema.includes(token)) throw new Error(`GORM schema is missing ${token}`);
+  }
+  for (const token of ["type User struct", "type TaskDefinition struct", "func All()", "func Relations()", "comment:"]) {
+    if (!models.includes(token)) throw new Error(`persistence model is missing ${token}`);
+  }
+  const sourceWithoutComments = `${schema}\n${models}`
+    .replace(/\/\/.*$/gm, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "");
+  if (/FOREIGN\s+KEY|REFERENCES\s+/i.test(sourceWithoutComments)) {
+    throw new Error("GORM schema must not declare foreign-key constraints");
+  }
+  const migrationTests = run("go", [
+    "-C",
+    "server",
+    "test",
+    "./internal/platform/persistence/model",
+    "./migrations",
+    "-count=1",
+  ]);
   if (migrationTests.status !== 0) {
-    throw new Error("dual-driver migration alignment tests failed");
+    throw new Error("GORM schema contract tests failed");
   }
-  return { drivers, files, latest: "000013" };
+  return { drivers, files, latest: "000001" };
 }
 
 function installerRetryRollback() {

@@ -10,16 +10,17 @@ test('B10.6 local file provider exposes metadata, safe storage and lifecycle HTT
   const paths = [
     'server/internal/application/file/local.go',
     'server/internal/transport/http/file/handler.go',
-    'server/migrations/mysql/000013_file_objects.up.sql',
-    'server/migrations/postgres/000013_file_objects.up.sql',
+    'server/migrations/schema.go',
+    'server/internal/platform/persistence/model/admin_file_models.go',
   ];
   for (const path of paths) assert.equal(existsSync(new URL(path, root)), true, path);
   const source = paths.slice(0, 2).map(read).join('\n');
   for (const token of ['LocalStore', 'CleanupDryRun', 'TenantID', 'SignedURL', 'multipart', 'preview', 'ACL']) {
     assert.match(source, new RegExp(token, 'i'), token);
   }
-  assert.match(read(paths[2]), /tenant_id/i);
-  assert.match(read(paths[3]), /sha256/i);
+  const schema = read(paths[3]);
+  assert.match(schema, /tenant_id/i);
+  assert.match(schema, /sha256/i);
 });
 
 test('B10.6 OpenAPI and generated client expose file center routes', () => {

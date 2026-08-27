@@ -29,27 +29,13 @@ func TestDownRejectsZeroSteps(t *testing.T) {
 	}
 }
 
-func TestMySQLDSNEnablesMultiStatements(t *testing.T) {
+func TestPostgresAliasesSelectTheGORMPostgresDriver(t *testing.T) {
 	t.Parallel()
 
-	got, err := mysqlMigrationDSN("root:root@tcp(127.0.0.1:3306)/gin_vben_admin?parseTime=true&multiStatements=false")
-	if err != nil {
-		t.Fatalf("mysqlMigrationDSN() error = %v", err)
-	}
-	if !strings.Contains(got, "multiStatements=true") {
-		t.Fatalf("mysqlMigrationDSN() = %q, want multiStatements=true", got)
-	}
-}
-
-func TestPostgresMigrationsUseTheRuntimePGXSQLDriver(t *testing.T) {
-	t.Parallel()
-
-	got, err := migrationSQLDriver(DriverPostgres)
-	if err != nil {
-		t.Fatalf("migrationSQLDriver(postgres) error = %v", err)
-	}
-	if got != "pgx" {
-		t.Fatalf("migrationSQLDriver(postgres) = %q, want pgx so probe and migration share TLS defaults", got)
+	for _, driver := range []string{"postgres", "pgsql", "postgresql", "pg"} {
+		if !isSupportedDriver(driver) {
+			t.Fatalf("isSupportedDriver(%q) = false", driver)
+		}
 	}
 }
 

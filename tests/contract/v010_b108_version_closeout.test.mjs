@@ -18,11 +18,19 @@ test("B10.8 closeout runner exists and keeps the 0.10 scope bounded", () => {
     "PASS_WITH_CONDITIONS",
     "MIGRATION_SMOKE_INTEGRATION",
     "confirmRollback",
-    "000013_file_objects",
+    "server/migrations/schema.go",
+    "server/internal/platform/persistence/model/registry.go",
+    "server/internal/platform/persistence/model/relations.go",
+    "CreateSchema",
   ]) {
     assert.match(source, new RegExp(token.replace(/[.-]/g, "\\$&")), token);
   }
   assert.doesNotMatch(source, /1\.0\.0.*implement/i);
+  assert.equal(
+    existsSync(join(root, "server/internal/platform/persistence/model/registry.go")),
+    true,
+    "persistence model registry",
+  );
 });
 
 test("B10.8 closeout runner reports migration, installer and perf checks", () => {

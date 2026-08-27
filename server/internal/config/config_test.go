@@ -384,6 +384,19 @@ func TestValidateRejectsInvalidTopologyAndRanges(t *testing.T) {
 	}
 }
 
+func TestValidateAcceptsPostgresDriverAliases(t *testing.T) {
+	for _, driver := range []string{"postgres", "pgsql", "postgresql", "pg"} {
+		cfg := Default()
+		cfg.Database = DatabaseConfig{
+			Enabled: true, Driver: driver, Mode: "single",
+			DSN: "postgres://fixture@db/app", ReadPolicy: "random",
+		}
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("Validate() driver %q error = %v", driver, err)
+		}
+	}
+}
+
 func TestSafeSummaryNeverContainsCredentialsOrDSNs(t *testing.T) {
 	cfg := Default()
 	cfg.Database = DatabaseConfig{

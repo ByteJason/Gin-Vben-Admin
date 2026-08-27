@@ -30,17 +30,16 @@ test("B10.3 menu writer exposes bounded CRUD and reorder routes", () => {
   assert.match(generated, /createIAMMenu|updateIAMMenu|deleteIAMMenu|reorderIAMMenus/);
 });
 
-test("B10.3 menu metadata migration exists for both supported dialects", () => {
-  for (const dialect of ["mysql", "postgres"]) {
-    const up = `server/migrations/${dialect}/000010_menu_metadata.up.sql`;
-    const down = `server/migrations/${dialect}/000010_menu_metadata.down.sql`;
-    assert.equal(existsSync(new URL(up, root)), true, `${dialect} up`);
-    assert.equal(existsSync(new URL(down, root)), true, `${dialect} down`);
-    const sql = read(up);
-    for (const column of ["menu_type", "component", "redirect", "icon", "permission", "keep_alive", "external"]) {
-      assert.match(sql, new RegExp(column));
-    }
+test("B10.3 menu metadata is declared in the single GORM schema", () => {
+  const schemaPath = "server/migrations/schema.go";
+  const modelPath = "server/internal/platform/persistence/model/admin_iam_models.go";
+  assert.equal(existsSync(new URL(schemaPath, root)), true, schemaPath);
+  assert.equal(existsSync(new URL(modelPath, root)), true, modelPath);
+  const schema = read(modelPath);
+  for (const column of ["menu_type", "component", "redirect", "icon", "permission", "keep_alive", "external"]) {
+    assert.match(schema, new RegExp(column));
   }
+  assert.match(schema, /func \(Menu\) TableName\(\) string/);
 });
 
 test("B10.3 route projection excludes button nodes and uses registry components", () => {

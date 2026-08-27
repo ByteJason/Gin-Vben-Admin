@@ -31,6 +31,20 @@ func TestDependencyCheckServiceRejectsUnsupportedDatabaseAndRedisModes(t *testin
 	}
 }
 
+func TestDependencyCheckServiceAcceptsPgsqlAsPostgres(t *testing.T) {
+	probe := &databaseProbeStub{result: DependencyCheck{OK: true, Reason: "reachable"}}
+	service := NewDependencyCheckService(probe, redisProbeStub{})
+	result, err := service.CheckDatabase(context.Background(), DatabaseConnection{
+		Driver: "pgsql", Mode: "single", DSN: "postgres://fixture@db/app",
+	})
+	if err != nil {
+		t.Fatalf("CheckDatabase() error = %v", err)
+	}
+	if !result.OK || result.Driver != "postgres" {
+		t.Fatalf("result = %#v, want canonical postgres driver", result)
+	}
+}
+
 func TestDependencyCheckServiceMapsProbeFailureWithoutExposingCause(t *testing.T) {
 	service := NewDependencyCheckService(&databaseProbeStub{err: errors.New("dsn=postgres://user:secret@host/app")}, redisProbeStub{})
 	result, err := service.CheckDatabase(context.Background(), DatabaseConnection{Driver: "postgres", Mode: "single", DSN: "postgres://user:secret@host/app"})

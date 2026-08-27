@@ -1,6 +1,0 @@
-DROP TABLE IF EXISTS iam_data_scopes;
-DROP TABLE IF EXISTS iam_policies;
-DROP TABLE IF EXISTS permissions;
-DROP TABLE IF EXISTS menus;
-DROP TABLE IF EXISTS user_roles;
-DROP TABLE IF EXISTS roles;

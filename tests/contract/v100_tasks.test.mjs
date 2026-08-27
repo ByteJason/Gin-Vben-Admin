@@ -13,10 +13,8 @@ test('B1.3 task contract exposes persisted definitions and execution seams', () 
     'server/internal/application/jobs/worker.go',
     'server/internal/platform/jobs/redis_queue.go',
     'server/internal/transport/http/tasks/handler.go',
-    'server/migrations/mysql/000017_tasks.up.sql',
-    'server/migrations/mysql/000017_tasks.down.sql',
-    'server/migrations/postgres/000017_tasks.up.sql',
-    'server/migrations/postgres/000017_tasks.down.sql',
+    'server/migrations/schema.go',
+    'server/internal/platform/persistence/model/admin_tasks_models.go',
   ]) {
     assert.equal(existsSync(new URL(path, root)), true, `missing ${path}`);
   }
@@ -51,6 +49,10 @@ test('B1.3 task contract exposes persisted definitions and execution seams', () 
   assert.match(openapi, /TaskRunLog/);
   assert.match(openapi, /payloadSchema/);
   assert.match(openapi, /writeOnly: true/);
+  const model = read('server/internal/platform/persistence/model/admin_tasks_models.go');
+  for (const token of ['TaskDefinition', 'TaskRun', 'TaskRunLog', 'payload_schema']) {
+    assert.match(model, new RegExp(token), `persistence model missing ${token}`);
+  }
 });
 
 test('B1.3 three UI templates expose equivalent task management pages', () => {

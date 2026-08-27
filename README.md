@@ -149,13 +149,20 @@ pnpm run dev
 
 登录后默认进入 `/dashboard/analytics`“运行概览”。生产菜单、兼容路由、访问码与各页面职责见 [`docs/admin-information-architecture.md`](docs/admin-information-architecture.md)。
 
-编辑本地 `server/configs/server.yaml` 或设置环境变量后，使用显式命令管理数据库迁移：
+编辑本地 `server/configs/server.yaml` 或设置环境变量后，使用显式命令管理数据库建表迁移。全新安装由
+`server/migrations/schema.go` 注册 `server/internal/platform/persistence/model` 中的 Model，
+通过 GORM `Migrator().CreateTable` 一次完成；后续版本按模块使用显式 GORM Migrator
+升级。详细约定见
+[`docs/database-migration.md`](docs/database-migration.md)。
 
 ```text
 go -C server run ./cmd/migrate status
 go -C server run ./cmd/migrate up
 go -C server run ./cmd/migrate down --steps 1
 ```
+
+建表只使用配置指定的 MySQL/PostgreSQL 主库，不执行增量 `ALTER`/`ADD` 操作；业务关系不创建数据库外键约束或外键索引。
+后台、共享身份和预留用户端的 Model 边界，以及后续升级目录见迁移文档。
 
 配置支持 MySQL/PostgreSQL 的 `single`、`read_write`、`cluster_endpoint` 模式，以及 Redis 的 `single`、`sentinel`、`cluster` 模式。默认示例关闭外部依赖；启用时请通过本地配置或环境变量填写连接信息。
 

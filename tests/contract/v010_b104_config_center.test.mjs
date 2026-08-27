@@ -10,9 +10,9 @@ test('B10.4 settings service exposes classified schema, precedence, encryption a
   const servicePath = 'server/internal/application/settings/service.go';
   const envelopePath = 'server/internal/application/settings/envelope.go';
   const handlerPath = 'server/internal/transport/http/settings/handler.go';
-  const mysqlMigration = 'server/migrations/mysql/000011_setting_encryption.up.sql';
-  const postgresMigration = 'server/migrations/postgres/000011_setting_encryption.up.sql';
-  for (const path of [servicePath, envelopePath, handlerPath, mysqlMigration, postgresMigration]) {
+  const schemaPath = 'server/migrations/schema.go';
+  const modelPath = 'server/internal/platform/persistence/model/admin_settings_models.go';
+  for (const path of [servicePath, envelopePath, handlerPath, schemaPath, modelPath]) {
     assert.equal(existsSync(new URL(path, root)), true, path);
   }
   const service = read(servicePath);
@@ -42,8 +42,7 @@ test('B10.4 settings service exposes classified schema, precedence, encryption a
   assert.match(handler, /testConnection|connectionTest|TestConnection/);
   assert.match(handler, /history/);
   assert.match(handler, /rollback/);
-  assert.match(read(mysqlMigration), /encrypted|ciphertext/i);
-  assert.match(read(postgresMigration), /encrypted|ciphertext/i);
+  assert.match(read(modelPath), /Encrypted|encrypted|ciphertext/i);
 });
 
 for (const app of apps) {

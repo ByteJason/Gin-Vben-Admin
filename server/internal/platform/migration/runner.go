@@ -1,45 +1,55 @@
-// Package migration runs immutable, embedded database schema migrations.
+// Package migration owns the one-shot GORM schema installer used by the
+// command line tool and the interactive installer.
+//
+// The schema is deliberately represented by Go models in
+// internal/platform/persistence/model and registered by server/migrations.
+// A fresh installation calls Migrator().CreateTable for each model; it never
+// performs an incremental column/index alteration. Future upgrades are
+// explicit versioned Migrator operations, not startup-time AutoMigrate.
 package migration
 
 import (
-	"database/sql"
+	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"strings"
 
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/persistence/gormdb"
 	"github.com/ByteJason/Gin-Vben-Admin/server/migrations"
-
-	migrate "github.com/golang-migrate/migrate/v4"
-	"github.com/golang-migrate/migrate/v4/database"
-	mysqlmigration "github.com/golang-migrate/migrate/v4/database/mysql"
-	postgresmigration "github.com/golang-migrate/migrate/v4/database/postgres"
-	"github.com/golang-migrate/migrate/v4/source/iofs"
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"gorm.io/gorm"
 )
 
 const (
-	DriverMySQL    = "mysql"
-	DriverPostgres = "postgres"
-	maxInt         = int(^uint(0) >> 1)
+	DriverMySQL    = gormdb.DriverMySQL
+	DriverPostgres = gormdb.DriverPostgres
+	// SchemaVersion is the single fresh-install schema version. Keeping a
+	// stable value preserves the installer/CLI status contract without a
+	// second migration-history table.
+	SchemaVersion uint = 1
+	maxInt             = int(^uint(0) >> 1)
 )
 
-// Status describes the migration state recorded by the selected database.
+// Status describes whether the single schema has been created.
 type Status struct {
 	Version uint
 	Dirty   bool
 	Applied bool
 }
 
-// Runner owns one migration engine and the database connection behind it.
+// Runner owns the configured primary GORM connection used by the schema
+// operation. It intentionally does not hold a separate database/sql
+// migration connection, so the selected driver and pool are identical to the
+// runtime database.
 type Runner struct {
-	engine *migrate.Migrate
+	store  *gormdb.Store
+	db     *gorm.DB
+	driver string
 }
 
-// New creates a migration runner for a supported write database. It loads SQL
-// from the embedded migration tree and never writes the DSN to stdout or stderr.
+// New creates a runner for a supported write database. The DSN is consumed by
+// gormdb.Open and is never included in returned errors or command output.
 func New(driver, dsn string) (*Runner, error) {
-	driver = strings.ToLower(strings.TrimSpace(driver))
+	driver = gormdb.NormalizeDriver(driver)
 	if !isSupportedDriver(driver) {
 		return nil, fmt.Errorf("unsupported migration database driver %q", driver)
 	}
@@ -47,40 +57,45 @@ func New(driver, dsn string) (*Runner, error) {
 	if dsn == "" {
 		return nil, errors.New("migration database DSN is required")
 	}
-
-	source, err := iofs.New(migrations.FS, driver)
+	store, err := gormdb.Open(gormdb.Options{
+		Driver: driver,
+		Mode:   gormdb.ModeSingle,
+		DSN:    dsn,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("load %s migration assets: %w", driver, err)
+		return nil, fmt.Errorf("initialize %s migration database: %w", driver, err)
 	}
-
-	databaseDriver, err := databaseDriver(driver, dsn)
-	if err != nil {
-		_ = source.Close()
-		return nil, err
-	}
-
-	engine, err := migrate.NewWithInstance("iofs", source, driver, databaseDriver)
-	if err != nil {
-		_ = source.Close()
-		_ = databaseDriver.Close()
-		return nil, fmt.Errorf("initialize %s migration runner: %w", driver, err)
-	}
-	return &Runner{engine: engine}, nil
+	return &Runner{store: store, db: store.DB(), driver: driver}, nil
 }
 
-// Up applies every pending migration. A database already at the latest version
-// is a successful no-op.
-func (r *Runner) Up() error {
-	if r == nil || r.engine == nil {
-		return errors.New("migration runner is not initialized")
+// NewWithDB builds a runner around an already initialized GORM handle. It is
+// useful to share the application's primary connection and keeps unit tests
+// from opening a second endpoint. The runner does not close a borrowed DB.
+func NewWithDB(db *gorm.DB, driver string) (*Runner, error) {
+	if db == nil {
+		return nil, errors.New("migration database is not initialized")
 	}
-	if err := r.engine.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
-		return fmt.Errorf("apply migrations: %w", err)
+	driver = gormdb.NormalizeDriver(driver)
+	if !isSupportedDriver(driver) {
+		return nil, fmt.Errorf("unsupported migration database driver %q", driver)
+	}
+	return &Runner{db: db, driver: driver}, nil
+}
+
+// Up creates all missing tables and seeds the fixed bootstrap rows. Existing
+// tables are left untouched; this is the intended fresh-install behaviour.
+func (r *Runner) Up() error {
+	if err := r.validate(); err != nil {
+		return err
+	}
+	if err := migrations.CreateSchema(r.db); err != nil {
+		return fmt.Errorf("apply schema: %w", err)
 	}
 	return nil
 }
 
-// Down reverts exactly steps migrations. steps must be positive.
+// Down removes the one schema as a reversible local-install operation. There
+// is only one schema version, therefore steps must be exactly one.
 func (r *Runner) Down(steps uint) error {
 	if steps == 0 {
 		return errors.New("migration down steps must be positive")
@@ -88,114 +103,69 @@ func (r *Runner) Down(steps uint) error {
 	if uint64(steps) > uint64(maxInt) {
 		return errors.New("migration down steps exceed supported range")
 	}
-	if r == nil || r.engine == nil {
-		return errors.New("migration runner is not initialized")
+	if steps > SchemaVersion {
+		return fmt.Errorf("migration down steps exceed schema version %d", SchemaVersion)
 	}
-	if err := r.engine.Steps(-int(steps)); err != nil {
-		return fmt.Errorf("revert %d migration steps: %w", steps, err)
+	if err := r.validate(); err != nil {
+		return err
+	}
+	if err := migrations.DropSchema(r.db); err != nil {
+		return fmt.Errorf("revert schema: %w", err)
 	}
 	return nil
 }
 
-// Status returns the currently recorded migration version and dirty state.
+// Status checks the bootstrap table on the configured primary connection.
+// GORM's Migrator has no dirty flag for CreateTable, so Dirty is always false.
 func (r *Runner) Status() (Status, error) {
-	if r == nil || r.engine == nil {
-		return Status{}, errors.New("migration runner is not initialized")
+	if err := r.validate(); err != nil {
+		return Status{}, err
 	}
-
-	version, dirty, err := r.engine.Version()
-	if errors.Is(err, migrate.ErrNilVersion) {
-		return Status{}, nil
-	}
+	applied, err := migrations.SchemaStatus(r.db)
 	if err != nil {
 		return Status{}, fmt.Errorf("read migration status: %w", err)
 	}
-	return Status{Version: version, Dirty: dirty, Applied: true}, nil
+	if !applied {
+		return Status{}, nil
+	}
+	return Status{Version: SchemaVersion, Applied: true}, nil
 }
 
-// Close releases the migration source and database resources.
+// Close releases an owned gormdb.Store. Borrowed handles created by
+// NewWithDB are left to their owner.
 func (r *Runner) Close() error {
-	if r == nil || r.engine == nil {
+	if r == nil {
 		return nil
 	}
-	sourceErr, databaseErr := r.engine.Close()
-	r.engine = nil
-	if sourceErr != nil {
-		return fmt.Errorf("close migration source: %w", sourceErr)
+	var err error
+	if r.store != nil {
+		err = r.store.Close()
 	}
-	if databaseErr != nil {
-		return fmt.Errorf("close migration database: %w", databaseErr)
+	r.store = nil
+	r.db = nil
+	return err
+}
+
+func (r *Runner) validate() error {
+	if r == nil || r.db == nil {
+		return errors.New("migration runner is not initialized")
 	}
 	return nil
 }
 
 func isSupportedDriver(driver string) bool {
+	driver = gormdb.NormalizeDriver(driver)
 	return driver == DriverMySQL || driver == DriverPostgres
 }
 
-func databaseDriver(driver, dsn string) (database.Driver, error) {
-	sqlDriver, err := migrationSQLDriver(driver)
-	if err != nil {
-		return nil, err
+// PrimaryDB is a convenience for code that wants the same write handle as a
+// runner without reaching into its implementation.
+func (r *Runner) PrimaryDB(ctx context.Context) *gorm.DB {
+	if r == nil || r.db == nil {
+		return nil
 	}
-	switch driver {
-	case DriverMySQL:
-		normalizedDSN, err := mysqlMigrationDSN(dsn)
-		if err != nil {
-			return nil, fmt.Errorf("normalize mysql migration DSN: %w", err)
-		}
-		db, err := sql.Open(sqlDriver, normalizedDSN)
-		if err != nil {
-			return nil, fmt.Errorf("open mysql migration database: %w", err)
-		}
-		driver, err := mysqlmigration.WithInstance(db, &mysqlmigration.Config{})
-		if err != nil {
-			_ = db.Close()
-			return nil, fmt.Errorf("connect mysql migration database: %w", err)
-		}
-		return driver, nil
-	case DriverPostgres:
-		db, err := sql.Open(sqlDriver, dsn)
-		if err != nil {
-			return nil, fmt.Errorf("open postgres migration database: %w", err)
-		}
-		driver, err := postgresmigration.WithInstance(db, &postgresmigration.Config{MultiStatementEnabled: true})
-		if err != nil {
-			_ = db.Close()
-			return nil, fmt.Errorf("connect postgres migration database: %w", err)
-		}
-		return driver, nil
-	default:
-		return nil, fmt.Errorf("unsupported migration database driver %q", driver)
+	if ctx == nil {
+		ctx = context.Background()
 	}
-}
-
-// migrationSQLDriver keeps the schema runner on the same database/sql driver
-// as the runtime connection probe. In particular, pgx defaults an omitted
-// PostgreSQL sslmode to prefer, while lib/pq defaults it to require. Using pgx
-// for both paths prevents a successful probe from failing immediately when a
-// local PostgreSQL server does not offer TLS.
-func migrationSQLDriver(driver string) (string, error) {
-	switch strings.ToLower(strings.TrimSpace(driver)) {
-	case DriverMySQL:
-		return DriverMySQL, nil
-	case DriverPostgres:
-		return "pgx", nil
-	default:
-		return "", fmt.Errorf("unsupported migration database driver %q", driver)
-	}
-}
-
-func mysqlMigrationDSN(dsn string) (string, error) {
-	separator := strings.LastIndex(dsn, "?")
-	if separator < 0 {
-		return dsn + "?multiStatements=true", nil
-	}
-
-	query, err := url.ParseQuery(dsn[separator+1:])
-	if err != nil {
-		return "", errors.New("invalid mysql migration DSN query")
-	}
-	query.Set("multiStatements", "true")
-	return dsn[:separator+1] + query.Encode(), nil
+	return r.db.WithContext(ctx)
 }

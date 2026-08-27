@@ -133,7 +133,7 @@ func databaseTargetDigest(connection DatabaseConnection) (string, error) {
 	if err := validateDatabaseConnection(connection); err != nil {
 		return "", err
 	}
-	driver := strings.ToLower(strings.TrimSpace(connection.Driver))
+	driver := normalizeDatabaseDriver(connection.Driver)
 	mode := strings.ToLower(strings.TrimSpace(connection.Mode))
 	if mode == "" {
 		mode = "single"
@@ -198,7 +198,7 @@ func databaseDSNTarget(driver, raw string) (string, error) {
 	if raw == "" {
 		return "", errors.New("database endpoint is required")
 	}
-	if driver == "postgres" {
+	if normalizeDatabaseDriver(driver) == "postgres" {
 		if parsed, err := url.Parse(raw); err == nil && parsed.Host != "" {
 			host := strings.ToLower(parsed.Hostname())
 			port := parsed.Port()

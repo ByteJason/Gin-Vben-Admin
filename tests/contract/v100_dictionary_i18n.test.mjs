@@ -11,10 +11,8 @@ test('B1.2 dictionary contract has tenant overrides, localization, and migration
     'server/internal/platform/dictionary/gorm_repository.go',
     'server/internal/transport/http/dictionary/handler.go',
     'server/internal/transport/http/response/response.go',
-    'server/migrations/mysql/000016_dictionary.up.sql',
-    'server/migrations/mysql/000016_dictionary.down.sql',
-    'server/migrations/postgres/000016_dictionary.up.sql',
-    'server/migrations/postgres/000016_dictionary.down.sql',
+    'server/migrations/schema.go',
+    'server/internal/platform/persistence/model/admin_dictionary_models.go',
   ];
   for (const path of paths) assert.ok(existsSync(new URL(path, root)), `missing ${path}`);
   const service = read('server/internal/application/dictionary/service.go');
@@ -26,12 +24,9 @@ test('B1.2 dictionary contract has tenant overrides, localization, and migration
   assert.match(handler, /Accept-Language/);
   assert.match(handler, /MessageKey/);
   assert.match(read('server/internal/transport/http/response/response.go'), /ErrorWithMessageKey/);
-  const mysql = read('server/migrations/mysql/000016_dictionary.up.sql');
-  const postgres = read('server/migrations/postgres/000016_dictionary.up.sql');
-  for (const sql of [mysql, postgres]) {
-    for (const token of ['dictionary_types', 'dictionary_items', 'dictionary_cache_versions', 'tenant_id', 'org_id', 'deleted_at', 'created_at', 'updated_at']) {
-      assert.match(sql, new RegExp(token));
-    }
+  const schema = read('server/internal/platform/persistence/model/admin_dictionary_models.go');
+  for (const token of ['dictionary_types', 'dictionary_items', 'dictionary_cache_versions', 'tenant_id', 'org_id', 'deleted_at', 'created_at', 'updated_at']) {
+    assert.match(schema, new RegExp(token));
   }
 });
 

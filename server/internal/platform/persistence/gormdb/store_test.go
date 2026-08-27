@@ -121,3 +121,107 @@ func TestOpenDoesNotProbeNetworkUntilPing(t *testing.T) {
 		t.Fatal("Ping() error = nil, want unavailable endpoint error")
 	}
 }
+
+func TestOpenPublishesCanonicalGlobalGORMDatabase(t *testing.T) {
+	store, err := Open(Options{
+		Driver: "pgsql",
+		Mode:   ModeSingle,
+		DSN:    "host=127.0.0.1 port=1 user=fixture dbname=fixture sslmode=disable",
+	})
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if GetDB() != store.DB() {
+		t.Fatal("global GORM database does not match the configured store")
+	}
+	if GetDriver() != DriverPostgres || store.Driver() != DriverPostgres {
+		t.Fatalf("global/store drivers = %q/%q, want postgres", GetDriver(), store.Driver())
+	}
+	if !store.DB().DisableForeignKeyConstraintWhenMigrating {
+		t.Fatal("GORM migration foreign-key creation is enabled")
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if GetDB() != nil || GetDriver() != "" {
+		t.Fatalf("global database state survived close: db=%p driver=%q", GetDB(), GetDriver())
+	}
+}
+
+func TestClosingTemporaryStoreRestoresPreviousGlobalDatabase(t *testing.T) {
+	first, err := Open(Options{
+		Driver: "mysql", Mode: ModeSingle,
+		DSN: "fixture@tcp(127.0.0.1:1)/first?parseTime=true",
+	})
+	if err != nil {
+		t.Fatalf("open first store: %v", err)
+	}
+	second, err := Open(Options{
+		Driver: "postgres", Mode: ModeSingle,
+		DSN: "host=127.0.0.1 port=1 user=fixture dbname=second sslmode=disable",
+	})
+	if err != nil {
+		_ = first.Close()
+		t.Fatalf("open second store: %v", err)
+	}
+	if GetDB() != second.DB() {
+		t.Fatal("temporary store was not published")
+	}
+	if err := second.Close(); err != nil {
+		_ = first.Close()
+		t.Fatalf("close second store: %v", err)
+	}
+	if GetDB() != first.DB() || GetDriver() != DriverMySQL {
+		t.Fatalf("previous global store was not restored: db=%p driver=%q", GetDB(), GetDriver())
+	}
+	if err := first.Close(); err != nil {
+		t.Fatalf("close first store: %v", err)
+	}
+}
+
+func TestClosingNestedStoresOutOfOrderDoesNotRestoreClosedHandle(t *testing.T) {
+	first, err := Open(Options{
+		Driver: "mysql", Mode: ModeSingle,
+		DSN: "fixture@tcp(127.0.0.1:1)/first?parseTime=true",
+	})
+	if err != nil {
+		t.Fatalf("open first store: %v", err)
+	}
+	second, err := Open(Options{
+		Driver: "postgres", Mode: ModeSingle,
+		DSN: "host=127.0.0.1 port=1 user=fixture dbname=second sslmode=disable",
+	})
+	if err != nil {
+		_ = first.Close()
+		t.Fatalf("open second store: %v", err)
+	}
+	third, err := Open(Options{
+		Driver: "mysql", Mode: ModeSingle,
+		DSN: "fixture@tcp(127.0.0.1:1)/third?parseTime=true",
+	})
+	if err != nil {
+		_ = second.Close()
+		_ = first.Close()
+		t.Fatalf("open third store: %v", err)
+	}
+
+	// Close older stores first. The current global handle must remain the
+	// newest live store, and closing the last store must clear rather than
+	// resurrect the already-closed first handle.
+	if err := first.Close(); err != nil {
+		t.Fatalf("close first store: %v", err)
+	}
+	if err := second.Close(); err != nil {
+		_ = third.Close()
+		t.Fatalf("close second store: %v", err)
+	}
+	if globalDB := GetDB(); globalDB != third.DB() {
+		t.Fatalf("global database after out-of-order close = %p, want third %p", globalDB, third.DB())
+	}
+	if err := third.Close(); err != nil {
+		t.Fatalf("close third store: %v", err)
+	}
+	if GetDB() != nil || GetDriver() != "" {
+		t.Fatalf("closed nested stores left global state: db=%p driver=%q", GetDB(), GetDriver())
+	}
+}

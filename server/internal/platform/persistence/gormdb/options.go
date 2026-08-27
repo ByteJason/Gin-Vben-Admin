@@ -22,6 +22,12 @@ const (
 	ReadPolicyRoundRobin ReadPolicy = "round_robin"
 )
 
+const (
+	// DriverMySQL and DriverPostgres are the canonical runtime driver names.
+	DriverMySQL    = "mysql"
+	DriverPostgres = "postgres"
+)
+
 type Options struct {
 	Driver          string
 	Mode            Mode
@@ -36,7 +42,7 @@ type Options struct {
 }
 
 func (options *Options) applyDefaults() {
-	options.Driver = strings.ToLower(strings.TrimSpace(options.Driver))
+	options.Driver = NormalizeDriver(options.Driver)
 	if options.Mode == "" {
 		options.Mode = ModeSingle
 	}
@@ -58,7 +64,8 @@ func (options *Options) applyDefaults() {
 }
 
 func (options Options) Validate() error {
-	if options.Driver != "mysql" && options.Driver != "postgres" {
+	options.Driver = NormalizeDriver(options.Driver)
+	if options.Driver != DriverMySQL && options.Driver != DriverPostgres {
 		return fmt.Errorf("database driver must be mysql or postgres")
 	}
 	if options.MaxOpenConns <= 0 || options.MaxIdleConns <= 0 || options.MaxIdleConns > options.MaxOpenConns {
@@ -92,4 +99,19 @@ func (options Options) Validate() error {
 		return fmt.Errorf("unsupported database mode %q", options.Mode)
 	}
 	return nil
+}
+
+// NormalizeDriver maps the names accepted by configuration and the command
+// line to the two canonical GORM dialect names.  In particular, pgsql is a
+// common spelling in existing deployments and is intentionally equivalent to
+// postgres.
+func NormalizeDriver(driver string) string {
+	switch strings.ToLower(strings.TrimSpace(driver)) {
+	case "pgsql", "postgresql", "pg":
+		return DriverPostgres
+	case DriverMySQL:
+		return DriverMySQL
+	default:
+		return strings.ToLower(strings.TrimSpace(driver))
+	}
 }

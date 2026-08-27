@@ -116,7 +116,7 @@ func (p *DependencyProbe) CheckRedis(ctx context.Context, request installer.Redi
 }
 
 func databaseOptionsFromRequest(request installer.DatabaseConnection) (gormdb.Options, error) {
-	driver := strings.ToLower(strings.TrimSpace(request.Driver))
+	driver := gormdb.NormalizeDriver(request.Driver)
 	mode := strings.ToLower(strings.TrimSpace(request.Mode))
 	if mode == "" {
 		mode = string(gormdb.ModeSingle)
@@ -160,7 +160,7 @@ func structuredDatabaseDSN(request installer.DatabaseConnection) (string, error)
 	if containsControl(request.Host) || containsControl(request.Database) || containsControl(request.Username) || containsControl(request.Password) {
 		return "", errors.New("database connection fields contain invalid characters")
 	}
-	switch strings.ToLower(strings.TrimSpace(request.Driver)) {
+	switch gormdb.NormalizeDriver(request.Driver) {
 	case "mysql":
 		config := mysqldriver.Config{
 			User:                 request.Username,

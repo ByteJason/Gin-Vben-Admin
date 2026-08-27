@@ -7,24 +7,21 @@ const read = (path) => readFileSync(new URL(path, root), 'utf8');
 const apps = ['web-antd', 'web-ele', 'web-naive'];
 
 test('1.0 SMTP accounts and delivery records expose portable schema', () => {
-  const mysql = read('server/migrations/mysql/000014_mail.up.sql');
-  const postgres = read('server/migrations/postgres/000014_mail.up.sql');
-  for (const source of [mysql, postgres]) {
-    for (const token of [
-      'smtp_accounts',
-      'email_messages',
-      'email_recipients',
-      'deleted_at',
-      'implicit_tls',
-      'weight',
-      'body_ciphertext',
-      'provider_message_id',
-    ]) {
-      assert.match(source, new RegExp(token, 'i'), token);
-    }
+  assert.equal(existsSync(new URL('server/migrations/schema.go', root)), true, 'single GORM schema file');
+  const source = read('server/internal/platform/persistence/model/admin_mail_models.go');
+  for (const token of [
+    'smtp_accounts',
+    'email_messages',
+    'email_recipients',
+    'deleted_at',
+    'implicit_tls',
+    'weight',
+    'body_ciphertext',
+    'provider_message_id',
+  ]) {
+    assert.match(source, new RegExp(token, 'i'), token);
   }
-  assert.match(mysql, /uq_smtp_accounts_tenant_name/i);
-  assert.match(postgres, /uq_smtp_accounts_tenant_name/i);
+  assert.match(source, /uq_smtp_accounts_tenant_name/i);
 });
 
 test('1.0 mail and monitor HTTP contracts are declared and redacted', () => {

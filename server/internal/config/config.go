@@ -607,7 +607,8 @@ func (cfg DatabaseConfig) validate() error {
 	if !cfg.Enabled {
 		return nil
 	}
-	if cfg.Driver != "mysql" && cfg.Driver != "postgres" {
+	driver := normalizeDatabaseDriver(cfg.Driver)
+	if driver != "mysql" && driver != "postgres" {
 		return fmt.Errorf("driver must be mysql or postgres, got %q", cfg.Driver)
 	}
 	switch cfg.Mode {
@@ -626,6 +627,20 @@ func (cfg DatabaseConfig) validate() error {
 		return fmt.Errorf("read_policy must be random or round_robin, got %q", cfg.ReadPolicy)
 	}
 	return nil
+}
+
+// normalizeDatabaseDriver keeps the configuration spelling compatible with
+// both GORM's postgres dialect and the commonly used pgsql alias. Runtime
+// components receive the canonical "postgres" value.
+func normalizeDatabaseDriver(driver string) string {
+	switch strings.ToLower(strings.TrimSpace(driver)) {
+	case "pgsql", "postgresql", "pg":
+		return "postgres"
+	case "mysql":
+		return "mysql"
+	default:
+		return strings.ToLower(strings.TrimSpace(driver))
+	}
 }
 
 // MigrationDSN returns the write endpoint used by the explicit migration CLI.

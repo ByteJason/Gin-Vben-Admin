@@ -19,7 +19,7 @@ func TestDependencyProbeBuildsStructuredMySQLAndPostgresOptions(t *testing.T) {
 	if mysql.Driver != "mysql" || !strings.Contains(mysql.DSN, "db.example:3306") || !strings.Contains(mysql.DSN, "admin") {
 		t.Fatalf("mysql options = %+v", mysql)
 	}
-	postgres, err := databaseOptionsFromRequest(installer.DatabaseConnection{Driver: "postgres", Mode: "single", Host: "db.example", Port: 5432, Database: "app", Username: "admin", Password: "secret", TLSMode: "disable"})
+	postgres, err := databaseOptionsFromRequest(installer.DatabaseConnection{Driver: "pgsql", Mode: "single", Host: "db.example", Port: 5432, Database: "app", Username: "admin", Password: "secret", TLSMode: "disable"})
 	if err != nil {
 		t.Fatalf("postgres options error = %v", err)
 	}

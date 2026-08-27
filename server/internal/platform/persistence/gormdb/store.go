@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
+	"github.com/ByteJason/Gin-Vben-Admin/server/global"
 	monitorapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/monitor"
 	mysqldriver "github.com/go-sql-driver/mysql"
 	gormmysql "gorm.io/driver/mysql"
@@ -17,11 +19,21 @@ import (
 )
 
 type Store struct {
-	database *gorm.DB
-	closers  []*sql.DB
-	driver   string
-	mode     string
+	database       *gorm.DB
+	closers        []*sql.DB
+	driver         string
+	mode           string
+	previousDB     *gorm.DB
+	previousDriver string
 }
+
+// activeStores tracks handles opened through this package. It lets Close
+// distinguish a still-live previous store from a store that was closed out of
+// order, so a nested temporary store never republishes a closed *gorm.DB.
+var activeStores = struct {
+	sync.Mutex
+	values map[*gorm.DB]struct{}
+}{values: make(map[*gorm.DB]struct{})}
 
 // Open constructs the configured topology without probing the network. Ping is
 // deliberately a separate readiness operation so a recovered dependency can
@@ -48,6 +60,10 @@ func Open(options Options) (*Store, error) {
 	database, err := gorm.Open(primaryDialector, &gorm.Config{
 		Logger:               logger.Default.LogMode(logger.Silent),
 		DisableAutomaticPing: true,
+		// Relationships are represented by application-level IDs.  Keeping
+		// this disabled makes both CreateTable and AutoMigrate refrain from
+		// creating database foreign-key constraints.
+		DisableForeignKeyConstraintWhenMigrating: true,
 	})
 	if err != nil {
 		return closeOnError(fmt.Errorf("initialize %s database: %w", options.Driver, err))
@@ -78,10 +94,38 @@ func Open(options Options) (*Store, error) {
 		}
 	}
 
+	// Publish the fully initialized primary handle only after resolver setup
+	// succeeds.  This keeps global.DB from pointing at a partially initialized
+	// store when Open returns an error.
+	store.previousDB = global.GetDB()
+	store.previousDriver = global.GetDriver()
+	activeStores.Lock()
+	activeStores.values[database] = struct{}{}
+	activeStores.Unlock()
+	global.SetDatabase(database, options.Driver)
+
 	return store, nil
 }
 
 func (s *Store) Name() string { return "database" }
+
+// DB returns the underlying GORM handle used by this store.  Migration code
+// should use this handle so schema creation shares the configured dialect and
+// connection pool rather than opening a second database connection.
+func (s *Store) DB() *gorm.DB {
+	if s == nil {
+		return nil
+	}
+	return s.database
+}
+
+// Driver returns the canonical dialect name configured for this store.
+func (s *Store) Driver() string {
+	if s == nil {
+		return ""
+	}
+	return s.driver
+}
 
 func (s *Store) Ping(ctx context.Context) error {
 	if s == nil || len(s.closers) == 0 {
@@ -164,6 +208,7 @@ func (s *Store) Close() error {
 	if s == nil {
 		return nil
 	}
+	database := s.database
 	var closeErrors []error
 	for index := len(s.closers) - 1; index >= 0; index-- {
 		if err := s.closers[index].Close(); err != nil {
@@ -172,16 +217,37 @@ func (s *Store) Close() error {
 	}
 	s.closers = nil
 	s.database = nil
+	// Do not clear a newer store that may have replaced this one in the global
+	// compatibility slot while this store was shutting down.
+	activeStores.Lock()
+	if database != nil {
+		delete(activeStores.values, database)
+	}
+	previousActive := false
+	if s.previousDB != nil {
+		_, previousActive = activeStores.values[s.previousDB]
+	}
+	if database != nil && global.GetDB() == database {
+		if previousActive {
+			global.SetDatabase(s.previousDB, s.previousDriver)
+		} else {
+			global.Reset()
+		}
+	}
+	activeStores.Unlock()
+	s.previousDB = nil
+	s.previousDriver = ""
 	return errors.Join(closeErrors...)
 }
 
 func openDialector(driver, dsn string, options Options) (*sql.DB, gorm.Dialector, error) {
+	driver = NormalizeDriver(driver)
 	var (
 		connection *sql.DB
 		dialector  gorm.Dialector
 	)
 	switch driver {
-	case "mysql":
+	case DriverMySQL:
 		parsed, err := mysqldriver.ParseDSN(dsn)
 		if err != nil {
 			return nil, nil, errors.New("parse mysql database dsn")
@@ -192,7 +258,7 @@ func openDialector(driver, dsn string, options Options) (*sql.DB, gorm.Dialector
 			return nil, nil, fmt.Errorf("open mysql database: %w", err)
 		}
 		dialector = gormmysql.New(gormmysql.Config{Conn: connection, SkipInitializeWithVersion: true})
-	case "postgres":
+	case DriverPostgres:
 		var err error
 		connection, err = sql.Open("pgx", dsn)
 		if err != nil {
@@ -209,6 +275,17 @@ func openDialector(driver, dsn string, options Options) (*sql.DB, gorm.Dialector
 	connection.SetConnMaxIdleTime(options.ConnMaxIdleTime)
 	return connection, dialector, nil
 }
+
+// SetDB and GetDB expose the global compatibility slot without requiring
+// callers to import the global package directly.
+func SetDB(db *gorm.DB) { global.SetDB(db) }
+
+func GetDB() *gorm.DB { return global.GetDB() }
+
+// SetDriver and GetDriver expose the canonical global dialect name.
+func SetDriver(driver string) { global.SetDriver(NormalizeDriver(driver)) }
+
+func GetDriver() string { return global.GetDriver() }
 
 func resolverPolicy(policy ReadPolicy) dbresolver.Policy {
 	if policy == ReadPolicyRoundRobin {

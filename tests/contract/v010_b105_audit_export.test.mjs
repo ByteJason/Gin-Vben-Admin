@@ -10,9 +10,9 @@ test('B10.5 audit service exposes taxonomy, redaction, export, retention dry-run
   const servicePath = 'server/internal/application/audit/query.go';
   const exportTestPath = 'server/internal/application/audit/export.go';
   const handlerPath = 'server/internal/transport/http/audit/handler.go';
-  const mysqlMigration = 'server/migrations/mysql/000012_audit_taxonomy.up.sql';
-  const postgresMigration = 'server/migrations/postgres/000012_audit_taxonomy.up.sql';
-  for (const path of [servicePath, exportTestPath, handlerPath, mysqlMigration, postgresMigration]) {
+  const schemaPath = 'server/migrations/schema.go';
+  const modelPath = 'server/internal/platform/persistence/model/audit_models.go';
+  for (const path of [servicePath, exportTestPath, handlerPath, schemaPath, modelPath]) {
     assert.equal(existsSync(new URL(path, root)), true, path);
   }
   const service = read(servicePath);
@@ -26,8 +26,7 @@ test('B10.5 audit service exposes taxonomy, redaction, export, retention dry-run
   }
   assert.match(handler, /export/);
   assert.match(handler, /retention\/dry-run/);
-  assert.match(read(mysqlMigration), /category/i);
-  assert.match(read(postgresMigration), /category/i);
+  assert.match(read(modelPath), /Category/);
 });
 
 test('B10.5 OpenAPI and generated client expose export and retention routes', () => {

@@ -6,8 +6,6 @@ import (
 	"strings"
 
 	mysqldriver "github.com/go-sql-driver/mysql"
-	migrate "github.com/golang-migrate/migrate/v4"
-	migratedatabase "github.com/golang-migrate/migrate/v4/database"
 
 	installer "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/installer"
 	migrationplatform "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/migration"
@@ -137,10 +135,6 @@ func (e *schemaInstallationError) InstallationFailureDiagnostic() installer.Fail
 func classifySchemaFailure(operation string, err error) (reason, databaseCode string) {
 	databaseCode = databaseErrorCode(err)
 	lower := strings.ToLower(errString(err))
-	var dirty migrate.ErrDirty
-	if errors.As(err, &dirty) {
-		return "migration_dirty", databaseCode
-	}
 
 	switch {
 	case strings.HasPrefix(databaseCode, "28"):
@@ -185,20 +179,7 @@ func databaseErrorCode(err error) string {
 	if err == nil {
 		return ""
 	}
-	if code := directDatabaseErrorCode(err); code != "" {
-		return code
-	}
-	var queryError *migratedatabase.Error
-	if errors.As(err, &queryError) && queryError != nil {
-		return directDatabaseErrorCode(queryError.OrigErr)
-	}
-	// Multi-statement migration execution returns database.Error as a value,
-	// while connection/status paths generally return a pointer.
-	var queryErrorValue migratedatabase.Error
-	if errors.As(err, &queryErrorValue) {
-		return directDatabaseErrorCode(queryErrorValue.OrigErr)
-	}
-	return ""
+	return directDatabaseErrorCode(err)
 }
 
 func directDatabaseErrorCode(err error) string {
