@@ -38,17 +38,27 @@ import { openDependencyLog } from './dependency-log.mjs';
 import { buildPnpmCommand } from './pnpm-command.mjs';
 
 function usage() {
-  return 'Usage: pnpm run init -- [--check|--reset] [--ui antd|ele|naive] [--confirm-cleanup] [--confirm-reset] [--no-open] [--port 1..65535]';
+  return 'Usage: pnpm run init -- [--check|--preflight|--reset] [--ui antd|ele|naive] [--confirm-cleanup] [--confirm-reset] [--no-open] [--port 1..65535]';
 }
 
 function parseArgs(argv) {
-  const options = { selectedUi: '', check: false, reset: false, confirmCleanup: false, confirmReset: false, noOpen: false, port: 8080 };
+  const options = {
+    selectedUi: '',
+    check: false,
+    preflight: false,
+    reset: false,
+    confirmCleanup: false,
+    confirmReset: false,
+    noOpen: false,
+    port: 8080,
+  };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === '--' && index === 0) continue;
     if (argument === '--ui') options.selectedUi = argv[++index] ?? '';
     else if (argument === '--port') options.port = Number(argv[++index]);
     else if (argument === '--check') options.check = true;
+    else if (argument === '--preflight') options.preflight = true;
     else if (argument === '--reset') options.reset = true;
     else if (argument === '--confirm-cleanup') options.confirmCleanup = true;
     else if (argument === '--confirm-reset') options.confirmReset = true;
@@ -56,7 +66,9 @@ function parseArgs(argv) {
     else if (argument === '--help' || argument === '-h') return { help: true };
     else throw new Error('ARGUMENT_INVALID');
   }
-  if (options.check && options.reset) throw new Error('ARGUMENT_INVALID');
+  if (options.check && (options.preflight || options.reset)) throw new Error('ARGUMENT_INVALID');
+  if (options.preflight && options.reset) throw new Error('ARGUMENT_INVALID');
+  if (options.preflight && !options.selectedUi) throw new Error('UI_INVALID');
   if (options.selectedUi && !UI_PROFILES[options.selectedUi]) throw new Error('UI_INVALID');
   if (!Number.isInteger(options.port) || options.port < 1 || options.port > 65535) throw new Error('PORT_INVALID');
   return options;
@@ -259,6 +271,28 @@ async function main() {
       if (current.state === STATES.INCONSISTENT) printStateGuidance(current);
       print({ ...current, next: 'CHECK_COMPLETE', error: current.state === STATES.INCONSISTENT ? 'STATE_INCONSISTENT' : 'NONE', port });
       return current.state === STATES.INCONSISTENT ? 3 : 0;
+    }
+    if (options.preflight) {
+      if (current.state !== STATES.PRISTINE) {
+        const error = current.state === STATES.INCONSISTENT
+          ? 'STATE_INCONSISTENT'
+          : 'INITIALIZATION_IN_PROGRESS';
+        if (current.state === STATES.INCONSISTENT) printStateGuidance(current);
+        print({ ...current, next: 'RECOVER_INITIALIZATION', error, port });
+        return 3;
+      }
+      printStage('prepare', 'preflight');
+      const plan = await preflightInitialization(root, options.selectedUi);
+      stdout.write('INIT_PREFLIGHT=ok\n');
+      stdout.write(`INIT_PLAN_RETAIN=${plan.retain}\nINIT_PLAN_STAGE=${plan.stage.join(',')}\nINIT_PLAN_BACKUP=${plan.backup}\n`);
+      print({
+        ...current,
+        selectedUi: options.selectedUi,
+        next: 'PREFLIGHT_COMPLETE',
+        error: 'NONE',
+        port,
+      });
+      return 0;
     }
     if (!options.reset && !options.selectedUi && current.state === STATES.PRISTINE) {
       stdout.write(`请打开 ${installURL(port)}，在安装页选择管理界面并继续。\n`);
