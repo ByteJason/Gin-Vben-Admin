@@ -36,7 +36,7 @@ func TestApplyServiceCompletesInstallationInSafeOrder(t *testing.T) {
 			Database: "app", Username: "app", Password: "database-secret",
 		},
 		Redis: RedisConnection{Mode: "single", Addr: "127.0.0.1:6379", Password: "redis-secret"},
-		Admin: AdminAccount{Username: "admin", Password: "initial-password-123"},
+		Admin: AdminAccount{Username: "admin", Password: "InitialAdmin123"},
 	})
 	if err != nil {
 		t.Fatalf("Apply() error = %v", err)
@@ -120,7 +120,7 @@ func TestApplyServicePersistsCredentialFreeProgressAndRemovesJournalAfterMarker(
 	request.Mode = "dev"
 	request.Database.DSN = "user:journal-database-secret@tcp(db:3306)/app"
 	request.Redis.Password = "journal-redis-secret"
-	request.Admin.Password = "journal-admin-secret"
+	request.Admin.Password = "JournalAdmin123"
 
 	if _, err := service.Apply(context.Background(), request); err != nil {
 		t.Fatalf("Apply() error = %v", err)
@@ -729,6 +729,38 @@ func TestValidateApplyRequestAcceptsOnlyBundledLocalePolicy(t *testing.T) {
 	}
 }
 
+func TestValidateApplyRequestEnforcesInitialAdminPasswordPolicy(t *testing.T) {
+	tests := []struct {
+		name     string
+		password string
+		valid    bool
+	}{
+		{name: "five characters", password: "Ab123", valid: false},
+		{name: "six mixed characters", password: "Abc123", valid: true},
+		{name: "letters only", password: "Abcdefghijkl", valid: false},
+		{name: "digits only", password: "123456789012", valid: false},
+		{name: "symbol", password: "Abcdefghij1!", valid: false},
+		{name: "non ASCII", password: "密码Abc123", valid: false},
+		{name: "whitespace", password: "Abcdef 12345", valid: false},
+		{name: "128 characters", password: strings.Repeat("a", 127) + "1", valid: true},
+		{name: "129 characters", password: strings.Repeat("a", 128) + "1", valid: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := validApplyRequest()
+			request.Admin.Password = test.password
+			_, err := validateApplyRequest(request)
+			if test.valid && err != nil {
+				t.Fatalf("validateApplyRequest() error = %v, want nil", err)
+			}
+			if !test.valid && !errors.Is(err, ErrInvalidApply) {
+				t.Fatalf("validateApplyRequest() error = %v, want ErrInvalidApply", err)
+			}
+		})
+	}
+}
+
 func TestApplyServiceRollsBackCompletedSideEffectsInReverseOrder(t *testing.T) {
 	t.Parallel()
 
@@ -902,7 +934,7 @@ func validApplyRequest() ApplyRequest {
 		Mode:     "embedded",
 		Database: DatabaseConnection{Driver: "mysql", Mode: "single", DSN: "user:secret@tcp(db:3306)/app"},
 		Redis:    RedisConnection{Mode: "single", Addr: "redis:6379"},
-		Admin:    AdminAccount{Username: "admin", Password: "initial-password-123"},
+		Admin:    AdminAccount{Username: "admin", Password: "InitialAdmin123"},
 	}
 }
 

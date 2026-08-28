@@ -209,7 +209,7 @@ func TestApplyJobDoesNotFailInstallationRunningAfterAdminInitProcessExited(t *te
 			Driver: "postgres", Mode: "single", Host: "localhost", Port: 15432, Database: "gin_vben_admin", Username: "root",
 		},
 		Redis: installer.RedisConnection{Mode: "single", Addr: "localhost:6379"},
-		Admin: installer.AdminAccount{Username: "admin", Password: "TestAdminPassword123!"},
+		Admin: installer.AdminAccount{Username: "admin", Password: "TestAdminPassword123"},
 	}
 	job, err := jobs.Start(context.Background(), request)
 	if err != nil {

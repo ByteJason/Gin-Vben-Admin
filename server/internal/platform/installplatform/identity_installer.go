@@ -87,8 +87,7 @@ func (s *IdentityInstaller) InitializeWithReference(ctx context.Context, databas
 
 func (s *IdentityInstaller) initializeWithReference(ctx context.Context, database installer.DatabaseConnection, account installer.AdminAccount, reference string, retainReceiptOnFailure bool) (installer.IdentityReceipt, error) {
 	username := strings.TrimSpace(account.Username)
-	passwordLength := len([]byte(account.Password))
-	if len(username) < 3 || len(username) > 64 || strings.ContainsAny(username, "\x00\r\n") || passwordLength < 12 || passwordLength > 128 || strings.ContainsAny(account.Password, "\x00\r\n") {
+	if len(username) < 3 || len(username) > 64 || strings.ContainsAny(username, "\x00\r\n") || !installer.IsValidInitialAdminPassword(account.Password) {
 		return installer.IdentityReceipt{}, ErrIdentityInstallation
 	}
 	passwordHash, err := s.hasher.Hash(account.Password)

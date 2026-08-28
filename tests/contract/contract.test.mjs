@@ -219,7 +219,18 @@ test('installation contract exposes one credential-write-only apply operation', 
   assert.doesNotMatch(applySchema, /selectedUi|confirmCleanup/);
   assert.match(applySchema, /localeMode:[\s\S]*enum: \[single, multi\]/);
   assert.match(applySchema, /locale:[\s\S]*enum: \[zh-CN, en-US\]/);
-  assert.match(install, /password:[\s\S]*?writeOnly: true/);
+  const adminSchema = install.slice(
+    install.indexOf('    AdminAccount:'),
+    install.indexOf('    ApplyResultEnvelope:'),
+  );
+  assert.match(adminSchema, /password:[\s\S]*?minLength: 6/);
+  assert.match(adminSchema, /password:[\s\S]*?maxLength: 128/);
+  assert.ok(
+    adminSchema.includes(
+      "pattern: '^(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9]{6,128}$'",
+    ),
+  );
+  assert.match(adminSchema, /password:[\s\S]*?writeOnly: true/);
   const result = install.slice(install.indexOf('    ApplyResult:'), install.indexOf('    ApplyErrorEnvelope:'));
   assert.doesNotMatch(result, /password|dsn|secret/i);
   assert.match(errors, /code: 10006[\s\S]*?key: installation_completed[\s\S]*?http_status: 409/);

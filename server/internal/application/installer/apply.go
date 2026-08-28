@@ -953,8 +953,7 @@ func validateApplyRequest(request ApplyRequest) (installstate.Mode, error) {
 		return "", ErrInvalidApply
 	}
 	username := strings.TrimSpace(request.Admin.Username)
-	passwordBytes := len([]byte(request.Admin.Password))
-	if len(username) < 3 || len(username) > 64 || strings.ContainsAny(username, "\x00\r\n") || passwordBytes < 12 || passwordBytes > 128 || strings.ContainsAny(request.Admin.Password, "\x00\r\n") {
+	if len(username) < 3 || len(username) > 64 || strings.ContainsAny(username, "\x00\r\n") || !IsValidInitialAdminPassword(request.Admin.Password) {
 		return "", ErrInvalidApply
 	}
 	return mode, nil

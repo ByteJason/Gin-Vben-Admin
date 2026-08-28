@@ -1307,12 +1307,23 @@ async function reconcileCompletedInstallation(
   return true;
 }
 
+function validAdminPassword(value) {
+  return /^(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9]{6,128}$/.test(value);
+}
+
 async function requestInstallation(event) {
   event.preventDefault();
   clearInstallationFailure();
   setProgress(0, '准备安装');
   if (!currentPlan || !databaseCheckPassed || !redisCheckPassed) {
     announceApplyError('请先完成目录、数据库和 Redis 检查。');
+    return;
+  }
+  if (!validAdminPassword(adminPassword.value)) {
+    announceApplyError(
+      '管理员密码需为 6–128 个字符，仅限英文字母和数字，且至少各 1 个。',
+    );
+    adminPassword.focus();
     return;
   }
   if (adminPassword.value !== adminPasswordConfirm.value) {

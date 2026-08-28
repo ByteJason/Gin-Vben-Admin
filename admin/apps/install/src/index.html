@@ -512,7 +512,10 @@
               >
                 <div class="connection-form__heading">
                   <h4>初始管理员</h4>
-                  <p>安装成功后使用该账号首次登录，请设置独立的高强度密码。</p>
+                  <p>
+                    安装成功后使用该账号首次登录。密码需为 6–128
+                    个字符，仅限英文字母和数字，且至少各 1 个。
+                  </p>
                 </div>
                 <div class="form-field">
                   <label for="admin-username">账号</label>
@@ -527,13 +530,15 @@
                   />
                 </div>
                 <div class="form-field">
-                  <label for="admin-password">密码（至少 12 个字符）</label>
+                  <label for="admin-password">密码（字母和数字组合）</label>
                   <input
                     id="admin-password"
                     name="password"
                     type="password"
-                    minlength="12"
+                    minlength="6"
                     maxlength="128"
+                    pattern="(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9]{6,128}"
+                    title="请输入 6–128 个字符，仅限英文字母和数字，且至少各 1 个。"
                     autocomplete="new-password"
                     required
                   />
@@ -543,8 +548,10 @@
                   <input
                     id="admin-password-confirm"
                     type="password"
-                    minlength="12"
+                    minlength="6"
                     maxlength="128"
+                    pattern="(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9]{6,128}"
+                    title="请输入 6–128 个字符，仅限英文字母和数字，且至少各 1 个。"
                     autocomplete="new-password"
                     required
                   />

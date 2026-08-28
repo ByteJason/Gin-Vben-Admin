@@ -58,8 +58,21 @@ test('installation shell is independent and exposes an accessible status region'
   assert.doesNotMatch(html, /凭据仅用于本次测试/);
   assert.match(html, /id="admin-username"/);
   assert.match(html, /id="admin-username"[^>]*value="admin"/);
-  assert.match(html, /id="admin-password"/);
-  assert.match(html, /id="admin-password-confirm"/);
+  assert.match(html, /6–128 个字符，仅限英文字母和数字，且至少各 1 个/);
+  for (const id of ['admin-password', 'admin-password-confirm']) {
+    const input = html.match(new RegExp(`<input[^>]*id="${id}"[^>]*>`))?.[0];
+    assert.ok(input, `${id} must exist`);
+    assert.match(input, /minlength="6"/);
+    assert.match(input, /maxlength="128"/);
+    assert.ok(
+      input.includes('pattern="(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9]{6,128}"'),
+      `${id} must enforce the administrator password policy`,
+    );
+    assert.match(
+      input,
+      /title="请输入 6–128 个字符，仅限英文字母和数字，且至少各 1 个。"/,
+    );
+  }
   assert.match(html, /id="confirm-cleanup"[^>]*type="checkbox"/);
   assert.match(html, /id="prepare-ui-button"[^>]*type="submit"/);
   assert.match(
@@ -183,6 +196,65 @@ test('installation shell is independent and exposes an accessible status region'
   assert.match(styles, /prefers-reduced-motion:\s*reduce/);
   assert.match(styles, /min-height:\s*44px/);
   assert.match(styles, /@media\s*\(max-width:\s*480px\)/);
+});
+
+test('administrator password validation enforces the documented ASCII boundary', () => {
+  const script = readFileSync(join(root, 'src/app.js'), 'utf8');
+  const validation = readFunction(script, 'validAdminPassword');
+  const validate = Function(`
+    'use strict';
+    ${validation}
+    return validAdminPassword;
+  `)();
+
+  for (const password of ['a12345', 'A1bcde', `A1${'a'.repeat(126)}`]) {
+    assert.equal(validate(password), true, password);
+  }
+  for (const password of [
+    'a1234',
+    'abcdef',
+    '123456',
+    'abc12_',
+    '密码A1234',
+    `A1${'a'.repeat(127)}`,
+  ]) {
+    assert.equal(validate(password), false, password);
+  }
+});
+
+test('installation submission rejects an invalid administrator password before transport', async () => {
+  const script = readFileSync(join(root, 'src/app.js'), 'utf8');
+  const validation = readFunction(script, 'validAdminPassword');
+  const requestInstallation = readFunction(script, 'requestInstallation');
+
+  const rejected = await Function(`
+    'use strict';
+    let currentPlan = { mode: 'dev' };
+    let databaseCheckPassed = true;
+    let redisCheckPassed = true;
+    let announcement = '';
+    let passwordFocused = false;
+    const adminPassword = {
+      value: 'abcdef',
+      focus() { passwordFocused = true; },
+    };
+    const adminPasswordConfirm = { value: 'abcdef', focus() {} };
+    const clearInstallationFailure = () => {};
+    const setProgress = () => {};
+    const announceApplyError = (message) => { announcement = message; };
+    ${validation}
+    ${requestInstallation}
+    return requestInstallation({ preventDefault() {} }).then(() => ({
+      announcement,
+      passwordFocused,
+    }));
+  `)();
+
+  assert.equal(
+    rejected.announcement,
+    '管理员密码需为 6–128 个字符，仅限英文字母和数字，且至少各 1 个。',
+  );
+  assert.equal(rejected.passwordFocused, true);
 });
 
 test('installation forms expose semantic groups and responsive installation feedback', () => {
@@ -806,6 +878,7 @@ test('the public installation flow wires immediate and asynchronous completed st
     script,
     'installationCompletionDetected',
   );
+  const validation = readFunction(script, 'validAdminPassword');
   const requestInstallation = readFunction(script, 'requestInstallation');
 
   const run = async (scenario) =>
@@ -818,8 +891,8 @@ test('the public installation flow wires immediate and asynchronous completed st
       let databaseCheckPassed = true;
       let redisCheckPassed = true;
       let retryJobId = null;
-      const adminPassword = { value: 'ADMIN_SECRET' };
-      const adminPasswordConfirm = { value: 'ADMIN_SECRET', focus() {} };
+      const adminPassword = { value: 'Admin123', focus() {} };
+      const adminPasswordConfirm = { value: 'Admin123', focus() {} };
       const adminUsername = { value: 'fixture_admin' };
       const modeChoice = { value: 'dev' };
       const localeMode = { value: 'single' };
@@ -841,6 +914,7 @@ test('the public installation flow wires immediate and asynchronous completed st
       const installationFailureMessage = () => 'failure';
       const commitCompletedInstallation = () => events.push('commit-direct');
       const updateApplyButton = () => events.push('update-button');
+      ${validation}
       ${completionDetected}
       ${requestInstallation}
       await requestInstallation({ preventDefault() {} });

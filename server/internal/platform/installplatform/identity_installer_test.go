@@ -23,12 +23,12 @@ func TestIdentityInstallerHashesInitialPasswordAndUsesOpaqueRollbackReference(t 
 	service := NewIdentityInstaller(factory, hasher, bytes.NewReader(bytes.Repeat([]byte{0x6b}, 64)))
 	database := installer.DatabaseConnection{Driver: "mysql", Mode: "single", DSN: "user:database-secret@tcp(db:3306)/app"}
 	receipt, err := service.Initialize(context.Background(), database, installer.AdminAccount{
-		Username: "admin", Password: "initial-password-123",
+		Username: "admin", Password: "InitialAdmin123",
 	})
 	if err != nil {
 		t.Fatalf("Initialize() error = %v", err)
 	}
-	if hasher.password != "initial-password-123" || store.passwordHash != hasher.hash || store.username != "admin" {
+	if hasher.password != "InitialAdmin123" || store.passwordHash != hasher.hash || store.username != "admin" {
 		t.Fatalf("hasher/store inputs = %q/%q/%q", hasher.password, store.passwordHash, store.username)
 	}
 	if opened.DSN != database.DSN || receipt.Reference == "" || strings.Contains(receipt.Reference, "password") || strings.Contains(receipt.Reference, "secret") {
@@ -48,6 +48,62 @@ func TestIdentityInstallerHashesInitialPasswordAndUsesOpaqueRollbackReference(t 
 	}
 }
 
+func TestIdentityInstallerEnforcesInitialAdminPasswordPolicy(t *testing.T) {
+	tests := []struct {
+		name     string
+		password string
+		valid    bool
+	}{
+		{name: "five characters", password: "Ab123", valid: false},
+		{name: "six mixed characters", password: "Abc123", valid: true},
+		{name: "letters only", password: "Abcdefghijkl", valid: false},
+		{name: "digits only", password: "123456789012", valid: false},
+		{name: "symbol", password: "Abcdefghij1!", valid: false},
+		{name: "non ASCII", password: "密码Abc123", valid: false},
+		{name: "whitespace", password: "Abcdef 12345", valid: false},
+		{name: "128 characters", password: strings.Repeat("a", 127) + "1", valid: true},
+		{name: "129 characters", password: strings.Repeat("a", 128) + "1", valid: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			store := &identityStoreStub{}
+			opened := false
+			hasher := &passwordHasherStub{hash: "$2a$12$fixture-hash"}
+			service := NewIdentityInstaller(
+				func(installer.DatabaseConnection) (IdentityStore, error) {
+					opened = true
+					return store, nil
+				},
+				hasher,
+				bytes.NewReader(bytes.Repeat([]byte{0x41}, 64)),
+			)
+
+			_, err := service.InitializeWithReference(
+				context.Background(),
+				installer.DatabaseConnection{Driver: "mysql", Mode: "single", DSN: "user:secret@tcp(db:3306)/app"},
+				installer.AdminAccount{Username: "admin", Password: test.password},
+				"install-password-policy-fixture",
+			)
+			if test.valid {
+				if err != nil {
+					t.Fatalf("InitializeWithReference() error = %v, want nil", err)
+				}
+				if !opened || hasher.password != test.password {
+					t.Fatalf("valid password was not hashed and persisted: opened=%v hashed=%q", opened, hasher.password)
+				}
+				return
+			}
+			if !errors.Is(err, ErrIdentityInstallation) {
+				t.Fatalf("InitializeWithReference() error = %v, want ErrIdentityInstallation", err)
+			}
+			if opened || hasher.password != "" {
+				t.Fatalf("invalid password reached dependencies: opened=%v hashed=%q", opened, hasher.password)
+			}
+		})
+	}
+}
+
 func TestInstallationUserRowStoresNormalizedUsername(t *testing.T) {
 	row, err := newInstallationUserRow(" Alice ", "hash")
 	if err != nil {
@@ -63,7 +119,7 @@ func TestIdentityInstallerRecoversRollbackAfterProcessRestartWithFreshConnection
 	factory := func(installer.DatabaseConnection) (IdentityStore, error) { return store, nil }
 	database := installer.DatabaseConnection{Driver: "mysql", Mode: "single", DSN: "user:fresh-secret@tcp(db:3306)/app"}
 	first := NewIdentityInstaller(factory, &passwordHasherStub{hash: "$2a$12$fixture-hash"}, bytes.NewReader(bytes.Repeat([]byte{0x6c}, 64)))
-	receipt, err := first.Initialize(context.Background(), database, installer.AdminAccount{Username: "admin", Password: "initial-password-123"})
+	receipt, err := first.Initialize(context.Background(), database, installer.AdminAccount{Username: "admin", Password: "InitialAdmin123"})
 	if err != nil {
 		t.Fatalf("Initialize() error = %v", err)
 	}
@@ -105,7 +161,7 @@ func TestIdentityInstallerPreservesSafeInitializationDiagnostic(t *testing.T) {
 	receipt, err := service.InitializeWithReference(
 		context.Background(),
 		installer.DatabaseConnection{Driver: "mysql", Mode: "single", DSN: "user:secret@tcp(db:3306)/app"},
-		installer.AdminAccount{Username: "admin", Password: "initial-password-123"},
+		installer.AdminAccount{Username: "admin", Password: "InitialAdmin123"},
 		"install-cccccccccccccccccccccccccccccccc",
 	)
 	if err == nil || receipt.Reference == "" {
@@ -133,7 +189,7 @@ func TestIdentityInstallerUsesCallerPreparedRecoveryReference(t *testing.T) {
 	receipt, err := service.InitializeWithReference(
 		context.Background(),
 		installer.DatabaseConnection{Driver: "mysql", Mode: "single", DSN: "user:secret@tcp(db:3306)/app"},
-		installer.AdminAccount{Username: "admin", Password: "initial-password-123"},
+		installer.AdminAccount{Username: "admin", Password: "InitialAdmin123"},
 		reference,
 	)
 	if err != nil {
@@ -153,7 +209,7 @@ func TestIdentityInstallerFinalizeForgetsInMemoryDatabaseCredentials(t *testing.
 	database := installer.DatabaseConnection{Driver: "mysql", Mode: "single", DSN: "user:database-secret@tcp(db:3306)/app"}
 	receipt, err := service.InitializeWithReference(
 		context.Background(), database,
-		installer.AdminAccount{Username: "admin", Password: "initial-password-123"},
+		installer.AdminAccount{Username: "admin", Password: "InitialAdmin123"},
 		"install-33333333333333333333333333333333",
 	)
 	if err != nil {
@@ -183,7 +239,7 @@ func TestIdentityInstallerRecoverRollbackForgetsCredentialsAfterInitializeCloseE
 	database := installer.DatabaseConnection{Driver: "mysql", Mode: "single", DSN: "user:database-secret@tcp(db:3306)/app"}
 	receipt, err := service.InitializeWithReference(
 		context.Background(), database,
-		installer.AdminAccount{Username: "admin", Password: "initial-password-123"},
+		installer.AdminAccount{Username: "admin", Password: "InitialAdmin123"},
 		"install-44444444444444444444444444444444",
 	)
 	if err == nil || receipt.Reference == "" || len(service.pending) != 1 {

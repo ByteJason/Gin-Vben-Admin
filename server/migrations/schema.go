@@ -214,12 +214,17 @@ func createTable(tx *gorm.DB, model any) error {
 	}
 	if tx.Dialector.Name() == "postgres" {
 		if comment := tableComments[table]; comment != "" {
-			if err := tx.Exec("COMMENT ON TABLE ? IS ?", clause.Table{Name: table}, comment).Error; err != nil {
+			if err := commentPostgresTable(tx, table, comment); err != nil {
 				return fmt.Errorf("comment table %s: %w", table, err)
 			}
 		}
 	}
 	return nil
+}
+
+func commentPostgresTable(tx *gorm.DB, table, comment string) error {
+	statement := "COMMENT ON TABLE ? IS '" + escapeSQLLiteral(comment) + "'"
+	return tx.Exec(statement, clause.Table{Name: table}).Error
 }
 
 func escapeSQLLiteral(value string) string { return strings.ReplaceAll(value, "'", "''") }

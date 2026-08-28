@@ -1048,8 +1048,10 @@ components:
         password:
           type: string
           format: password
-          minLength: 12
+          description: 6–128 个 ASCII 字母或数字，且至少各包含 1 个
+          minLength: 6
           maxLength: 128
+          pattern: '^(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9]{6,128}$'
           writeOnly: true
     ApplyResultEnvelope:
       type: object

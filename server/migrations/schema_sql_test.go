@@ -3,6 +3,7 @@ package migrations
 import (
 	"bytes"
 	"log"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -12,6 +13,31 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
+
+func TestPostgresTableCommentUsesParserSafeLiteral(t *testing.T) {
+	sqlDB, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer sqlDB.Close()
+
+	mock.ExpectExec(regexp.QuoteMeta(`COMMENT ON TABLE "users" IS '用''户'`)).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	database, err := gorm.Open(
+		gormpostgres.New(gormpostgres.Config{Conn: sqlDB, PreferSimpleProtocol: true}),
+		&gorm.Config{DisableAutomaticPing: true},
+	)
+	if err != nil {
+		t.Fatalf("gorm.Open() error = %v", err)
+	}
+
+	if err := commentPostgresTable(database, "users", "用'户"); err != nil {
+		t.Fatalf("commentPostgresTable() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("PostgreSQL driver SQL = %v", err)
+	}
+}
 
 func TestCreateTableDDLHasCommentsAndNoForeignKeys(t *testing.T) {
 	tests := []struct {
