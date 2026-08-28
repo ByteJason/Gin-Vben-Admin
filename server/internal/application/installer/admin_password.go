@@ -2,7 +2,9 @@ package installer
 
 const (
 	initialAdminPasswordMinLength = 6
-	initialAdminPasswordMaxLength = 128
+	// bcrypt rejects inputs longer than 72 bytes. The installer accepts ASCII
+	// only, so the byte and character limits are identical.
+	initialAdminPasswordMaxLength = 72
 )
 
 // IsValidInitialAdminPassword reports whether password satisfies the policy for

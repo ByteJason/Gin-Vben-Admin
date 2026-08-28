@@ -742,8 +742,8 @@ func TestValidateApplyRequestEnforcesInitialAdminPasswordPolicy(t *testing.T) {
 		{name: "symbol", password: "Abcdefghij1!", valid: false},
 		{name: "non ASCII", password: "密码Abc123", valid: false},
 		{name: "whitespace", password: "Abcdef 12345", valid: false},
-		{name: "128 characters", password: strings.Repeat("a", 127) + "1", valid: true},
-		{name: "129 characters", password: strings.Repeat("a", 128) + "1", valid: false},
+		{name: "72 characters", password: strings.Repeat("a", 71) + "1", valid: true},
+		{name: "73 characters", password: strings.Repeat("a", 72) + "1", valid: false},
 	}
 
 	for _, test := range tests {

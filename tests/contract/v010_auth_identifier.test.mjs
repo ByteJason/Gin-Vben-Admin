@@ -44,6 +44,36 @@ test('0.10 all admin login forms submit a shared username-or-email identifier fi
     assert.match(login, /authentication\.identifierTip['"]/, `${ui} identifier tip`);
     assert.doesNotMatch(login, /fieldName:\s*'username'/, `${ui} legacy username field`);
 
+    const identifierField = login.match(
+      /component:\s*'VbenInput',[\s\S]*?fieldName:\s*'identifier'/,
+    )?.[0];
+    assert.ok(identifierField, `${ui} identifier field schema`);
+    assert.match(
+      identifierField,
+      /autocomplete:\s*'username'/,
+      `${ui} identifier autocomplete`,
+    );
+    assert.match(
+      identifierField,
+      /autocapitalize:\s*'none'/,
+      `${ui} identifier autocapitalize`,
+    );
+    assert.match(
+      identifierField,
+      /spellcheck:\s*false/,
+      `${ui} identifier spellcheck`,
+    );
+
+    const passwordField = login.match(
+      /component:\s*'VbenInputPassword',[\s\S]*?fieldName:\s*'password'/,
+    )?.[0];
+    assert.ok(passwordField, `${ui} password field schema`);
+    assert.match(
+      passwordField,
+      /autocomplete:\s*'current-password'/,
+      `${ui} password autocomplete`,
+    );
+
     const store = readFileSync(join(root, `admin/apps/${ui}/src/store/auth.ts`), 'utf8');
     assert.match(store, /identifier:\s*params\.identifier(?:\s*\?\?\s*params\.username)?/, `${ui} store identifier payload`);
     assert.doesNotMatch(store, /username:\s*params\.username/, `${ui} legacy username payload`);
@@ -59,4 +89,33 @@ test('0.10 all admin login forms submit a shared username-or-email identifier fi
   assert.equal(zh.identifierTip, '请输入用户名或邮箱');
   assert.equal(en.identifier, 'Username or email');
   assert.equal(en.identifierTip, 'Please enter username or email');
+});
+
+test('0.10 shared login remembers only the identifier under the existing storage key', () => {
+  const login = readFileSync(
+    join(root, 'admin/packages/effects/common-ui/src/ui/authentication/login.vue'),
+    'utf8',
+  );
+
+  assert.match(
+    login,
+    /const REMEMBER_ME_KEY = `REMEMBER_ME_USERNAME_\$\{location\.hostname\}`/,
+    'keeps the existing localStorage key compatible',
+  );
+  assert.match(
+    login,
+    /const localIdentifier = localStorage\.getItem\(REMEMBER_ME_KEY\) \|\| ''/,
+    'reads the remembered identifier',
+  );
+  assert.match(
+    login,
+    /rememberMe\.value \? values\?\.identifier : ''/,
+    'stores the identifier when remember-me is checked',
+  );
+  assert.match(
+    login,
+    /formApi\.setFieldValue\('identifier', localIdentifier\)/,
+    'restores the remembered value into the identifier field',
+  );
+  assert.doesNotMatch(login, /values(?:\?\.|\.)(?:password|username)/);
 });

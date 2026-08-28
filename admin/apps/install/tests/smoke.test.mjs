@@ -58,19 +58,19 @@ test('installation shell is independent and exposes an accessible status region'
   assert.doesNotMatch(html, /凭据仅用于本次测试/);
   assert.match(html, /id="admin-username"/);
   assert.match(html, /id="admin-username"[^>]*value="admin"/);
-  assert.match(html, /6–128 个字符，仅限英文字母和数字，且至少各 1 个/);
+  assert.match(html, /6–72 个字符，仅限英文字母和数字，且至少各 1 个/);
   for (const id of ['admin-password', 'admin-password-confirm']) {
     const input = html.match(new RegExp(`<input[^>]*id="${id}"[^>]*>`))?.[0];
     assert.ok(input, `${id} must exist`);
     assert.match(input, /minlength="6"/);
-    assert.match(input, /maxlength="128"/);
+    assert.match(input, /maxlength="72"/);
     assert.ok(
-      input.includes('pattern="(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9]{6,128}"'),
+      input.includes('pattern="(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9]{6,72}"'),
       `${id} must enforce the administrator password policy`,
     );
     assert.match(
       input,
-      /title="请输入 6–128 个字符，仅限英文字母和数字，且至少各 1 个。"/,
+      /title="请输入 6–72 个字符，仅限英文字母和数字，且至少各 1 个。"/,
     );
   }
   assert.match(html, /id="confirm-cleanup"[^>]*type="checkbox"/);
@@ -207,7 +207,7 @@ test('administrator password validation enforces the documented ASCII boundary',
     return validAdminPassword;
   `)();
 
-  for (const password of ['a12345', 'A1bcde', `A1${'a'.repeat(126)}`]) {
+  for (const password of ['a12345', 'A1bcde', `A1${'a'.repeat(70)}`]) {
     assert.equal(validate(password), true, password);
   }
   for (const password of [
@@ -216,7 +216,7 @@ test('administrator password validation enforces the documented ASCII boundary',
     '123456',
     'abc12_',
     '密码A1234',
-    `A1${'a'.repeat(127)}`,
+    `A1${'a'.repeat(71)}`,
   ]) {
     assert.equal(validate(password), false, password);
   }
@@ -252,7 +252,7 @@ test('installation submission rejects an invalid administrator password before t
 
   assert.equal(
     rejected.announcement,
-    '管理员密码需为 6–128 个字符，仅限英文字母和数字，且至少各 1 个。',
+    '管理员密码需为 6–72 个字符，仅限英文字母和数字，且至少各 1 个。',
   );
   assert.equal(rejected.passwordFocused, true);
 });

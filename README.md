@@ -189,6 +189,23 @@ pnpm run dev
 `ui:install` 会解析当前 profile、安装选中包的依赖闭包并刷新本机依赖收据；重复执行是幂等的。
 浏览器准备阶段已完成同一项过滤安装，安装成功后再次执行用于统一所有本地启动、拉取和切换流程。
 
+若首次登录持续提示凭据无效，先停止正在运行的 Go 服务端，再在仓库的 `server` 目录重设
+**安装收据中记录的初始管理员**密码；成功后重新启动服务端。
+命令不会通过参数或输出暴露密码，也不会接收任意用户名；两次输入必须一致，并遵循安装页相同的
+6–72 位 ASCII 字母加数字规则。输入时终端不回显：
+
+```text
+read -rs NEW_ADMIN_PASSWORD
+printf '\n'
+read -rs NEW_ADMIN_PASSWORD_CONFIRM
+printf '\n'
+printf '%s\n%s\n' "$NEW_ADMIN_PASSWORD" "$NEW_ADMIN_PASSWORD_CONFIRM" | go run ./cmd/admin-password reset
+unset NEW_ADMIN_PASSWORD NEW_ADMIN_PASSWORD_CONFIRM
+```
+
+成功输出 `ADMIN_PASSWORD_RESET=OK` 和 `LOGIN_FAILURE_STATE_RESET=OK`；该操作同时清除数据库和
+Redis 中该账号的登录失败/锁定状态。使用非默认 YAML 时追加 `--config PATH`。
+
 团队成员可以各自选择。Node/CLI 还接受 `ADMIN_UI`，并兼容 `APP_UI` 别名；CI/Docker 仅使用
 显式 `ADMIN_UI=antd|ele|naive`，不把个人偏好提交到分支。
 

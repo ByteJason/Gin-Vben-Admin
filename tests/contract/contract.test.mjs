@@ -224,10 +224,10 @@ test('installation contract exposes one credential-write-only apply operation', 
     install.indexOf('    ApplyResultEnvelope:'),
   );
   assert.match(adminSchema, /password:[\s\S]*?minLength: 6/);
-  assert.match(adminSchema, /password:[\s\S]*?maxLength: 128/);
+  assert.match(adminSchema, /password:[\s\S]*?maxLength: 72/);
   assert.ok(
     adminSchema.includes(
-      "pattern: '^(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9]{6,128}$'",
+      "pattern: '^(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9]{6,72}$'",
     ),
   );
   assert.match(adminSchema, /password:[\s\S]*?writeOnly: true/);

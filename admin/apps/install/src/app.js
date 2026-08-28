@@ -1308,7 +1308,7 @@ async function reconcileCompletedInstallation(
 }
 
 function validAdminPassword(value) {
-  return /^(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9]{6,128}$/.test(value);
+  return /^(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9]{6,72}$/.test(value);
 }
 
 async function requestInstallation(event) {
@@ -1321,7 +1321,7 @@ async function requestInstallation(event) {
   }
   if (!validAdminPassword(adminPassword.value)) {
     announceApplyError(
-      '管理员密码需为 6–128 个字符，仅限英文字母和数字，且至少各 1 个。',
+      '管理员密码需为 6–72 个字符，仅限英文字母和数字，且至少各 1 个。',
     );
     adminPassword.focus();
     return;
