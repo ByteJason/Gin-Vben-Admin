@@ -17,14 +17,44 @@
 
 ## 初始化与验证
 
+本机首次安装有两条互斥路径；选择其中一条，不要先后重复执行。两条路径都保留三套源码，
+管理端开发服务器都只在网页后端安装完成后启动一次。
+
+### A. 浏览器优先（普通用户推荐）
+
+从仓库根目录只启动普通 Go API：
+
 ```text
+cd server
+go run ./cmd/api/main.go
+```
+
+打开 [http://127.0.0.1:8080/install](http://127.0.0.1:8080/install)，在网页中选择
+Ant Design Vue、Element Plus 或 Naive UI，再完成数据库、Redis、管理员和默认项配置。网页准备任务
+会按选择执行冻结 lockfile 的过滤安装，三套 `apps/web-*` 源码始终保留。安装路由只接受真实
+loopback 来源和 loopback Host，不信任代理头。
+
+### B. CLI 优先（开发者）
+
+若选择本路径，请跳过 A。先在 `admin/` 预览选择、写入本机 profile，并统一安装当前 UI 依赖：
+
+```text
+cd admin
+pnpm run ui:select -- ele --check
+pnpm run ui:select -- ele
+pnpm run ui:install
+
 cd ../server
 go run ./cmd/api/main.go
 ```
 
-打开 [http://127.0.0.1:8080/install](http://127.0.0.1:8080/install)，在网页中选择 Ant Design Vue、Element Plus 或 Naive UI。无需预先执行 `pnpm install`：Go 会异步调用现有 Node/pnpm 初始化事务，原子保留所选应用，将另外两套移动到仓库根目录 `.runtime/install/ui-backup/<transaction>/`，写入 `.ui-profile.json`，并只对缩减后的 workspace 执行 `pnpm install --frozen-lockfile`。安装路由只接受真实 loopback 来源和 loopback Host，不信任代理头。
+再打开 [http://127.0.0.1:8080/install](http://127.0.0.1:8080/install)。网页将 CLI 已选 UI
+显示为只读项，只继续后端安装；此时不要另开一个 `pnpm run dev`。`pnpm run ui:install` 会从
+`.ui-profile.local.json` 解析选中包，底层执行
+`pnpm install --filter <selected-package>... --frozen-lockfile`，并刷新依赖收据。
 
-UI 移动、依赖安装或 UI 重置中断后，重新打开页面即可继续固定选择；合法持久事务在 Go 重启后仍显示为 `ui_prepare`。安装完成前可在网页中确认恢复三套模板并重选。网页安装事务不会把密码或 DSN 写入事务文件。
+选择、依赖安装或网页安装中断后，重新打开页面即可继续固定选择；合法的零移动 journal 在 Go
+重启后仍显示为 `ui_prepare`。网页安装事务不会把密码或 DSN 写入事务文件。
 
 网页安装失败时，页面会保留当前输入并显示失败步骤、稳定原因标识、数据库代码（若有）、任务 ID；菜单或权限种子与旧数据冲突时还会显示安全的资源类型和资源 ID。服务端终端可按任务 ID 查找 `installation.job.failed`，结构化日志不会输出 SQL、DSN 或凭据。
 
@@ -37,7 +67,11 @@ pnpm run init -- --check                 # 严格只读，显示 INIT_REASON/INI
 pnpm run init -- --reset --confirm-reset  # 仅网页安装完成前
 ```
 
-无参数执行 `pnpm run init` 不再询问 UI，只输出安装页地址；`--check`、`--reset` 保留为维护入口。安装完成前，公开的 `dev`、`build`、`preview` 会要求先完成网页安装；完成后它们从 `.ui-profile.json` 自动分发到唯一保留的应用：
+无参数执行 `pnpm run init` 不再询问 UI，只输出安装页地址；`--check`、`--reset` 保留为维护入口。
+完成 UI 选择并安装对应依赖后，公开的 `dev`、`build`、`preview` 会从本机
+`.ui-profile.local.json`（旧版则回退到 `.ui-profile.json`）自动分发到当前包。workspace 的
+`ui_prepared` 与 `installed` 都允许前端分发；`.runtime/install/.installed` 只控制后端安装状态和
+业务 API 门禁，不作为前端依赖/build 门禁：
 
 ```text
 pnpm run dev
@@ -45,7 +79,8 @@ pnpm run build
 pnpm run preview
 ```
 
-安装成功后停止旧服务端，并在两个终端分别运行。网页准备任务已只为所选 UI 安装依赖；这里再次执行 `pnpm install` 是幂等校验和本地链接补齐，不会恢复或安装未选择的 UI：
+安装成功后停止旧服务端，并在两个终端分别运行。管理端只启动一次，本地依赖统一由
+`ui:install` 解析当前 profile：
 
 ```text
 # 仓库根目录，终端 1：服务端
@@ -54,19 +89,62 @@ go run ./cmd/api/main.go
 
 # 仓库根目录，终端 2：管理端
 cd admin
-pnpm install
+# ui:install 内部执行 pnpm install --filter 当前 profile... --frozen-lockfile
+pnpm run ui:install
 pnpm run dev
 ```
 
-已初始化后拉取更新时，上游改动可能让未选 UI 原路径重新出现少量 tracked 源码残片。没有 `package.json` 的残片不是 pnpm workspace；Node 命令门禁和 Go 安装状态都会继续使用 `.ui-profile.json` 的唯一选择，所以无需重新 init，也不会安装残片依赖。不要删除 `.ui-profile.json`、`.runtime/install/.installed` 或初始化备份；若完整未选 workspace 或异常路径出现，一致性检查会保留并显示真实选择后阻断运行。
+后续拉取先检查分支状态，再刷新当前 UI 依赖：
+
+```text
+git status
+git pull --ff-only
+cd admin
+pnpm run ui:install
+```
+
+选择器保留三个 tracked UI 路径，不会因为本机只激活一套而制造 `modify/delete` 冲突；用户自己的
+同文件修改或分叉提交仍按普通 Git rebase/merge 流程处理，`--ff-only` 只适用于能够快进的分支。
+
+旧版已经删除/暂存两套 UI 的工作区需一次性收敛：先用 `pnpm run init -- --check` 完成或恢复任何
+活动事务，然后从当前 `HEAD` 只恢复两套**未选择**的 tracked 目录，再对原选择执行
+`pnpm run ui:select -- <antd|ele|naive>` 和 `pnpm run ui:install`。例如原选择为 `ele`：
+
+```text
+git restore --source=HEAD -- admin/apps/web-antd admin/apps/web-naive
+cd admin
+pnpm run ui:select -- ele
+pnpm run ui:install
+```
+
+这样保留已选择 UI 的本地适配，同时消除另外两棵树的本机删除；随后回到仓库根目录执行
+`git pull --ff-only`。未选目录若也有需要保留的修改，恢复前先备份或提交。
+
+已安装后切换 UI：
+
+```text
+cd admin
+pnpm run ui:select -- naive --check
+pnpm run ui:select -- naive
+pnpm run ui:install
+pnpm run dev
+```
+
+切换只改变活动 profile、派生收据和切换报告；根 `.env` 已存在时只精确更新
+`APP_UI_ACTIVE`，其余键保持不变。三套源码与公共业务层不变，报告中的
+`sourceAdapter`、`targetAdapter`、`adapterChecks=[route,theme,form,component]` 与
+`uiSpecific=revalidate-adapter` 提醒人工复核 adapter。后端 `.installed` 原文件保持，历史目录保存
+字节一致副本，因此服务端仍为 `installed`，现有数据库、管理员和业务 API 继续可用，无需重跑网页
+后端安装。不要提交 `.ui-profile.local.json`，也不要手动编辑 `.runtime/install/` 中的 journal 和报告。
 
 以下状态由程序维护，**不要手动删除、改名或编辑**：
 
 | 路径 | 作用 |
 | --- | --- |
-| `admin/.ui-profile.json` | 记录唯一选择的 UI，并驱动通用命令分发 |
+| `admin/.ui-profile.local.json` | 本机 UI 选择，已忽略且优先于旧版 profile |
+| `admin/.ui-profile.json` | 旧版兼容 profile，新流程不改写 |
 | `.runtime/install/` | 事务根目录；内部短期租约、清理墓碑、`environment-backup/` 等均由程序维护，请勿删除或编辑 |
-| `.runtime/install/.installed` | 最后原子写入的安装完成标记和 build 门禁 |
+| `.runtime/install/.installed` | 后端安装完成标记和业务 API 门禁；不作为前端依赖/build 门禁，切换 UI 时保持原文件 |
 | `.runtime/install/admin-init.lock` | schema 2 init 进程租约；绑定 PID 与启动身份，真实 owner 即使心跳暂停也不会按 TTL 误回收，崩溃或 PID 复用后安全恢复 |
 | `.runtime/install/admin-init.lock.reclaim` | init 回收失效租约时的原子墓碑；回收中断后由下一次 init 自动处理 |
 | `.runtime/install/admin-init-heartbeat/` | 绑定进程启动身份的一主一 owner 双 UUID 心跳；长时间安装时保持活跃，单通道异常或系统暂停不会误解锁 |
@@ -78,13 +156,17 @@ pnpm run dev
 | `.runtime/install/dependency-job-gate-<UUID>.json` | Windows kill-on-close Job Object 完成绑定后发布的短期门闩；正常结束时自动清理，强制终止或断电残片按 UUID 隔离且不阻塞重跑，请勿手动删除 |
 | `.runtime/install/process.guard` | 服务端安装锁共用的持久跨进程保护文件；空闲时也不要删除 |
 | `.runtime/install/.installed.lock` | 并发安装互斥锁 |
-| `.runtime/install/transaction.json` | 不含敏感字段的 UI 选择、重置与网页安装恢复记录 |
-| `.runtime/install/ui-backup/` | 初始化期间暂存的未选 UI |
+| `.runtime/install/workspace-transaction.json` | 零移动 journal：`switching_ui` 用于原子切换恢复，`dependencies_pending` 用于依赖准备；中断后以同一 UI 重跑，未完成时 dev/build 会被门禁阻止 |
+| `.runtime/install/workspace-dependencies.json` | 当前 UI 与 lockfile 摘要；`pnpm run ui:install` 成功后刷新 |
+| `.runtime/install/ui-switch-report.json` | 切换前后选择及公共层/adapter 人工复核提示 |
+| `.runtime/install/ui-switch-history/` | 已安装切换时归档的后端 marker 字节副本；原 marker 保持不变 |
+| `.runtime/install/transaction.json` | 旧版 UI 移动事务兼容记录 |
+| `.runtime/install/ui-backup/` | 仅旧版迁移/恢复可能出现 |
 | `.runtime/install/legacy-prepared-migration.json` | 旧版构建失败状态的可中断迁移 journal；`--check` 只读识别，重跑 init 自动续接 |
 | `.runtime/install/legacy-recovery/<transaction>/.ui-init-receipt.json` | 可逆隔离的旧 receipt；只用于迁移来源证据 |
 | `.runtime/init-backup/` | 旧版 UI 暂存目录；合法目标由迁移器接管，冲突时保持不变 |
 | `.runtime/init-recovery/` | 旧版历史恢复记录；迁移过程中原样保留 |
 
-遇到中断时重新运行 init 或重新打开安装页，让程序恢复这些状态。Docker 在已有 profile 时自动使用它；全新 CI 可显式传入 `ADMIN_UI=antd|ele|naive`，显式值与 profile 不一致时输出 `UI_PROFILE_MISMATCH`。若网页安装需要替换已有 `.env`，`environment-backup/` 仅在事务期间以 `0600` 权限保存原文件用于补偿，并在完成标记提交后精确清理；不要复制或提交它。
+遇到中断时重新运行 init 或重新打开安装页，让程序恢复这些状态。CI/Docker 显式传入 `ADMIN_UI=antd|ele|naive`；本机 `.ui-profile.local.json` 被 `.dockerignore` 排除，不会污染镜像选择。旧版 tracked profile 与显式部署值不一致时输出 `UI_PROFILE_MISMATCH`。若网页安装需要替换已有 `.env`，`environment-backup/` 仅在事务期间以 `0600` 权限保存原文件用于补偿，并在完成标记提交后精确清理；不要复制或提交它。
 
-init 会使用 Node.js 内置文件 API，将所选模板的 `.env.development.example` 和 `.env.production.example` 原子复制为对应本地环境文件；已有本地文件保持原字节。任何初始化锁、事务、profile 或 UI 模板移动发生前，程序都会用随机临时哨兵实际验证创建、写入并同步、硬链接、目录同步、重命名、删除以及模板到备份目录的跨目录移动能力；探针结束后立即清理，因此能在 Windows ACL/文件系统限制、macOS/Linux 权限或跨磁盘卷移动不受支持时提前停止。另一个进程仍可能在预检后临时占用文件，所以真实移动继续使用可恢复事务，修复占用后可直接重试。安装页会显示稳定的失败阶段、原因、逻辑目录范围、所需操作和任务 ID；只有已经进入依赖安装阶段且日志已成功创建时才显示 `.runtime/install/dependency-install.log`。旧版本完成安装但缺少整个文件时，通用 `dev/build/preview` 分发器会在启动前自动补齐；已有旧文件缺少标题时由共享 Vite 配置提供默认值，不改写其中的自定义地址或敏感字段。开发环境默认 API 地址为 `/api`，即使本地环境文件意外缺失也会回退到同源 `/api`，再由 Vite 代理转发到 Gin 的 `/api` 根路径（`http://localhost:8080/api`）。普通用户与源码工作区都只使用通用的 profile 驱动命令。
+init 会使用 Node.js 内置文件 API，将所选模板的 `.env.development.example` 和 `.env.production.example` 原子复制为对应本地环境文件；已有本地文件保持原字节。新流程只验证本机选择、状态目录和三套模板完整性，零移动 journal 的 `moves` 永远为空。仅在接管旧版 source-moving 现场时，兼容恢复器才会额外验证硬链接、目录同步、重命名、删除和跨目录移动能力，并用可恢复事务续接。安装页会显示稳定的失败阶段、原因、逻辑目录范围、所需操作和任务 ID；只有已经进入依赖安装阶段且日志已成功创建时才显示 `.runtime/install/dependency-install.log`。旧版本完成安装但缺少整个文件时，通用 `dev/build/preview` 分发器会在启动前自动补齐；已有旧文件缺少标题时由共享 Vite 配置提供默认值，不改写其中的自定义地址或敏感字段。开发环境默认 API 地址为 `/api`，即使本地环境文件意外缺失也会回退到同源 `/api`，再由 Vite 代理转发到 Gin 的 `/api` 根路径（`http://localhost:8080/api`）。普通用户与源码工作区都只使用通用的 profile 驱动命令。

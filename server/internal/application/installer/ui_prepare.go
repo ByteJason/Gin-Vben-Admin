@@ -148,7 +148,10 @@ func (s *UIPreparationJobService) StartPrepare(ctx context.Context, request UIPr
 			return UIPreparationJob{}, ErrUIPreparationConflict
 		}
 		if !profile.Installing {
-			return s.completedPrepare(request.SelectedUI)
+			if !profile.IndependentUISelection {
+				return s.completedPrepare(request.SelectedUI)
+			}
+			return s.enqueue(UIPreparationActionPrepare, request.SelectedUI)
 		}
 		if !profile.PreparingUI || profile.UIAction != UIPreparationActionPrepare {
 			return UIPreparationJob{}, ErrUIPreparationConflict
@@ -418,7 +421,8 @@ func allowedUIPreparationErrorKey(value string) bool {
 	case "ui_prepare_failed", "ui_reset_failed", "ui_preflight_failed", "ui_template_layout_invalid",
 		"ui_api_unavailable", "ui_initialization_busy", "ui_initialization_lease_failed",
 		"ui_state_directory_invalid", "ui_node_version_unsupported", "ui_pnpm_version_unsupported",
-		"ui_dependency_install_failed", "ui_workspace_prepare_failed":
+		"ui_dependency_install_failed", "ui_workspace_prepare_failed", "ui_switch_failed",
+		"ui_workspace_layout_invalid", "ui_workspace_transaction_invalid":
 		return true
 	default:
 		return false
@@ -436,7 +440,8 @@ func allowedUIPreparationFailureReason(value string) bool {
 		"recovery_validation_failed", "runtime_env_app_invalid", "runtime_env_profile_invalid",
 		"runtime_env_target_invalid", "runtime_env_template_invalid", "ui_invalid",
 		"ui_package_mismatch", "ui_profile_invalid", "ui_profile_mismatch", "ui_profile_required",
-		"reset_in_progress", "state_inconsistent", "initialization_in_progress", "initialization_operation_failed":
+		"reset_in_progress", "state_inconsistent", "initialization_in_progress", "initialization_operation_failed",
+		"workspace_layout_invalid", "workspace_transaction_invalid", "ui_switch_failed":
 		return true
 	default:
 		return false

@@ -32,10 +32,11 @@ type MarkerReader interface {
 // InstallationProfile is the credential-free UI selection prepared by the
 // local initializer. It is read-only from the installation API boundary.
 type InstallationProfile struct {
-	SelectedUI  installstate.UI     `json:"selectedUi"`
-	Installing  bool                `json:"installing"`
-	PreparingUI bool                `json:"preparingUi"`
-	UIAction    UIPreparationAction `json:"uiAction,omitempty"`
+	SelectedUI             installstate.UI     `json:"selectedUi"`
+	Installing             bool                `json:"installing"`
+	PreparingUI            bool                `json:"preparingUi"`
+	UIAction               UIPreparationAction `json:"uiAction,omitempty"`
+	IndependentUISelection bool                `json:"-"`
 }
 
 // ProfileProvider returns the initializer's selected UI. exists=false means
@@ -167,10 +168,16 @@ func (s *StatusService) Status(ctx context.Context) (Status, error) {
 	if err := marker.Validate(); err != nil {
 		return inconsistentStatus(profile), nil
 	}
-	if marker.SelectedUI != profile.SelectedUI {
+	if marker.SelectedUI != profile.SelectedUI && !profile.IndependentUISelection {
 		return inconsistentStatus(profile), nil
 	}
-	if profile.Installing {
+	// A workspace UI switch has its own durable preparation journal, but it does
+	// not reopen the already-committed backend installation. Keep the marker as
+	// the business-route gate while exposing the pending frontend work through
+	// phase/uiAction. First-install apply activity and legacy UI preparation still
+	// use the installing state until their backend marker is committed.
+	independentUIPreparation := profile.IndependentUISelection && profile.PreparingUI && profile.UIAction == UIPreparationActionPrepare
+	if profile.Installing && !independentUIPreparation {
 		return Status{State: StateInstalling, SchemaVersion: installstate.CurrentSchemaVersion, InstallerVersion: CurrentInstallerVersion, SelectedUI: profile.SelectedUI, Phase: installationPhase(profile), UIAction: installationUIAction(profile)}, nil
 	}
 	installedAt := marker.InstalledAt
@@ -179,9 +186,11 @@ func (s *StatusService) Status(ctx context.Context) (Status, error) {
 		Installed:        true,
 		SchemaVersion:    marker.SchemaVersion,
 		InstallerVersion: marker.InstallerVersion,
-		SelectedUI:       marker.SelectedUI,
+		SelectedUI:       profile.SelectedUI,
 		Mode:             marker.Mode,
 		InstalledAt:      &installedAt,
+		Phase:            installationPhase(profile),
+		UIAction:         installationUIAction(profile),
 	}, nil
 }
 

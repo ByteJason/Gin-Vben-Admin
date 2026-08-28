@@ -31,6 +31,7 @@ func TestCommandUIInitializerRunsShellFreePrepareWithFilteredEnvironmentAndStabl
 		"PNPM_HOME=/fixture/pnpm", "COREPACK_HOME=/fixture/corepack",
 		"DATABASE_PASSWORD=private-db", "NPM_TOKEN=private-npm",
 		"NODE_OPTIONS=--require=/private/hook.mjs", "GIN_VBEN_INSTALL_STATE_DIR=/private/override",
+		"GIN_VBEN_UI_SELECTION_MODE=legacy", "ADMIN_UI=naive", "APP_UI=antd",
 	})
 	if err != nil {
 		t.Fatalf("newCommandUIInitializer() error = %v", err)
@@ -57,7 +58,7 @@ func TestCommandUIInitializerRunsShellFreePrepareWithFilteredEnvironmentAndStabl
 	if !strings.Contains(joinedEnvironment, "GIN_VBEN_INSTALL_STATE_DIR="+stateDirectory) {
 		t.Fatalf("filtered environment missing fixed state directory %q: %q", stateDirectory, joinedEnvironment)
 	}
-	for _, blocked := range []string{"DATABASE_PASSWORD", "private-db", "NPM_TOKEN", "private-npm", "NODE_OPTIONS", "/private/hook", "/private/override"} {
+	for _, blocked := range []string{"DATABASE_PASSWORD", "private-db", "NPM_TOKEN", "private-npm", "NODE_OPTIONS", "/private/hook", "/private/override", "GIN_VBEN_UI_SELECTION_MODE", "ADMIN_UI", "APP_UI"} {
 		if strings.Contains(joinedEnvironment, blocked) {
 			t.Fatalf("filtered environment contains %q: %q", blocked, joinedEnvironment)
 		}

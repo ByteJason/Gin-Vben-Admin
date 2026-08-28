@@ -680,6 +680,9 @@ components:
             - ui_pnpm_version_unsupported
             - ui_dependency_install_failed
             - ui_workspace_prepare_failed
+            - ui_switch_failed
+            - ui_workspace_layout_invalid
+            - ui_workspace_transaction_invalid
         failureStep:
           type: string
           enum: [launch, preflight, workspace, dependencies, reset]
@@ -721,6 +724,9 @@ components:
             - state_inconsistent
             - initialization_in_progress
             - initialization_operation_failed
+            - workspace_layout_invalid
+            - workspace_transaction_invalid
+            - ui_switch_failed
           description: 来自初始化命令白名单输出的稳定原因，不包含自由文本
         failureScope:
           type: string

@@ -51,6 +51,8 @@ function fixture() {
     'process-identity.mjs',
     'profile-gate.mjs',
     'selected-dispatch.mjs',
+    'ui-install.mjs',
+    'ui-select.mjs',
   ]) {
     cpSync(join(sourceRoot, 'scripts', name), join(root, 'scripts', name));
   }
@@ -297,6 +299,25 @@ test('init accepts the pnpm argument separator used by documented commands', () 
     assert.match(output(result), /INIT_STATE=pristine/);
     assert.match(output(result), /INIT_NEXT=CHECK_COMPLETE/);
     assert.match(output(result), /INIT_ERROR=NONE/);
+  } finally {
+    dispose(root);
+  }
+});
+
+test('workspace dry-run remains read-only even when an inherited legacy mode is present', () => {
+  const root = fixture();
+  try {
+    writeFileSync(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - apps/*\n');
+    const before = filesystemSnapshot(root);
+    const result = run(root, 'init.mjs', [
+      '--dry-run', '--ui', 'ele', '--confirm-cleanup', '--no-open',
+    ], {
+      GIN_VBEN_UI_SELECTION_MODE: 'legacy',
+    });
+    assert.equal(result.status, 0, output(result));
+    assert.match(output(result), /INIT_NEXT=PREFLIGHT_COMPLETE/);
+    assert.match(output(result), /INIT_PLAN_PRESERVE=apps\/web-antd,apps\/web-ele,apps\/web-naive/);
+    assert.deepEqual(filesystemSnapshot(root), before);
   } finally {
     dispose(root);
   }
@@ -2930,6 +2951,77 @@ test('dependency lease binds a separate Job guardian and Node child identity', a
   }
 });
 
+test('dependency installation cannot cross an admin mutation lease without its exact handoff', async () => {
+  const root = fixture();
+  let releaseAdmin;
+  let dependency;
+  try {
+    releaseAdmin = await acquireAdminInitLease(root, { heartbeatIntervalMs: 1_000 });
+    let blocked;
+    try {
+      dependency = await acquireDependencyInstallLease(root, { heartbeatIntervalMs: 1_000 });
+    } catch (error) {
+      blocked = error;
+    }
+    if (dependency) {
+      await dependency.release();
+      dependency = null;
+    }
+    assert.equal(blocked?.message, 'INIT_BUSY');
+
+    dependency = await acquireDependencyInstallLease(root, {
+      adminLeaseId: releaseAdmin.lease.id,
+      heartbeatIntervalMs: 1_000,
+    });
+    assert.equal(dependency.lease.owner, 'admin-dependency-install');
+  } finally {
+    await dependency?.release();
+    await releaseAdmin?.();
+    dispose(root);
+  }
+});
+
+test('dependency admission rechecks an admin writer that wins its publication race', async () => {
+  const root = fixture();
+  let releaseAdmin;
+  try {
+    await assert.rejects(
+      acquireDependencyInstallLease(root, {
+        heartbeatIntervalMs: 1_000,
+        afterAdminLeaseAdmission: async () => {
+          releaseAdmin = await acquireAdminInitLease(root, { heartbeatIntervalMs: 1_000 });
+        },
+      }),
+      /INIT_BUSY/,
+    );
+    assert.equal(existsSync(join(root, '..', '.runtime', 'install', 'dependency-install.lock')), false);
+  } finally {
+    await releaseAdmin?.();
+    dispose(root);
+  }
+});
+
+test('admin admission removes only itself when dependency publication wins the reverse race', async () => {
+  const root = fixture();
+  let dependency;
+  try {
+    await assert.rejects(
+      acquireAdminInitLease(root, {
+        heartbeatIntervalMs: 1_000,
+        afterDependencyAdmission: async () => {
+          dependency = await acquireDependencyInstallLease(root, { heartbeatIntervalMs: 1_000 });
+        },
+      }),
+      /INIT_BUSY/,
+    );
+    assert.equal(existsSync(adminLeasePath(root)), false);
+    assert.equal(existsSync(join(root, '..', '.runtime', 'install', 'dependency-install.lock')), true);
+  } finally {
+    await dependency?.release();
+    dispose(root);
+  }
+});
+
 test('stale dependency lease with reused live PIDs is reclaimed by start-token mismatch', async () => {
   const root = fixture();
   try {
@@ -4000,6 +4092,353 @@ test('the generic build dispatches only to the selected UI package', () => {
     });
     assert.equal(result.status, 0, output(result));
     assert.equal(readFileSync(log, 'utf8'), '-F @vben/web-ele run build');
+  } finally {
+    dispose(root);
+  }
+});
+
+test('an externally installed non-destructive selection can run without an init receipt', () => {
+  const root = fixture();
+  try {
+    writeFileSync(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - apps/*\n');
+    writeFileSync(join(root, '.ui-profile.local.json'), `${JSON.stringify({
+      schema: 1,
+      selectedUi: 'ele',
+      packageName: '@vben/web-ele',
+      appDirectory: 'apps/web-ele',
+    }, null, 2)}\n`);
+
+    // The documented quick start performs the filtered pnpm install directly,
+    // so no init-owned dependency receipt exists at this public CLI seam.
+    const gate = run(root, 'profile-gate.mjs', ['--command', 'dev']);
+    assert.equal(gate.status, 0, output(gate));
+    assert.match(output(gate), /INIT_STATE=ui_prepared/);
+    assert.match(output(gate), /INIT_ACTION=RUN_SELECTED_APP/);
+    assert.match(output(gate), /INIT_NEXT=RUN_DEV/);
+    assert.match(output(gate), /INIT_ERROR=NONE/);
+
+    const runner = join(root, 'scripts', 'record-workspace-dispatch.mjs');
+    const log = join(root, 'workspace-dispatch.log');
+    writeFileSync(runner, [
+      'import { writeFileSync } from "node:fs";',
+      'writeFileSync(process.env.INIT_DISPATCH_LOG, process.argv.slice(2).join(" "));',
+    ].join('\n'));
+    const dispatch = run(root, 'selected-dispatch.mjs', ['--command', 'dev'], {
+      INIT_PNPM_COMMAND: process.execPath,
+      INIT_PNPM_PREFIX_ARGS: JSON.stringify([runner]),
+      INIT_DISPATCH_LOG: log,
+    });
+    assert.equal(dispatch.status, 0, output(dispatch));
+    assert.equal(readFileSync(log, 'utf8'), '-F @vben/web-ele run dev');
+  } finally {
+    dispose(root);
+  }
+});
+
+test('an environment UI override treats the durable UI receipt as a cache miss and dispatches the override', () => {
+  const root = fixture();
+  try {
+    writeFileSync(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - apps/*\n');
+    writeFileSync(join(root, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n');
+    const initialized = run(root, 'init.mjs', ['--ui', 'ele', '--no-open']);
+    assert.equal(initialized.status, 0, output(initialized));
+    const receipt = join(root, '..', '.runtime', 'install', 'workspace-dependencies.json');
+    const receiptBytes = readFileSync(receipt);
+
+    const gate = run(root, 'profile-gate.mjs', ['--command', 'dev'], { ADMIN_UI: 'naive' });
+    assert.equal(gate.status, 0, output(gate));
+    assert.match(output(gate), /INIT_SELECTED_UI=naive/);
+    assert.match(output(gate), /INIT_ACTION=RUN_SELECTED_APP/);
+
+    const runner = join(root, 'scripts', 'record-override-dispatch.mjs');
+    const log = join(root, 'override-dispatch.log');
+    writeFileSync(runner, [
+      'import { writeFileSync } from "node:fs";',
+      'writeFileSync(process.env.INIT_DISPATCH_LOG, process.argv.slice(2).join(" "));',
+    ].join('\n'));
+    const dispatch = run(root, 'selected-dispatch.mjs', ['--command', 'dev'], {
+      ADMIN_UI: 'naive',
+      INIT_PNPM_COMMAND: process.execPath,
+      INIT_PNPM_PREFIX_ARGS: JSON.stringify([runner]),
+      INIT_DISPATCH_LOG: log,
+    });
+    assert.equal(dispatch.status, 0, output(dispatch));
+    assert.equal(readFileSync(log, 'utf8'), '-F @vben/web-naive run dev');
+    assert.deepEqual(readFileSync(receipt), receiptBytes);
+    assert.equal(JSON.parse(readFileSync(join(root, '.ui-profile.local.json'), 'utf8')).selectedUi, 'ele');
+  } finally {
+    dispose(root);
+  }
+});
+
+test('ui install runs the selected dependency closure and refreshes its optional receipt', () => {
+  const root = fixture();
+  try {
+    const source = readFileSync(join(sourceRoot, 'scripts', 'ui-install.mjs'), 'utf8');
+    assert.ok(
+      source.indexOf('const releaseAdmin = await acquireAdminInitLease(root)')
+        < source.indexOf('const resolved = resolveWorkspaceProfile(root)'),
+      'the selected profile must be resolved only after the lease is held',
+    );
+    writeFileSync(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - apps/*\n');
+    writeFileSync(join(root, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n');
+    writeFileSync(join(root, '.ui-profile.local.json'), `${JSON.stringify({
+      schema: 1,
+      selectedUi: 'ele',
+      packageName: '@vben/web-ele',
+      appDirectory: 'apps/web-ele',
+    })}\n`);
+    const runner = join(root, 'scripts', 'record-ui-install.mjs');
+    const log = join(root, 'ui-install.log');
+    writeFileSync(runner, [
+      'import { appendFileSync } from "node:fs";',
+      'appendFileSync(process.env.INIT_PNPM_LOG, `${process.argv.slice(2).join(" ")}\\n`);',
+    ].join('\n'));
+    const result = run(root, 'ui-install.mjs', [], {
+      INIT_PNPM_COMMAND: process.execPath,
+      INIT_PNPM_PREFIX_ARGS: JSON.stringify([runner]),
+      INIT_PNPM_LOG: log,
+    });
+    assert.equal(result.status, 0, output(result));
+    assert.equal(readFileSync(log, 'utf8'), 'install --filter @vben/web-ele... --frozen-lockfile\n');
+    const receipt = JSON.parse(readFileSync(join(root, '..', '.runtime', 'install', 'workspace-dependencies.json'), 'utf8'));
+    assert.equal(receipt.selectedUi, 'ele');
+    assert.equal(receipt.dependenciesReady, true);
+
+    const repeated = run(root, 'ui-install.mjs', [], {
+      INIT_PNPM_COMMAND: process.execPath,
+      INIT_PNPM_PREFIX_ARGS: JSON.stringify([runner]),
+      INIT_PNPM_LOG: log,
+    });
+    assert.equal(repeated.status, 0, output(repeated));
+    assert.deepEqual(readFileSync(log, 'utf8').trim().split('\n'), [
+      'install --filter @vben/web-ele... --frozen-lockfile',
+      'install --filter @vben/web-ele... --frozen-lockfile',
+    ]);
+  } finally {
+    dispose(root);
+  }
+});
+
+test('ui install never certifies dependencies when its lockfile changes during pnpm', () => {
+  const root = fixture();
+  try {
+    writeFileSync(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - apps/*\n');
+    writeFileSync(join(root, 'pnpm-lock.yaml'), 'lockfileVersion: 9\nrevision: before\n');
+    writeFileSync(join(root, '.ui-profile.local.json'), `${JSON.stringify({
+      schema: 1,
+      selectedUi: 'ele',
+      packageName: '@vben/web-ele',
+      appDirectory: 'apps/web-ele',
+    })}\n`);
+    const runner = join(root, 'scripts', 'change-lockfile-during-install.mjs');
+    writeFileSync(runner, [
+      'import { writeFileSync } from "node:fs";',
+      'writeFileSync(process.env.INIT_LOCKFILE, "lockfileVersion: 9\\nrevision: after\\n");',
+    ].join('\n'));
+
+    const result = run(root, 'ui-install.mjs', [], {
+      INIT_LOCKFILE: join(root, 'pnpm-lock.yaml'),
+      INIT_PNPM_COMMAND: process.execPath,
+      INIT_PNPM_PREFIX_ARGS: JSON.stringify([runner]),
+    });
+    assert.equal(result.status, 1, output(result));
+    assert.match(output(result), /UI_INSTALL_ERROR=DEPENDENCY_INSTALL_FAILED/);
+    assert.equal(existsSync(join(root, '..', '.runtime', 'install', 'workspace-dependencies.json')), false);
+  } finally {
+    dispose(root);
+  }
+});
+
+test('workspace init hands its exact admin lease to the dependency supervisor', () => {
+  const root = fixture();
+  try {
+    writeFileSync(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - apps/*\n');
+    writeFileSync(join(root, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n');
+    const runner = join(root, 'scripts', 'record-supervised-workspace-install.mjs');
+    const log = join(root, 'supervised-workspace-install.log');
+    writeFileSync(runner, [
+      'import { writeFileSync } from "node:fs";',
+      'writeFileSync(process.env.INIT_PNPM_LOG, process.argv.slice(2).join(" "));',
+    ].join('\n'));
+
+    const result = run(root, 'init.mjs', ['--ui', 'ele', '--no-open'], {
+      INIT_DEPENDENCY_INSTALL_TEST_MODE: '',
+      INIT_PNPM_COMMAND: process.execPath,
+      INIT_PNPM_PREFIX_ARGS: JSON.stringify([runner]),
+      INIT_PNPM_LOG: log,
+    });
+    assert.equal(result.status, 0, output(result));
+    assert.equal(readFileSync(log, 'utf8'), 'install --filter @vben/web-ele... --frozen-lockfile');
+    const receipt = JSON.parse(readFileSync(
+      join(root, '..', '.runtime', 'install', 'workspace-dependencies.json'),
+      'utf8',
+    ));
+    assert.equal(receipt.selectedUi, 'ele');
+    assert.equal(existsSync(adminLeasePath(root)), false);
+    assert.equal(existsSync(join(root, '..', '.runtime', 'install', 'dependency-install.lock')), false);
+  } finally {
+    dispose(root);
+  }
+});
+
+test('a killed ui install parent leaves its supervisor lease covering the live pnpm runner', async () => {
+  const root = fixture();
+  let first;
+  try {
+    writeFileSync(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - apps/*\n');
+    writeFileSync(join(root, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n');
+    writeFileSync(join(root, '.ui-profile.local.json'), `${JSON.stringify({
+      schema: 1,
+      selectedUi: 'ele',
+      packageName: '@vben/web-ele',
+      appDirectory: 'apps/web-ele',
+    })}\n`);
+    const runner = join(root, 'scripts', 'slow-ui-install-runner.mjs');
+    const ready = join(root, 'slow-ui-install-ready');
+    const log = join(root, 'slow-ui-install.log');
+    writeFileSync(runner, [
+      'import { appendFileSync, writeFileSync } from "node:fs";',
+      'appendFileSync(process.env.INIT_PNPM_LOG, "START\\n");',
+      'writeFileSync(process.env.INIT_PNPM_READY, String(process.pid));',
+      'await new Promise((resolveDelay) => setTimeout(resolveDelay, 800));',
+      'appendFileSync(process.env.INIT_PNPM_LOG, "END\\n");',
+    ].join('\n'));
+    const env = {
+      ...process.env,
+      INIT_PNPM_COMMAND: process.execPath,
+      INIT_PNPM_PREFIX_ARGS: JSON.stringify([runner]),
+      INIT_PNPM_LOG: log,
+      INIT_PNPM_READY: ready,
+    };
+    first = spawn(process.execPath, [join(root, 'scripts', 'ui-install.mjs')], {
+      cwd: root,
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const firstExit = new Promise((resolveExit) => {
+      first.once('exit', (status, signal) => resolveExit({ status, signal }));
+    });
+    const readyDeadline = Date.now() + 2_000;
+    while (!existsSync(ready) && Date.now() < readyDeadline) {
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 10));
+    }
+    assert.equal(existsSync(ready), true);
+
+    first.kill('SIGKILL');
+    const killed = await firstExit;
+    assert.notEqual(killed.status, 0);
+
+    const blocked = run(root, 'ui-select.mjs', ['naive']);
+    assert.equal(blocked.status, 1, output(blocked));
+    assert.match(output(blocked), /INIT_BUSY/);
+    assert.equal(JSON.parse(readFileSync(join(root, '.ui-profile.local.json'), 'utf8')).selectedUi, 'ele');
+    assert.deepEqual(readFileSync(log, 'utf8').trim().split('\n'), ['START']);
+
+    const stateRoot = join(root, '..', '.runtime', 'install');
+    const completionDeadline = Date.now() + 3_000;
+    while (
+      (
+        !existsSync(log)
+        || !readFileSync(log, 'utf8').includes('END\n')
+        || existsSync(join(stateRoot, 'dependency-install.lock'))
+      )
+      && Date.now() < completionDeadline
+    ) await new Promise((resolveDelay) => setTimeout(resolveDelay, 20));
+    assert.deepEqual(readFileSync(log, 'utf8').trim().split('\n'), ['START', 'END']);
+    assert.equal(existsSync(join(stateRoot, 'dependency-install.lock')), false);
+
+    const switched = run(root, 'ui-select.mjs', ['naive']);
+    assert.equal(switched.status, 0, output(switched));
+    assert.equal(JSON.parse(readFileSync(join(root, '.ui-profile.local.json'), 'utf8')).selectedUi, 'naive');
+  } finally {
+    if (first && first.exitCode === null && first.signalCode === null) first.kill('SIGKILL');
+    dispose(root);
+  }
+});
+
+test('an interrupted installed UI switch resumes dependency preparation instead of reporting already installed', () => {
+  const root = fixture();
+  try {
+    writeFileSync(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - apps/*\n');
+    writeFileSync(join(root, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n');
+    const initialized = run(root, 'init.mjs', ['--ui', 'ele', '--no-open']);
+    assert.equal(initialized.status, 0, output(initialized));
+
+    const stateRoot = join(root, '..', '.runtime', 'install');
+    writeFileSync(join(stateRoot, '.installed'), JSON.stringify({
+      schema_version: 1,
+      installer_version: '0.4.0-dev',
+      installed_at: '2026-08-28T00:00:00Z',
+      selected_ui: 'ele',
+      mode: 'dev',
+      artifact_hash: 'a'.repeat(64),
+      manifest_hash: 'b'.repeat(64),
+    }));
+
+    const crashRunner = join(root, 'crash-workspace-initialize.mjs');
+    const stateModule = new URL('../scripts/init-state.mjs', import.meta.url).href;
+    writeFileSync(crashRunner, [
+      `import { initializeWorkspace } from ${JSON.stringify(stateModule)};`,
+      `await initializeWorkspace(${JSON.stringify(root)}, 'naive', {`,
+      '  afterSelection: () => process.exit(89),',
+      '});',
+      '',
+    ].join('\n'));
+    const crashed = spawnSync(process.execPath, [crashRunner], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env },
+    });
+    assert.equal(crashed.status, 89, output(crashed));
+    const pendingBeforeRetry = JSON.parse(readFileSync(join(stateRoot, 'workspace-transaction.json'), 'utf8'));
+    assert.equal(pendingBeforeRetry.phase, 'dependencies_pending');
+    assert.equal(pendingBeforeRetry.selectedUi, 'naive');
+
+    const resumed = run(root, 'init.mjs', ['--no-open']);
+    assert.equal(resumed.status, 0, output(resumed));
+    assert.doesNotMatch(output(resumed), /INIT_NEXT=ALREADY_INSTALLED/);
+    assert.match(output(resumed), /INIT_STAGE=prepare:dependencies/);
+    assert.equal(existsSync(join(stateRoot, 'workspace-transaction.json')), false);
+    assert.equal(
+      JSON.parse(readFileSync(join(stateRoot, 'workspace-dependencies.json'), 'utf8')).selectedUi,
+      'naive',
+    );
+  } finally {
+    dispose(root);
+  }
+});
+
+test('an installed environment-selected target cannot bypass its durable UI switch', () => {
+  const root = fixture();
+  try {
+    writeFileSync(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - apps/*\n');
+    writeFileSync(join(root, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n');
+    assert.equal(run(root, 'init.mjs', ['--ui', 'ele', '--no-open']).status, 0);
+    const stateRoot = join(root, '..', '.runtime', 'install');
+    writeFileSync(join(stateRoot, '.installed'), JSON.stringify({
+      schema_version: 1,
+      installer_version: '0.4.0-dev',
+      installed_at: '2026-08-28T00:00:00Z',
+      selected_ui: 'ele',
+      mode: 'dev',
+      artifact_hash: 'a'.repeat(64),
+      manifest_hash: 'b'.repeat(64),
+    }));
+
+    const switched = run(root, 'init.mjs', ['--ui', 'naive', '--no-open'], {
+      ADMIN_UI: 'naive',
+    });
+    assert.equal(switched.status, 0, output(switched));
+    assert.doesNotMatch(output(switched), /INIT_NEXT=ALREADY_INSTALLED/);
+    assert.equal(
+      JSON.parse(readFileSync(join(root, '.ui-profile.local.json'), 'utf8')).selectedUi,
+      'naive',
+    );
+    assert.equal(
+      JSON.parse(readFileSync(join(stateRoot, 'workspace-dependencies.json'), 'utf8')).selectedUi,
+      'naive',
+    );
   } finally {
     dispose(root);
   }

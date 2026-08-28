@@ -1,5 +1,6 @@
-# Build one of the management UI templates.
-FROM node:22-alpine AS build
+# Build one of the management UI templates from the shared workspace without
+# removing the other tracked templates.
+FROM node:24-alpine AS build
 
 WORKDIR /workspace
 RUN corepack enable
@@ -10,17 +11,11 @@ COPY packages ./packages
 COPY internal ./internal
 COPY scripts ./scripts
 
-RUN pnpm install --frozen-lockfile --ignore-scripts \
-    && pnpm -r run --if-present stub
-
-ARG UI_APP=web-antd
-RUN case "$UI_APP" in \
-      web-antd|web-ele|web-naive) ;; \
-      *) echo "Unsupported UI_APP=$UI_APP" >&2; exit 2 ;; \
-    esac \
-    && pnpm --filter "@vben/${UI_APP}" run build \
-    && mkdir -p /out \
-    && cp -R "apps/${UI_APP}/dist/." /out/
+ARG ADMIN_UI=""
+RUN UI_PACKAGE="$(node ./scripts/docker-build-ui.mjs --ui "${ADMIN_UI}" --print-package)" \
+    && pnpm install --frozen-lockfile --filter "${UI_PACKAGE}..." --ignore-scripts \
+    && pnpm -r run --if-present stub \
+    && node ./scripts/docker-build-ui.mjs --ui "${ADMIN_UI}" --out /out
 
 FROM nginx:1.27-alpine
 COPY nginx.conf /etc/nginx/conf.d/default.conf

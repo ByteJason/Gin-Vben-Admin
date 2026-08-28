@@ -37,6 +37,9 @@
     "dev": "node ./scripts/profile-gate.mjs --command dev && node ./scripts/selected-dispatch.mjs --command dev",
     "format": "vsh lint --format",
     "init": "node ./scripts/init.mjs",
+    "ui:select": "node ./scripts/ui-select.mjs",
+    "ui:check": "node ./scripts/ui-select.mjs --check",
+    "ui:install": "node ./scripts/ui-install.mjs",
     "lint": "vsh lint",
     "postinstall": "pnpm -r run --if-present stub",
     "prepare": "is-ci || pnpm exec lefthook install",
@@ -50,7 +53,7 @@
     "update:deps": "npx taze -r -w",
     "version": "pnpm exec changeset version && pnpm install --no-frozen-lockfile",
     "catalog": "pnpm dlx codemod pnpm/catalog",
-    "test:smoke": "node --test tests/smoke.test.mjs tests/production-admin-contract.test.mjs tests/manage-access-contract.test.mjs tests/init-cli.test.mjs tests/docker-ui.test.mjs tests/pnpm-command.test.mjs tests/dependency-log.test.mjs tests/dependency-runner.test.mjs tests/process-identity.test.mjs"
+    "test:smoke": "node --test tests/smoke.test.mjs tests/production-admin-contract.test.mjs tests/manage-access-contract.test.mjs tests/init-cli.test.mjs tests/non-destructive-selection.test.mjs tests/docker-ui.test.mjs tests/pnpm-command.test.mjs tests/dependency-log.test.mjs tests/dependency-runner.test.mjs tests/process-identity.test.mjs"
   },
   "dependencies": {
     "sortablejs": "catalog:"

@@ -211,6 +211,49 @@ func TestFileProfileProviderRejectsServerTransactionForDifferentUI(t *testing.T)
 	}
 }
 
+func TestFileProfileProviderReportsMatchingServerTransactionAsApplyingAfterRestart(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	mustWriteProfileFixture(t, root, `{"schema":1,"selectedUi":"ele","packageName":"@vben/web-ele","appDirectory":"apps/web-ele"}`)
+	if err := os.MkdirAll(filepath.Join(root, "admin", "apps", "web-ele"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	transaction := installer.ApplyTransaction{
+		Schema: installer.ApplyTransactionSchema, Owner: installer.ApplyTransactionOwner,
+		ID: "install-0123456789abcdef0123456789abcdef", SelectedUI: installstate.UIEle,
+		Mode: installstate.ModeDev, DatabaseTarget: strings.Repeat("d", 64),
+		Phase: installer.TransactionApplying, CurrentStep: "schema", CompletedSteps: []string{"plan", "database", "redis"},
+		UpdatedAt: time.Date(2026, time.August, 28, 10, 0, 0, 0, time.UTC),
+	}
+	encoded, err := json.Marshal(transaction)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transactionPath := filepath.Join(root, ".runtime", "install", "transaction.json")
+	if err := os.MkdirAll(filepath.Dir(transactionPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(transactionPath, append(encoded, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	provider, err := NewFileProfileProvider(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, exists, err := provider.Profile(context.Background())
+	if err != nil || !exists || profile.SelectedUI != installstate.UIEle || !profile.Installing || profile.PreparingUI {
+		t.Fatalf("Profile() = (%#v, %t, %v), want applying ele profile", profile, exists, err)
+	}
+	status, err := installer.NewStatusServiceWithProfile(
+		NewFileMarkerStore(filepath.Join(root, ".runtime", "install", ".installed")),
+		provider,
+	).Status(context.Background())
+	if err != nil || status.State != installer.StateInstalling || status.SelectedUI != installstate.UIEle || status.Phase != installer.InstallationPhaseApply {
+		t.Fatalf("Status() = (%#v, %v), want apply phase", status, err)
+	}
+}
+
 func TestFileProfileProviderDistinguishesPristineFromInconsistent(t *testing.T) {
 	t.Parallel()
 

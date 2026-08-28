@@ -11,6 +11,8 @@ const PROFILES = Object.freeze({
 });
 
 function readProfile(root) {
+  // Container builds are explicit and reproducible. A per-clone selector is
+  // never an input; only the tracked legacy profile may constrain ADMIN_UI.
   const path = join(root, '.ui-profile.json');
   try {
     const info = lstatSync(path);
@@ -30,7 +32,7 @@ function readProfile(root) {
 }
 
 export function resolveDockerSelection(root, explicitUi) {
-  const explicit = String(explicitUi || '').trim();
+  const explicit = String(explicitUi || process.env.ADMIN_UI || process.env.APP_UI || '').trim();
   if (explicit && !PROFILES[explicit]) throw new Error('UI_INVALID');
   const profile = readProfile(root);
   if (profile && explicit && profile.selectedUi !== explicit) throw new Error('UI_PROFILE_MISMATCH');
@@ -54,9 +56,14 @@ function option(args, name) {
 }
 
 function main() {
+  const args = process.argv.slice(2);
   const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
-  const output = option(process.argv.slice(2), '--out');
-  const selection = resolveDockerSelection(root, option(process.argv.slice(2), '--ui'));
+  const output = option(args, '--out');
+  const selection = resolveDockerSelection(root, option(args, '--ui'));
+  if (args.includes('--print-package')) {
+    process.stdout.write(`${selection.packageName}\n`);
+    return;
+  }
   if (!output) throw new Error('OUTPUT_REQUIRED');
 
   const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';

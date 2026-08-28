@@ -134,6 +134,15 @@ test('installation contract exposes asynchronous UI preparation without widening
     install.indexOf('    UIPreparationJob:'),
     install.indexOf('    UIPreparationErrorEnvelope:'),
   );
+  for (const stableValue of [
+    'ui_switch_failed',
+    'ui_workspace_layout_invalid',
+    'ui_workspace_transaction_invalid',
+    'workspace_layout_invalid',
+    'workspace_transaction_invalid',
+  ]) {
+    assert.match(jobSchema, new RegExp(`- ${stableValue}`), stableValue);
+  }
   assert.doesNotMatch(jobSchema, /command|stdout|stderr|absolutePath|password|dsn|secret|token/i);
   const applySchema = install.slice(install.indexOf('    ApplyRequest:'), install.indexOf('    AdminAccount:'));
   assert.doesNotMatch(applySchema, /selectedUi|confirmCleanup|confirmReset/);

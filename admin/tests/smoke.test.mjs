@@ -5,10 +5,16 @@ import { resolve } from 'node:path';
 import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '..');
-const profilePath = resolve(root, '.ui-profile.json');
-const requiredApps = existsSync(profilePath)
-  ? [`web-${JSON.parse(readFileSync(profilePath, 'utf8')).selectedUi}`]
-  : ['web-antd', 'web-ele', 'web-naive'];
+const localProfilePath = resolve(root, '.ui-profile.local.json');
+const trackedProfilePath = resolve(root, '.ui-profile.json');
+const profilePath = [localProfilePath, trackedProfilePath]
+  .find((candidate) => existsSync(candidate)) ?? '';
+// A local profile selects the runtime dispatch target only; it must never
+// narrow the source-tree smoke checks. The three templates are intentionally
+// tracked together so a fast-forward pull can update any of them.
+const requiredApps = existsSync(localProfilePath) || !profilePath
+  ? ['web-antd', 'web-ele', 'web-naive']
+  : [`web-${JSON.parse(readFileSync(profilePath, 'utf8')).selectedUi}`];
 const brandLogoFilename = 'gin-vben-admin-logo.png';
 const brandLogoSha256 =
   'a76a68003fdc33d7a112e9683cda3a74603362d372195421b2983e902d44ca07';

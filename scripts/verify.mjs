@@ -91,16 +91,41 @@ const unexpectedRootDirectories = rootEntries
   .filter((entry) => entry.isDirectory() && !allowedRootDirectories.has(entry.name))
   .map((entry) => entry.name);
 
-const profilePath = 'admin/.ui-profile.json';
-let expectedManagementApps = ['web-antd', 'web-ele', 'web-naive'];
-if (await exists(profilePath)) {
-  const profile = JSON.parse(await text(profilePath));
-  if (!['antd', 'ele', 'naive'].includes(profile.selectedUi) || profile.appDirectory !== `apps/web-${profile.selectedUi}` || profile.packageName !== `@vben/web-${profile.selectedUi}`) {
+const localProfilePath = 'admin/.ui-profile.local.json';
+const trackedProfilePath = 'admin/.ui-profile.json';
+const workspaceMode = await exists('admin/pnpm-workspace.yaml') || await exists(localProfilePath);
+const profilePath = await exists(localProfilePath)
+  ? localProfilePath
+  : await exists(trackedProfilePath)
+    ? trackedProfilePath
+    : '';
+let profile = null;
+if (profilePath) {
+  try {
+    profile = JSON.parse(await text(profilePath));
+  } catch {
     console.error('VERIFY_FAILED ui_profile=invalid');
     process.exit(1);
   }
-  expectedManagementApps = [`web-${profile.selectedUi}`];
+  if (
+    !profile
+    || !['antd', 'ele', 'naive'].includes(profile.selectedUi)
+    || profile.appDirectory !== `apps/web-${profile.selectedUi}`
+    || profile.packageName !== `@vben/web-${profile.selectedUi}`
+  ) {
+    console.error('VERIFY_FAILED ui_profile=invalid');
+    process.exit(1);
+  }
 }
+// In the non-destructive workspace model a profile controls dispatch, not
+// source presence. Verify all three tracked templates so a pull cannot hide a
+// missing adapter. The single-template expectation remains for old checkouts
+// that have no workspace manifest and only a legacy tracked profile.
+const expectedManagementApps = workspaceMode
+  ? ['web-antd', 'web-ele', 'web-naive']
+  : profile
+    ? [`web-${profile.selectedUi}`]
+    : ['web-antd', 'web-ele', 'web-naive'];
 for (const app of expectedManagementApps) required.push(`admin/apps/${app}`);
 const existence = await Promise.all(required.map(async (item) => [item, await exists(item)]));
 const missing = existence.filter(([, present]) => !present).map(([item]) => item);

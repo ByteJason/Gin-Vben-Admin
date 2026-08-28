@@ -13,7 +13,7 @@ const uiResetEndpoint = '/api/system/install/v1/ui/reset';
 const missingUIToolsMessage =
   '准备管理界面需要 Node.js ^22.18.0 或 ^24.12.0，以及 pnpm >=11.0.0；升级后重新检查运行能力。';
 const installationCompletedMessage =
-  '安装已完成。请停止旧服务端，回到仓库根目录，并按下方两个终端命令分别重启服务端和启动管理端；管理端先运行 pnpm install，再运行 pnpm run dev。';
+  '安装已完成。请停止旧服务端，回到仓库根目录，并按下方两个终端命令分别重启服务端和启动管理端；管理端先运行 pnpm run ui:install 安装所选工作区闭包，再运行 pnpm run dev。';
 
 const title = document.querySelector('#status-title');
 const badge = document.querySelector('#status-badge');
@@ -143,6 +143,14 @@ const uiStepLabels = {
   complete: '界面准备完成',
   failed: '界面准备失败',
 };
+// `uiStepLabels` remains the wire-compatible vocabulary consumed by older
+// status fixtures. The public copy below describes the workspace model: the
+// workspace step writes only ignored metadata and never moves source trees.
+const uiStepDisplayLabels = {
+  ...uiStepLabels,
+  workspace: '保留三套源码并写入本机 profile',
+  reset: '清除本机选择（不改动源码）',
+};
 const uiFailureReasonLabels = {
   api_unavailable: '本机服务端自检接口不可访问',
   process_failed: '本机准备进程未正常启动或退出',
@@ -160,14 +168,14 @@ const uiFailureReasonLabels = {
   initialization_in_progress: '初始化事务仍在执行或等待恢复',
   initialization_operation_failed:
     '初始化文件操作失败，权限或文件占用可能在预检后发生了变化',
-  template_layout_invalid: '三套管理界面模板结构不完整',
+  template_layout_invalid: '三套管理界面源码结构不完整',
 };
 const uiFailureScopeLabels = {
-  admin_apps: '管理界面模板父目录',
+  admin_apps: '管理界面源码父目录',
   admin_root: '管理端根目录（admin）',
   selected_ui: '所选管理界面目录',
   state_root: '初始化状态目录（.runtime/install）',
-  ui_backup: '界面模板到备份目录的移动路径',
+  ui_backup: '旧版界面迁移状态目录',
 };
 const uiFailureOperationLabels = {
   create: '创建临时文件或目录',
@@ -341,10 +349,10 @@ function renderStatus(status) {
     badge.textContent = '等待选择';
     badge.dataset.tone = 'ready';
     message.textContent =
-      '请选择一套管理界面。确认后仅保留并安装所选界面的依赖。';
+      '请选择一套管理界面。确认后只写入本机 profile；开发仓库始终保留三套源码，依赖按所选工作区闭包安装。';
     details.hidden = true;
     uiPrepareTitle.textContent = '选择管理界面';
-    uiPrepareHint.textContent = '仅安装所选界面的依赖';
+    uiPrepareHint.textContent = '按所选工作区闭包安装依赖';
     uiPreparePanel.hidden = false;
     uiPrepareForm.hidden = false;
     resumeUIResetButton.hidden = true;
@@ -528,7 +536,7 @@ function safeUIActionLogPath(value) {
 function renderUIActionProgress(job) {
   const action = job?.action === 'reset' ? '重置管理界面' : '准备管理界面';
   const progress = Math.max(0, Math.min(100, Number(job?.progress || 0)));
-  const step = uiStepLabels[job?.currentStep] || '正在执行界面任务';
+  const step = uiStepDisplayLabels[job?.currentStep] || '正在执行界面任务';
   const updated = job?.lastUpdated ? `；更新于 ${String(job.lastUpdated)}` : '';
   setUIActionProgress(progress, `${action}：${step}，${progress}%`);
   showUIActionMessage(
@@ -541,7 +549,9 @@ function renderUIActionProgress(job) {
   }
   if (job?.state === 'failed') {
     const failedStep =
-      uiStepLabels[job.failureStep] || job.failureStep || '未识别阶段';
+      uiStepDisplayLabels[job.failureStep] ||
+      job.failureStep ||
+      '未识别阶段';
     const failedReason =
       uiFailureReasonLabels[job.failureReason] ||
       job.failureReason ||
@@ -658,8 +668,8 @@ async function finishUIAction(job) {
     resumeUIResetButton.hidden = !resetting;
     retryButton.hidden = false;
     if (resetting) {
-      uiPrepareTitle.textContent = '继续恢复三套界面模板';
-      uiPrepareHint.textContent = '恢复全部界面模板并清除当前选择';
+      uiPrepareTitle.textContent = '继续清除本机选择';
+      uiPrepareHint.textContent = '清除本机选择（三套源码保持不变）';
     }
     setUIActionPending(false);
     uiPrepareResult.focus();
@@ -704,7 +714,7 @@ async function requestUIPreparation(event) {
     return;
   }
   if (!selectedUi || !confirmCleanup.checked) {
-    showUIActionMessage('请选择管理界面并确认模板暂存方案。', 'error');
+    showUIActionMessage('请选择管理界面并确认本机选择方案（不会删除三套源码）。', 'error');
     uiPrepareResult.focus();
     return;
   }
@@ -735,12 +745,12 @@ async function requestUIReset(confirmFirst = true) {
   if (
     confirmFirst &&
     !window.confirm(
-      '确认恢复三套管理界面模板并清除当前选择？数据库安装尚未开始。',
+      '确认清除本机 UI 选择？三套源码不会改动；数据库安装尚未开始。',
     )
   )
     return;
   uiPrepareTitle.textContent = '重置管理界面';
-  uiPrepareHint.textContent = '恢复全部界面模板并清除当前选择';
+  uiPrepareHint.textContent = '清除本机选择（三套源码保持不变）';
   uiPreparePanel.hidden = false;
   uiPrepareForm.hidden = true;
   resumeUIResetButton.hidden = true;
@@ -754,8 +764,8 @@ async function requestUIReset(confirmFirst = true) {
     await runUIAction(uiResetEndpoint, { confirmReset: true });
   } catch {
     renderUIRequestUnavailable('reset');
-    uiPrepareTitle.textContent = '继续恢复三套界面模板';
-    uiPrepareHint.textContent = '恢复全部界面模板并清除当前选择';
+    uiPrepareTitle.textContent = '继续清除本机选择';
+    uiPrepareHint.textContent = '清除本机选择（三套源码保持不变）';
     resumeUIResetButton.hidden = false;
     retryButton.hidden = false;
     setUIActionPending(false);
@@ -767,23 +777,23 @@ function renderRecoverableUIPreparation(status) {
   clearStatusRefresh();
   const recoveringReset = status.uiAction === 'reset';
   title.textContent = recoveringReset
-    ? '继续恢复三套界面模板'
+    ? '继续清除本机选择'
     : '继续准备管理界面';
   badge.textContent = '可恢复';
   badge.dataset.tone = 'pending';
   message.textContent = recoveringReset
-    ? '检测到尚未完成的界面重置任务，可继续恢复三套模板。'
+    ? '检测到尚未完成的界面重置任务，可继续清除本机选择；三套源码保持不变。'
     : '检测到尚未完成的界面准备任务。当前选择已保留，可继续执行同一任务。';
   details.hidden = false;
   selectedUi.textContent =
     uiLabels[status.selectedUi] || status.selectedUi || '—';
   selectedMode.textContent = recoveringReset ? '重置界面' : '准备界面';
   uiPrepareTitle.textContent = recoveringReset
-    ? '继续恢复三套界面模板'
+    ? '继续清除本机选择'
     : '继续准备管理界面';
   uiPrepareHint.textContent = recoveringReset
-    ? '恢复全部界面模板并清除当前选择'
-    : '仅安装所选界面的依赖';
+    ? '清除本机选择（三套源码保持不变）'
+    : '按所选工作区闭包安装依赖';
   uiPreparePanel.hidden = false;
   uiPrepareForm.hidden = recoveringReset;
   resumeUIResetButton.hidden = !recoveringReset;
@@ -807,7 +817,7 @@ function renderRecoverableUIPreparation(status) {
   } else {
     showUIActionMessage(
       recoveringReset
-        ? '点击“继续恢复三套模板”恢复任务。'
+        ? '点击“继续清除本机选择”恢复任务；三套源码保持不变。'
         : '点击“继续准备此界面”恢复任务。',
       'pending',
     );

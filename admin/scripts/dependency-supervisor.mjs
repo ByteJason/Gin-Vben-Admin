@@ -7,10 +7,16 @@ import {
   STATES,
   acquireDependencyInstallLease,
   completeDependencyPreparation,
+  completeWorkspaceDependencyPreparation,
+  buildWorkspaceInstallArgs,
   dependenciesPrepared,
+  inspectWorkspaceState,
   inspectState,
+  requiredWorkspaceLockfileHash,
   rootFromScript,
   statePaths,
+  workspaceDependenciesPrepared,
+  workspaceSelectionSignal,
 } from './init-state.mjs';
 import { buildPnpmCommand } from './pnpm-command.mjs';
 import { waitForWindowsJobGate } from './dependency-launch.mjs';
@@ -30,13 +36,14 @@ async function waitForWindowsJob() {
   return waitForWindowsJobGate(gate, token);
 }
 
-function moduleInvocation() {
-  const invocation = buildPnpmCommand(['install', '--frozen-lockfile']);
+function moduleInvocation(profile, workspaceMode) {
+  const installArgs = workspaceMode ? buildWorkspaceInstallArgs(profile) : ['install', '--frozen-lockfile'];
+  const invocation = buildPnpmCommand(installArgs);
   if (invocation.command !== process.execPath || invocation.args.length < 1) {
     throw new Error('DEPENDENCY_INSTALL_FAILED');
   }
-  const [modulePath, ...args] = invocation.args;
-  return { modulePath, args };
+  const [modulePath, ...workerArgs] = invocation.args;
+  return { modulePath, args: workerArgs };
 }
 
 function runPnpmWorker(invocation) {
@@ -59,24 +66,44 @@ let dependencyLease;
 let status = 1;
 try {
   const job = await waitForWindowsJob();
-  const invocation = moduleInvocation();
-  let current = inspectState(root);
-  if (current.profile && dependenciesPrepared(root, current.profile)) {
+  const configuredMode = String(process.env.GIN_VBEN_UI_SELECTION_MODE || '').trim().toLowerCase();
+  const forceDependencyInstall = process.env.GIN_VBEN_FORCE_DEPENDENCY_INSTALL === '1';
+  const workspaceMode = configuredMode === 'workspace'
+    || (configuredMode !== 'legacy' && workspaceSelectionSignal(root));
+  let current = workspaceMode ? inspectWorkspaceState(root) : inspectState(root);
+  const profile = current.profile;
+  const prepared = !forceDependencyInstall && (workspaceMode
+    ? profile && workspaceDependenciesPrepared(root, profile)
+    : profile && dependenciesPrepared(root, profile));
+  if (prepared) {
     status = 0;
   } else {
     dependencyLease = await acquireDependencyInstallLease(root, {
+      adminLeaseId: process.env.GIN_VBEN_ADMIN_LEASE_ID || '',
       childPid: process.pid,
       supervisorPid: job.guardianPid,
     });
-    current = inspectState(root);
-    if (current.profile && dependenciesPrepared(root, current.profile)) {
+    current = workspaceMode ? inspectWorkspaceState(root) : inspectState(root);
+    const alreadyPrepared = !forceDependencyInstall && (workspaceMode
+      ? current.profile && workspaceDependenciesPrepared(root, current.profile)
+      : current.profile && dependenciesPrepared(root, current.profile));
+    if (alreadyPrepared) {
       status = 0;
     } else {
+      const installedProfile = current.profile;
+      const expectedLockfileHash = workspaceMode
+        ? requiredWorkspaceLockfileHash(root)
+        : '';
+      const invocation = moduleInvocation(installedProfile, workspaceMode);
       const workerStatus = await runPnpmWorker(invocation);
       if (workerStatus !== 0) throw new Error('DEPENDENCY_INSTALL_FAILED');
 
-      current = inspectState(root);
-      if (current.state === STATES.INSTALLING && current.reason === STATE_REASONS.DEPENDENCIES_PENDING) {
+      current = workspaceMode ? inspectWorkspaceState(root) : inspectState(root);
+      if (workspaceMode) {
+        await completeWorkspaceDependencyPreparation(root, installedProfile, {
+          expectedLockfileHash,
+        });
+      } else if (current.state === STATES.INSTALLING && current.reason === STATE_REASONS.DEPENDENCIES_PENDING) {
         await completeDependencyPreparation(root);
       }
       status = 0;

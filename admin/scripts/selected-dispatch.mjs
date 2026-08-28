@@ -5,16 +5,30 @@ import {
   STATES,
   ensureSelectedUIRuntimeEnv,
   inspectState,
+  inspectWorkspaceState,
   rootFromScript,
+  workspaceSelectionSignal,
 } from './init-state.mjs';
 import { buildPnpmCommand } from './pnpm-command.mjs';
 
 const commandIndex = process.argv.indexOf('--command');
 const command = commandIndex >= 0 ? process.argv[commandIndex + 1] : '';
 const root = rootFromScript(import.meta.url);
-const snapshot = inspectState(root);
+let workspaceMode = false;
+let snapshot;
+try {
+  workspaceMode = workspaceSelectionSignal(root);
+  snapshot = workspaceMode ? inspectWorkspaceState(root) : inspectState(root);
+} catch (error) {
+  process.stderr.write(`INIT_ERROR=${error?.message || 'PROFILE_INVALID'}\n`);
+  process.exit(3);
+}
 
-if (!['build', 'dev', 'preview'].includes(command) || snapshot.state !== STATES.INSTALLED || !snapshot.profile) {
+const runnableWorkspaceState = workspaceMode && (
+  snapshot.state === STATES.INSTALLED
+  || snapshot.state === STATES.UI_PREPARED
+);
+if (!['build', 'dev', 'preview'].includes(command) || (!runnableWorkspaceState && snapshot.state !== STATES.INSTALLED) || !snapshot.profile) {
   process.exit(3);
 }
 

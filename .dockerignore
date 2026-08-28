@@ -13,6 +13,9 @@
 **/*.log
 admin/.ui-init-receipt.json
 admin/.ui-init-runtime.json
+# Per-clone UI preference must not leak into reproducible CI/deploy builds;
+# Docker selects explicitly with ADMIN_UI.
+admin/.ui-profile.local.json
 .env
 .env.*
 server/bin

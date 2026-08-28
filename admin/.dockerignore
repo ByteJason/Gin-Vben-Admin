@@ -1,0 +1,13 @@
+.git
+.ui-profile.local.json
+.ui-init-receipt.json
+.ui-init-runtime.json
+node_modules
+**/node_modules
+**/dist
+**/test-results
+**/playwright-report
+**/.turbo
+**/.vite
+**/.cache
+**/*.log

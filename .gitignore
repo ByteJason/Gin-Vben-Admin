@@ -153,6 +153,10 @@ __debug_bin*
 /admin/.ui-init-receipt.json
 /admin/.ui-init-runtime.json
 
+# The active UI is a per-clone choice. Keep all three tracked templates and
+# store only this local selector outside Git so pulls remain fast-forwardable.
+/admin/.ui-profile.local.json
+
 # Local Docker overrides and volumes
 compose.override.yaml
 compose.override.yml

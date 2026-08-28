@@ -49,8 +49,26 @@ test('Docker UI accepts an explicit template in a pristine CI checkout', () => {
   }
 });
 
+test('Docker UI ignores the per-clone local selector and requires an explicit deployment choice', () => {
+  const root = fixture();
+  try {
+    writeFileSync(join(root, '.ui-profile.local.json'), JSON.stringify({
+      schema: 1,
+      selectedUi: 'ele',
+      packageName: '@vben/web-ele',
+      appDirectory: 'apps/web-ele',
+    }));
+    assert.equal(resolveDockerSelection(root, 'antd').packageName, '@vben/web-antd');
+    assert.throws(() => resolveDockerSelection(root, ''), /UI_PROFILE_REQUIRED/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('Docker build caches Corepack and pnpm downloads across bounded retries', () => {
   const dockerfile = readFileSync(join(import.meta.dirname, '..', '..', 'deploy', 'admin.Dockerfile'), 'utf8');
+  const dockerignore = readFileSync(join(import.meta.dirname, '..', '..', '.dockerignore'), 'utf8');
+  const adminDockerignore = readFileSync(join(import.meta.dirname, '..', '.dockerignore'), 'utf8');
   assert.match(dockerfile, /--mount=type=cache[^\n]*target=\/root\/\.cache\/node\/corepack/);
   assert.match(dockerfile, /--mount=type=cache[^\n]*target=\/pnpm\/store/);
   assert.match(dockerfile, /pnpm config set store-dir \/pnpm\/store/);
@@ -58,4 +76,6 @@ test('Docker build caches Corepack and pnpm downloads across bounded retries', (
   assert.match(dockerfile, /pnpm config set registry "\$\{NPM_REGISTRY\}" --location=project/);
   assert.match(dockerfile, /pnpm config set fetch-timeout 600000 --location=project/);
   assert.match(dockerfile, /pnpm -r run --if-present stub/);
+  assert.match(dockerignore, /^admin\/\.ui-profile\.local\.json$/m);
+  assert.match(adminDockerignore, /^\.ui-profile\.local\.json$/m);
 });

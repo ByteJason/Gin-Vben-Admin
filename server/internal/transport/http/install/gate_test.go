@@ -63,3 +63,22 @@ func TestInstallationGateAllowsBusinessRoutesAfterInstall(t *testing.T) {
 		t.Fatalf("status = %d, want 204", recorder.Code)
 	}
 }
+
+func TestInstallationGateAllowsBusinessRoutesWhileInstalledUISwitchIsPending(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	status := statusProviderStub{status: installer.Status{
+		State:     installer.StateInstalled,
+		Installed: true,
+		Phase:     installer.InstallationPhaseUIPrepare,
+		UIAction:  installer.UIPreparationActionPrepare,
+	}}
+	router := gin.New()
+	router.Use(InstallationGate(status))
+	router.GET("/api/admin/v1/ping", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/admin/v1/ping", nil))
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204 during an independent UI switch", recorder.Code)
+	}
+}

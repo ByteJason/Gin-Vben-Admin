@@ -96,7 +96,7 @@
           >
             <div class="capability-panel__heading">
               <h3 id="ui-prepare-title">选择管理界面</h3>
-              <span id="ui-prepare-hint">仅安装所选界面的依赖</span>
+              <span id="ui-prepare-hint">按所选工作区闭包安装依赖</span>
             </div>
             <form id="ui-prepare-form" class="ui-prepare-form">
               <fieldset
@@ -106,7 +106,7 @@
               >
                 <legend>选择管理界面</legend>
                 <p id="ui-choice-help" class="field-help">
-                  三套界面共享相同业务能力；确认后保留所选模板，并将另外两套安全暂存以便安装前重置。
+                  三套界面共享相同业务能力；确认只写入本机 profile，开发仓库始终保留三套源码，依赖按所选工作区闭包安装。
                 </p>
                 <div class="ui-option-grid">
                   <label class="ui-option">
@@ -150,7 +150,7 @@
               <label class="confirm-field ui-cleanup-confirm">
                 <input id="confirm-cleanup" type="checkbox" required />
                 <span
-                  >我已确认保留所选界面，并安全暂存另外两套模板；安装完成前仍可重置。</span
+                  >我已确认只更新本机 profile；开发仓库保留三套源码，依赖按所选工作区闭包安装。</span
                 >
               </label>
               <button
@@ -168,7 +168,7 @@
               type="button"
               hidden
             >
-              继续恢复三套模板
+              继续清除本机选择（源码保持不变）
             </button>
             <div
               id="ui-prepare-result"
@@ -250,7 +250,7 @@
                       >读取安装页选择中</output
                     >
                     <span class="field-help"
-                      >安装页已完成模板准备与所选界面的依赖安装。</span
+                      >安装页已写入本机 profile，并完成所选工作区闭包的依赖安装。</span
                     >
                   </div>
                   <div class="form-field">
@@ -323,7 +323,7 @@
               <h4 id="plan-result-title">预检结果</h4>
               <dl class="plan-summary">
                 <div>
-                  <dt>可裁剪模板</dt>
+                  <dt>本机选择可更新</dt>
                   <dd id="plan-cleanup">—</dd>
                 </div>
                 <div>
@@ -676,7 +676,7 @@ go run ./cmd/api/main.go</code></pre>
               <article class="terminal-card" aria-label="终端 2：管理端">
                 <header><span>终端 2</span><strong>管理端</strong></header>
                 <pre><code>cd admin
-pnpm install
+pnpm run ui:install
 pnpm run dev</code></pre>
               </article>
             </div>

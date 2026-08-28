@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { link, mkdir, open, rename, rm, rmdir } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
@@ -24,6 +24,13 @@ const ADMIN_INIT_IDENTITY_UNAVAILABLE_MAX_AGE_MS = 86_400_000;
 const DEPENDENCY_INSTALL_OWNER = 'admin-dependency-install';
 const DEPENDENCY_IDENTITY_UNAVAILABLE_MAX_AGE_MS = 86_400_000;
 const INSTALL_STATE_DIRECTORY_ENV = 'GIN_VBEN_INSTALL_STATE_DIR';
+export const UI_SELECTION_MODE_ENV = 'GIN_VBEN_UI_SELECTION_MODE';
+export const WORKSPACE_SELECTION_MODE = 'workspace';
+export const LEGACY_SELECTION_MODE = 'legacy';
+const LOCAL_PROFILE_FILE = '.ui-profile.local.json';
+const WORKSPACE_TRANSACTION_OWNER = 'admin-init-workspace';
+const WORKSPACE_TRANSACTION_SCHEMA = 1;
+const WORKSPACE_RECEIPT_SCHEMA = 1;
 const STABLE_INITIALIZATION_ERROR_CODES = new Set([
   'API_UNAVAILABLE',
   'ARGUMENT_INVALID',
@@ -62,6 +69,9 @@ const STABLE_INITIALIZATION_ERROR_CODES = new Set([
   'UI_PROFILE_INVALID',
   'UI_PROFILE_MISMATCH',
   'UI_PROFILE_REQUIRED',
+  'UI_SWITCH_FAILED',
+  'WORKSPACE_LAYOUT_INVALID',
+  'WORKSPACE_TRANSACTION_INVALID',
 ]);
 
 export const UI_PROFILES = Object.freeze({
@@ -82,11 +92,13 @@ export const STATE_REASONS = Object.freeze({
   NONE: 'NONE',
   SOURCE_MOVE_TRANSACTION_PRESENT: 'SOURCE_MOVE_TRANSACTION_PRESENT',
   DEPENDENCIES_PENDING: 'DEPENDENCIES_PENDING',
+  UI_SWITCH_PENDING: 'UI_SWITCH_PENDING',
   RESET_TRANSACTION_PRESENT: 'RESET_TRANSACTION_PRESENT',
   LEGACY_PREPARED_MIGRATION_PENDING: 'LEGACY_PREPARED_MIGRATION_PENDING',
   LEGACY_PREPARED_STATE_INVALID: 'LEGACY_PREPARED_STATE_INVALID',
   SERVER_INSTALL_TRANSACTION_PRESENT: 'SERVER_INSTALL_TRANSACTION_PRESENT',
   TRANSACTION_INVALID: 'TRANSACTION_INVALID',
+  WORKSPACE_TRANSACTION_INVALID: 'WORKSPACE_TRANSACTION_INVALID',
   TRANSACTION_MARKER_CONFLICT: 'TRANSACTION_MARKER_CONFLICT',
   RUNTIME_WITHOUT_PROFILE: 'RUNTIME_WITHOUT_PROFILE',
   MARKER_WITHOUT_PROFILE: 'MARKER_WITHOUT_PROFILE',
@@ -165,12 +177,19 @@ export function statePaths(root, environment = process.env) {
   const stateRoot = installStateRoot(root, environment);
   return {
     profile: join(root, '.ui-profile.json'),
+    // Local selection is deliberately ignored by Git. The tracked profile is
+    // retained only as a compatibility read path for older checkouts.
+    localProfile: join(root, LOCAL_PROFILE_FILE),
     // Kept only for recognizing and quarantining state written by older releases.
     receipt: join(root, '.ui-init-receipt.json'),
     runtime: join(root, '.ui-init-runtime.json'),
     stateRoot,
     applyLock: join(stateRoot, 'apply.lock'),
     transaction: join(stateRoot, 'transaction.json'),
+    workspaceTransaction: join(stateRoot, 'workspace-transaction.json'),
+    workspaceReceipt: join(stateRoot, 'workspace-dependencies.json'),
+    workspaceSwitchReport: join(stateRoot, 'ui-switch-report.json'),
+    workspaceHistoryRoot: join(stateRoot, 'ui-switch-history'),
     adminLease: join(stateRoot, 'admin-init.lock'),
     adminLeaseReclaim: join(stateRoot, 'admin-init.lock.reclaim'),
     adminHeartbeatRoot: join(stateRoot, 'admin-init-heartbeat'),
@@ -196,7 +215,179 @@ function profileFor(selectedUi) {
   return entry ? { schema: 1, selectedUi, ...entry } : null;
 }
 
+/**
+ * Public profile factory used by the non-destructive selector and by build
+ * entrypoints. Keeping the canonical mapping in this module prevents a UI
+ * name, package name, and directory from drifting apart across scripts.
+ */
+export function profileForUI(selectedUi) {
+  return profileFor(selectedUi);
+}
+
+function configuredUISelection(environment = process.env) {
+  const values = ['ADMIN_UI', 'APP_UI']
+    .map((key) => ({ key, value: typeof environment?.[key] === 'string' ? environment[key].trim() : '' }))
+    .filter(({ value }) => value !== '');
+  if (values.length > 1 && new Set(values.map(({ value }) => value)).size !== 1) {
+    throw new Error('UI_PROFILE_MISMATCH');
+  }
+  const selectedUi = values[0]?.value ?? '';
+  if (selectedUi && !UI_PROFILES[selectedUi]) throw new Error('UI_INVALID');
+  return selectedUi;
+}
+
+function profileCandidate(file) {
+  const present = pathPresent(file);
+  if (!present) return { present: false, profile: null };
+  return { present: true, profile: parseProfile(file) };
+}
+
+/**
+ * Resolve a workspace UI without mutating the repository. Environment values
+ * (`ADMIN_UI` and the backwards-compatible `APP_UI` alias) are ephemeral and
+ * take precedence over the ignored local profile, which in turn shadows the
+ * legacy tracked profile. A malformed profile is reported instead of being
+ * silently replaced.
+ */
+export function resolveWorkspaceProfile(root, environment = process.env) {
+  const location = statePaths(root, environment);
+  const explicitUi = configuredUISelection(environment);
+  const local = profileCandidate(location.localProfile);
+  if (local.present && !local.profile) throw new Error('UI_PROFILE_INVALID');
+  if (explicitUi) {
+    const legacy = profileCandidate(location.profile);
+    return {
+      profile: profileFor(explicitUi),
+      source: 'environment',
+      explicitUi,
+      localProfile: local.profile,
+      legacyProfile: legacy.profile,
+    };
+  }
+  if (local.profile) {
+    // A legacy tracked profile may be stale or malformed after an upstream
+    // migration. The ignored local selector is authoritative, so do not let
+    // that compatibility file shadow a valid local choice.
+    const legacy = profileCandidate(location.profile);
+    return {
+      profile: local.profile,
+      source: 'local',
+      explicitUi: '',
+      localProfile: local.profile,
+      legacyProfile: legacy.profile,
+    };
+  }
+  const legacy = profileCandidate(location.profile);
+  if (legacy.present && !legacy.profile) throw new Error('UI_PROFILE_INVALID');
+  if (legacy.profile) {
+    return {
+      profile: legacy.profile,
+      source: 'legacy',
+      explicitUi: '',
+      localProfile: null,
+      legacyProfile: legacy.profile,
+    };
+  }
+  return {
+    profile: null,
+    source: 'none',
+    explicitUi: '',
+    localProfile: null,
+    legacyProfile: null,
+  };
+}
+
+/** Return true when the checkout opts into the non-destructive state model. */
+export function workspaceSelectionSignal(root, environment = process.env) {
+  const location = statePaths(root, environment);
+  const explicitUi = configuredUISelection(environment);
+  const currentTransactionPresent = pathPresent(location.transaction);
+  const currentTransaction = currentTransactionPresent ? validTransaction(location.transaction) : null;
+
+  // A source-moving journal always wins over new workspace hints. This keeps
+  // an upgraded checkout on the compatibility recovery path until its old
+  // move transaction has been completed or reset.
+  if (currentTransactionPresent && currentTransaction?.owner !== 'server-installer') return false;
+  const activeLegacyEvidence = [
+    location.legacyMigration,
+    location.legacyTransaction,
+    location.legacyMarker,
+  ].some(pathPresent);
+  if (activeLegacyEvidence) return false;
+
+  const hasWorkspaceState = pathPresent(location.localProfile)
+    || pathPresent(location.workspaceTransaction)
+    || pathPresent(location.workspaceReceipt);
+  if (hasWorkspaceState) return true;
+
+  // A checkout upgraded from the source-moving initializer can contain a
+  // durable legacy journal/receipt or a non-empty backup root. Let the legacy
+  // recovery path finish that transaction instead of treating the manifest as
+  // permission to overwrite it with a fresh zero-move profile.
+  const passiveLegacyEvidence = [
+    location.receipt,
+    location.runtime,
+    location.backupRoot,
+  ].some(pathPresent) || nonEmptyDirectory(location.legacyBackupRoot) || nonEmptyDirectory(location.legacyRecoveryRoot);
+  if (passiveLegacyEvidence) return false;
+  if (explicitUi) return true;
+
+  // A checked-in workspace manifest opts a real checkout into the
+  // non-destructive state model even before a local selector is written.
+  // Presence routes malformed/symlinked manifests into the workspace
+  // inspector, which fails closed instead of falling back to source moves.
+  return pathPresent(join(root, 'pnpm-workspace.yaml'));
+}
+
+function nonEmptyDirectory(target) {
+  if (!plainDirectory(target)) return false;
+  try {
+    return readdirSync(target).length > 0;
+  } catch {
+    return true;
+  }
+}
+
 const RUNTIME_ENV_MODES = Object.freeze(['development', 'production']);
+
+function preflightSelectedUIRuntimeEnv(root, profile) {
+  const expected = profileFor(profile?.selectedUi);
+  if (
+    !expected
+    || profile?.appDirectory !== expected.appDirectory
+    || profile?.packageName !== expected.packageName
+  ) throw new Error('RUNTIME_ENV_PROFILE_INVALID');
+  const appDirectory = join(root, expected.appDirectory);
+  if (!plainDirectory(appDirectory)) throw new Error('RUNTIME_ENV_APP_INVALID');
+  try {
+    accessSync(appDirectory, fsConstants.R_OK | fsConstants.W_OK | fsConstants.X_OK);
+  } catch {
+    throw new Error('RUNTIME_ENV_TARGET_INVALID');
+  }
+  for (const mode of RUNTIME_ENV_MODES) {
+    const template = join(appDirectory, `.env.${mode}.example`);
+    const target = join(appDirectory, `.env.${mode}`);
+    if (!plainFile(template)) throw new Error('RUNTIME_ENV_TEMPLATE_INVALID');
+    try {
+      readFileSync(template);
+    } catch {
+      throw new Error('RUNTIME_ENV_TEMPLATE_INVALID');
+    }
+    const targetState = strictPathState(target);
+    if (targetState.kind === 'error') throw new Error('RUNTIME_ENV_TARGET_INVALID');
+    if (targetState.kind === 'present') {
+      if (!targetState.stat.isFile() || targetState.stat.isSymbolicLink()) {
+        throw new Error('RUNTIME_ENV_TARGET_INVALID');
+      }
+      try {
+        readFileSync(target);
+      } catch {
+        throw new Error('RUNTIME_ENV_TARGET_INVALID');
+      }
+    }
+  }
+  return expected;
+}
 
 /**
  * Materialize the selected UI's ignored runtime env files from tracked,
@@ -204,16 +395,8 @@ const RUNTIME_ENV_MODES = Object.freeze(['development', 'production']);
  * are atomic so an interrupted init or dispatch can safely retry.
  */
 export async function ensureSelectedUIRuntimeEnv(root, profile, options = {}) {
-  const expected = profileFor(profile?.selectedUi);
-  if (
-    !expected
-    || profile?.appDirectory !== expected.appDirectory
-    || profile?.packageName !== expected.packageName
-  ) {
-    throw new Error('RUNTIME_ENV_PROFILE_INVALID');
-  }
+  const expected = preflightSelectedUIRuntimeEnv(root, profile);
   const appDirectory = join(root, expected.appDirectory);
-  if (!plainDirectory(appDirectory)) throw new Error('RUNTIME_ENV_APP_INVALID');
   const publish = options.publish ?? publishExclusive;
 
   for (const mode of RUNTIME_ENV_MODES) {
@@ -704,10 +887,20 @@ function validTransaction(file) {
 
 function validMarker(file, profile) {
   const marker = parseJSON(file);
+  return validMarkerContents(marker, profile);
+}
+
+function validMarkerContents(marker, profile) {
   if (!marker || marker.schema_version !== 1 || marker.selected_ui !== profile.selectedUi) return false;
   if (typeof marker.installer_version !== 'string' || typeof marker.installed_at !== 'string') return false;
   if (!['embedded', 'standalone', 'api_only', 'dev'].includes(marker.mode)) return false;
   return /^[a-f0-9]{64}$/i.test(marker.artifact_hash ?? '') && /^[a-f0-9]{64}$/i.test(marker.manifest_hash ?? '');
+}
+
+function validWorkspaceMarker(file) {
+  const marker = parseJSON(file);
+  const installationProfile = profileFor(marker?.selected_ui);
+  return Boolean(installationProfile && validMarkerContents(marker, installationProfile));
 }
 
 function validRuntime(file) {
@@ -898,6 +1091,746 @@ async function atomicWrite(file, contents) {
     await rm(temporary, { force: true }).catch(() => {});
     throw error;
   }
+}
+
+function workspaceFileSnapshot(file) {
+  const state = strictPathState(file);
+  if (state.kind === 'missing') return { present: false, contents: null };
+  if (
+    state.kind !== 'present'
+    || !state.stat.isFile()
+    || state.stat.isSymbolicLink()
+  ) throw new Error('UI_SWITCH_FAILED');
+  try {
+    return { present: true, contents: readFileSync(file) };
+  } catch {
+    throw new Error('UI_SWITCH_FAILED');
+  }
+}
+
+async function restoreWorkspaceFile(file, snapshot) {
+  if (snapshot.present) {
+    await atomicWrite(file, snapshot.contents);
+  } else if (pathPresent(file)) {
+    await rm(file, { force: true });
+    await syncDirectory(dirname(file));
+  }
+}
+
+function workspaceActiveUIEnvironment(contents, selectedUi) {
+  const source = contents.toString('utf8');
+  const pattern = /^[ \t]*(?:export[ \t]+)?APP_UI_ACTIVE[ \t]*=[^\r\n]*$/gm;
+  const matches = source.match(pattern) ?? [];
+  if (matches.length > 1) throw new Error('UI_SWITCH_FAILED');
+  const newline = source.includes('\r\n') ? '\r\n' : '\n';
+  if (matches.length === 1) {
+    return source.replace(/^[ \t]*(?:export[ \t]+)?APP_UI_ACTIVE[ \t]*=[^\r\n]*$/m, `APP_UI_ACTIVE="${selectedUi}"`);
+  }
+  const separator = source === '' || source.endsWith('\n') ? '' : newline;
+  return `${source}${separator}APP_UI_ACTIVE="${selectedUi}"${newline}`;
+}
+
+function workspaceLockfileHash(root) {
+  const lockfile = join(root, 'pnpm-lock.yaml');
+  if (!plainFile(lockfile)) return '';
+  try {
+    return createHash('sha256').update(readFileSync(lockfile)).digest('hex');
+  } catch {
+    throw new Error('WORKSPACE_LAYOUT_INVALID');
+  }
+}
+
+export function requiredWorkspaceLockfileHash(root) {
+  const lockfile = join(root, 'pnpm-lock.yaml');
+  if (!plainFile(lockfile)) throw new Error('WORKSPACE_LAYOUT_INVALID');
+  try {
+    const contents = readFileSync(lockfile);
+    if (contents.length === 0) throw new Error('WORKSPACE_LAYOUT_INVALID');
+    return createHash('sha256').update(contents).digest('hex');
+  } catch (error) {
+    if (error?.message === 'WORKSPACE_LAYOUT_INVALID') throw error;
+    throw new Error('WORKSPACE_LAYOUT_INVALID');
+  }
+}
+
+function workspaceTemplateLayout(root) {
+  const manifest = join(root, 'pnpm-workspace.yaml');
+  if (!plainFile(manifest)) return { valid: false, allTemplatesPresent: false, reason: 'WORKSPACE_LAYOUT_INVALID' };
+  try {
+    const contents = readFileSync(manifest, 'utf8');
+    if (!/^[ \t]*-[ \t]+['"]?apps\/\*['"]?[ \t]*(?:#.*)?$/m.test(contents)) {
+      return { valid: false, allTemplatesPresent: false, reason: 'WORKSPACE_LAYOUT_INVALID' };
+    }
+  } catch {
+    return { valid: false, allTemplatesPresent: false, reason: 'WORKSPACE_LAYOUT_INVALID' };
+  }
+  const appsRoot = join(root, 'apps');
+  if (!plainDirectory(appsRoot)) return { valid: false, allTemplatesPresent: false, reason: 'WORKSPACE_LAYOUT_INVALID' };
+  const entries = {};
+  for (const [ui, profile] of Object.entries(UI_PROFILES)) {
+    const directory = join(root, profile.appDirectory);
+    if (!plainDirectory(directory)) {
+      return { valid: false, allTemplatesPresent: false, reason: 'WORKSPACE_LAYOUT_INVALID', missingUi: ui };
+    }
+    const packageFile = join(directory, 'package.json');
+    if (!plainFile(packageFile)) {
+      return { valid: false, allTemplatesPresent: false, reason: 'WORKSPACE_LAYOUT_INVALID', missingUi: ui };
+    }
+    let packageJSON;
+    try {
+      packageJSON = JSON.parse(readFileSync(packageFile, 'utf8'));
+    } catch {
+      return { valid: false, allTemplatesPresent: false, reason: 'WORKSPACE_LAYOUT_INVALID', missingUi: ui };
+    }
+    if (packageJSON?.name !== profile.packageName) {
+      return { valid: false, allTemplatesPresent: false, reason: 'UI_PACKAGE_MISMATCH', missingUi: ui };
+    }
+    entries[ui] = { ...profile, directory };
+  }
+  return { valid: true, allTemplatesPresent: true, entries };
+}
+
+function workspaceTransactionFor(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const keys = Object.keys(value).sort().join(',');
+  if (keys !== 'id,moves,owner,phase,schema,selectedUi') return null;
+  const profile = profileFor(value.selectedUi);
+  if (
+    !profile
+    || value.schema !== WORKSPACE_TRANSACTION_SCHEMA
+    || value.owner !== WORKSPACE_TRANSACTION_OWNER
+    || !['dependencies_pending', 'switching_ui'].includes(value.phase)
+    || !TRANSACTION_ID_PATTERN.test(value.id ?? '')
+    || !Array.isArray(value.moves)
+    || value.moves.length !== 0
+  ) return null;
+  return { ...value, profile };
+}
+
+function readWorkspaceTransaction(file) {
+  if (!pathPresent(file)) return null;
+  return workspaceTransactionFor(parseJSON(file));
+}
+
+function workspaceReceiptShape(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const keys = Object.keys(value).sort().join(',');
+  if (keys !== 'dependenciesReady,lockfileHash,packageName,schema,selectedUi') return null;
+  const receiptProfile = profileFor(value.selectedUi);
+  if (
+    !receiptProfile
+    || value.schema !== WORKSPACE_RECEIPT_SCHEMA
+    || value.dependenciesReady !== true
+    || value.packageName !== receiptProfile.packageName
+    || typeof value.lockfileHash !== 'string'
+  ) return null;
+  return value;
+}
+
+function workspaceReceiptStatus(file, root, profile) {
+  if (!pathPresent(file)) return { state: 'missing', receipt: null };
+  if (!plainFile(file)) return { state: 'invalid', receipt: null };
+  const value = workspaceReceiptShape(parseJSON(file));
+  if (!value) return { state: 'invalid', receipt: null };
+  if (!profileFor(profile?.selectedUi)) return { state: 'invalid', receipt: null };
+  if (value.selectedUi !== profile.selectedUi) return { state: 'foreign', receipt: value };
+  let currentHash;
+  try {
+    currentHash = workspaceLockfileHash(root);
+  } catch {
+    return { state: 'invalid', receipt: null };
+  }
+  if (value.lockfileHash !== currentHash) return { state: 'stale', receipt: value };
+  return { state: 'ready', receipt: value };
+}
+
+export function buildWorkspaceInstallArgs(profile) {
+  const expected = profileFor(profile?.selectedUi);
+  if (!expected || profile.packageName !== expected.packageName || profile.appDirectory !== expected.appDirectory) {
+    throw new Error('UI_PROFILE_INVALID');
+  }
+  return ['install', '--filter', `${expected.packageName}...`, '--frozen-lockfile'];
+}
+
+export function workspaceDependenciesPrepared(root, profile, environment = process.env) {
+  if (!profile) return false;
+  const location = statePaths(root, environment);
+  return workspaceReceiptStatus(location.workspaceReceipt, root, profile).state === 'ready';
+}
+
+/**
+ * Read-only state projection for the single-repository model. All three UI
+ * directories remain tracked; only the selected package is dispatched by the
+ * runtime scripts. This projection intentionally does not inspect or create
+ * backup directories, so a pull can fast-forward normally.
+ */
+export function inspectWorkspaceState(root, environment = process.env) {
+  let resolved;
+  try {
+    resolved = resolveWorkspaceProfile(root, environment);
+  } catch (error) {
+    return { state: STATES.INCONSISTENT, profile: null, reason: error?.message ?? 'UI_PROFILE_INVALID', source: 'invalid' };
+  }
+  const location = statePaths(root, environment);
+  const layout = workspaceTemplateLayout(root);
+  const serverTransactionPresent = pathPresent(location.transaction);
+  if (serverTransactionPresent) {
+    const transaction = validTransaction(location.transaction);
+    if (!transaction || transaction.owner !== 'server-installer') {
+      return { state: STATES.INCONSISTENT, profile: resolved.profile, selectedUi: resolved.profile?.selectedUi, reason: STATE_REASONS.WORKSPACE_TRANSACTION_INVALID, source: resolved.source, allTemplatesPresent: layout.allTemplatesPresent };
+    }
+    if (!layout.valid) {
+      return { state: STATES.INCONSISTENT, profile: resolved.profile, selectedUi: resolved.profile?.selectedUi, reason: layout.reason, source: resolved.source, allTemplatesPresent: layout.allTemplatesPresent };
+    }
+    return {
+      state: STATES.INSTALLING,
+      profile: resolved.profile,
+      selectedUi: resolved.profile?.selectedUi,
+      reason: STATE_REASONS.SERVER_INSTALL_TRANSACTION_PRESENT,
+      source: resolved.source,
+      allTemplatesPresent: true,
+    };
+  }
+  const transactionPresent = pathPresent(location.workspaceTransaction);
+  if (transactionPresent) {
+    const transaction = readWorkspaceTransaction(location.workspaceTransaction);
+    if (!transaction) {
+      return { state: STATES.INCONSISTENT, profile: resolved.profile, selectedUi: resolved.profile?.selectedUi, reason: STATE_REASONS.WORKSPACE_TRANSACTION_INVALID, source: resolved.source, allTemplatesPresent: layout.allTemplatesPresent };
+    }
+    if (transaction.phase === 'dependencies_pending' && resolved.profile && resolved.profile.selectedUi !== transaction.selectedUi) {
+      return { state: STATES.INCONSISTENT, profile: resolved.profile, selectedUi: resolved.profile.selectedUi, reason: STATE_REASONS.WORKSPACE_TRANSACTION_INVALID, source: resolved.source, allTemplatesPresent: layout.allTemplatesPresent };
+    }
+    if (!layout.valid) {
+      return { state: STATES.INCONSISTENT, profile: transaction.profile, selectedUi: transaction.selectedUi, reason: layout.reason, source: resolved.source, allTemplatesPresent: layout.allTemplatesPresent };
+    }
+    return {
+      state: STATES.INSTALLING,
+      profile: transaction.profile,
+      selectedUi: transaction.selectedUi,
+      reason: transaction.phase === 'switching_ui'
+        ? STATE_REASONS.UI_SWITCH_PENDING
+        : STATE_REASONS.DEPENDENCIES_PENDING,
+      source: resolved.source,
+      allTemplatesPresent: true,
+      transactionId: transaction.id,
+    };
+  }
+  const markerState = strictPathState(location.marker, lstatSync);
+  const markerPresent = markerState.kind !== 'missing';
+  const markerLockState = strictPathState(location.lock, lstatSync);
+  const markerLockPresent = markerLockState.kind !== 'missing';
+  const receiptPresent = strictPathState(location.workspaceReceipt, lstatSync).kind !== 'missing';
+  if (!resolved.profile) {
+    if (!layout.valid) {
+      return { state: STATES.INCONSISTENT, profile: null, reason: layout.reason, source: resolved.source, allTemplatesPresent: layout.allTemplatesPresent };
+    }
+    if (markerLockPresent) {
+      return { state: STATES.INSTALLING, profile: null, reason: STATE_REASONS.MARKER_LOCK_PRESENT, source: resolved.source, allTemplatesPresent: true };
+    }
+    if (markerPresent) {
+      return { state: STATES.INCONSISTENT, profile: null, reason: STATE_REASONS.MARKER_WITHOUT_PROFILE, source: resolved.source, allTemplatesPresent: true };
+    }
+    if (receiptPresent) {
+      return { state: STATES.INCONSISTENT, profile: null, reason: STATE_REASONS.RECEIPT_WITHOUT_PROFILE, source: resolved.source, allTemplatesPresent: true };
+    }
+    return { state: STATES.PRISTINE, profile: null, reason: STATE_REASONS.NONE, source: resolved.source, allTemplatesPresent: true };
+  }
+  if (!layout.valid) {
+    return { state: STATES.INCONSISTENT, profile: resolved.profile, selectedUi: resolved.profile.selectedUi, reason: layout.reason, source: resolved.source, allTemplatesPresent: layout.allTemplatesPresent };
+  }
+  if (markerLockPresent) {
+    return { state: STATES.INSTALLING, profile: resolved.profile, selectedUi: resolved.profile.selectedUi, reason: STATE_REASONS.MARKER_LOCK_PRESENT, source: resolved.source, allTemplatesPresent: true };
+  }
+  // In workspace mode the immutable installation marker proves backend setup;
+  // the ignored profile independently selects the active frontend. A switch
+  // therefore keeps the valid marker even when its installation-time UI
+  // differs from the current local selection.
+  if (markerPresent && !validWorkspaceMarker(location.marker)) {
+    return { state: STATES.INCONSISTENT, profile: resolved.profile, selectedUi: resolved.profile.selectedUi, reason: STATE_REASONS.MARKER_INVALID, source: resolved.source, allTemplatesPresent: true };
+  }
+  const receiptStatus = workspaceReceiptStatus(location.workspaceReceipt, root, resolved.profile);
+  if (receiptStatus.state === 'invalid') {
+    return { state: STATES.INCONSISTENT, profile: resolved.profile, selectedUi: resolved.profile.selectedUi, reason: STATE_REASONS.RECEIPT_INVALID, source: resolved.source, allTemplatesPresent: true };
+  }
+  return {
+    state: markerPresent ? STATES.INSTALLED : STATES.UI_PREPARED,
+    profile: resolved.profile,
+    selectedUi: resolved.profile.selectedUi,
+    reason: STATE_REASONS.NONE,
+    source: resolved.source,
+    allTemplatesPresent: true,
+    dependenciesReady: receiptStatus.state === 'ready',
+    dependenciesStale: receiptStatus.state === 'stale',
+    dependenciesForeign: receiptStatus.state === 'foreign',
+  };
+}
+
+function workspaceSelectionReport(previousUi, selectedUi, changed) {
+  const sourceProfile = profileFor(previousUi);
+  const targetProfile = profileFor(selectedUi);
+  return {
+    schema: 1,
+    previousUi: previousUi || null,
+    selectedUi,
+    changed,
+    changedBranch: 'selectedUi',
+    commonLayer: 'preserved',
+    uiSpecific: previousUi && previousUi !== selectedUi ? 'revalidate-adapter' : 'unchanged',
+    dependencies: 'selected-only',
+    allTemplatesPreserved: true,
+    sourceAdapter: sourceProfile?.appDirectory ?? null,
+    targetAdapter: targetProfile?.appDirectory ?? null,
+    adapterChecks: ['route', 'theme', 'form', 'component'],
+    manualVerification: changed && Boolean(previousUi) ? 'required' : 'not-required',
+    backendInstallation: 'preserved',
+  };
+}
+
+function readWorkspaceSelectionReport(file, selectedUi) {
+  const report = parseJSON(file);
+  if (
+    !report
+    || report.schema !== 1
+    || report.selectedUi !== selectedUi
+    || typeof report.changed !== 'boolean'
+    || !(report.previousUi === null || Boolean(profileFor(report.previousUi)))
+    || report.changedBranch !== 'selectedUi'
+    || report.commonLayer !== 'preserved'
+    || report.dependencies !== 'selected-only'
+    || report.allTemplatesPreserved !== true
+    || report.backendInstallation !== 'preserved'
+    || JSON.stringify(report.adapterChecks) !== JSON.stringify(['route', 'theme', 'form', 'component'])
+  ) return null;
+  return report;
+}
+
+function preflightWorkspaceSelection(root, location, profile, selectedUi, changed, persistedProfile, options = {}) {
+  const stateRootState = strictPathState(location.stateRoot);
+  if (
+    stateRootState.kind === 'error'
+    || (stateRootState.kind === 'present' && (
+      !stateRootState.stat.isDirectory()
+      || stateRootState.stat.isSymbolicLink()
+    ))
+  ) throw new Error('UI_SWITCH_FAILED');
+  if (strictPathState(location.lock).kind !== 'missing') throw new Error('UI_SWITCH_FAILED');
+  if (strictPathState(location.applyLock).kind !== 'missing') throw new Error('INIT_BUSY');
+  // The Go installer journal survives a crashed apply owner. Its mere
+  // presence is authoritative even when apply.lock has already disappeared;
+  // changing UI underneath that recovery would split selectedUi across the
+  // backend transaction and the local workspace profile.
+  if (strictPathState(location.transaction).kind !== 'missing') throw new Error('INIT_BUSY');
+  if (!options.dependencyLeaseOwned && strictPathState(location.dependencyLease).kind !== 'missing') {
+    throw new Error('INIT_BUSY');
+  }
+  if (options.readOnly && !options.leaseOwned && strictPathState(location.adminLease).kind !== 'missing') {
+    throw new Error('INIT_BUSY');
+  }
+
+  const transactionState = strictPathState(location.workspaceTransaction);
+  if (transactionState.kind === 'error' || (transactionState.kind === 'present' && (
+    !transactionState.stat.isFile()
+    || transactionState.stat.isSymbolicLink()
+  ))) throw new Error('WORKSPACE_TRANSACTION_INVALID');
+  const transaction = transactionState.kind === 'present'
+    ? readWorkspaceTransaction(location.workspaceTransaction)
+    : null;
+  if (transactionState.kind === 'present' && !transaction) throw new Error('WORKSPACE_TRANSACTION_INVALID');
+  if (transaction?.selectedUi !== undefined && transaction.selectedUi !== selectedUi) {
+    throw new Error('INITIALIZATION_IN_PROGRESS');
+  }
+  if (options.readOnly && !options.leaseOwned && transaction) throw new Error('INITIALIZATION_IN_PROGRESS');
+  if (transaction?.phase === 'dependencies_pending' && changed) throw new Error('INITIALIZATION_IN_PROGRESS');
+  if (transaction?.phase === 'switching_ui' && persistedProfile?.selectedUi === selectedUi) {
+    if (!readWorkspaceSelectionReport(location.workspaceSwitchReport, selectedUi)) {
+      throw new Error('UI_SWITCH_FAILED');
+    }
+  }
+
+  const repositoryEnvironment = resolve(root, '..', '.env');
+  for (const file of [
+    location.localProfile,
+    location.workspaceReceipt,
+    location.workspaceSwitchReport,
+    location.marker,
+    repositoryEnvironment,
+  ]) workspaceFileSnapshot(file);
+  if (changed && pathPresent(location.marker) && !validWorkspaceMarker(location.marker)) {
+    throw new Error('UI_SWITCH_FAILED');
+  }
+  if (changed && pathPresent(location.marker)) {
+    const historyRootState = strictPathState(location.workspaceHistoryRoot);
+    if (historyRootState.kind === 'error' || (historyRootState.kind === 'present' && (
+      !historyRootState.stat.isDirectory()
+      || historyRootState.stat.isSymbolicLink()
+    ))) throw new Error('UI_SWITCH_FAILED');
+  }
+  preflightSelectedUIRuntimeEnv(root, profile);
+  return transaction;
+}
+
+/**
+ * Select or switch the active UI in-place. The only repository-local source
+ * write is the ignored `.ui-profile.local.json`; no tracked template is moved,
+ * deleted, or renamed. `check`/`dryRun` returns the plan without writing.
+ */
+export async function selectWorkspaceUI(root, selectedUi, options = {}) {
+  const profile = profileFor(selectedUi);
+  if (!profile) throw new Error('UI_INVALID');
+  const location = statePaths(root, options.environment ?? process.env);
+  const layout = workspaceTemplateLayout(root);
+  if (!layout.valid) throw new Error(layout.reason);
+  const resolved = resolveWorkspaceProfile(root, options.environment ?? process.env);
+  if (resolved.explicitUi && resolved.explicitUi !== selectedUi) {
+    throw new Error('UI_PROFILE_MISMATCH');
+  }
+  // Environment selection controls this invocation but is not persisted. A
+  // switch must compare against the durable local/legacy choice so old
+  // dependency metadata and markers are invalidated for the real previous UI.
+  const persistedProfile = resolved.localProfile ?? resolved.legacyProfile;
+  const previousUi = persistedProfile?.selectedUi ?? '';
+  const changed = previousUi !== selectedUi;
+  const report = workspaceSelectionReport(previousUi, selectedUi, changed);
+  const result = {
+    profile,
+    previousUi,
+    changed,
+    source: 'local',
+    report,
+    plan: {
+      retain: profile.appDirectory,
+      preserve: Object.values(UI_PROFILES).map((entry) => entry.appDirectory),
+      dependencyArgs: buildWorkspaceInstallArgs(profile),
+    },
+  };
+  const readOnly = options.check === true || options.dryRun === true;
+  const continueToDependencies = options.continueToDependencies === true;
+  preflightWorkspaceSelection(root, location, profile, selectedUi, changed, persistedProfile, {
+    readOnly,
+    leaseOwned: options.leaseOwned === true,
+    dependencyLeaseOwned: options.dependencyLeaseOwned === true,
+  });
+  if (readOnly) return { ...result, dryRun: true };
+
+  const stateRootState = strictPathState(location.stateRoot);
+  if (stateRootState.kind === 'error' || (stateRootState.kind === 'present' && (!stateRootState.stat.isDirectory() || stateRootState.stat.isSymbolicLink()))) {
+    throw new Error('UI_SWITCH_FAILED');
+  }
+  mkdirSync(location.stateRoot, { recursive: true, mode: 0o700 });
+  if (strictPathState(location.lock).kind !== 'missing') throw new Error('UI_SWITCH_FAILED');
+
+  const transactionSnapshot = workspaceFileSnapshot(location.workspaceTransaction);
+  const existingTransaction = transactionSnapshot.present
+    ? readWorkspaceTransaction(location.workspaceTransaction)
+    : null;
+  if (transactionSnapshot.present && !existingTransaction) throw new Error('WORKSPACE_TRANSACTION_INVALID');
+  if (existingTransaction?.selectedUi !== undefined && existingTransaction.selectedUi !== selectedUi) {
+    throw new Error('INITIALIZATION_IN_PROGRESS');
+  }
+  if (existingTransaction?.phase === 'dependencies_pending') {
+    if (changed) throw new Error('INITIALIZATION_IN_PROGRESS');
+    return { ...result, dependencyPreparationPending: true };
+  }
+  if (existingTransaction?.phase === 'switching_ui' && persistedProfile?.selectedUi === selectedUi) {
+    // The local selector is committed last. A matching selector proves that
+    // the report, environment and receipt changes completed before a crash.
+    const recoveredReport = readWorkspaceSelectionReport(location.workspaceSwitchReport, selectedUi);
+    if (!recoveredReport) throw new Error('UI_SWITCH_FAILED');
+    if (continueToDependencies) {
+      await atomicWrite(location.workspaceTransaction, `${JSON.stringify({
+        ...existingTransaction,
+        phase: 'dependencies_pending',
+      }, null, 2)}\n`);
+    } else {
+      await rm(location.workspaceTransaction, { force: true });
+      await syncDirectory(location.stateRoot);
+    }
+    return {
+      ...result,
+      previousUi: recoveredReport.previousUi ?? '',
+      changed: recoveredReport.changed,
+      report: recoveredReport,
+      resumed: true,
+      dependencyPreparationPending: continueToDependencies,
+    };
+  }
+  const switchTransaction = existingTransaction?.phase === 'switching_ui'
+    ? existingTransaction
+    : changed || continueToDependencies
+      ? {
+          schema: WORKSPACE_TRANSACTION_SCHEMA,
+          owner: WORKSPACE_TRANSACTION_OWNER,
+          id: randomUUID(),
+          selectedUi,
+          phase: 'switching_ui',
+          moves: [],
+        }
+      : null;
+
+  // Prepare ignored app-local env files before changing the authoritative
+  // selector. A validation failure therefore leaves the active UI untouched.
+  await ensureSelectedUIRuntimeEnv(root, profile);
+
+  const repositoryEnvironment = resolve(root, '..', '.env');
+  const profileSnapshot = workspaceFileSnapshot(location.localProfile);
+  const receiptSnapshot = workspaceFileSnapshot(location.workspaceReceipt);
+  const reportSnapshot = workspaceFileSnapshot(location.workspaceSwitchReport);
+  const markerSnapshot = workspaceFileSnapshot(location.marker);
+  const environmentSnapshot = workspaceFileSnapshot(repositoryEnvironment);
+  const receiptStatus = workspaceReceiptStatus(location.workspaceReceipt, root, profile);
+  const historyFile = switchTransaction && markerSnapshot.present
+    ? join(location.workspaceHistoryRoot, `${switchTransaction.id}.installed.json`)
+    : '';
+  const historySnapshot = historyFile ? workspaceFileSnapshot(historyFile) : null;
+  try {
+    if (switchTransaction && !existingTransaction) {
+      await atomicWrite(location.workspaceTransaction, `${JSON.stringify(switchTransaction, null, 2)}\n`);
+    }
+    await options.afterSwitchTransactionWrite?.();
+
+    if (changed && markerSnapshot.present) {
+      // The backend installation marker is immutable audit evidence. Archive a
+      // byte-identical copy, but keep the original in place: workspace UI
+      // selection and backend installation are deliberately separate states.
+      if (!validWorkspaceMarker(location.marker)) throw new Error('UI_SWITCH_FAILED');
+      const historyRootState = strictPathState(location.workspaceHistoryRoot);
+      if (historyRootState.kind === 'error' || (historyRootState.kind === 'present' && (!historyRootState.stat.isDirectory() || historyRootState.stat.isSymbolicLink()))) {
+        throw new Error('UI_SWITCH_FAILED');
+      }
+      mkdirSync(location.workspaceHistoryRoot, { recursive: true, mode: 0o700 });
+      await atomicWrite(historyFile, markerSnapshot.contents);
+      result.markerArchived = relative(resolve(root, '..'), historyFile).split('\\').join('/');
+      result.installationMarkerPreserved = true;
+    }
+
+    await atomicWrite(location.workspaceSwitchReport, `${JSON.stringify(report, null, 2)}\n`);
+    await options.afterReportWrite?.();
+
+    if (changed && markerSnapshot.present && environmentSnapshot.present) {
+      await atomicWrite(
+        repositoryEnvironment,
+        workspaceActiveUIEnvironment(environmentSnapshot.contents, selectedUi),
+      );
+      result.runtimeEnvironmentUpdated = true;
+    }
+    await options.afterEnvironmentWrite?.();
+
+    if (receiptSnapshot.present && (changed || receiptStatus.state !== 'ready')) {
+      await rm(location.workspaceReceipt, { force: true });
+      await syncDirectory(location.stateRoot);
+    }
+    await options.afterReceiptRemoval?.();
+
+    // Commit the selector last. Every earlier mutation is derived metadata, so
+    // an interruption before this atomic rename still dispatches the old UI.
+    await atomicWrite(location.localProfile, `${JSON.stringify(profile, null, 2)}\n`);
+    await options.afterProfileWrite?.();
+    if (switchTransaction) {
+      const owned = readWorkspaceTransaction(location.workspaceTransaction);
+      if (!owned || owned.id !== switchTransaction.id || owned.phase !== 'switching_ui') {
+        throw new Error('UI_SWITCH_FAILED');
+      }
+      if (continueToDependencies) {
+        await atomicWrite(location.workspaceTransaction, `${JSON.stringify({
+          ...switchTransaction,
+          phase: 'dependencies_pending',
+        }, null, 2)}\n`);
+        result.dependencyPreparationPending = true;
+      } else {
+        await rm(location.workspaceTransaction, { force: true });
+        await syncDirectory(location.stateRoot);
+      }
+    }
+  } catch (error) {
+    // Restore every primary file byte-for-byte when an in-process failure is
+    // observed. The archived marker is additive evidence and is removed only
+    // after the old coherent state has been restored.
+    let rollbackFailed = false;
+    for (const [file, snapshot] of [
+      [location.localProfile, profileSnapshot],
+      [location.workspaceReceipt, receiptSnapshot],
+      [location.workspaceSwitchReport, reportSnapshot],
+      [repositoryEnvironment, environmentSnapshot],
+      [location.marker, markerSnapshot],
+    ]) {
+      try {
+        await restoreWorkspaceFile(file, snapshot);
+      } catch {
+        rollbackFailed = true;
+      }
+    }
+    if (historyFile) {
+      try {
+        await restoreWorkspaceFile(historyFile, historySnapshot);
+      } catch {
+        rollbackFailed = true;
+      }
+    }
+    // Restore the blocking authority last. Removing the switching journal while
+    // a selector/report compensation failed would expose a partial switch as a
+    // completed state to public build/dev commands.
+    if (!rollbackFailed) {
+      try {
+        await restoreWorkspaceFile(location.workspaceTransaction, transactionSnapshot);
+      } catch {
+        rollbackFailed = true;
+      }
+    }
+    if (rollbackFailed && switchTransaction) {
+      try {
+        const blockingTransaction = { ...switchTransaction, phase: 'switching_ui' };
+        const currentTransaction = readWorkspaceTransaction(location.workspaceTransaction);
+        if (
+          !currentTransaction
+          || currentTransaction.id !== blockingTransaction.id
+          || currentTransaction.phase !== 'switching_ui'
+        ) {
+          await atomicWrite(
+            location.workspaceTransaction,
+            `${JSON.stringify(blockingTransaction, null, 2)}\n`,
+          );
+        }
+      } catch {
+        // Keep the stable failure and every remaining artifact as recovery
+        // evidence when even the blocking journal cannot be republished.
+      }
+    }
+    if (error?.message === 'UI_SWITCH_FAILED') throw error;
+    throw new Error('UI_SWITCH_FAILED');
+  }
+  return result;
+}
+
+export async function initializeWorkspace(root, selectedUi, options = {}) {
+  const environment = options.environment ?? process.env;
+  const profile = profileFor(selectedUi || configuredUISelection(environment));
+  if (!profile) throw new Error('UI_INVALID');
+  const location = statePaths(root, environment);
+  const layout = workspaceTemplateLayout(root);
+  if (!layout.valid) throw new Error(layout.reason);
+  const current = inspectWorkspaceState(root, environment);
+  if (current.state === STATES.INCONSISTENT && current.reason !== STATE_REASONS.RECEIPT_INVALID) {
+    throw new Error(current.reason || 'WORKSPACE_LAYOUT_INVALID');
+  }
+  const resolved = resolveWorkspaceProfile(root, environment);
+  const persistedProfile = resolved.localProfile ?? resolved.legacyProfile;
+  const receiptStatus = workspaceReceiptStatus(location.workspaceReceipt, root, profile);
+  if (
+    current.state === STATES.INSTALLED
+    && current.selectedUi === profile.selectedUi
+    && persistedProfile?.selectedUi === profile.selectedUi
+    && ['missing', 'ready'].includes(receiptStatus.state)
+  ) {
+    return { ...current, profile, repeated: true, mode: WORKSPACE_SELECTION_MODE };
+  }
+  const pendingBeforeSelection = readWorkspaceTransaction(location.workspaceTransaction);
+  if (pathPresent(location.workspaceTransaction) && !pendingBeforeSelection) throw new Error('WORKSPACE_TRANSACTION_INVALID');
+  if (pendingBeforeSelection && pendingBeforeSelection.selectedUi !== profile.selectedUi) throw new Error('INITIALIZATION_IN_PROGRESS');
+  await selectWorkspaceUI(root, profile.selectedUi, {
+    environment,
+    leaseOwned: options.leaseOwned === true,
+    dependencyLeaseOwned: options.dependencyLeaseOwned === true,
+    continueToDependencies: receiptStatus.state !== 'ready',
+  });
+  await options.afterSelection?.();
+  const existing = readWorkspaceTransaction(location.workspaceTransaction);
+  if (pathPresent(location.workspaceTransaction) && !existing) throw new Error('WORKSPACE_TRANSACTION_INVALID');
+  let transaction = existing;
+  if (!transaction && workspaceDependenciesPrepared(root, profile, environment)) {
+    return { state: STATES.UI_PREPARED, profile, repeated: true, transactionId: '', mode: WORKSPACE_SELECTION_MODE };
+  }
+  if (!transaction) {
+    transaction = {
+      schema: WORKSPACE_TRANSACTION_SCHEMA,
+      owner: WORKSPACE_TRANSACTION_OWNER,
+      id: randomUUID(),
+      selectedUi: profile.selectedUi,
+      phase: 'dependencies_pending',
+      moves: [],
+    };
+    await atomicWrite(location.workspaceTransaction, `${JSON.stringify(transaction, null, 2)}\n`);
+  }
+  try {
+    await ensureSelectedUIRuntimeEnv(root, profile);
+  } catch (error) {
+    if (error?.message !== 'RUNTIME_ENV_TEMPLATE_INVALID') throw error;
+  }
+  return {
+    state: STATES.UI_PREPARED,
+    profile,
+    repeated: Boolean(pendingBeforeSelection),
+    transactionId: transaction.id,
+    mode: WORKSPACE_SELECTION_MODE,
+  };
+}
+
+export async function completeWorkspaceDependencyPreparation(root, profile, options = {}) {
+  const expected = profileFor(profile?.selectedUi);
+  if (
+    !expected
+    || profile?.schema !== expected.schema
+    || profile?.packageName !== expected.packageName
+    || profile?.appDirectory !== expected.appDirectory
+  ) throw new Error('UI_PROFILE_INVALID');
+  const environment = options.environment ?? process.env;
+  const location = statePaths(root, environment);
+  const transactionPresent = pathPresent(location.workspaceTransaction);
+  const transaction = transactionPresent ? readWorkspaceTransaction(location.workspaceTransaction) : null;
+  if (transactionPresent && (!transaction || (
+    transaction.selectedUi !== expected.selectedUi
+    || transaction.phase !== 'dependencies_pending'
+  ))) throw new Error('WORKSPACE_TRANSACTION_INVALID');
+  const layout = workspaceTemplateLayout(root);
+  if (!layout.valid) throw new Error(layout.reason);
+  const active = resolveWorkspaceProfile(root, environment).profile;
+  if (
+    !active
+    || active.selectedUi !== expected.selectedUi
+    || active.packageName !== expected.packageName
+    || active.appDirectory !== expected.appDirectory
+  ) throw new Error('UI_PROFILE_MISMATCH');
+  const lockfileHash = requiredWorkspaceLockfileHash(root);
+  if (options.expectedLockfileHash && options.expectedLockfileHash !== lockfileHash) {
+    throw new Error('DEPENDENCY_INSTALL_FAILED');
+  }
+  mkdirSync(location.stateRoot, { recursive: true, mode: 0o700 });
+  const receipt = {
+    schema: WORKSPACE_RECEIPT_SCHEMA,
+    selectedUi: expected.selectedUi,
+    packageName: expected.packageName,
+    dependenciesReady: true,
+    lockfileHash,
+  };
+  await atomicWrite(location.workspaceReceipt, `${JSON.stringify(receipt, null, 2)}\n`);
+  if (pathPresent(location.workspaceTransaction)) {
+    await rm(location.workspaceTransaction, { force: true });
+    await syncDirectory(location.stateRoot);
+  }
+  return inspectWorkspaceState(root, environment);
+}
+
+export async function resetWorkspaceSelection(root, options = {}) {
+  const location = statePaths(root, options.environment ?? process.env);
+  // Presence is authoritative here: a malformed or orphaned marker must not
+  // turn reset into a false-success path that leaves backend state behind.
+  if (strictPathState(location.marker).kind !== 'missing') {
+    throw new Error('RESET_UNAVAILABLE_INSTALLED');
+  }
+  const current = inspectWorkspaceState(root, options.environment ?? process.env);
+  // An installed application owns additional server-side state. UI selection
+  // reset is intentionally limited to the pre-install phase; use the explicit
+  // selector to switch a post-install checkout, which archives the marker and
+  // forces dependency revalidation without deleting source trees.
+  if (current.state === STATES.INSTALLED) throw new Error('RESET_UNAVAILABLE_INSTALLED');
+  if (current.state === STATES.INSTALLING) throw new Error('INITIALIZATION_IN_PROGRESS');
+  if (current.state === STATES.INCONSISTENT) {
+    throw new Error(current.reason || 'WORKSPACE_LAYOUT_INVALID');
+  }
+  for (const file of [location.localProfile, location.workspaceTransaction, location.workspaceReceipt, location.workspaceSwitchReport]) {
+    if (pathPresent(file)) await rm(file, { force: true });
+  }
+  await syncDirectory(location.stateRoot).catch(() => {});
+  return inspectWorkspaceState(root, options.environment ?? process.env);
 }
 
 export async function syncDirectory(directory, options = {}) {
@@ -1519,6 +2452,32 @@ export async function acquireDependencyInstallLease(root, options = {}) {
   if (!plainDirectory(location.stateRoot)) throw new Error('PREFLIGHT_FAILED');
   await ensureDependencyInstallIdle(root, options);
 
+  const adminLeaseId = options.adminLeaseId ?? '';
+  if (adminLeaseId && !TRANSACTION_ID_PATTERN.test(adminLeaseId)) {
+    throw new Error('DEPENDENCY_INSTALL_FAILED');
+  }
+  const assertAdminAdmission = () => {
+    const admin = readLeaseSnapshot(location.adminLease, options);
+    if (!admin) {
+      if (adminLeaseId) throw new Error('INIT_BUSY');
+      return;
+    }
+    if (
+      admin.error
+      || !admin.regular
+      || !admin.lease
+      || !adminLeaseId
+      || admin.lease.id !== adminLeaseId
+    ) throw new Error('INIT_BUSY');
+  };
+  // Dependency work and workspace mutation share one ordered lock protocol:
+  // admin first, dependency second. A standalone supervisor may proceed only
+  // while no admin writer exists; a supervisor launched by that writer must
+  // present the exact lease id. Validate on both sides of publication to close
+  // the check-then-create race with a newly admitted selector.
+  assertAdminAdmission();
+  await options.afterAdminLeaseAdmission?.();
+
   const supervisorPid = options.supervisorPid ?? process.pid;
   const childPid = options.childPid ?? process.pid;
   if (
@@ -1551,11 +2510,19 @@ export async function acquireDependencyInstallLease(root, options = {}) {
   try {
     await publishExclusive(location.dependencyLease, encoded, 'dependency');
   } catch (error) {
-    if (error?.code === 'EEXIST') throw new Error('DEPENDENCY_INSTALL_BUSY');
+    if (error?.code === 'EEXIST') {
+      throw new Error(adminLeaseId ? 'INIT_BUSY' : 'DEPENDENCY_INSTALL_BUSY');
+    }
     throw new Error('DEPENDENCY_INSTALL_FAILED');
   }
   const owned = readDependencyLeaseSnapshot(location.dependencyLease);
   if (!owned || owned.contents !== encoded) throw new Error('DEPENDENCY_INSTALL_FAILED');
+  try {
+    assertAdminAdmission();
+  } catch (error) {
+    await removeLeaseSnapshot(location.dependencyLease, owned);
+    throw error;
+  }
 
   let stopHeartbeat;
   try {
@@ -1793,6 +2760,12 @@ async function stopAdminHeartbeat(controller) {
 }
 
 async function activateOwnedLease(location, owned, lease, options) {
+  const dependencyState = strictPathState(location.dependencyLease);
+  const dependencyReclaimState = strictPathState(location.dependencyLeaseReclaim);
+  if (dependencyState.kind !== 'missing' || dependencyReclaimState.kind !== 'missing') {
+    await removeLeaseSnapshot(location.adminLease, owned);
+    throw new Error('INIT_BUSY');
+  }
   let heartbeat;
   try {
     heartbeat = await startAdminHeartbeat(location, lease, options);
@@ -1802,12 +2775,19 @@ async function activateOwnedLease(location, owned, lease, options) {
     throw error;
   }
   let released = false;
-  return async () => {
+  const release = async () => {
     if (released) return false;
     released = true;
     await stopAdminHeartbeat(heartbeat);
     return removeLeaseSnapshot(location.adminLease, owned);
   };
+  Object.defineProperty(release, 'lease', {
+    configurable: false,
+    enumerable: true,
+    value: Object.freeze({ ...lease }),
+    writable: false,
+  });
+  return release;
 }
 
 async function recoverInterruptedLeaseReclaim(location, now, graceMs, heartbeatStaleMs, startTokenResolver, options = {}) {
@@ -1896,6 +2876,7 @@ export async function acquireAdminInitLease(root, options = {}) {
   mkdirSync(location.stateRoot, { recursive: true, mode: 0o700 });
   if (!plainDirectory(location.stateRoot)) throw new Error('PREFLIGHT_FAILED');
   await ensureDependencyInstallIdle(root, options);
+  await options.afterDependencyAdmission?.();
 
   const startTokenResolver = options.processStartToken ?? processStartToken;
   const pidStartToken = resolveProcessStartToken(startTokenResolver, process.pid);

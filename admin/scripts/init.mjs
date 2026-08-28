@@ -13,12 +13,17 @@ import {
   STATE_REASONS,
   UI_PROFILES,
   acquireAdminInitLease,
+  acquireDependencyInstallLease,
   completeDependencyPreparation,
+  completeWorkspaceDependencyPreparation,
+  buildWorkspaceInstallArgs,
   dependenciesPrepared,
   formatStatus,
   ensureInstallerApplyIdle,
   initialize,
+  initializeWorkspace,
   inspectState,
+  inspectWorkspaceState,
   installURL,
   migrateLegacyPreparedState,
   preflightInitialization,
@@ -29,16 +34,23 @@ import {
   recoverSafeLocalState,
   recoverInitializationPreflightArtifacts,
   reset,
+  resetWorkspaceSelection,
+  selectWorkspaceUI,
   rootFromScript,
   stableInitializationErrorCode,
   statePaths,
+  UI_SELECTION_MODE_ENV,
+  WORKSPACE_SELECTION_MODE,
+  LEGACY_SELECTION_MODE,
+  workspaceDependenciesPrepared,
+  workspaceSelectionSignal,
 } from './init-state.mjs';
 import { buildDependencySupervisorCommand } from './dependency-launch.mjs';
 import { openDependencyLog } from './dependency-log.mjs';
 import { buildPnpmCommand } from './pnpm-command.mjs';
 
 function usage() {
-  return 'Usage: pnpm run init -- [--check|--preflight|--reset] [--ui antd|ele|naive] [--confirm-cleanup] [--confirm-reset] [--no-open] [--port 1..65535]';
+  return 'Usage: pnpm run init -- [--workspace] [--check|--preflight|--reset] [--ui antd|ele|naive] [--confirm-cleanup] [--confirm-reset] [--dry-run] [--no-open] [--port 1..65535]';
 }
 
 function parseArgs(argv) {
@@ -47,6 +59,8 @@ function parseArgs(argv) {
     check: false,
     preflight: false,
     reset: false,
+    workspace: false,
+    dryRun: false,
     confirmCleanup: false,
     confirmReset: false,
     noOpen: false,
@@ -60,15 +74,18 @@ function parseArgs(argv) {
     else if (argument === '--check') options.check = true;
     else if (argument === '--preflight') options.preflight = true;
     else if (argument === '--reset') options.reset = true;
+    else if (argument === '--workspace') options.workspace = true;
+    else if (argument === '--dry-run') options.dryRun = true;
     else if (argument === '--confirm-cleanup') options.confirmCleanup = true;
     else if (argument === '--confirm-reset') options.confirmReset = true;
     else if (argument === '--no-open') options.noOpen = true;
     else if (argument === '--help' || argument === '-h') return { help: true };
     else throw new Error('ARGUMENT_INVALID');
   }
-  if (options.check && (options.preflight || options.reset)) throw new Error('ARGUMENT_INVALID');
+  if (options.check && (options.preflight || options.reset || options.dryRun)) throw new Error('ARGUMENT_INVALID');
   if (options.preflight && options.reset) throw new Error('ARGUMENT_INVALID');
   if (options.preflight && !options.selectedUi) throw new Error('UI_INVALID');
+  if (options.dryRun && (!options.selectedUi || options.reset || options.preflight || options.check)) throw new Error('ARGUMENT_INVALID');
   if (options.selectedUi && !UI_PROFILES[options.selectedUi]) throw new Error('UI_INVALID');
   if (!Number.isInteger(options.port) || options.port < 1 || options.port > 65535) throw new Error('PORT_INVALID');
   return options;
@@ -166,12 +183,15 @@ async function verifyOrdinaryAPI(port) {
   }
 }
 
-async function installDependencies() {
+async function installDependencies(profile = null, workspaceMode = false, adminLeaseId = '') {
   if (process.env.INIT_DEPENDENCY_INSTALL_TEST_MODE === 'success') return;
   // Validate the same command construction before launching the detached
   // supervisor, which imports the JavaScript pnpm CLI in its own Worker.
+  const dependencyArgs = workspaceMode
+    ? buildWorkspaceInstallArgs(profile)
+    : ['install', '--frozen-lockfile'];
   try {
-    buildPnpmCommand(['install', '--frozen-lockfile']);
+    buildPnpmCommand(dependencyArgs);
   } catch {
     throw new Error('DEPENDENCY_INSTALL_FAILED');
   }
@@ -194,10 +214,14 @@ async function installDependencies() {
   });
   let supervisor;
   try {
+    const supervisorEnvironment = { ...process.env };
+    supervisorEnvironment.GIN_VBEN_FORCE_DEPENDENCY_INSTALL = '0';
+    if (workspaceMode) supervisorEnvironment.GIN_VBEN_UI_SELECTION_MODE = 'workspace';
+    if (adminLeaseId) supervisorEnvironment.GIN_VBEN_ADMIN_LEASE_ID = adminLeaseId;
     supervisor = spawn(invocation.command, invocation.args, {
       cwd: root,
       detached: true,
-      env: process.env,
+      env: supervisorEnvironment,
       shell: false,
       stdio: ['ignore', logDescriptor, logDescriptor],
       windowsHide: true,
@@ -244,8 +268,20 @@ function openInstaller(prepared, options) {
   return 0;
 }
 
-async function ensureDependenciesPrepared(profile) {
-  if (!dependenciesPrepared(root, profile)) await installDependencies();
+async function ensureDependenciesPrepared(profile, workspaceMode = false, adminLeaseId = '') {
+  if (workspaceMode) {
+    if (!workspaceDependenciesPrepared(root, profile, process.env)) {
+      await installDependencies(profile, true, adminLeaseId);
+    }
+    const currentWorkspace = inspectWorkspaceState(root, process.env);
+    if (currentWorkspace.state === STATES.INSTALLING && currentWorkspace.reason === STATE_REASONS.DEPENDENCIES_PENDING) {
+      return completeWorkspaceDependencyPreparation(root, profile, { environment: process.env });
+    }
+    if (workspaceDependenciesPrepared(root, profile, process.env)) return { state: STATES.UI_PREPARED, profile };
+    if (currentWorkspace.state === STATES.UI_PREPARED || currentWorkspace.state === STATES.INSTALLED) return currentWorkspace;
+    throw new Error('WORKSPACE_TRANSACTION_INVALID');
+  }
+  if (!dependenciesPrepared(root, profile)) await installDependencies(null, false, adminLeaseId);
   const current = inspectState(root);
   if (current.state === STATES.INSTALLING && current.reason === STATE_REASONS.DEPENDENCIES_PENDING) {
     return completeDependencyPreparation(root);
@@ -253,6 +289,115 @@ async function ensureDependenciesPrepared(profile) {
   if (dependenciesPrepared(root, profile)) return { state: STATES.UI_PREPARED, profile };
   if (current.state === STATES.UI_PREPARED) return current;
   throw new Error('DEPENDENCY_TRANSACTION_INVALID');
+}
+
+function workspaceModeFor(options = {}) {
+  const configured = String(process.env[UI_SELECTION_MODE_ENV] || '').trim().toLowerCase();
+  // Explicit workspace/dry-run flags are safety boundaries. In particular, an
+  // inherited legacy environment must never turn a dry-run into source moves.
+  if (options.workspace || options.dryRun) return true;
+  if (configured === LEGACY_SELECTION_MODE) return false;
+  if (configured === WORKSPACE_SELECTION_MODE) return true;
+  // The signal also recognizes durable source-moving journals, allowing an
+  // upgraded checkout to finish its compatibility migration before adopting
+  // the zero-move state model.
+  return workspaceSelectionSignal(root, process.env);
+}
+
+async function runWorkspaceFlow(options) {
+  let release;
+  const environment = process.env;
+  let current = inspectWorkspaceState(root, environment);
+  if (options.check) {
+    if (current.state === STATES.INCONSISTENT) printStateGuidance(current);
+    print({ ...current, next: 'CHECK_COMPLETE', error: current.state === STATES.INCONSISTENT ? 'STATE_INCONSISTENT' : 'NONE', port });
+    return current.state === STATES.INCONSISTENT ? 3 : 0;
+  }
+  if (options.dryRun || options.preflight) {
+    const selectedUi = options.selectedUi;
+    if (!selectedUi) throw new Error('UI_INVALID');
+    const plan = await selectWorkspaceUI(root, selectedUi, { check: true, environment });
+    printStage('prepare', 'preflight');
+    stdout.write('INIT_PREFLIGHT=ok\n');
+    stdout.write(`INIT_PLAN_RETAIN=${plan.plan.retain}\nINIT_PLAN_PRESERVE=${plan.plan.preserve.join(',')}\n`);
+    stdout.write(`INIT_PLAN_DEPENDENCIES=${plan.plan.dependencyArgs.join(' ')}\n`);
+    print({ ...current, selectedUi, next: 'PREFLIGHT_COMPLETE', error: 'NONE', port });
+    return 0;
+  }
+  if (!options.reset && !options.selectedUi && current.state === STATES.PRISTINE) {
+    stdout.write(`请打开 ${installURL(port)}，在安装页选择管理界面；三套源码会始终保留。\n`);
+    print({ ...current, action: 'OPEN_INSTALLER', next: 'OPEN_INSTALLER', port });
+    return 0;
+  }
+  if (options.reset) {
+    await confirm('Confirm reset: clear the local UI selection.', options.confirmReset);
+    release = await acquireAdminInitLease(root);
+    let coordination;
+    try {
+      coordination = await acquireDependencyInstallLease(root, {
+        adminLeaseId: release.lease.id,
+      });
+      ensureInstallerApplyIdle(root);
+      const result = await resetWorkspaceSelection(root);
+      printStage('reset', 'complete');
+      print({ ...result, next: 'RESET_COMPLETE', port });
+      return 0;
+    } finally {
+      await coordination?.release();
+      await release?.();
+    }
+  }
+  if (
+    current.state === STATES.INSTALLED
+    && (!options.selectedUi || options.selectedUi === current.selectedUi)
+    && current.source !== 'environment'
+    && !current.dependenciesStale
+    && !current.dependenciesForeign
+  ) {
+    print({ ...current, next: 'ALREADY_INSTALLED', port });
+    return 0;
+  }
+  if (!options.selectedUi && current.profile) options.selectedUi = current.profile.selectedUi;
+  if (!options.selectedUi) throw new Error('UI_INVALID');
+  await verifyOrdinaryAPI(port);
+  release = await acquireAdminInitLease(root);
+  try {
+    ensureInstallerApplyIdle(root);
+    let coordination;
+    let preparedSelection;
+    try {
+      coordination = await acquireDependencyInstallLease(root, {
+        adminLeaseId: release.lease.id,
+      });
+      printStage('prepare', 'preflight');
+      const plan = await selectWorkspaceUI(root, options.selectedUi, {
+        check: true,
+        environment,
+        leaseOwned: true,
+        dependencyLeaseOwned: true,
+      });
+      stdout.write('INIT_PREFLIGHT=ok\n');
+      stdout.write(`INIT_PLAN_RETAIN=${plan.plan.retain}\nINIT_PLAN_PRESERVE=${plan.plan.preserve.join(',')}\n`);
+      stdout.write(`INIT_PLAN_DEPENDENCIES=${plan.plan.dependencyArgs.join(' ')}\n`);
+      printStage('prepare', 'workspace');
+      preparedSelection = await initializeWorkspace(root, options.selectedUi, {
+        environment,
+        leaseOwned: true,
+        dependencyLeaseOwned: true,
+      });
+    } finally {
+      await coordination?.release();
+    }
+    printStage('prepare', 'dependencies');
+    const prepared = await ensureDependenciesPrepared(
+      preparedSelection.profile,
+      true,
+      release.lease.id,
+    );
+    return openInstaller({ ...prepared, profile: preparedSelection.profile }, options);
+  } finally {
+    await release?.();
+  }
 }
 
 async function main() {
@@ -265,6 +410,9 @@ async function main() {
     }
     assertRuntimeCompatibility();
     port = options.port;
+    if (workspaceModeFor(options)) {
+      return await runWorkspaceFlow(options);
+    }
     if (!options.check) await recoverInitializationPreflightArtifacts(root);
     let current = inspectState(root);
     if (options.check) {
@@ -403,7 +551,7 @@ async function main() {
       }
       const resumed = await initialize(root, current.selectedUi ?? current.profile?.selectedUi);
       printStage('prepare', 'dependencies');
-      const prepared = await ensureDependenciesPrepared(resumed.profile);
+      const prepared = await ensureDependenciesPrepared(resumed.profile, false, releaseAdminLease.lease.id);
       return openInstaller({ ...prepared, profile: resumed.profile }, options);
     }
     if (current.state === STATES.UI_PREPARED) {
@@ -412,7 +560,7 @@ async function main() {
         allowPartialLayout: true,
       });
       printStage('prepare', 'dependencies');
-      const prepared = await ensureDependenciesPrepared(current.profile);
+      const prepared = await ensureDependenciesPrepared(current.profile, false, releaseAdminLease.lease.id);
       return openInstaller(prepared, options);
     }
     if (current.state !== STATES.PRISTINE) {
@@ -439,14 +587,14 @@ async function main() {
       return 3;
     }
     printStage('prepare', 'dependencies');
-    const prepared = await ensureDependenciesPrepared(result.profile);
+    const prepared = await ensureDependenciesPrepared(result.profile, false, releaseAdminLease.lease.id);
     return openInstaller(prepared, options);
   } catch (error) {
     const code = stableInitializationErrorCode(error);
     let current = { state: STATES.INCONSISTENT, profile: null, reason: STATE_REASONS.INSTALL_STATE_DIR_INVALID };
     if (code !== 'INSTALL_STATE_DIR_INVALID') {
       try {
-        current = inspectState(root);
+        current = workspaceSelectionSignal(root) ? inspectWorkspaceState(root) : inspectState(root);
       } catch {
         // Keep the fixed, credential-free fallback when filesystem state can no
         // longer be inspected after a TOCTOU race.
@@ -469,7 +617,11 @@ async function main() {
       || code === 'INITIALIZATION_OPERATION_FAILED'
       || code === 'RECOVERY_VALIDATION_FAILED'
       || code === 'LEGACY_MIGRATION_INVALID'
-      || code === 'INIT_BUSY';
+      || code === 'INIT_BUSY'
+      || code === 'WORKSPACE_LAYOUT_INVALID'
+      || code === 'WORKSPACE_TRANSACTION_INVALID'
+      || code === 'UI_SWITCH_FAILED'
+      || code === 'UI_PROFILE_INVALID';
     const next = argumentError ? 'PROVIDE_INPUT' : code === 'INIT_BUSY' ? 'WAIT_FOR_INITIALIZATION' : 'RECOVER_INITIALIZATION';
     print({ ...current, next, error: code, port });
     if (argumentError) stdout.write(`${usage()}\n`);

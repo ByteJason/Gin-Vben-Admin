@@ -420,7 +420,8 @@ func allowedUIInitializerErrorCode(value string) bool {
 		"RECOVERY_VALIDATION_FAILED", "RUNTIME_ENV_APP_INVALID", "RUNTIME_ENV_PROFILE_INVALID",
 		"RUNTIME_ENV_TARGET_INVALID", "RUNTIME_ENV_TEMPLATE_INVALID", "UI_INVALID",
 		"UI_PACKAGE_MISMATCH", "UI_PROFILE_INVALID", "UI_PROFILE_MISMATCH", "UI_PROFILE_REQUIRED",
-		"RESET_IN_PROGRESS", "STATE_INCONSISTENT", "INITIALIZATION_IN_PROGRESS", "INITIALIZATION_OPERATION_FAILED":
+		"RESET_IN_PROGRESS", "STATE_INCONSISTENT", "INITIALIZATION_IN_PROGRESS", "INITIALIZATION_OPERATION_FAILED",
+		"UI_SWITCH_FAILED", "WORKSPACE_LAYOUT_INVALID", "WORKSPACE_TRANSACTION_INVALID":
 		return true
 	default:
 		return false
@@ -491,6 +492,12 @@ func uiInitializerFailure(action installer.UIPreparationAction, diagnostic uiIni
 			setClassification("ui_dependency_install_failed", "dependencies")
 		case "SOURCE_MOVE_STATE_INVALID", "INITIALIZATION_RESUME_INVALID":
 			setClassification("ui_workspace_prepare_failed", "workspace")
+		case "WORKSPACE_LAYOUT_INVALID", "UI_PACKAGE_MISMATCH":
+			setClassification("ui_workspace_layout_invalid", "preflight")
+		case "WORKSPACE_TRANSACTION_INVALID":
+			setClassification("ui_workspace_transaction_invalid", "workspace")
+		case "UI_SWITCH_FAILED":
+			setClassification("ui_switch_failed", "workspace")
 		}
 	}
 	failure.DependencyLog = diagnostic.dependencyLog && failure.Step == "dependencies"

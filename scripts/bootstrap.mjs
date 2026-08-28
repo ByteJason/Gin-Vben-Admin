@@ -113,7 +113,10 @@ if (await exists(`${uiDirectory}/.env.development.example`) && !(await exists(`$
 }
 
 if (!skipInstall) {
-  await run('pnpm', ['--dir', 'admin', 'install', '--frozen-lockfile']);
+  // Keep the one-lockfile workspace intact while installing only the chosen
+  // UI closure. The other two source trees remain tracked and available for
+  // the CI matrix, but a developer clone does not pay their dependency cost.
+  await run('pnpm', ['--dir', 'admin', 'install', '--filter', `@vben/web-${ui}...`, '--frozen-lockfile']);
   await run('go', ['-C', 'server', 'mod', 'download']);
 }
 

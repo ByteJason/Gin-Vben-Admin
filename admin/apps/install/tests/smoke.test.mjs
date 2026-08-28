@@ -86,7 +86,8 @@ test('installation shell is independent and exposes an accessible status region'
   assert.match(html, /终端 1：服务端/);
   assert.match(html, /终端 2：管理端/);
   assert.match(html, /go run \.\/cmd\/api\/main\.go/);
-  assert.match(html, /pnpm install/);
+  assert.match(html, /pnpm run ui:install/);
+  assert.doesNotMatch(html, /pnpm install(?:\s|<)/);
   assert.match(html, /pnpm run dev/);
   assert.doesNotMatch(html, /pnpm run build/);
   const nextSteps =
@@ -94,9 +95,13 @@ test('installation shell is independent and exposes an accessible status region'
     '';
   assert.match(
     nextSteps,
-    /终端 1：[\s\S]*?cd server[\s\S]*?go run \.\/cmd\/api\/main\.go[\s\S]*?终端 2：[\s\S]*?cd admin[\s\S]*?pnpm install[\s\S]*?pnpm run dev/,
+    /终端 1：[\s\S]*?cd server[\s\S]*?go run \.\/cmd\/api\/main\.go[\s\S]*?终端 2：[\s\S]*?cd admin[\s\S]*?pnpm run ui:install[\s\S]*?pnpm run dev/,
   );
   assert.doesNotMatch(nextSteps, /pnpm run build/);
+  assert.doesNotMatch(
+    html,
+    /确认后仅保留|仅保留并安装|可裁剪模板|继续恢复三套(?:界面)?模板|安全暂存另外两套/,
+  );
   assert.match(html, /aria-valuetext="尚未开始"/);
   assert.match(html, /autocomplete="new-password"/);
   assert.match(html, /aria-current="step"/);
@@ -161,11 +166,13 @@ test('installation shell is independent and exposes an accessible status region'
   assert.match(script, /安装任务正在执行/);
   assert.doesNotMatch(script, /Ctrl\+C/);
   assert.match(script, /pnpm run dev/);
-  assert.match(script, /pnpm install/);
+  assert.match(script, /pnpm run ui:install/);
+  assert.doesNotMatch(script, /pnpm install(?:\s|。|，)/);
   assert.match(script, /const installationCompletedMessage\s*=/);
   assert.equal(script.match(/installationCompletedMessage/g)?.length, 3);
   assert.doesNotMatch(script, /pnpm run build/);
   assert.doesNotMatch(script, /构建并暂存界面资源/);
+  assert.doesNotMatch(script, /确认后仅保留|继续恢复三套(?:界面)?模板/);
   assert.doesNotMatch(script, /innerHTML/);
   assert.doesNotMatch(script, /localStorage|sessionStorage/);
   assert.doesNotMatch(
@@ -297,7 +304,7 @@ test('recoverable UI status dispatches prepare and reset actions separately', ()
 
   assert.match(
     html,
-    /id="resume-ui-reset-button"[^>]*type="button"[^>]*hidden[^>]*>[\s\S]*?继续恢复三套模板/,
+    /id="resume-ui-reset-button"[^>]*type="button"[^>]*hidden[^>]*>[\s\S]*?继续清除本机选择/,
   );
   assert.match(recoverable, /status\.uiAction === 'reset'/);
   assert.match(recoverable, /uiPrepareForm\.hidden\s*=\s*recoveringReset/);
@@ -390,7 +397,7 @@ test('a failed reset exposes a retryable reset control without showing prepare i
     pending: [false],
     resetHidden: false,
     retryHidden: false,
-    title: '继续恢复三套界面模板',
+    title: '继续清除本机选择',
   });
 });
 
@@ -443,6 +450,7 @@ test('UI action diagnostics expose stable keys and repository-relative logs only
   ]) {
     assert.match(renderProgress, new RegExp(field.replace('.', '\\.')));
   }
+  assert.match(renderProgress, /uiStepDisplayLabels\[job\.failureStep\]/);
   assert.doesNotMatch(renderProgress, /尚未移动或修改管理界面模板/);
   assert.match(renderProgress, /job\.logPath[\s\S]*?uiPrepareLogPath/);
 });

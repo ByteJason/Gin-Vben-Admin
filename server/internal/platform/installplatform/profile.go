@@ -48,9 +48,12 @@ var uiProfileDefinitions = map[string]uiProfileDefinition{
 // exists=true with an empty profile so the public status becomes inconsistent
 // rather than leaking a local filesystem failure.
 type FileProfileProvider struct {
-	root            string
-	profilePath     string
-	transactionPath string
+	root                     string
+	profilePath              string
+	localProfilePath         string
+	workspaceManifestPath    string
+	transactionPath          string
+	workspaceTransactionPath string
 }
 
 func NewFileProfileProvider(workspaceRoot string) (*FileProfileProvider, error) {
@@ -85,9 +88,12 @@ func newFileProfileProvider(workspaceRoot, configuredStateDirectory string) (*Fi
 		}
 	}
 	return &FileProfileProvider{
-		root:            filepath.Clean(canonical),
-		profilePath:     filepath.Join(canonical, "admin", ".ui-profile.json"),
-		transactionPath: filepath.Join(filepath.Clean(stateDirectory), "transaction.json"),
+		root:                     filepath.Clean(canonical),
+		profilePath:              filepath.Join(canonical, "admin", ".ui-profile.json"),
+		localProfilePath:         filepath.Join(canonical, "admin", ".ui-profile.local.json"),
+		workspaceManifestPath:    filepath.Join(canonical, "admin", "pnpm-workspace.yaml"),
+		transactionPath:          filepath.Join(filepath.Clean(stateDirectory), "transaction.json"),
+		workspaceTransactionPath: filepath.Join(filepath.Clean(stateDirectory), "workspace-transaction.json"),
 	}, nil
 }
 
@@ -98,8 +104,93 @@ func (p *FileProfileProvider) Profile(ctx context.Context) (installer.Installati
 	if err := ctx.Err(); err != nil {
 		return installer.InstallationProfile{}, false, err
 	}
-	if p == nil || p.root == "" || p.profilePath == "" || p.transactionPath == "" {
+	if p == nil || p.root == "" || p.profilePath == "" || p.localProfilePath == "" || p.workspaceManifestPath == "" || p.transactionPath == "" || p.workspaceTransactionPath == "" {
 		return installer.InstallationProfile{}, false, ErrWorkspaceRootInvalid
+	}
+	workspaceMode, manifestStateOK := workspaceManifestState(p.workspaceManifestPath)
+	if !manifestStateOK {
+		return installer.InstallationProfile{}, true, nil
+	}
+
+	// Resolve the durable selector once so the workspace journal, server apply
+	// journal, and final status all observe the same bytes. The ignored local
+	// selector is strict and takes precedence over the tracked legacy profile.
+	localContents, localExists, localErr := readRegularFile(p.localProfilePath, maxUIProfileBytes)
+	if localErr != nil {
+		if ctx.Err() != nil {
+			return installer.InstallationProfile{}, false, ctx.Err()
+		}
+		return installer.InstallationProfile{}, true, nil
+	}
+	profileContents := localContents
+	profileExists := localExists
+	independentUISelection := localExists
+	if localExists && !workspaceMode {
+		return installer.InstallationProfile{}, true, nil
+	}
+	if !localExists {
+		var trackedErr error
+		profileContents, profileExists, trackedErr = readRegularFile(p.profilePath, maxUIProfileBytes)
+		if trackedErr != nil {
+			if ctx.Err() != nil {
+				return installer.InstallationProfile{}, false, ctx.Err()
+			}
+			return installer.InstallationProfile{}, true, nil
+		}
+	}
+	var profile uiProfileDefinition
+	profileValid := false
+	if profileExists {
+		profile, profileValid = decodeTrackedUIProfile(profileContents)
+		if profileValid {
+			switch {
+			case localExists:
+				profileValid = p.validTemplateLayout(profile, true)
+			case workspaceMode && p.validTemplateLayout(profile, true):
+				// A tracked compatibility profile can coexist with the new
+				// all-template checkout until each clone writes its local choice.
+				independentUISelection = true
+			default:
+				// Old installed checkouts used the same pnpm workspace manifest
+				// but intentionally retained only the selected template.
+				profileValid = p.validTemplateLayout(profile, false)
+			}
+		}
+	}
+
+	// The workspace selector uses a separate, zero-move journal. Keeping it
+	// separate from the historical source-move journal lets old transactions
+	// resume without changing their validation contract.
+	workspaceContents, workspaceExists, workspaceErr := readRegularFile(p.workspaceTransactionPath, maxUIProfileBytes)
+	if workspaceErr != nil {
+		if ctx.Err() != nil {
+			return installer.InstallationProfile{}, false, ctx.Err()
+		}
+		return installer.InstallationProfile{}, true, nil
+	}
+	if workspaceExists {
+		transaction, ok := decodeWorkspaceTransaction(workspaceContents)
+		if !ok {
+			return installer.InstallationProfile{}, true, nil
+		}
+		definition := uiProfileDefinitions[string(transaction.SelectedUI)]
+		if !p.validTemplateLayout(definition, true) {
+			return installer.InstallationProfile{}, true, nil
+		}
+		profileMismatch := transaction.Phase == "dependencies_pending" && profile.ui != transaction.SelectedUI
+		if profileExists && (!profileValid || profileMismatch) {
+			return installer.InstallationProfile{}, true, nil
+		}
+		return installer.InstallationProfile{
+			SelectedUI:             transaction.SelectedUI,
+			Installing:             true,
+			PreparingUI:            true,
+			UIAction:               installer.UIPreparationActionPrepare,
+			IndependentUISelection: true,
+		}, true, nil
+	}
+	if workspaceMode && !profileExists && !p.validTemplateLayout(uiProfileDefinitions["antd"], true) {
+		return installer.InstallationProfile{}, true, nil
 	}
 
 	var serverTransaction *installer.ApplyTransaction
@@ -149,27 +240,23 @@ func (p *FileProfileProvider) Profile(ctx context.Context) (installer.Installati
 		}
 	}
 
-	contents, exists, err := readRegularFile(p.profilePath, maxUIProfileBytes)
-	if !exists && err == nil {
+	if !profileExists {
 		if serverTransaction != nil {
 			return installer.InstallationProfile{}, true, nil
 		}
 		return installer.InstallationProfile{}, false, nil
 	}
-	if err != nil {
-		if _, inspectErr := os.Lstat(p.profilePath); errors.Is(inspectErr, os.ErrNotExist) {
-			return installer.InstallationProfile{}, false, nil
-		}
-		return installer.InstallationProfile{}, true, nil
-	}
-	profile, ok := decodeTrackedUIProfile(contents)
-	if !ok || !p.validTemplateLayout(profile) {
+	if !profileValid {
 		return installer.InstallationProfile{}, true, nil
 	}
 	if serverTransaction != nil && serverTransaction.SelectedUI != profile.ui {
 		return installer.InstallationProfile{}, true, nil
 	}
-	return installer.InstallationProfile{SelectedUI: profile.ui}, true, nil
+	return installer.InstallationProfile{
+		SelectedUI:             profile.ui,
+		Installing:             serverTransaction != nil,
+		IndependentUISelection: independentUISelection,
+	}, true, nil
 }
 
 func decodeAdminInitTransaction(contents []byte) (adminInitTransaction, bool) {
@@ -210,7 +297,57 @@ func decodeTrackedUIProfile(contents []byte) (uiProfileDefinition, bool) {
 	return expected, true
 }
 
-func (p *FileProfileProvider) validTemplateLayout(selected uiProfileDefinition) bool {
+type workspaceInitTransaction struct {
+	Schema     int             `json:"schema"`
+	Owner      string          `json:"owner"`
+	ID         string          `json:"id"`
+	SelectedUI installstate.UI `json:"selectedUi"`
+	Phase      string          `json:"phase"`
+	Moves      []adminInitMove `json:"moves"`
+}
+
+func decodeWorkspaceTransaction(contents []byte) (workspaceInitTransaction, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(contents))
+	decoder.DisallowUnknownFields()
+	var transaction workspaceInitTransaction
+	if err := decoder.Decode(&transaction); err != nil || ensureJSONEnd(decoder) != nil {
+		return workspaceInitTransaction{}, false
+	}
+	if transaction.Schema != 1 || transaction.Owner != "admin-init-workspace" || !validAdminInitTransactionID(transaction.ID) || (transaction.Phase != "dependencies_pending" && transaction.Phase != "switching_ui") || len(transaction.Moves) != 0 {
+		return workspaceInitTransaction{}, false
+	}
+	if _, ok := uiProfileDefinitions[string(transaction.SelectedUI)]; !ok {
+		return workspaceInitTransaction{}, false
+	}
+	return transaction, true
+}
+
+// workspaceManifestState distinguishes a real workspace manifest from a
+// missing compatibility marker. A symlink or unreadable entry is an existing
+// but invalid repository state and is surfaced as an inconsistent profile.
+func workspaceManifestState(path string) (workspace bool, valid bool) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, true
+	}
+	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return false, false
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return true, false
+	}
+	for _, line := range strings.Split(string(contents), "\n") {
+		line, _, _ = strings.Cut(line, "#")
+		line = strings.TrimSpace(line)
+		if line == "- apps/*" || line == "- 'apps/*'" || line == `- "apps/*"` {
+			return true, true
+		}
+	}
+	return true, false
+}
+
+func (p *FileProfileProvider) validTemplateLayout(selected uiProfileDefinition, requireAll bool) bool {
 	for name, candidate := range uiProfileDefinitions {
 		path := filepath.Join(p.root, "admin", filepath.FromSlash(candidate.appDirectory))
 		info, err := os.Lstat(path)
@@ -218,18 +355,49 @@ func (p *FileProfileProvider) validTemplateLayout(selected uiProfileDefinition) 
 			if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 				return false
 			}
+			if !requireAll {
+				continue
+			}
+			manifestPath := filepath.Join(path, "package.json")
+			manifestInfo, manifestErr := os.Lstat(manifestPath)
+			if manifestErr != nil || !manifestInfo.Mode().IsRegular() || manifestInfo.Mode()&os.ModeSymlink != 0 {
+				return false
+			}
+			contents, readErr := os.ReadFile(manifestPath)
+			var manifest struct {
+				Name string `json:"name"`
+			}
+			if readErr != nil || json.Unmarshal(contents, &manifest) != nil || manifest.Name != candidate.packageName {
+				return false
+			}
+			continue
+		}
+		if errors.Is(err, os.ErrNotExist) && !requireAll {
 			continue
 		}
 		if errors.Is(err, os.ErrNotExist) {
-			continue
+			return false
 		}
 		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 			return false
 		}
-		// A fast-forward pull may restore only changed tracked files below an
-		// unselected UI path. Without package.json it is not a pnpm workspace
-		// or a runnable template, so it must not invalidate the selected UI.
-		if _, manifestErr := os.Lstat(filepath.Join(path, "package.json")); !errors.Is(manifestErr, os.ErrNotExist) {
+		manifestPath := filepath.Join(path, "package.json")
+		manifestInfo, manifestErr := os.Lstat(manifestPath)
+		if requireAll {
+			if manifestErr != nil || !manifestInfo.Mode().IsRegular() || manifestInfo.Mode()&os.ModeSymlink != 0 {
+				return false
+			}
+			contents, readErr := os.ReadFile(manifestPath)
+			var manifest struct {
+				Name string `json:"name"`
+			}
+			if readErr != nil || json.Unmarshal(contents, &manifest) != nil || manifest.Name != candidate.packageName {
+				return false
+			}
+		} else if !errors.Is(manifestErr, os.ErrNotExist) {
+			// A fast-forward pull may restore only changed tracked files below an
+			// unselected UI path. Without package.json it is not a pnpm workspace
+			// or a runnable template, so it must not invalidate the selected UI.
 			return false
 		}
 	}

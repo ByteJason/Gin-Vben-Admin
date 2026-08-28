@@ -236,6 +236,32 @@ func TestUIPreparationJobServiceReturnsSucceededJobForAlreadyPreparedSameUI(t *t
 	}
 }
 
+func TestUIPreparationJobServiceRevalidatesIndependentWorkspaceSelection(t *testing.T) {
+	runner := newControllableUIPreparationRunner()
+	service := NewUIPreparationJobService(
+		runner,
+		profileProviderStub{exists: true, profile: InstallationProfile{
+			SelectedUI: installstate.UIEle, IndependentUISelection: true,
+		}},
+		markerReaderStub{},
+	)
+	t.Cleanup(func() { _ = service.Close() })
+
+	job, err := service.StartPrepare(context.Background(), UIPrepareRequest{SelectedUI: installstate.UIEle, ConfirmCleanup: true})
+	if err != nil {
+		t.Fatalf("StartPrepare() error = %v", err)
+	}
+	if job.State != UIPreparationJobQueued || job.SelectedUI != installstate.UIEle {
+		t.Fatalf("StartPrepare() = %#v, want queued workspace revalidation", job)
+	}
+	select {
+	case <-runner.started:
+	case <-time.After(time.Second):
+		t.Fatal("workspace revalidation did not invoke the runner")
+	}
+	runner.release(nil)
+}
+
 func TestUIPreparationJobServiceRunsConfirmedResetAndSurfacesStableFailure(t *testing.T) {
 	invalidService := NewUIPreparationJobService(newControllableUIPreparationRunner(), profileProviderStub{}, markerReaderStub{})
 	t.Cleanup(func() { _ = invalidService.Close() })

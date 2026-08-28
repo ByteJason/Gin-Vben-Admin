@@ -140,9 +140,10 @@ test('post-install quick start uses two terminals and installs before dev withou
   ]) {
     assert.match(section, /终端 1/iu, name);
     assert.match(section, /终端 2/iu, name);
-    assert.match(section, /终端 1[\s\S]*cd server[\s\S]*go run \.\/cmd\/api\/main\.go[\s\S]*终端 2[\s\S]*cd admin[\s\S]*pnpm install[\s\S]*pnpm run dev/iu, name);
+    assert.match(section, /终端 1[\s\S]*cd server[\s\S]*go run \.\/cmd\/api\/main\.go[\s\S]*终端 2[\s\S]*cd admin[\s\S]*pnpm run ui:install[\s\S]*pnpm run dev/iu, name);
     assert.match(section, /go run \.\/cmd\/api\/main\.go/iu, name);
-    assert.match(section, /pnpm install[\s\S]*pnpm run dev/iu, name);
+    assert.match(section, /pnpm run ui:install[\s\S]*pnpm run dev/iu, name);
+    assert.doesNotMatch(section, /^\s*pnpm install(?:\s|$)/mu, name);
     assert.doesNotMatch(section, /pnpm run build/iu, name);
   }
 });

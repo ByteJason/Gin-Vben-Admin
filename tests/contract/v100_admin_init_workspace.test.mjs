@@ -37,7 +37,8 @@ test('INIT-100 web installer selects UI before exposing it as read-only plan sta
   assert.match(script, /JSON\.stringify\(\{\s*mode\s*\}\)/);
   assert.match(script, /重新启动|重启/);
   assert.match(script, /pnpm run dev/);
-  assert.match(script, /pnpm install/);
+  assert.match(script, /pnpm run ui:install/);
+  assert.doesNotMatch(script, /pnpm install(?:\s|<)/);
   assert.doesNotMatch(script, /pnpm run build/);
   assert.match(script, /\.focus\(\)/, 'state and error transitions move focus');
   assert.match(script, /aria-valuetext/);
