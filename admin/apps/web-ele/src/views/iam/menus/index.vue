@@ -70,6 +70,27 @@ const defaultForm = (): MenuForm => ({
 const menuForm = reactive<MenuForm>(defaultForm());
 const formError = ref('');
 
+const localizedMenuKeys: Record<string, string> = {
+  'menu-overview': 'page.dashboard.title',
+  'menu-overview-runtime': 'page.dashboard.analytics',
+  'menu-identity': 'page.iam.group',
+  'menu-identity-users': 'page.iam.users',
+  'menu-identity-roles': 'page.iam.roles',
+  'menu-identity-menus': 'page.iam.menus',
+  'menu-identity-permissions': 'page.iam.permissions',
+  'menu-system-config': 'page.settings.group',
+  'menu-system-settings': 'page.settings.title',
+  'menu-system-dictionary': 'page.dictionary.title',
+  'menu-system-mail': 'page.mail.title',
+  'menu-system-files': 'page.files.title',
+  'menu-system-observability': 'page.observability.title',
+  'menu-operations': 'page.navigation.operations',
+  'menu-operations-monitor': 'page.monitor.title',
+  'menu-operations-audit': 'page.audit.title',
+  'menu-operations-tasks': 'page.tasks.title',
+  'menu-operations-data-jobs': 'page.navigation.dataJobs',
+};
+
 const componentOptions = computed(() =>
   components.value
     .slice()
@@ -182,9 +203,13 @@ async function loadComponents() {
 function parentName(menu: IAMMenu) {
   const parentId = menu.parentId?.trim();
   if (!parentId) return String($t('page.iam.menuRoot'));
-  return (
-    menus.value.find((candidate) => candidate.id === parentId)?.name ?? parentId
-  );
+  const parent = menus.value.find((candidate) => candidate.id === parentId);
+  return parent ? localizedMenuName(parent) : parentId;
+}
+
+function localizedMenuName(menu: IAMMenu) {
+  const key = localizedMenuKeys[menu.id];
+  return key ? String($t(key)) : menu.name;
 }
 
 function menuTypeLabel(type?: IAMMenuType) {
@@ -457,8 +482,10 @@ onMounted(async () => {
                   class="menu-name"
                   :style="{ paddingLeft: `${row.depth * 18}px` }"
                 >
-                  <span v-if="row.depth" class="tree-branch" aria-hidden="true">└</span>
-                  {{ row.menu.name }}
+                  <span v-if="row.depth" class="tree-branch" aria-hidden="true"
+                    >└</span
+                  >
+                  {{ localizedMenuName(row.menu) }}
                 </span>
               </td>
               <td>{{ menuTypeLabel(row.menu.type) }}</td>
@@ -574,8 +601,10 @@ onMounted(async () => {
           {{ formError }}
         </p>
         <form class="menu-form" @submit.prevent="saveMenu">
-          <label v-if="!isEditing" for="menu-id">{{ $t('page.iam.menuId')
-            }}<span aria-hidden="true"> *</span></label>
+          <label v-if="!isEditing" for="menu-id"
+            >{{ $t('page.iam.menuId')
+            }}<span aria-hidden="true"> *</span></label
+          >
           <input
             v-if="!isEditing"
             id="menu-id"
@@ -584,8 +613,10 @@ onMounted(async () => {
             maxlength="64"
             autocomplete="off"
           />
-          <label for="menu-name">{{ $t('page.iam.menuName')
-            }}<span aria-hidden="true"> *</span></label>
+          <label for="menu-name"
+            >{{ $t('page.iam.menuName')
+            }}<span aria-hidden="true"> *</span></label
+          >
           <input
             id="menu-name"
             v-model="menuForm.name"
@@ -593,8 +624,10 @@ onMounted(async () => {
             maxlength="191"
             autocomplete="off"
           />
-          <label for="menu-path">{{ $t('page.iam.menuPath')
-            }}<span aria-hidden="true"> *</span></label>
+          <label for="menu-path"
+            >{{ $t('page.iam.menuPath')
+            }}<span aria-hidden="true"> *</span></label
+          >
           <input
             id="menu-path"
             v-model="menuForm.path"
@@ -602,8 +635,10 @@ onMounted(async () => {
             maxlength="255"
             autocomplete="off"
           />
-          <label for="menu-type">{{ $t('page.iam.menuType')
-            }}<span aria-hidden="true"> *</span></label>
+          <label for="menu-type"
+            >{{ $t('page.iam.menuType')
+            }}<span aria-hidden="true"> *</span></label
+          >
           <select id="menu-type" v-model="menuForm.type">
             <option value="directory">
               {{ $t('page.iam.menuDirectory') }}
@@ -620,7 +655,8 @@ onMounted(async () => {
               :value="candidate.menu.id"
               :disabled="candidate.menu.id === editingId"
             >
-              {{ '· '.repeat(candidate.depth) }}{{ candidate.menu.name }}
+              {{ '· '.repeat(candidate.depth)
+              }}{{ localizedMenuName(candidate.menu) }}
             </option>
           </select>
           <label for="menu-component">{{ $t('page.iam.menuComponent') }}</label>
@@ -671,14 +707,22 @@ onMounted(async () => {
             min="-1000000"
             max="1000000"
           />
-          <label class="checkbox-field"><input v-model="menuForm.visible" type="checkbox" />
-            {{ $t('page.iam.menuVisible') }}</label>
-          <label class="checkbox-field"><input v-model="menuForm.active" type="checkbox" />
-            {{ $t('page.iam.menuActive') }}</label>
-          <label class="checkbox-field"><input v-model="menuForm.keepAlive" type="checkbox" />
-            {{ $t('page.iam.menuKeepAlive') }}</label>
-          <label class="checkbox-field"><input v-model="menuForm.external" type="checkbox" />
-            {{ $t('page.iam.menuExternal') }}</label>
+          <label class="checkbox-field"
+            ><input v-model="menuForm.visible" type="checkbox" />
+            {{ $t('page.iam.menuVisible') }}</label
+          >
+          <label class="checkbox-field"
+            ><input v-model="menuForm.active" type="checkbox" />
+            {{ $t('page.iam.menuActive') }}</label
+          >
+          <label class="checkbox-field"
+            ><input v-model="menuForm.keepAlive" type="checkbox" />
+            {{ $t('page.iam.menuKeepAlive') }}</label
+          >
+          <label class="checkbox-field"
+            ><input v-model="menuForm.external" type="checkbox" />
+            {{ $t('page.iam.menuExternal') }}</label
+          >
           <div class="dialog-actions">
             <button
               class="secondary-button"

@@ -1,4 +1,39 @@
 {
-  "updatePassword": "更新密码",
-  "updateBasicProfile": "更新基本信息"
+  "tabs": {
+    "basic": "基本设置",
+    "security": "安全设置",
+    "password": "修改密码",
+    "notice": "新消息提醒"
+  },
+  "title": "个人中心",
+  "roles": {
+    "admin": "管理员",
+    "user": "用户",
+    "test": "测试"
+  },
+  "realName": "姓名",
+  "username": "用户名",
+  "rolesLabel": "角色",
+  "introduction": "个人简介",
+  "oldPassword": "旧密码",
+  "oldPasswordPlaceholder": "请输入旧密码",
+  "newPassword": "新密码",
+  "newPasswordPlaceholder": "请输入新密码",
+  "confirmPassword": "确认密码",
+  "confirmPasswordPlaceholder": "请再次输入新密码",
+  "passwordMismatch": "两次输入的密码不一致",
+  "passwordUpdated": "密码修改成功",
+  "accountPassword": "账户密码",
+  "systemMessage": "系统消息",
+  "todoTask": "待办任务",
+  "notificationDescription": "其他用户的消息将以站内信的形式通知",
+  "passwordStrength": "当前密码强度：强",
+  "securityPhone": "密保手机",
+  "boundPhone": "已绑定手机：138****8293",
+  "securityQuestion": "密保问题",
+  "securityQuestionUnbound": "未设置密保问题，密保问题可有效保护账户安全",
+  "securityEmail": "备用邮箱",
+  "boundEmail": "已绑定邮箱：ant***sign.com",
+  "securityMfa": "MFA 设备",
+  "securityMfaUnbound": "未绑定 MFA 设备，绑定后，可以进行二次确认"
 }

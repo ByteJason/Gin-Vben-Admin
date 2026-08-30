@@ -4,6 +4,7 @@ import type { VbenFormSchema } from '#/adapter/form';
 import { computed } from 'vue';
 
 import { ProfilePasswordSetting, z } from '@vben/common-ui';
+import { $t } from '@vben/locales';
 
 import { ElMessage } from 'element-plus';
 
@@ -11,37 +12,37 @@ const formSchema = computed((): VbenFormSchema[] => {
   return [
     {
       fieldName: 'oldPassword',
-      label: '旧密码',
+      label: $t('profile.oldPassword'),
       component: 'VbenInputPassword',
       componentProps: {
-        placeholder: '请输入旧密码',
+        placeholder: $t('profile.oldPasswordPlaceholder'),
       },
     },
     {
       fieldName: 'newPassword',
-      label: '新密码',
+      label: $t('profile.newPassword'),
       component: 'VbenInputPassword',
       componentProps: {
         passwordStrength: true,
-        placeholder: '请输入新密码',
+        placeholder: $t('profile.newPasswordPlaceholder'),
       },
     },
     {
       fieldName: 'confirmPassword',
-      label: '确认密码',
+      label: $t('profile.confirmPassword'),
       component: 'VbenInputPassword',
       componentProps: {
         passwordStrength: true,
-        placeholder: '请再次输入新密码',
+        placeholder: $t('profile.confirmPasswordPlaceholder'),
       },
       dependencies: {
         rules(values) {
           const { newPassword } = values;
           return z
-            .string({ error: '请再次输入新密码' })
-            .min(1, { message: '请再次输入新密码' })
+            .string({ error: $t('profile.confirmPasswordPlaceholder') })
+            .min(1, { message: $t('profile.confirmPasswordPlaceholder') })
             .refine((value) => value === newPassword, {
-              message: '两次输入的密码不一致',
+              message: $t('profile.passwordMismatch'),
             });
         },
         triggerFields: ['newPassword'],
@@ -51,7 +52,7 @@ const formSchema = computed((): VbenFormSchema[] => {
 });
 
 function handleSubmit() {
-  ElMessage.success('密码修改成功');
+  ElMessage.success($t('profile.passwordUpdated'));
 }
 </script>
 <template>

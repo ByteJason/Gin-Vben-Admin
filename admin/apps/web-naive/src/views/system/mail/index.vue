@@ -9,6 +9,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 
 import { useAccess } from '@vben/access';
 import { ManagementPage } from '@vben/common-ui';
+import { $t } from '#/locales';
 
 import {
   deleteSMTPAccountApi,
@@ -82,7 +83,7 @@ async function load() {
     accounts.value = Array.isArray(accountResult) ? accountResult : [];
     messages.value = messageResult?.items ?? [];
   } catch {
-    error.value = '加载 SMTP 账户或投递记录失败';
+    error.value = String($t('page.mail.loadError'));
   } finally {
     loading.value = false;
   }
@@ -91,7 +92,7 @@ async function load() {
 async function save() {
   if (!canManage.value) return;
   if (!form.name.trim() || !form.host.trim() || !form.fromEmail.trim()) {
-    error.value = '账号名称、SMTP 主机和发件人邮箱必填';
+    error.value = String($t('page.mail.saveErrorRequired'));
     return;
   }
   saving.value = true;
@@ -99,11 +100,13 @@ async function save() {
   notice.value = '';
   try {
     await saveSMTPAccountApi({ ...form }, editingId.value);
-    notice.value = editingId.value ? 'SMTP 账户已更新' : 'SMTP 账户已创建';
+    notice.value = String(
+      $t(editingId.value ? 'page.mail.updated' : 'page.mail.created'),
+    );
     resetForm();
     await load();
   } catch {
-    error.value = '保存 SMTP 账户失败，请检查字段或唯一索引';
+    error.value = String($t('page.mail.saveError'));
   } finally {
     saving.value = false;
   }
@@ -118,10 +121,16 @@ async function test(account: SMTPAccount) {
     const result = await testSMTPAccountApi(account.id);
     testResult.value =
       result.status === 'ok'
-        ? `${account.name} 连接成功`
-        : `${account.name} 连接失败：${result.stage ?? 'unknown'} / ${result.code ?? 'provider_unavailable'}`;
+        ? String($t('page.mail.testSuccess', { name: account.name }))
+        : String(
+            $t('page.mail.testFailure', {
+              code: result.code ?? 'provider_unavailable',
+              name: account.name,
+              stage: result.stage ?? 'unknown',
+            }),
+          );
   } catch {
-    error.value = 'SMTP 连接测试请求失败';
+    error.value = String($t('page.mail.testError'));
   } finally {
     testingId.value = '';
   }
@@ -129,22 +138,29 @@ async function test(account: SMTPAccount) {
 
 async function remove(account: SMTPAccount) {
   if (!canManage.value) return;
-  if (!window.confirm(`确认软删除 SMTP 账户“${account.name}”？`)) return;
+  if (
+    !window.confirm(
+      String($t('page.mail.deleteConfirm', { name: account.name })),
+    )
+  )
+    return;
   testingId.value = account.id;
   try {
     await deleteSMTPAccountApi(account.id);
-    notice.value = 'SMTP 账户已软删除';
+    notice.value = String($t('page.mail.deleted'));
     if (editingId.value === account.id) resetForm();
     await load();
   } catch {
-    error.value = '删除 SMTP 账户失败';
+    error.value = String($t('page.mail.deleteError'));
   } finally {
     testingId.value = '';
   }
 }
 
 function statusLabel(status: string) {
-  return status === 'sent' ? '已发送' : status === 'failed' ? '失败' : status;
+  if (status === 'sent') return String($t('page.mail.statusSent'));
+  if (status === 'failed') return String($t('page.mail.statusFailed'));
+  return status;
 }
 
 onMounted(load);
@@ -158,14 +174,12 @@ onMounted(load);
   >
     <header class="page-heading">
       <div>
-        <p class="eyebrow">MAIL / DELIVERY</p>
-        <h1 id="mail-title">SMTP 账户与邮件投递</h1>
-        <p class="description">
-          配置可启停的 SMTP 账户池，按权重轮训，并查看脱敏投递状态。
-        </p>
+        <p class="eyebrow">{{ $t('page.mail.eyebrow') }}</p>
+        <h1 id="mail-title">{{ $t('page.mail.title') }}</h1>
+        <p class="description">{{ $t('page.mail.description') }}</p>
       </div>
       <button class="secondary" type="button" :disabled="loading" @click="load">
-        刷新
+        {{ $t('page.mail.refresh') }}
       </button>
     </header>
 
@@ -182,9 +196,13 @@ onMounted(load);
     >
       <div class="section-heading">
         <div>
-          <p class="eyebrow">ACCOUNT POOL</p>
+          <p class="eyebrow">{{ $t('page.mail.accountPool') }}</p>
           <h2 id="mail-editor-title">
-            {{ editingId ? '编辑 SMTP 账户' : '新增 SMTP 账户' }}
+            {{
+              editingId
+                ? $t('page.mail.editAccount')
+                : $t('page.mail.newAccount')
+            }}
           </h2>
         </div>
         <button
@@ -193,39 +211,68 @@ onMounted(load);
           type="button"
           @click="resetForm"
         >
-          取消编辑
+          {{ $t('page.mail.cancelEdit') }}
         </button>
       </div>
       <form class="account-form" @submit.prevent="save">
-        <label><span>账号名称</span><input v-model="form.name" autocomplete="off" required /></label>
-        <label><span>SMTP 主机</span><input v-model="form.host" autocomplete="off" required /></label>
-        <label><span>SMTP 端口</span><input
+        <label
+          ><span>{{ $t('page.mail.accountName') }}</span
+          ><input v-model="form.name" autocomplete="off" required
+        /></label>
+        <label
+          ><span>{{ $t('page.mail.smtpHost') }}</span
+          ><input v-model="form.host" autocomplete="off" required
+        /></label>
+        <label
+          ><span>{{ $t('page.mail.smtpPort') }}</span
+          ><input
             v-model.number="form.port"
             min="1"
             max="65535"
             type="number"
             required
         /></label>
-        <label><span>SMTP 用户名</span><input v-model="form.username" autocomplete="username" /></label>
-        <label><span>SMTP 密码</span><input
+        <label
+          ><span>{{ $t('page.mail.smtpUsername') }}</span
+          ><input v-model="form.username" autocomplete="username"
+        /></label>
+        <label
+          ><span>{{ $t('page.mail.smtpPassword') }}</span
+          ><input
             v-model="form.password"
             autocomplete="new-password"
             type="password"
-            :placeholder="editingId ? '留空保留现有密码' : ''"
+            :placeholder="editingId ? $t('page.mail.passwordPlaceholder') : ''"
         /></label>
-        <label><span>权重</span><input v-model.number="form.weight" min="1" type="number" required /></label>
-        <label><span>发件人邮箱</span><input
+        <label
+          ><span>{{ $t('page.mail.weight') }}</span
+          ><input v-model.number="form.weight" min="1" type="number" required
+        /></label>
+        <label
+          ><span>{{ $t('page.mail.fromEmail') }}</span
+          ><input
             v-model="form.fromEmail"
             autocomplete="email"
             type="email"
             required
         /></label>
-        <label><span>发件人名称</span><input v-model="form.fromName" /></label>
-        <label class="toggle"><input v-model="form.enabled" type="checkbox" /><span>启用该 SMTP</span></label>
-        <label class="toggle"><input v-model="form.implicitTls" type="checkbox" /><span>隐式 TLS（SMTPS / 465）</span></label>
+        <label
+          ><span>{{ $t('page.mail.fromName') }}</span
+          ><input v-model="form.fromName"
+        /></label>
+        <label class="toggle"
+          ><input v-model="form.enabled" type="checkbox" /><span>{{
+            $t('page.mail.enableSmtp')
+          }}</span></label
+        >
+        <label class="toggle"
+          ><input v-model="form.implicitTls" type="checkbox" /><span>{{
+            $t('page.mail.implicitTls')
+          }}</span></label
+        >
         <div class="form-actions">
           <button class="primary" type="submit" :disabled="saving">
-            {{ saving ? '保存中…' : '保存 SMTP 账户' }}
+            {{ saving ? $t('page.mail.saving') : $t('page.mail.save') }}
           </button>
         </div>
       </form>
@@ -234,35 +281,42 @@ onMounted(load);
     <section class="table-card" aria-labelledby="mail-table-title">
       <div class="section-heading">
         <div>
-          <p class="eyebrow">POOL STATUS</p>
-          <h2 id="mail-table-title">SMTP 账户池</h2>
+          <p class="eyebrow">{{ $t('page.mail.poolStatus') }}</p>
+          <h2 id="mail-table-title">{{ $t('page.mail.accountPool') }}</h2>
         </div>
-        <span class="count">{{ accounts.length }} 个账户</span>
+        <span class="count">{{
+          $t('page.mail.accountCount', { count: accounts.length })
+        }}</span>
       </div>
       <p v-if="!loading && !hasAccounts" class="empty-state">
-        尚未配置 SMTP 账户。
+        {{ $t('page.mail.emptyAccounts') }}
       </p>
       <div v-else class="table-scroll">
         <table>
           <caption class="sr-only">
-            SMTP 账户列表
+            {{
+              $t('page.mail.accountList')
+            }}
           </caption>
           <thead>
             <tr>
-              <th>名称</th>
-              <th>主机</th>
-              <th>端口</th>
-              <th>权重</th>
-              <th>发件人</th>
-              <th>状态</th>
-              <th>安全</th>
-              <th>操作</th>
+              <th>{{ $t('page.mail.name') }}</th>
+              <th>{{ $t('page.mail.host') }}</th>
+              <th>{{ $t('page.mail.port') }}</th>
+              <th>{{ $t('page.mail.weight') }}</th>
+              <th>{{ $t('page.mail.sender') }}</th>
+              <th>{{ $t('page.mail.status') }}</th>
+              <th>{{ $t('page.mail.security') }}</th>
+              <th>{{ $t('page.mail.actions') }}</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="account in accounts" :key="account.id">
               <td>
-                <strong>{{ account.name }}</strong><small>{{ account.username || '无认证用户名' }}</small>
+                <strong>{{ account.name }}</strong
+                ><small>{{
+                  account.username || $t('page.mail.noAuthUsername')
+                }}</small>
               </td>
               <td>{{ account.host }}</td>
               <td>{{ account.port }}</td>
@@ -270,11 +324,21 @@ onMounted(load);
               <td>{{ account.fromEmail }}</td>
               <td>
                 <span
-                  class="status-pill" :class="[account.enabled ? 'ok' : 'off']"
-                  >{{ account.enabled ? '启用' : '关闭' }}</span>
+                  class="status-pill"
+                  :class="[account.enabled ? 'ok' : 'off']"
+                  >{{
+                    account.enabled
+                      ? $t('page.mail.enabled')
+                      : $t('page.mail.disabled')
+                  }}</span
+                >
               </td>
               <td>
-                {{ account.implicitTls ? '隐式 TLS' : 'STARTTLS / 明文' }}
+                {{
+                  account.implicitTls
+                    ? $t('page.mail.implicitTlsShort')
+                    : $t('page.mail.startTlsPlain')
+                }}
               </td>
               <td class="actions">
                 <button
@@ -284,18 +348,20 @@ onMounted(load);
                   @click="test(account)"
                 >
                   {{
-                    testingId === account.id ? '测试中…' : '测试连接'
-                  }}
-</button><button v-if="canManage" type="button" @click="edit(account)">
-                  编辑
-</button><button
+                    testingId === account.id
+                      ? $t('page.mail.testing')
+                      : $t('page.mail.testConnection')
+                  }}</button
+                ><button v-if="canManage" type="button" @click="edit(account)">
+                  {{ $t('page.mail.edit') }}</button
+                ><button
                   v-if="canManage"
                   class="danger"
                   type="button"
                   :disabled="testingId === account.id"
                   @click="remove(account)"
                 >
-                  删除
+                  {{ $t('page.mail.delete') }}
                 </button>
               </td>
             </tr>
@@ -307,24 +373,30 @@ onMounted(load);
     <section class="table-card" aria-labelledby="message-table-title">
       <div class="section-heading">
         <div>
-          <p class="eyebrow">AUDIT TRAIL</p>
-          <h2 id="message-table-title">邮件投递记录</h2>
+          <p class="eyebrow">{{ $t('page.mail.auditTrail') }}</p>
+          <h2 id="message-table-title">
+            {{ $t('page.mail.deliveryRecords') }}
+          </h2>
         </div>
-        <span class="muted">正文仅保存密文与摘要</span>
+        <span class="muted">{{ $t('page.mail.bodyStoredEncrypted') }}</span>
       </div>
-      <p v-if="messages.length === 0" class="empty-state">暂无发送记录。</p>
+      <p v-if="messages.length === 0" class="empty-state">
+        {{ $t('page.mail.emptyMessages') }}
+      </p>
       <div v-else class="table-scroll">
         <table>
           <caption class="sr-only">
-            邮件投递记录
+            {{
+              $t('page.mail.messageList')
+            }}
           </caption>
           <thead>
             <tr>
-              <th>主题</th>
-              <th>收件人</th>
-              <th>状态</th>
-              <th>尝试次数</th>
-              <th>创建时间</th>
+              <th>{{ $t('page.mail.subject') }}</th>
+              <th>{{ $t('page.mail.recipients') }}</th>
+              <th>{{ $t('page.mail.status') }}</th>
+              <th>{{ $t('page.mail.attempts') }}</th>
+              <th>{{ $t('page.mail.createdAt') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -339,10 +411,10 @@ onMounted(load);
               </td>
               <td>
                 <span
-                  class="status-pill" :class="[
-                    message.status === 'sent' ? 'ok' : 'off',
-                  ]"
-                  >{{ statusLabel(message.status) }}</span>
+                  class="status-pill"
+                  :class="[message.status === 'sent' ? 'ok' : 'off']"
+                  >{{ statusLabel(message.status) }}</span
+                >
               </td>
               <td>{{ message.attemptCount }}</td>
               <td>{{ new Date(message.createdAt).toLocaleString() }}</td>

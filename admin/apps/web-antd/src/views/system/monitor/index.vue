@@ -13,6 +13,7 @@ import { useVisibilityPolling } from '@vben/hooks';
 
 import { listSessionsApi } from '#/api/core/auth';
 import { getMonitorOverviewApi } from '#/api/core/monitor';
+import { $t } from '#/locales';
 
 const overview = ref<MonitorOverview>();
 const sessions = ref<AuthApi.SessionInfo[]>([]);
@@ -23,10 +24,26 @@ const sampledAt = ref(Date.now());
 
 const sessionTrend = computed(() => {
   const buckets = [
-    { count: 0, label: '15 分钟内', maxAge: 15 * 60 * 1000 },
-    { count: 0, label: '15–60 分钟', maxAge: 60 * 60 * 1000 },
-    { count: 0, label: '1–24 小时', maxAge: 24 * 60 * 60 * 1000 },
-    { count: 0, label: '24 小时前', maxAge: Number.POSITIVE_INFINITY },
+    {
+      count: 0,
+      label: String($t('page.monitor.minutes15')),
+      maxAge: 15 * 60 * 1000,
+    },
+    {
+      count: 0,
+      label: String($t('page.monitor.minutes15to60')),
+      maxAge: 60 * 60 * 1000,
+    },
+    {
+      count: 0,
+      label: String($t('page.monitor.hours1to24')),
+      maxAge: 24 * 60 * 60 * 1000,
+    },
+    {
+      count: 0,
+      label: String($t('page.monitor.hours24Plus')),
+      maxAge: Number.POSITIVE_INFINITY,
+    },
   ];
   for (const session of sessions.value) {
     const age = Math.max(0, sampledAt.value - Date.parse(session.lastSeenAt));
@@ -49,17 +66,19 @@ const activeSessions = computed(
 );
 
 function statusText(status: MonitorStatus | undefined) {
-  if (status === 'ok') return '正常';
-  if (status === 'degraded') return '局部降级';
-  return '不可用';
+  if (status === 'ok') return String($t('page.monitor.statusOk'));
+  if (status === 'degraded') return String($t('page.monitor.statusDegraded'));
+  return String($t('page.monitor.statusUnavailable'));
 }
 
 function valueText(value: number | string | undefined, suffix = '') {
-  return value === undefined || value === '' ? '不可用' : `${value}${suffix}`;
+  return value === undefined || value === ''
+    ? String($t('page.monitor.unavailable'))
+    : `${value}${suffix}`;
 }
 
 function formatBytes(value?: number) {
-  if (value === undefined) return '不可用';
+  if (value === undefined) return String($t('page.monitor.unavailable'));
   if (value === 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
   const exponent = Math.min(
@@ -70,15 +89,17 @@ function formatBytes(value?: number) {
 }
 
 function formatPercent(value?: number) {
-  return value === undefined ? '不可用' : `${(value * 100).toFixed(1)}%`;
+  return value === undefined
+    ? String($t('page.monitor.unavailable'))
+    : `${(value * 100).toFixed(1)}%`;
 }
 
 function formatDuration(seconds?: number) {
-  if (seconds === undefined) return '不可用';
+  if (seconds === undefined) return String($t('page.monitor.unavailable'));
   const days = Math.floor(seconds / 86_400);
   const hours = Math.floor((seconds % 86_400) / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
-  return `${days} 天 ${hours} 小时 ${minutes} 分钟`;
+  return String($t('page.monitor.duration', { days, hours, minutes }));
 }
 
 function capabilityEntries(capabilities: MonitorCapabilities) {
@@ -101,14 +122,14 @@ async function refresh() {
     monitorError.value = '';
   } else {
     monitorError.value = overview.value
-      ? '最新资源快照获取失败，当前显示上次成功数据。'
-      : '资源快照暂时不可用，请稍后重试。';
+      ? String($t('page.monitor.loadErrorCached'))
+      : String($t('page.monitor.loadError'));
   }
   if (sessionsResult.status === 'fulfilled') {
     sessions.value = sessionsResult.value;
     sessionsError.value = '';
   } else {
-    sessionsError.value = '会话活跃度暂时不可用。';
+    sessionsError.value = String($t('page.monitor.sessionsError'));
   }
   loading.value = false;
 }
@@ -124,19 +145,22 @@ useVisibilityPolling(refresh, 15_000);
   >
     <header class="page-heading">
       <div>
-        <p class="eyebrow">OPERATIONS / LIVE SNAPSHOT</p>
-        <h1 id="monitor-title">资源监控</h1>
-        <p class="description">
-          展示服务端明确标注范围与采集能力的实时资源、运行时、依赖连接池和会话活跃度。
-        </p>
+        <p class="eyebrow">{{ $t('page.monitor.eyebrow') }}</p>
+        <h1 id="monitor-title">{{ $t('page.monitor.title') }}</h1>
+        <p class="description">{{ $t('page.monitor.description') }}</p>
       </div>
       <div class="heading-actions">
         <span v-if="overview" class="updated">
-          采集于 {{ new Date(overview.collectedAt).toLocaleString() }} · 每 15
-          秒
+          {{
+            $t('page.monitor.collectedAt', {
+              at: new Date(overview.collectedAt).toLocaleString(),
+            })
+          }}
         </span>
         <button type="button" :disabled="loading" @click="refresh">
-          {{ loading ? '刷新中…' : '立即刷新' }}
+          {{
+            loading ? $t('page.monitor.refreshing') : $t('page.monitor.refresh')
+          }}
         </button>
       </div>
     </header>
@@ -148,30 +172,39 @@ useVisibilityPolling(refresh, 15_000);
       {{ sessionsError }}
     </p>
     <p v-if="loading && !overview" class="loading-state" role="status">
-      正在读取资源快照…
+      {{ $t('page.monitor.loading') }}
     </p>
 
     <template v-if="overview">
-      <section class="summary-grid" aria-label="实例摘要">
+      <section
+        class="summary-grid"
+        :aria-label="$t('page.monitor.summaryLabel')"
+      >
         <article class="summary-card">
-          <span>采集范围</span><strong>{{ overview.scope }}</strong>
+          <span>{{ $t('page.monitor.scope') }}</span
+          ><strong>{{ overview.scope }}</strong>
         </article>
         <article class="summary-card">
-          <span>运行时长</span><strong>{{ formatDuration(overview.uptimeSeconds) }}</strong>
+          <span>{{ $t('page.monitor.uptime') }}</span
+          ><strong>{{ formatDuration(overview.uptimeSeconds) }}</strong>
         </article>
         <article class="summary-card">
-          <span>应用版本</span><strong>{{ overview.version || '不可用' }}</strong>
+          <span>{{ $t('page.monitor.version') }}</span
+          ><strong>{{
+            overview.version || $t('page.monitor.unavailable')
+          }}</strong>
         </article>
         <article class="summary-card">
-          <span>活动会话</span><strong>{{ activeSessions }} / {{ sessions.length }}</strong>
+          <span>{{ $t('page.monitor.activeSessions') }}</span
+          ><strong>{{ activeSessions }} / {{ sessions.length }}</strong>
         </article>
       </section>
 
       <section class="panel" aria-labelledby="runtime-title">
         <div class="section-heading">
           <div>
-            <p class="eyebrow">RUNTIME</p>
-            <h2 id="runtime-title">Go 运行时</h2>
+            <p class="eyebrow">{{ $t('page.monitor.runtime') }}</p>
+            <h2 id="runtime-title">{{ $t('page.monitor.runtime') }}</h2>
           </div>
           <span class="status" :class="[overview.runtime.status]">
             {{ statusText(overview.runtime.status) }}
@@ -179,58 +212,63 @@ useVisibilityPolling(refresh, 15_000);
         </div>
         <dl class="detail-grid">
           <div>
-            <dt>Go 版本</dt>
+            <dt>{{ $t('page.monitor.goVersion') }}</dt>
             <dd>{{ overview.runtime.goVersion }}</dd>
           </div>
           <div>
-            <dt>操作系统</dt>
+            <dt>{{ $t('page.monitor.os') }}</dt>
             <dd>{{ overview.runtime.os }}</dd>
           </div>
           <div>
-            <dt>架构</dt>
+            <dt>{{ $t('page.monitor.architecture') }}</dt>
             <dd>{{ overview.runtime.arch }}</dd>
           </div>
           <div>
-            <dt>应用版本</dt>
-            <dd>{{ overview.runtime.applicationVersion || '不可用' }}</dd>
-          </div>
-          <div>
-            <dt>Commit</dt>
-            <dd class="code-value">
-              {{ overview.runtime.commit || '不可用' }}
+            <dt>{{ $t('page.monitor.applicationVersion') }}</dt>
+            <dd>
+              {{
+                overview.runtime.applicationVersion ||
+                $t('page.monitor.unavailable')
+              }}
             </dd>
           </div>
           <div>
-            <dt>Heap Alloc</dt>
+            <dt>{{ $t('page.monitor.commit') }}</dt>
+            <dd class="code-value">
+              {{ overview.runtime.commit || $t('page.monitor.unavailable') }}
+            </dd>
+          </div>
+          <div>
+            <dt>{{ $t('page.monitor.heapAlloc') }}</dt>
             <dd>{{ formatBytes(overview.runtime.heapAllocBytes) }}</dd>
           </div>
           <div>
-            <dt>Heap Sys</dt>
+            <dt>{{ $t('page.monitor.heapSys') }}</dt>
             <dd>{{ formatBytes(overview.runtime.heapSysBytes) }}</dd>
           </div>
           <div>
-            <dt>Heap In Use</dt>
+            <dt>{{ $t('page.monitor.heapInUse') }}</dt>
             <dd>{{ formatBytes(overview.runtime.heapInUseBytes) }}</dd>
           </div>
           <div>
-            <dt>Heap Objects</dt>
+            <dt>{{ $t('page.monitor.heapObjects') }}</dt>
             <dd>{{ valueText(overview.runtime.heapObjects) }}</dd>
           </div>
           <div>
-            <dt>Next GC</dt>
+            <dt>{{ $t('page.monitor.nextGc') }}</dt>
             <dd>{{ formatBytes(overview.runtime.nextGcBytes) }}</dd>
           </div>
           <div>
-            <dt>GC 次数</dt>
+            <dt>{{ $t('page.monitor.gcCount') }}</dt>
             <dd>{{ valueText(overview.runtime.gcCount) }}</dd>
           </div>
           <div>
-            <dt>最近 GC Pause</dt>
+            <dt>{{ $t('page.monitor.lastGcPause') }}</dt>
             <dd>{{ valueText(overview.runtime.lastGcPauseNs, ' ns') }}</dd>
           </div>
         </dl>
         <details class="capabilities">
-          <summary>采集能力</summary>
+          <summary>{{ $t('page.monitor.capabilities') }}</summary>
           <ul>
             <li
               v-for="[name, capability] in capabilityEntries(
@@ -239,21 +277,39 @@ useVisibilityPolling(refresh, 15_000);
               :key="name"
             >
               <strong>{{ name }}</strong>
-              <span>{{ capability.available ? '可用' : '不可用' }} ·
-                {{ capability.scope
+              <span
+                >{{
+                  capability.available
+                    ? $t('page.monitor.available')
+                    : $t('page.monitor.unavailable')
+                }}
+                · {{ capability.scope
                 }}<template v-if="capability.source">
-                  · {{ capability.source }}</template></span>
+                  · {{ capability.source }}</template
+                ></span
+              >
             </li>
           </ul>
         </details>
       </section>
 
-      <section class="resource-grid" aria-label="CPU、内存和文件系统">
+      <section
+        class="resource-grid"
+        :aria-label="$t('page.monitor.cpuMemoryDisk')"
+      >
         <article
           v-for="resource in [
             { key: 'cpu', title: 'CPU', metric: overview.cpu },
-            { key: 'memory', title: '内存', metric: overview.memory },
-            { key: 'disk', title: '文件系统', metric: overview.disk },
+            {
+              key: 'memory',
+              title: $t('page.monitor.memory'),
+              metric: overview.memory,
+            },
+            {
+              key: 'disk',
+              title: $t('page.monitor.disk'),
+              metric: overview.disk,
+            },
           ]"
           :key="resource.key"
           class="panel resource-card"
@@ -266,11 +322,11 @@ useVisibilityPolling(refresh, 15_000);
           </div>
           <dl class="metric-list">
             <div>
-              <dt>逻辑核心</dt>
+              <dt>{{ $t('page.monitor.logicalCores') }}</dt>
               <dd>{{ valueText(resource.metric.cores) }}</dd>
             </div>
             <div>
-              <dt>Load 1 / 5 / 15</dt>
+              <dt>{{ $t('page.monitor.loadAverage') }}</dt>
               <dd>
                 {{ valueText(resource.metric.load1) }} /
                 {{ valueText(resource.metric.load5) }} /
@@ -282,19 +338,19 @@ useVisibilityPolling(refresh, 15_000);
               <dd>{{ formatBytes(resource.metric.rssBytes) }}</dd>
             </div>
             <div>
-              <dt>已用</dt>
+              <dt>{{ $t('page.monitor.used') }}</dt>
               <dd>{{ formatBytes(resource.metric.usedBytes) }}</dd>
             </div>
             <div>
-              <dt>可用</dt>
+              <dt>{{ $t('page.monitor.free') }}</dt>
               <dd>{{ formatBytes(resource.metric.freeBytes) }}</dd>
             </div>
             <div>
-              <dt>总量</dt>
+              <dt>{{ $t('page.monitor.total') }}</dt>
               <dd>{{ formatBytes(resource.metric.totalBytes) }}</dd>
             </div>
             <div>
-              <dt>使用率</dt>
+              <dt>{{ $t('page.monitor.usage') }}</dt>
               <dd>{{ formatPercent(resource.metric.utilization) }}</dd>
             </div>
           </dl>
@@ -302,7 +358,7 @@ useVisibilityPolling(refresh, 15_000);
             {{ resource.metric.message }}
           </p>
           <details class="capabilities">
-            <summary>采集能力</summary>
+            <summary>{{ $t('page.monitor.capabilities') }}</summary>
             <ul>
               <li
                 v-for="[name, capability] in capabilityEntries(
@@ -310,22 +366,33 @@ useVisibilityPolling(refresh, 15_000);
                 )"
                 :key="name"
               >
-                <strong>{{ name }}</strong><span>{{ capability.available ? '可用' : '不可用' }} ·
-                  {{ capability.scope
+                <strong>{{ name }}</strong
+                ><span
+                  >{{
+                    capability.available
+                      ? $t('page.monitor.available')
+                      : $t('page.monitor.unavailable')
+                  }}
+                  · {{ capability.scope
                   }}<template v-if="capability.source">
-                    · {{ capability.source }}</template></span>
+                    · {{ capability.source }}</template
+                  ></span
+                >
               </li>
             </ul>
           </details>
         </article>
       </section>
 
-      <section class="dependency-grid" aria-label="数据库与 Redis">
+      <section
+        class="dependency-grid"
+        :aria-label="$t('page.monitor.databaseRedis')"
+      >
         <article class="panel">
           <div class="section-heading">
             <div>
-              <p class="eyebrow">DATABASE</p>
-              <h2>数据库</h2>
+              <p class="eyebrow">{{ $t('page.monitor.database') }}</p>
+              <h2>{{ $t('page.monitor.database') }}</h2>
             </div>
             <span class="status" :class="[overview.database.status]">{{
               statusText(overview.database.status)
@@ -333,58 +400,62 @@ useVisibilityPolling(refresh, 15_000);
           </div>
           <dl class="detail-grid compact">
             <div>
-              <dt>Driver</dt>
-              <dd>{{ overview.database.driver || '不可用' }}</dd>
+              <dt>{{ $t('page.monitor.driver') }}</dt>
+              <dd>
+                {{ overview.database.driver || $t('page.monitor.unavailable') }}
+              </dd>
             </div>
             <div>
-              <dt>模式</dt>
-              <dd>{{ overview.database.mode || '不可用' }}</dd>
+              <dt>{{ $t('page.monitor.mode') }}</dt>
+              <dd>
+                {{ overview.database.mode || $t('page.monitor.unavailable') }}
+              </dd>
             </div>
             <div>
-              <dt>延迟</dt>
+              <dt>{{ $t('page.monitor.latency') }}</dt>
               <dd>{{ valueText(overview.database.latencyMs, ' ms') }}</dd>
             </div>
             <template v-if="overview.database.pool">
               <div>
-                <dt>Open</dt>
+                <dt>{{ $t('page.monitor.open') }}</dt>
                 <dd>{{ overview.database.pool.open }}</dd>
               </div>
               <div>
-                <dt>In Use</dt>
+                <dt>{{ $t('page.monitor.inUse') }}</dt>
                 <dd>{{ overview.database.pool.inUse }}</dd>
               </div>
               <div>
-                <dt>Idle</dt>
+                <dt>{{ $t('page.monitor.idle') }}</dt>
                 <dd>{{ overview.database.pool.idle }}</dd>
               </div>
               <div>
-                <dt>Max</dt>
+                <dt>{{ $t('page.monitor.max') }}</dt>
                 <dd>
                   {{
                     overview.database.pool.max === 0
-                      ? '0（无限制）'
+                      ? $t('page.monitor.unlimited')
                       : overview.database.pool.max
                   }}
                 </dd>
               </div>
               <div>
-                <dt>Wait Count</dt>
+                <dt>{{ $t('page.monitor.waitCount') }}</dt>
                 <dd>{{ overview.database.pool.waitCount }}</dd>
               </div>
               <div>
-                <dt>Wait Duration</dt>
+                <dt>{{ $t('page.monitor.waitDuration') }}</dt>
                 <dd>{{ overview.database.pool.waitDurationMs }} ms</dd>
               </div>
               <div>
-                <dt>Max Idle Closed</dt>
+                <dt>{{ $t('page.monitor.maxIdleClosed') }}</dt>
                 <dd>{{ overview.database.pool.maxIdleClosed }}</dd>
               </div>
               <div>
-                <dt>Max Idle Time Closed</dt>
+                <dt>{{ $t('page.monitor.maxIdleTimeClosed') }}</dt>
                 <dd>{{ overview.database.pool.maxIdleTimeClosed }}</dd>
               </div>
               <div>
-                <dt>Max Lifetime Closed</dt>
+                <dt>{{ $t('page.monitor.maxLifetimeClosed') }}</dt>
                 <dd>{{ overview.database.pool.maxLifetimeClosed }}</dd>
               </div>
             </template>
@@ -393,7 +464,7 @@ useVisibilityPolling(refresh, 15_000);
             {{ overview.database.message }}
           </p>
           <details class="capabilities">
-            <summary>采集能力</summary>
+            <summary>{{ $t('page.monitor.capabilities') }}</summary>
             <ul>
               <li
                 v-for="[name, capability] in capabilityEntries(
@@ -401,10 +472,18 @@ useVisibilityPolling(refresh, 15_000);
                 )"
                 :key="name"
               >
-                <strong>{{ name }}</strong><span>{{ capability.available ? '可用' : '不可用' }} ·
-                  {{ capability.scope
+                <strong>{{ name }}</strong
+                ><span
+                  >{{
+                    capability.available
+                      ? $t('page.monitor.available')
+                      : $t('page.monitor.unavailable')
+                  }}
+                  · {{ capability.scope
                   }}<template v-if="capability.source">
-                    · {{ capability.source }}</template></span>
+                    · {{ capability.source }}</template
+                  ></span
+                >
               </li>
             </ul>
           </details>
@@ -422,60 +501,62 @@ useVisibilityPolling(refresh, 15_000);
           </div>
           <dl class="detail-grid compact">
             <div>
-              <dt>模式</dt>
-              <dd>{{ overview.redis.mode || '不可用' }}</dd>
+              <dt>{{ $t('page.monitor.mode') }}</dt>
+              <dd>
+                {{ overview.redis.mode || $t('page.monitor.unavailable') }}
+              </dd>
             </div>
             <div>
-              <dt>延迟</dt>
+              <dt>{{ $t('page.monitor.latency') }}</dt>
               <dd>{{ valueText(overview.redis.latencyMs, ' ms') }}</dd>
             </div>
             <div>
-              <dt>Keyspace</dt>
+              <dt>{{ $t('page.monitor.keyspace') }}</dt>
               <dd>{{ valueText(overview.redis.keyspace) }}</dd>
             </div>
             <template v-if="overview.redis.pool">
               <div>
-                <dt>Max</dt>
+                <dt>{{ $t('page.monitor.max') }}</dt>
                 <dd>{{ valueText(overview.redis.pool.max) }}</dd>
               </div>
               <div>
-                <dt>Total</dt>
+                <dt>{{ $t('page.monitor.total') }}</dt>
                 <dd>{{ overview.redis.pool.total }}</dd>
               </div>
               <div>
-                <dt>Active</dt>
+                <dt>{{ $t('page.monitor.active') }}</dt>
                 <dd>{{ overview.redis.pool.active }}</dd>
               </div>
               <div>
-                <dt>Idle</dt>
+                <dt>{{ $t('page.monitor.idle') }}</dt>
                 <dd>{{ overview.redis.pool.idle }}</dd>
               </div>
               <div>
-                <dt>Hits</dt>
+                <dt>{{ $t('page.monitor.hits') }}</dt>
                 <dd>{{ overview.redis.pool.hits }}</dd>
               </div>
               <div>
-                <dt>Misses</dt>
+                <dt>{{ $t('page.monitor.misses') }}</dt>
                 <dd>{{ overview.redis.pool.misses }}</dd>
               </div>
               <div>
-                <dt>Timeouts</dt>
+                <dt>{{ $t('page.monitor.timeouts') }}</dt>
                 <dd>{{ overview.redis.pool.timeouts }}</dd>
               </div>
               <div>
-                <dt>Wait Count</dt>
+                <dt>{{ $t('page.monitor.waitCount') }}</dt>
                 <dd>{{ overview.redis.pool.waitCount }}</dd>
               </div>
               <div>
-                <dt>Wait Duration</dt>
+                <dt>{{ $t('page.monitor.waitDuration') }}</dt>
                 <dd>{{ overview.redis.pool.waitDurationMs }} ms</dd>
               </div>
               <div>
-                <dt>Stale</dt>
+                <dt>{{ $t('page.monitor.stale') }}</dt>
                 <dd>{{ overview.redis.pool.stale }}</dd>
               </div>
               <div>
-                <dt>Pending</dt>
+                <dt>{{ $t('page.monitor.pending') }}</dt>
                 <dd>{{ overview.redis.pool.pending }}</dd>
               </div>
             </template>
@@ -484,7 +565,7 @@ useVisibilityPolling(refresh, 15_000);
             {{ overview.redis.message }}
           </p>
           <details class="capabilities">
-            <summary>采集能力</summary>
+            <summary>{{ $t('page.monitor.capabilities') }}</summary>
             <ul>
               <li
                 v-for="[name, capability] in capabilityEntries(
@@ -492,10 +573,18 @@ useVisibilityPolling(refresh, 15_000);
                 )"
                 :key="name"
               >
-                <strong>{{ name }}</strong><span>{{ capability.available ? '可用' : '不可用' }} ·
-                  {{ capability.scope
+                <strong>{{ name }}</strong
+                ><span
+                  >{{
+                    capability.available
+                      ? $t('page.monitor.available')
+                      : $t('page.monitor.unavailable')
+                  }}
+                  · {{ capability.scope
                   }}<template v-if="capability.source">
-                    · {{ capability.source }}</template></span>
+                    · {{ capability.source }}</template
+                  ></span
+                >
               </li>
             </ul>
           </details>
@@ -505,10 +594,14 @@ useVisibilityPolling(refresh, 15_000);
       <section class="panel" aria-labelledby="session-trend-title">
         <div class="section-heading">
           <div>
-            <p class="eyebrow">AUTH SESSIONS</p>
-            <h2 id="session-trend-title">会话活跃度</h2>
+            <p class="eyebrow">{{ $t('page.monitor.sessionActivity') }}</p>
+            <h2 id="session-trend-title">
+              {{ $t('page.monitor.sessionActivity') }}
+            </h2>
           </div>
-          <span class="muted">当前 {{ sessions.length }} 个设备会话</span>
+          <span class="muted">{{
+            $t('page.monitor.deviceSessionCount', { count: sessions.length })
+          }}</span>
         </div>
         <div v-if="sessions.length" class="trend-list">
           <div
@@ -523,12 +616,12 @@ useVisibilityPolling(refresh, 15_000);
             <strong>{{ bucket.count }}</strong>
           </div>
         </div>
-        <p v-else class="empty-state">当前没有设备会话数据。</p>
+        <p v-else class="empty-state">{{ $t('page.monitor.emptySessions') }}</p>
       </section>
     </template>
 
     <p class="privacy-note">
-      页面只展示非敏感运行指标；地址、DSN、密码、令牌、命令和本机目录不进入响应。
+      {{ $t('page.monitor.privacyNote') }}
     </p>
   </ManagementPage>
 </template>

@@ -6,6 +6,7 @@ import type { VbenFormSchema } from '#/adapter/form';
 import { computed, onMounted, ref } from 'vue';
 
 import { ProfileBaseSetting } from '@vben/common-ui';
+import { $t } from '@vben/locales';
 
 import { getUserInfoApi } from '#/api';
 
@@ -13,15 +14,15 @@ const profileBaseSettingRef = ref();
 
 const MOCK_ROLES_OPTIONS: BasicOption[] = [
   {
-    label: '管理员',
+    label: $t('profile.roles.admin'),
     value: 'super',
   },
   {
-    label: '用户',
+    label: $t('profile.roles.user'),
     value: 'user',
   },
   {
-    label: '测试',
+    label: $t('profile.roles.test'),
     value: 'test',
   },
 ];
@@ -31,12 +32,12 @@ const formSchema = computed((): VbenFormSchema[] => {
     {
       fieldName: 'realName',
       component: 'Input',
-      label: '姓名',
+      label: $t('profile.realName'),
     },
     {
       fieldName: 'username',
       component: 'Input',
-      label: '用户名',
+      label: $t('profile.username'),
     },
     {
       fieldName: 'roles',
@@ -45,12 +46,12 @@ const formSchema = computed((): VbenFormSchema[] => {
         mode: 'tags',
         options: MOCK_ROLES_OPTIONS,
       },
-      label: '角色',
+      label: $t('profile.rolesLabel'),
     },
     {
       fieldName: 'introduction',
       component: 'Textarea',
-      label: '个人简介',
+      label: $t('profile.introduction'),
     },
   ];
 });

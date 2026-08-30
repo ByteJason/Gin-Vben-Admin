@@ -11,6 +11,9 @@ export const messages: Record<Locale, Record<string, string>> = {
     submit: 'Submit',
     toggleSidebar: 'Toggle sidebar',
     confirmTitle: 'Please Confirm',
+    'formArray.action': 'Actions',
+    'formArray.add': 'Add row',
+    'formArray.empty': 'No data',
   },
   'zh-CN': {
     cancel: '取消',
@@ -22,6 +25,9 @@ export const messages: Record<Locale, Record<string, string>> = {
     submit: '提交',
     toggleSidebar: '切换侧边栏',
     confirmTitle: '请确认',
+    'formArray.action': '操作',
+    'formArray.add': '添加一行',
+    'formArray.empty': '暂无数据',
   },
 };
 

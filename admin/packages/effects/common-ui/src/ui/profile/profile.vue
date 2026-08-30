@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Props } from './types';
 
+import { $t } from '@vben/locales';
 import { preferences } from '@vben-core/preferences';
 import {
   Card,
@@ -18,7 +19,7 @@ defineOptions({
 });
 
 withDefaults(defineProps<Props>(), {
-  title: '关于项目',
+  title: String($t('profile.title')),
   tabs: () => [],
 });
 

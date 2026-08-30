@@ -160,11 +160,11 @@ onMounted(() => void loadJobs());
   <ManagementPage class="import-export-page">
     <header class="page-heading">
       <div>
-        <p class="eyebrow">IMPORT / EXPORT</p>
+        <p class="eyebrow">{{ $t('page.importExport.eyebrow') }}</p>
         <h1>{{ $t('page.importExport.title') }}</h1>
         <p class="description">{{ $t('page.importExport.description') }}</p>
         <p class="muted">{{ $t('page.importExport.limits') }}</p>
-        <small class="muted">50 MB / 100,000 rows</small>
+        <small class="muted">{{ $t('page.importExport.limits') }}</small>
       </div>
       <div class="toolbar" aria-label="Template downloads">
         <button
@@ -198,10 +198,11 @@ onMounted(() => void loadJobs());
     <section v-if="canManage" class="panel" aria-labelledby="import-title">
       <div class="section-heading">
         <div>
-          <p class="eyebrow">IMPORT</p>
+          <p class="eyebrow">{{ $t('page.importExport.import') }}</p>
           <h2 id="import-title">{{ $t('page.importExport.importTitle') }}</h2>
         </div>
-        <label class="file-picker">{{ $t('page.importExport.chooseFile')
+        <label class="file-picker"
+          >{{ $t('page.importExport.chooseFile')
           }}<input
             type="file"
             accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -254,8 +255,8 @@ onMounted(() => void loadJobs());
               busy === 'commit'
                 ? $t('page.importExport.working')
                 : $t('page.importExport.commit')
-            }}
-</button><button
+            }}</button
+          ><button
             class="secondary"
             type="button"
             :disabled="busy !== ''"
@@ -277,7 +278,7 @@ onMounted(() => void loadJobs());
     <section class="panel" aria-labelledby="jobs-title">
       <div class="section-heading">
         <div>
-          <p class="eyebrow">ASYNC JOBS</p>
+          <p class="eyebrow">{{ $t('page.importExport.jobsEyebrow') }}</p>
           <h2 id="jobs-title">{{ $t('page.importExport.jobsTitle') }}</h2>
         </div>
       </div>
@@ -323,8 +324,8 @@ onMounted(() => void loadJobs());
                   :disabled="busy === job.id"
                   @click="cancelJob(job)"
                 >
-                  {{ $t('page.importExport.cancel') }}
-</button><button
+                  {{ $t('page.importExport.cancel') }}</button
+                ><button
                   v-if="
                     canManage && ['failed', 'cancelled'].includes(job.status)
                   "
@@ -333,8 +334,8 @@ onMounted(() => void loadJobs());
                   :disabled="busy === job.id"
                   @click="retryJob(job)"
                 >
-                  {{ $t('page.importExport.retry') }}
-</button><button
+                  {{ $t('page.importExport.retry') }}</button
+                ><button
                   v-if="job.kind === 'import' && job.errorCount"
                   class="link-button"
                   type="button"

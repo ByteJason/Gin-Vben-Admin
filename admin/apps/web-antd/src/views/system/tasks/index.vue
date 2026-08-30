@@ -58,6 +58,15 @@ const form = reactive(emptyForm());
 const selected = computed(() =>
   tasks.value.find((item) => item.id === selectedId.value),
 );
+const taskTypeLabels = {
+  http: 'page.tasks.typeHttp',
+  manual: 'page.tasks.typeManual',
+  webhook: 'page.tasks.typeWebhook',
+} as const;
+function taskTypeLabel(type: string) {
+  const key = taskTypeLabels[type as keyof typeof taskTypeLabels];
+  return key ? String($t(key)) : type;
+}
 
 function resetForm() {
   Object.assign(form, emptyForm());
@@ -320,16 +329,20 @@ onMounted(() => void loadTasks());
                     type="button"
                     @click="selectTask(item)"
                   >
-                    {{ item.name }}
-</button><small>{{ item.cron || $t('page.tasks.manual') }}</small>
+                    {{ item.name }}</button
+                  ><small>{{ item.cron || $t('page.tasks.manual') }}</small>
                 </th>
-                <td>{{ item.type }}</td>
+                <td>{{ taskTypeLabel(item.type) }}</td>
                 <td>
-                  <span class="status-pill" :class="[item.enabled ? 'ok' : 'off']">{{
-                    item.enabled
-                      ? $t('page.tasks.enabled')
-                      : $t('page.tasks.disabled')
-                  }}</span>
+                  <span
+                    class="status-pill"
+                    :class="[item.enabled ? 'ok' : 'off']"
+                    >{{
+                      item.enabled
+                        ? $t('page.tasks.enabled')
+                        : $t('page.tasks.disabled')
+                    }}</span
+                  >
                 </td>
                 <td class="actions">
                   <button
@@ -337,8 +350,8 @@ onMounted(() => void loadTasks());
                     type="button"
                     @click="editTask(item)"
                   >
-                    {{ $t('page.tasks.edit') }}
-</button><button
+                    {{ $t('page.tasks.edit') }}</button
+                  ><button
                     v-if="canManage"
                     type="button"
                     :disabled="running === item.id"
@@ -348,8 +361,8 @@ onMounted(() => void loadTasks());
                       running === item.id
                         ? $t('page.tasks.running')
                         : $t('page.tasks.run')
-                    }}
-</button><button
+                    }}</button
+                  ><button
                     v-if="canManage"
                     class="danger"
                     type="button"
@@ -383,38 +396,71 @@ onMounted(() => void loadTasks());
           </div>
         </div>
         <form v-if="canManage" class="task-form" @submit.prevent="saveTask">
-          <label><span>{{ $t('page.tasks.name') }}</span><input v-model="form.name" required /></label>
-          <label><span>{{ $t('page.tasks.type') }}</span><select v-model="form.type">
-              <option value="manual">manual</option>
-              <option value="http">http</option>
-              <option value="webhook">webhook</option>
-            </select></label>
-          <label><span>{{ $t('page.tasks.timezone') }}</span><input v-model="form.timezone" required /></label>
-          <label><span>{{ $t('page.tasks.cron') }}</span><input v-model="form.cron" placeholder="0 * * * *" /></label>
-          <label><span>{{ $t('page.tasks.concurrency') }}</span><input v-model.number="form.concurrency" min="1" type="number" /></label>
-          <label><span>{{ $t('page.tasks.timeout') }}</span><input v-model.number="form.timeoutSeconds" min="1" type="number" /></label>
-          <label><span>{{ $t('page.tasks.maxAttempts') }}</span><input
+          <label
+            ><span>{{ $t('page.tasks.name') }}</span
+            ><input v-model="form.name" required
+          /></label>
+          <label
+            ><span>{{ $t('page.tasks.type') }}</span
+            ><select v-model="form.type">
+              <option value="manual">{{ $t('page.tasks.typeManual') }}</option>
+              <option value="http">{{ $t('page.tasks.typeHttp') }}</option>
+              <option value="webhook">
+                {{ $t('page.tasks.typeWebhook') }}
+              </option>
+            </select></label
+          >
+          <label
+            ><span>{{ $t('page.tasks.timezone') }}</span
+            ><input v-model="form.timezone" required
+          /></label>
+          <label
+            ><span>{{ $t('page.tasks.cron') }}</span
+            ><input v-model="form.cron" placeholder="0 * * * *"
+          /></label>
+          <label
+            ><span>{{ $t('page.tasks.concurrency') }}</span
+            ><input v-model.number="form.concurrency" min="1" type="number"
+          /></label>
+          <label
+            ><span>{{ $t('page.tasks.timeout') }}</span
+            ><input v-model.number="form.timeoutSeconds" min="1" type="number"
+          /></label>
+          <label
+            ><span>{{ $t('page.tasks.maxAttempts') }}</span
+            ><input
               v-model.number="form.maxAttempts"
               min="1"
               max="10"
               type="number"
           /></label>
-          <label><span>{{ $t('page.tasks.policy') }}</span><select v-model="form.concurrencyPolicy">
-              <option value="forbid">forbid</option>
-              <option value="allow">allow</option>
-              <option value="replace">replace</option>
-            </select></label>
-          <label class="wide"><span>{{ $t('page.tasks.payloadSchema') }}</span><textarea v-model="form.payloadText" rows="5" required></textarea>
+          <label
+            ><span>{{ $t('page.tasks.policy') }}</span
+            ><select v-model="form.concurrencyPolicy">
+              <option value="forbid">
+                {{ $t('page.tasks.policyForbid') }}
+              </option>
+              <option value="allow">{{ $t('page.tasks.policyAllow') }}</option>
+              <option value="replace">
+                {{ $t('page.tasks.policyReplace') }}
+              </option>
+            </select></label
+          >
+          <label class="wide"
+            ><span>{{ $t('page.tasks.payloadSchema') }}</span
+            ><textarea v-model="form.payloadText" rows="5" required></textarea>
           </label>
-          <label class="toggle"><input v-model="form.enabled" type="checkbox" /><span>{{
+          <label class="toggle"
+            ><input v-model="form.enabled" type="checkbox" /><span>{{
               $t('page.tasks.enabled')
-            }}</span></label>
+            }}</span></label
+          >
           <div class="form-actions">
             <button class="primary" type="submit" :disabled="saving">
               {{
                 saving ? $t('page.tasks.saving') : $t('page.tasks.save')
-              }}
-</button><button
+              }}</button
+            ><button
               v-if="editingId"
               class="secondary"
               type="button"
@@ -441,8 +487,11 @@ onMounted(() => void loadTasks());
           <ul v-else>
             <li v-for="run in runs" :key="run.id">
               <div>
-                <span>{{ run.status }}</span><small>{{ run.attemptCount }}/{{ run.maxAttempts }} ·
-                  {{ run.createdAt }}</small>
+                <span>{{ run.status }}</span
+                ><small
+                  >{{ run.attemptCount }}/{{ run.maxAttempts }} ·
+                  {{ run.createdAt }}</small
+                >
               </div>
               <div class="run-actions">
                 <button
@@ -454,8 +503,8 @@ onMounted(() => void loadTasks());
                   :disabled="runAction === run.id"
                   @click="cancelRun(run)"
                 >
-                  {{ $t('page.tasks.cancelRun') }}
-</button><button
+                  {{ $t('page.tasks.cancelRun') }}</button
+                ><button
                   v-if="
                     canManage &&
                     (run.status === 'failed' || run.status === 'dead_letter')
@@ -464,8 +513,8 @@ onMounted(() => void loadTasks());
                   :disabled="runAction === run.id"
                   @click="retryRun(run)"
                 >
-                  {{ $t('page.tasks.retry') }}
-</button><button
+                  {{ $t('page.tasks.retry') }}</button
+                ><button
                   type="button"
                   @click="loadRunLogs(selected.id, run.id)"
                 >
@@ -474,8 +523,11 @@ onMounted(() => void loadTasks());
               </div>
               <ul v-if="logs[run.id]?.length" class="run-logs">
                 <li v-for="entry in logs[run.id]" :key="entry.id">
-                  <span>{{ entry.status }}</span><small>{{ entry.errorCode || $t('page.tasks.noError') }} ·
-                    {{ entry.createdAt }}</small>
+                  <span>{{ entry.status }}</span
+                  ><small
+                    >{{ entry.errorCode || $t('page.tasks.noError') }} ·
+                    {{ entry.createdAt }}</small
+                  >
                 </li>
               </ul>
             </li>

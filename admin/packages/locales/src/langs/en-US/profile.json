@@ -1,4 +1,39 @@
 {
-  "updatePassword": "Update Password",
-  "updateBasicProfile": "Update Basic Profile"
+  "tabs": {
+    "basic": "Basic settings",
+    "security": "Security settings",
+    "password": "Change password",
+    "notice": "New message alerts"
+  },
+  "title": "Profile",
+  "roles": {
+    "admin": "Administrator",
+    "user": "User",
+    "test": "Test"
+  },
+  "realName": "Name",
+  "username": "Username",
+  "rolesLabel": "Roles",
+  "introduction": "Bio",
+  "oldPassword": "Current password",
+  "oldPasswordPlaceholder": "Enter current password",
+  "newPassword": "New password",
+  "newPasswordPlaceholder": "Enter new password",
+  "confirmPassword": "Confirm password",
+  "confirmPasswordPlaceholder": "Enter the new password again",
+  "passwordMismatch": "The passwords do not match",
+  "passwordUpdated": "Password updated successfully",
+  "accountPassword": "Account password",
+  "systemMessage": "System messages",
+  "todoTask": "To-do tasks",
+  "notificationDescription": "Messages from other users are delivered to your inbox",
+  "passwordStrength": "Current password strength: strong",
+  "securityPhone": "Security phone",
+  "boundPhone": "Bound phone: 138****8293",
+  "securityQuestion": "Security question",
+  "securityQuestionUnbound": "No security question is configured; adding one helps protect the account",
+  "securityEmail": "Backup email",
+  "boundEmail": "Bound email: ant***sign.com",
+  "securityMfa": "MFA device",
+  "securityMfaUnbound": "No MFA device is bound; bind one for additional confirmation"
 }

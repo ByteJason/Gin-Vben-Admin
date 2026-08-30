@@ -2,38 +2,39 @@
 import { computed } from 'vue';
 
 import { ProfileSecuritySetting } from '@vben/common-ui';
+import { $t } from '@vben/locales';
 
 const formSchema = computed(() => {
   return [
     {
       value: true,
       fieldName: 'accountPassword',
-      label: '账户密码',
-      description: '当前密码强度：强',
+      label: $t('profile.accountPassword'),
+      description: $t('profile.passwordStrength'),
     },
     {
       value: true,
       fieldName: 'securityPhone',
-      label: '密保手机',
-      description: '已绑定手机：138****8293',
+      label: $t('profile.securityPhone'),
+      description: $t('profile.boundPhone'),
     },
     {
       value: true,
       fieldName: 'securityQuestion',
-      label: '密保问题',
-      description: '未设置密保问题，密保问题可有效保护账户安全',
+      label: $t('profile.securityQuestion'),
+      description: $t('profile.securityQuestionUnbound'),
     },
     {
       value: true,
       fieldName: 'securityEmail',
-      label: '备用邮箱',
-      description: '已绑定邮箱：ant***sign.com',
+      label: $t('profile.securityEmail'),
+      description: $t('profile.boundEmail'),
     },
     {
       value: false,
       fieldName: 'securityMfa',
-      label: 'MFA 设备',
-      description: '未绑定 MFA 设备，绑定后，可以进行二次确认',
+      label: $t('profile.securityMfa'),
+      description: $t('profile.securityMfaUnbound'),
     },
   ];
 });

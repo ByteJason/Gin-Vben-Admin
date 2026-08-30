@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import type { ImageCaptchaChallenge, ImageCaptchaProps } from '../types';
 
-import { computed, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+
+import { $t } from '@vben/locales';
 
 const props = withDefaults(defineProps<ImageCaptchaProps>(), {
   alt: 'Captcha image',
@@ -16,16 +18,49 @@ const challenge = ref<ImageCaptchaChallenge | null>(null);
 const loading = ref(false);
 const failed = ref(false);
 const requestVersion = ref(0);
+const remainingSeconds = ref(0);
+let expiryTimer: ReturnType<typeof setInterval> | undefined;
 
 const expiresInLabel = computed(() => {
-  const seconds = challenge.value?.expiresIn;
-  return typeof seconds === 'number' && seconds > 0 ? `${seconds}s` : '';
+  if (!challenge.value) return '';
+  if (remainingSeconds.value <= 0) {
+    return String($t('authentication.captchaExpired'));
+  }
+  return String(
+    $t('authentication.captchaExpiresIn', {
+      seconds: remainingSeconds.value,
+    }),
+  );
 });
+
+function clearExpiryTimer() {
+  if (expiryTimer) {
+    clearInterval(expiryTimer);
+    expiryTimer = undefined;
+  }
+}
+
+function startExpiryTimer(seconds: number) {
+  clearExpiryTimer();
+  remainingSeconds.value = Math.max(0, Math.ceil(seconds));
+  if (remainingSeconds.value <= 0) return;
+
+  expiryTimer = setInterval(() => {
+    if (remainingSeconds.value <= 1) {
+      remainingSeconds.value = 0;
+      clearExpiryTimer();
+      return;
+    }
+    remainingSeconds.value -= 1;
+  }, 1000);
+}
 
 async function refresh() {
   const version = ++requestVersion.value;
   loading.value = true;
   failed.value = false;
+  clearExpiryTimer();
+  remainingSeconds.value = 0;
   challenge.value = null;
   modelValue.value = '';
   props.onChallengeId?.('');
@@ -39,6 +74,7 @@ async function refresh() {
       throw new Error('captcha challenge is missing an id');
     }
     challenge.value = nextChallenge;
+    startExpiryTimer(nextChallenge.expiresIn);
     props.onChallengeId?.(nextChallenge.id);
   } catch {
     if (version === requestVersion.value) {
@@ -55,6 +91,8 @@ async function refresh() {
 onMounted(() => {
   void refresh();
 });
+
+onBeforeUnmount(clearExpiryTimer);
 </script>
 
 <template>
@@ -97,7 +135,7 @@ onMounted(() => {
       autocomplete="off"
       class="border-input bg-background focus-visible:ring-ring h-9 w-full rounded-md border px-3 text-sm focus-visible:outline-none focus-visible:ring-2"
       data-testid="image-captcha-input"
-      :disabled="disabled || loading || !challenge"
+      :disabled="disabled || loading || !challenge || remainingSeconds <= 0"
       :name="name"
       :placeholder="inputPlaceholder"
       spellcheck="false"

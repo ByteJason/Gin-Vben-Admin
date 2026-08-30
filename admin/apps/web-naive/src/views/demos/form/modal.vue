@@ -1,5 +1,6 @@
 <script lang="ts" setup>
 import { useVbenModal } from '@vben/common-ui';
+import { $t } from '@vben/locales';
 
 import { useVbenForm } from '#/adapter/form';
 
@@ -16,32 +17,32 @@ const [Form, formApi] = useVbenForm({
     {
       component: 'Input',
       componentProps: {
-        placeholder: '请输入',
+        placeholder: $t('demos.pleaseEnter'),
       },
       fieldName: 'field1',
-      label: '字段1',
+      label: $t('demos.field1'),
       rules: 'required',
     },
     {
       component: 'Input',
       componentProps: {
-        placeholder: '请输入',
+        placeholder: $t('demos.pleaseEnter'),
       },
       fieldName: 'field2',
-      label: '字段2',
+      label: $t('demos.field2'),
       rules: 'required',
     },
     {
       component: 'Select',
       componentProps: {
         options: [
-          { label: '选项1', value: '1' },
-          { label: '选项2', value: '2' },
+          { label: $t('demos.option1'), value: '1' },
+          { label: $t('demos.option2'), value: '2' },
         ],
-        placeholder: '请输入',
+        placeholder: $t('demos.pleaseEnter'),
       },
       fieldName: 'field3',
-      label: '字段3',
+      label: $t('demos.field3'),
       rules: 'required',
     },
   ],
@@ -65,7 +66,7 @@ const [Modal, modalApi] = useVbenModal<FormModalData>({
       }
     }
   },
-  title: '内嵌表单示例',
+  title: $t('demos.embeddedFormExample'),
 });
 
 defineExpose({ modalApi });

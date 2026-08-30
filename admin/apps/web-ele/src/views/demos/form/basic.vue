@@ -2,6 +2,7 @@
 import { h } from 'vue';
 
 import { Page, useVbenDrawer } from '@vben/common-ui';
+import { $t } from '@vben/locales';
 
 import { ElButton, ElCard, ElCheckbox, ElMessage } from 'element-plus';
 
@@ -19,7 +20,7 @@ const [Form, formApi] = useVbenForm({
   // 大屏一行显示3个，中屏一行显示2个，小屏一行显示1个
   // wrapperClass: 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3',
   handleSubmit: (values) => {
-    ElMessage.success(`表单数据：${JSON.stringify(values)}`);
+    ElMessage.success($t('demos.formData', { data: JSON.stringify(values) }));
   },
   schema: [
     {
@@ -95,7 +96,7 @@ const [Form, formApi] = useVbenForm({
         isButton: true,
         options: ['A', 'B', 'C', 'D', 'E', 'F'].map((v) => ({
           value: v,
-          label: `选项${v}`,
+          label: $t('demos.optionPrefix', { value: v }),
         })),
       },
     },
@@ -104,7 +105,10 @@ const [Form, formApi] = useVbenForm({
       fieldName: 'checkbox',
       label: 'Checkbox',
       componentProps: {
-        options: ['A', 'B', 'C'].map((v) => ({ value: v, label: `选项${v}` })),
+        options: ['A', 'B', 'C'].map((v) => ({
+          value: v,
+          label: $t('demos.optionPrefix', { value: v }),
+        })),
       },
     },
     {
@@ -128,9 +132,9 @@ const [Form, formApi] = useVbenForm({
       componentProps: {
         isButton: true,
         options: [
-          { value: 'A', label: '选项A' },
-          { value: 'B', label: '选项B' },
-          { value: 'C', label: '选项C' },
+          { value: 'A', label: $t('demos.optionPrefix', { value: 'A' }) },
+          { value: 'B', label: $t('demos.optionPrefix', { value: 'B' }) },
+          { value: 'C', label: $t('demos.optionPrefix', { value: 'C' }) },
         ],
       },
     },
@@ -146,9 +150,9 @@ const [Form, formApi] = useVbenForm({
       componentProps: {
         filterable: true,
         options: [
-          { value: 'A', label: '选项A' },
-          { value: 'B', label: '选项B' },
-          { value: 'C', label: '选项C' },
+          { value: 'A', label: $t('demos.optionPrefix', { value: 'A' }) },
+          { value: 'B', label: $t('demos.optionPrefix', { value: 'B' }) },
+          { value: 'C', label: $t('demos.optionPrefix', { value: 'C' }) },
         ],
       },
     },
@@ -172,20 +176,24 @@ function setFormValues() {
 </script>
 <template>
   <Page
-    description="我们重新包装了CheckboxGroup、RadioGroup、Select，可以通过options属性传入选项属性数组以自动生成选项"
-    title="表单演示"
+    :description="$t('demos.formAdapterDescription')"
+    :title="$t('demos.formDemo')"
   >
-    <Drawer class="w-150" title="基础表单示例">
+    <Drawer class="w-150" :title="$t('demos.drawerTitle')">
       <Form />
     </Drawer>
     <ElCard>
       <template #header>
         <div class="flex items-center">
-          <span class="flex-auto">基础表单演示</span>
-          <ElButton type="primary" @click="setFormValues">设置表单值</ElButton>
+          <span class="flex-auto">{{ $t('demos.baseFormExample') }}</span>
+          <ElButton type="primary" @click="setFormValues">{{
+            $t('demos.setFormValues')
+          }}</ElButton>
         </div>
       </template>
-      <ElButton type="primary" @click="drawerApi.open"> 打开抽屉 </ElButton>
+      <ElButton type="primary" @click="drawerApi.open">{{
+        $t('demos.openDrawer')
+      }}</ElButton>
     </ElCard>
   </Page>
 </template>

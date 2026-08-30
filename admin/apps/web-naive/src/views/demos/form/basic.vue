@@ -1,5 +1,6 @@
 <script lang="ts" setup>
 import { Page, useVbenModal } from '@vben/common-ui';
+import { $t } from '@vben/locales';
 
 import { NButton, NCard, useMessage } from 'naive-ui';
 
@@ -21,7 +22,7 @@ const [Form, formApi] = useVbenForm({
   // 大屏一行显示3个，中屏一行显示2个，小屏一行显示1个
   wrapperClass: 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3',
   handleSubmit: (values) => {
-    message.success(`表单数据：${JSON.stringify(values)}`);
+    message.success($t('demos.formData', { data: JSON.stringify(values) }));
   },
   schema: [
     {
@@ -97,11 +98,11 @@ const [Form, formApi] = useVbenForm({
         isButton: true,
         class: 'flex flex-wrap', // 如果选项过多，可以添加class来自动折叠
         options: [
-          { value: 'A', label: '选项A' },
-          { value: 'B', label: '选项B' },
-          { value: 'C', label: '选项C' },
-          { value: 'D', label: '选项D' },
-          { value: 'E', label: '选项E' },
+          { value: 'A', label: $t('demos.optionPrefix', { value: 'A' }) },
+          { value: 'B', label: $t('demos.optionPrefix', { value: 'B' }) },
+          { value: 'C', label: $t('demos.optionPrefix', { value: 'C' }) },
+          { value: 'D', label: $t('demos.optionPrefix', { value: 'D' }) },
+          { value: 'E', label: $t('demos.optionPrefix', { value: 'E' }) },
         ],
       },
       rules: 'selectRequired',
@@ -112,9 +113,9 @@ const [Form, formApi] = useVbenForm({
       label: 'Checkbox',
       componentProps: {
         options: [
-          { value: 'A', label: '选项A' },
-          { value: 'B', label: '选项B' },
-          { value: 'C', label: '选项C' },
+          { value: 'A', label: $t('demos.optionPrefix', { value: 'A' }) },
+          { value: 'B', label: $t('demos.optionPrefix', { value: 'B' }) },
+          { value: 'C', label: $t('demos.optionPrefix', { value: 'C' }) },
         ],
       },
       rules: 'selectRequired',
@@ -137,7 +138,7 @@ const [Form, formApi] = useVbenForm({
     {
       component: 'Input',
       fieldName: 'collapsibleTextArea',
-      label: 'vertical时可折叠',
+      label: $t('demos.collapsibleTextArea'),
       componentProps: {
         type: 'textarea',
       },
@@ -163,14 +164,16 @@ const [Modal, modalApi] = useVbenModal({
 </script>
 <template>
   <Page
-    description="表单适配器重新包装了CheckboxGroup和RadioGroup，可以通过options属性传递选项数据（选项数据将作为子组件的属性）"
-    title="表单演示"
+    :description="$t('demos.formAdapterDescription')"
+    :title="$t('demos.formDemo')"
   >
-    <NCard title="基础表单" header-extra-class="gap-4">
+    <NCard :title="$t('demos.baseForm')" header-extra-class="gap-4">
       <template #header-extra>
-        <NButton type="primary" @click="setFormValues">设置表单值</NButton>
+        <NButton type="primary" @click="setFormValues">{{
+          $t('demos.setFormValues')
+        }}</NButton>
         <NButton type="primary" @click="modalApi.open()" class="ml-2">
-          打开弹窗
+          {{ $t('demos.openDialog') }}
         </NButton>
       </template>
       <Form />

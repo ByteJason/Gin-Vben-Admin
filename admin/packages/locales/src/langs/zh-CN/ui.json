@@ -59,7 +59,32 @@
     "titleTip": "裁剪比例 {0}",
     "confirm": "裁剪",
     "cancel": "取消裁剪",
-    "errorTip": "裁剪错误"
+    "errorTip": "裁剪错误",
+    "imageAlt": "原图",
+    "aspectRatioInvalid": "裁剪比例格式错误，请使用“数字:数字”格式，例如“16:9”。",
+    "aspectRatioParseFailed": "裁剪比例解析失败，宽高必须为正整数。",
+    "imageLoadTimeout": "图片加载超时（10 秒）。",
+    "imageLoadFailed": "图片加载失败",
+    "exportFailed": "图片导出失败"
+  },
+  "about": {
+    "title": "关于项目",
+    "description": "这是一个采用 Vue 3、Vite、TailwindCSS 和 TypeScript 构建的现代化开箱即用中后台解决方案，提供规范的代码、丰富的配置和适用于中大型项目的实用示例。",
+    "basicInfo": "基本信息",
+    "productionDependencies": "生产环境依赖",
+    "developmentDependencies": "开发环境依赖",
+    "version": "版本号",
+    "license": "开源许可协议",
+    "buildTime": "最后构建时间",
+    "repository": "项目仓库",
+    "upstreamProject": "上游前端项目",
+    "upstreamDocs": "上游前端文档",
+    "upstreamPreview": "上游前端预览"
+  },
+  "workbench": {
+    "todo": "待办",
+    "projects": "项目",
+    "team": "团队"
   },
   "tiptap": {
     "placeholder": "请输入内容...",

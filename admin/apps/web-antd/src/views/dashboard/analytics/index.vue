@@ -15,6 +15,7 @@ import { useAccessStore } from '@vben/stores';
 
 import { listSessionsApi } from '#/api/core/auth';
 import { getDashboardSummaryApi } from '#/api/core/dashboard';
+import { $t } from '#/locales';
 
 const accessStore = useAccessStore();
 const summary = ref<DashboardSummary>();
@@ -31,33 +32,49 @@ const canReadMonitor = computed(() =>
 const countCards = computed(() => {
   if (!summary.value) return [];
   return [
-    { key: 'users', label: '用户', metric: summary.value.counts.users },
-    { key: 'roles', label: '角色', metric: summary.value.counts.roles },
-    { key: 'tasks', label: '任务', metric: summary.value.counts.tasks },
+    {
+      key: 'users',
+      label: String($t('page.analytics.users')),
+      metric: summary.value.counts.users,
+    },
+    {
+      key: 'roles',
+      label: String($t('page.analytics.roles')),
+      metric: summary.value.counts.roles,
+    },
+    {
+      key: 'tasks',
+      label: String($t('page.analytics.tasks')),
+      metric: summary.value.counts.tasks,
+    },
     {
       key: 'importJobs',
-      label: '导入作业',
+      label: String($t('page.analytics.imports')),
       metric: summary.value.counts.importJobs,
     },
     {
       key: 'exportJobs',
-      label: '导出作业',
+      label: String($t('page.analytics.exports')),
       metric: summary.value.counts.exportJobs,
     },
-    { key: 'files', label: '文件', metric: summary.value.counts.files },
+    {
+      key: 'files',
+      label: String($t('page.analytics.files')),
+      metric: summary.value.counts.files,
+    },
     {
       key: 'auditEvents',
-      label: '审计事件',
+      label: String($t('page.analytics.auditEvents')),
       metric: summary.value.counts.auditEvents,
     },
     {
       key: 'mailAccounts',
-      label: '邮件账户',
+      label: String($t('page.analytics.mailAccounts')),
       metric: summary.value.counts.mailAccounts,
     },
     {
       key: 'mailMessages',
-      label: '邮件消息',
+      label: String($t('page.analytics.mailMessages')),
       metric: summary.value.counts.mailMessages,
     },
   ];
@@ -86,10 +103,26 @@ const expiringSessions = computed(
 
 const sessionTrend = computed(() => {
   const buckets = [
-    { count: 0, label: '1 小时内', maxAge: 60 * 60 * 1000 },
-    { count: 0, label: '1–6 小时', maxAge: 6 * 60 * 60 * 1000 },
-    { count: 0, label: '6–24 小时', maxAge: 24 * 60 * 60 * 1000 },
-    { count: 0, label: '24 小时前', maxAge: Number.POSITIVE_INFINITY },
+    {
+      count: 0,
+      label: String($t('page.analytics.hour1')),
+      maxAge: 60 * 60 * 1000,
+    },
+    {
+      count: 0,
+      label: String($t('page.analytics.hours1to6')),
+      maxAge: 6 * 60 * 60 * 1000,
+    },
+    {
+      count: 0,
+      label: String($t('page.analytics.hours6to24')),
+      maxAge: 24 * 60 * 60 * 1000,
+    },
+    {
+      count: 0,
+      label: String($t('page.analytics.hours24Plus')),
+      maxAge: Number.POSITIVE_INFINITY,
+    },
   ];
   for (const session of sessions.value) {
     const age = Math.max(0, sampledAt.value - Date.parse(session.lastSeenAt));
@@ -104,23 +137,23 @@ const sessionTrend = computed(() => {
 });
 
 function statusText(status?: DashboardStatus) {
-  if (status === 'ok') return '正常';
-  if (status === 'degraded') return '局部降级';
-  return '不可用';
+  if (status === 'ok') return String($t('page.analytics.statusOk'));
+  if (status === 'degraded') return String($t('page.analytics.statusDegraded'));
+  return String($t('page.analytics.statusUnavailable'));
 }
 
 function countText(metric: DashboardCountMetric) {
   return metric.value === undefined
-    ? '不可用'
+    ? String($t('page.analytics.unavailable'))
     : new Intl.NumberFormat().format(metric.value);
 }
 
 function formatDuration(seconds?: number) {
-  if (seconds === undefined) return '不可用';
+  if (seconds === undefined) return String($t('page.analytics.unavailable'));
   const days = Math.floor(seconds / 86_400);
   const hours = Math.floor((seconds % 86_400) / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
-  return `${days} 天 ${hours} 小时 ${minutes} 分钟`;
+  return String($t('page.monitor.duration', { days, hours, minutes }));
 }
 
 async function refresh() {
@@ -137,14 +170,14 @@ async function refresh() {
     summaryError.value = '';
   } else {
     summaryError.value = summary.value
-      ? '最新运行摘要获取失败，当前显示上次成功数据。'
-      : '运行摘要暂时不可用，请稍后重试。';
+      ? String($t('page.analytics.loadErrorCached'))
+      : String($t('page.analytics.loadError'));
   }
   if (sessionsResult.status === 'fulfilled') {
     sessions.value = sessionsResult.value;
     sessionsError.value = '';
   } else {
-    sessionsError.value = '设备会话数据暂时不可用。';
+    sessionsError.value = String($t('page.analytics.sessionsError'));
   }
   loading.value = false;
 }
@@ -160,18 +193,24 @@ useVisibilityPolling(refresh, 15_000);
   >
     <header class="page-heading">
       <div>
-        <p class="eyebrow">DASHBOARD / CURRENT STATE</p>
-        <h1 id="operations-overview-title">运行概览</h1>
-        <p class="description">
-          基于当前租户的真实聚合摘要与设备会话，快速确认实例、依赖和主要业务数据状态。
-        </p>
+        <p class="eyebrow">{{ $t('page.analytics.eyebrow') }}</p>
+        <h1 id="operations-overview-title">{{ $t('page.analytics.title') }}</h1>
+        <p class="description">{{ $t('page.analytics.description') }}</p>
       </div>
       <div class="heading-actions">
         <span v-if="summary" class="updated">
-          采集于 {{ new Date(summary.collectedAt).toLocaleString() }} · 每 15 秒
+          {{
+            $t('page.monitor.collectedAt', {
+              at: new Date(summary.collectedAt).toLocaleString(),
+            })
+          }}
         </span>
         <button type="button" :disabled="loading" @click="refresh">
-          {{ loading ? '刷新中…' : '立即刷新' }}
+          {{
+            loading
+              ? $t('page.analytics.refreshing')
+              : $t('page.analytics.refresh')
+          }}
         </button>
       </div>
     </header>
@@ -183,7 +222,7 @@ useVisibilityPolling(refresh, 15_000);
       {{ sessionsError }}
     </p>
     <p v-if="loading && !summary" class="loading-state" role="status">
-      正在读取运行摘要…
+      {{ $t('page.analytics.loading') }}
     </p>
 
     <template v-if="summary">
@@ -191,8 +230,10 @@ useVisibilityPolling(refresh, 15_000);
         <div class="instance-copy">
           <div class="section-heading">
             <div>
-              <p class="eyebrow">INSTANCE</p>
-              <h2 id="instance-title">实例状态</h2>
+              <p class="eyebrow">{{ $t('page.analytics.instance') }}</p>
+              <h2 id="instance-title">
+                {{ $t('page.analytics.instanceStatus') }}
+              </h2>
             </div>
             <span class="status" :class="[summary.instance.status]">
               {{ statusText(summary.instance.status) }}
@@ -200,24 +241,35 @@ useVisibilityPolling(refresh, 15_000);
           </div>
           <dl class="instance-grid">
             <div>
-              <dt>运行状态</dt>
-              <dd>{{ summary.instance.state || '不可用' }}</dd>
+              <dt>{{ $t('page.analytics.runningStatus') }}</dt>
+              <dd>
+                {{ summary.instance.state || $t('page.analytics.unavailable') }}
+              </dd>
             </div>
             <div>
-              <dt>采集范围</dt>
-              <dd>{{ summary.instance.scope || '不可用' }}</dd>
+              <dt>{{ $t('page.analytics.scope') }}</dt>
+              <dd>
+                {{ summary.instance.scope || $t('page.analytics.unavailable') }}
+              </dd>
             </div>
             <div>
-              <dt>版本</dt>
-              <dd>{{ summary.instance.version || '不可用' }}</dd>
+              <dt>{{ $t('page.analytics.version') }}</dt>
+              <dd>
+                {{
+                  summary.instance.version || $t('page.analytics.unavailable')
+                }}
+              </dd>
             </div>
             <div>
-              <dt>运行时长</dt>
+              <dt>{{ $t('page.monitor.uptime') }}</dt>
               <dd>{{ formatDuration(summary.instance.uptimeSeconds) }}</dd>
             </div>
           </dl>
         </div>
-        <div class="health-list" aria-label="依赖健康状态">
+        <div
+          class="health-list"
+          :aria-label="$t('page.analytics.dependencyHealth')"
+        >
           <div
             v-for="health in [
               {
@@ -245,10 +297,14 @@ useVisibilityPolling(refresh, 15_000);
       <section class="counts-section" aria-labelledby="counts-title">
         <div class="section-heading">
           <div>
-            <p class="eyebrow">TENANT COUNTS</p>
-            <h2 id="counts-title">业务数据</h2>
+            <p class="eyebrow">{{ $t('page.analytics.tenantCounts') }}</p>
+            <h2 id="counts-title">{{ $t('page.analytics.businessData') }}</h2>
           </div>
-          <span class="status" :class="[summary.status]">整体{{ statusText(summary.status) }}</span>
+          <span class="status" :class="[summary.status]">{{
+            $t('page.analytics.overallStatus', {
+              status: statusText(summary.status),
+            })
+          }}</span>
         </div>
         <div class="count-grid">
           <article
@@ -269,29 +325,35 @@ useVisibilityPolling(refresh, 15_000);
       <section class="sessions-panel" aria-labelledby="sessions-title">
         <div class="section-heading">
           <div>
-            <p class="eyebrow">AUTH SESSIONS</p>
-            <h2 id="sessions-title">设备会话</h2>
+            <p class="eyebrow">{{ $t('page.analytics.deviceSessions') }}</p>
+            <h2 id="sessions-title">
+              {{ $t('page.analytics.deviceSessions') }}
+            </h2>
           </div>
-          <span class="updated">当前浏览器采样</span>
+          <span class="updated">{{ $t('page.analytics.browserSample') }}</span>
         </div>
         <div class="session-summary">
           <div>
-            <span>全部</span><strong>{{ sessions.length }}</strong>
+            <span>{{ $t('page.analytics.all') }}</span
+            ><strong>{{ sessions.length }}</strong>
           </div>
           <div>
-            <span>活动</span><strong>{{ activeSessions }}</strong>
+            <span>{{ $t('page.analytics.active') }}</span
+            ><strong>{{ activeSessions }}</strong>
           </div>
           <div>
-            <span>24h 内过期</span><strong>{{ expiringSessions }}</strong>
+            <span>{{ $t('page.analytics.expiring24h') }}</span
+            ><strong>{{ expiringSessions }}</strong>
           </div>
           <div>
-            <span>已撤销</span><strong>{{ revokedSessions }}</strong>
+            <span>{{ $t('page.analytics.revoked') }}</span
+            ><strong>{{ revokedSessions }}</strong>
           </div>
         </div>
         <div
           v-if="sessions.length"
           class="trend-list"
-          aria-label="按最近活动时间分组的会话趋势"
+          :aria-label="$t('page.analytics.sessionTrend')"
         >
           <div
             v-for="bucket in sessionTrend"
@@ -305,26 +367,29 @@ useVisibilityPolling(refresh, 15_000);
             <strong>{{ bucket.count }}</strong>
           </div>
         </div>
-        <p v-else class="empty-state">当前没有设备会话数据。</p>
+        <p v-else class="empty-state">
+          {{ $t('page.analytics.emptySessions') }}
+        </p>
       </section>
 
       <section class="monitor-entry" aria-labelledby="monitor-entry-title">
         <div>
-          <p class="eyebrow">DEEP DIAGNOSTICS</p>
-          <h2 id="monitor-entry-title">需要更完整的资源字段？</h2>
-          <p>
-            资源监控按能力展示 CPU、内存、文件系统、Go runtime
-            与连接池，不在概览中扩大权限。
-          </p>
+          <p class="eyebrow">{{ $t('page.monitor.eyebrow') }}</p>
+          <h2 id="monitor-entry-title">
+            {{ $t('page.analytics.monitorQuestion') }}
+          </h2>
+          <p>{{ $t('page.analytics.monitorDescription') }}</p>
         </div>
         <RouterLink
           v-if="canReadMonitor"
           class="monitor-link"
           to="/system/monitor"
-          >
-进入资源监控
-</RouterLink>
-        <span v-else class="permission-note">需要 ops:monitor:read 权限</span>
+        >
+          {{ $t('page.analytics.goToMonitor') }}
+        </RouterLink>
+        <span v-else class="permission-note">{{
+          $t('page.analytics.monitorPermission')
+        }}</span>
       </section>
     </template>
   </ManagementPage>

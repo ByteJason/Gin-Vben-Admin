@@ -1,5 +1,6 @@
 <script lang="ts" setup>
 import { Page } from '@vben/common-ui';
+import { $t } from '@vben/locales';
 
 import { NButton, NCard, useMessage } from 'naive-ui';
 
@@ -11,19 +12,21 @@ const [Form, formApi] = useVbenForm({
   layout: 'vertical',
   wrapperClass: 'grid-cols-1',
   handleSubmit: (values) => {
-    message.success(`提交成功：${JSON.stringify(values)}`);
+    message.success(
+      $t('demos.submittedWithData', { data: JSON.stringify(values) }),
+    );
   },
   schema: [
     {
       component: 'Input',
       fieldName: 'projectName',
-      label: '项目名称',
+      label: $t('demos.projectName'),
       rules: 'required',
     },
     {
       component: 'VbenFormFieldArray',
       fieldName: 'members',
-      label: '项目成员',
+      label: $t('demos.projectMembers'),
       // 初始化为空数组，供数组编辑器使用
       defaultValue: [],
       componentProps: {
@@ -41,40 +44,40 @@ const [Form, formApi] = useVbenForm({
           {
             component: 'Input',
             fieldName: 'name',
-            label: '姓名',
+            label: $t('demos.memberName'),
             rules: 'required',
-            componentProps: { placeholder: '请输入姓名' },
+            componentProps: { placeholder: $t('demos.memberName') },
           },
           {
             component: 'InputNumber',
             fieldName: 'age',
-            label: '年龄',
+            label: $t('demos.memberAge'),
             componentProps: { min: 0, max: 150 },
           },
           {
             component: 'Select',
             fieldName: 'role',
-            label: '角色',
+            label: $t('demos.memberRole'),
             rules: 'selectRequired',
             componentProps: {
-              placeholder: '请选择',
+              placeholder: $t('demos.pleaseSelect'),
               options: [
-                { label: '前端', value: 'fe' },
-                { label: '后端', value: 'be' },
-                { label: '测试', value: 'qa' },
-                { label: '产品', value: 'pm' },
+                { label: $t('demos.frontend'), value: 'fe' },
+                { label: $t('demos.backend'), value: 'be' },
+                { label: $t('demos.testing'), value: 'qa' },
+                { label: $t('demos.product'), value: 'pm' },
               ],
             },
           },
           {
             component: 'DatePicker',
             fieldName: 'joinDate',
-            label: '入职日期',
+            label: $t('demos.joinDate'),
           },
           {
             component: 'Switch',
             fieldName: 'active',
-            label: '在职',
+            label: $t('demos.onDuty'),
           },
         ],
       },
@@ -86,9 +89,15 @@ function setFormValues() {
   formApi.setValues({
     projectName: 'Gin Vben Admin',
     members: [
-      { name: '张三', age: 28, role: 'fe', joinDate: Date.now(), active: true },
       {
-        name: '李四',
+        name: $t('demos.memberOne'),
+        age: 28,
+        role: 'fe',
+        joinDate: Date.now(),
+        active: true,
+      },
+      {
+        name: $t('demos.memberTwo'),
         age: 32,
         role: 'be',
         joinDate: Date.now(),
@@ -106,14 +115,20 @@ async function getFormValues() {
 
 <template>
   <Page
-    description="基于 useVbenForm 的数组编辑器（VbenFormFieldArray）：可增删行，每个单元格复用 vbenForm 注册的编辑组件，并享受逐格校验。"
-    title="数组编辑器表单"
+    :description="$t('demos.arrayFormDescription')"
+    :title="$t('demos.arrayForm')"
   >
-    <NCard title="数组编辑器">
+    <NCard :title="$t('demos.arrayEditor')">
       <template #header-extra>
-        <NButton class="mr-2" @click="setFormValues">设置表单值</NButton>
-        <NButton class="mr-2" @click="getFormValues">获取表单值</NButton>
-        <NButton type="primary" @click="formApi.submit()"> 提交校验 </NButton>
+        <NButton class="mr-2" @click="setFormValues">{{
+          $t('demos.setFormValues')
+        }}</NButton>
+        <NButton class="mr-2" @click="getFormValues">{{
+          $t('demos.getFormValues')
+        }}</NButton>
+        <NButton type="primary" @click="formApi.submit()">{{
+          $t('demos.submitValidate')
+        }}</NButton>
       </template>
       <Form />
     </NCard>

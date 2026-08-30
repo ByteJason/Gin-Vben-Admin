@@ -5,6 +5,7 @@ import type { FormCommonConfig, FormSchema } from '../types';
 import { computed } from 'vue';
 
 import { Plus, X } from '@vben-core/icons';
+import { useSimpleLocale } from '@vben-core/composables';
 import {
   VbenButton,
   VbenIconButton,
@@ -49,11 +50,8 @@ const props = withDefaults(
     showIndex?: boolean;
   }>(),
   {
-    actionText: '操作',
-    addButtonText: '添加一行',
     createRow: undefined,
     disabled: false,
-    emptyText: '暂无数据',
     commonConfig: () => ({}),
     globalCommonConfig: () => ({}),
     max: Number.POSITIVE_INFINITY,
@@ -65,6 +63,16 @@ const props = withDefaults(
 );
 
 const arrayPath = computed(() => props.name);
+const { $t: simpleT } = useSimpleLocale();
+const actionLabel = computed(
+  () => props.actionText ?? simpleT.value('formArray.action'),
+);
+const addButtonLabel = computed(
+  () => props.addButtonText ?? simpleT.value('formArray.add'),
+);
+const emptyLabel = computed(
+  () => props.emptyText ?? simpleT.value('formArray.empty'),
+);
 const formRenderProps = injectRenderFormProps();
 const form = formRenderProps.form;
 if (!form) {
@@ -164,7 +172,7 @@ const normalizedRowSchemas = computed(() =>
         <div
           class="text-muted-foreground px-2 py-2 text-left text-sm font-normal"
         >
-          {{ actionText }}
+          {{ actionLabel }}
         </div>
       </div>
 
@@ -215,7 +223,7 @@ const normalizedRowSchemas = computed(() =>
         v-if="arrayLength === 0"
         class="text-muted-foreground py-6 text-center text-sm"
       >
-        {{ emptyText }}
+        {{ emptyLabel }}
       </div>
     </div>
 
@@ -228,7 +236,7 @@ const normalizedRowSchemas = computed(() =>
       @click="addRow"
     >
       <Plus class="mr-1 size-4" />
-      {{ addButtonText }}
+      {{ addButtonLabel }}
     </VbenButton>
   </div>
 </template>

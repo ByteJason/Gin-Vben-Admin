@@ -59,7 +59,32 @@
     "titleTip": "Cropping Ratio {0}",
     "confirm": "Crop",
     "cancel": "Cancel cropping",
-    "errorTip": "Cropping error"
+    "errorTip": "Cropping error",
+    "imageAlt": "Original image",
+    "aspectRatioInvalid": "Invalid crop ratio. Use the format \"number:number\", for example \"16:9\".",
+    "aspectRatioParseFailed": "Crop ratio could not be parsed; width and height must be positive integers.",
+    "imageLoadTimeout": "Image loading timed out after 10 seconds",
+    "imageLoadFailed": "Image loading failed",
+    "exportFailed": "Image export failed"
+  },
+  "about": {
+    "title": "About project",
+    "description": "A modern, ready-to-use admin solution built with Vue 3, Vite, TailwindCSS, and TypeScript. It provides a disciplined codebase, rich configuration, and practical examples for medium and large projects.",
+    "basicInfo": "Basic information",
+    "productionDependencies": "Production dependencies",
+    "developmentDependencies": "Development dependencies",
+    "version": "Version",
+    "license": "Open-source license",
+    "buildTime": "Last build time",
+    "repository": "Project repository",
+    "upstreamProject": "Upstream frontend project",
+    "upstreamDocs": "Upstream frontend docs",
+    "upstreamPreview": "Upstream frontend preview"
+  },
+  "workbench": {
+    "todo": "To-do",
+    "projects": "Projects",
+    "team": "Team"
   },
   "tiptap": {
     "placeholder": "Please enter content...",

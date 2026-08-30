@@ -2,6 +2,7 @@
 import { ref } from 'vue';
 
 import { Page } from '@vben/common-ui';
+import { $t } from '@vben/locales';
 
 import {
   ElButton,
@@ -16,29 +17,27 @@ import {
 type NotificationType = 'error' | 'info' | 'success' | 'warning';
 
 function info() {
-  ElMessage.info('How many roads must a man walk down');
+  ElMessage.info($t('demos.messageInfo'));
 }
 
 function error() {
   ElMessage.error({
     duration: 2500,
-    message: 'Once upon a time you dressed so fine',
+    message: $t('demos.messageError'),
   });
 }
 
 function warning() {
-  ElMessage.warning('How many roads must a man walk down');
+  ElMessage.warning($t('demos.messageInfo'));
 }
 function success() {
-  ElMessage.success(
-    'Cause you walked hand in hand With another man in my place',
-  );
+  ElMessage.success($t('demos.messageSuccess'));
 }
 
 function notify(type: NotificationType) {
   ElNotification({
     duration: 2500,
-    message: '说点啥呢',
+    message: $t('demos.notificationMessage'),
     type,
   });
 }
@@ -57,43 +56,54 @@ const segmentedOptions = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 </script>
 
 <template>
-  <Page
-    description="支持多语言，主题功能集成切换等"
-    title="Element Plus组件使用演示"
-  >
+  <Page :description="$t('demos.description')" :title="$t('demos.elementDemo')">
     <div class="flex flex-wrap gap-5">
       <ElCard class="mb-5 w-auto">
-        <template #header> 按钮 </template>
+        <template #header>{{ $t('demos.buttons') }}</template>
         <ElSpace>
-          <ElButton text>Text</ElButton>
-          <ElButton>Default</ElButton>
-          <ElButton type="primary"> Primary </ElButton>
-          <ElButton type="info"> Info </ElButton>
-          <ElButton type="success"> Success </ElButton>
-          <ElButton type="warning"> Warning </ElButton>
-          <ElButton type="danger"> Error </ElButton>
+          <ElButton text>{{ $t('demos.text') }}</ElButton>
+          <ElButton>{{ $t('demos.default') }}</ElButton>
+          <ElButton type="primary">{{ $t('demos.primary') }}</ElButton>
+          <ElButton type="info">{{ $t('demos.info') }}</ElButton>
+          <ElButton type="success">{{ $t('demos.success') }}</ElButton>
+          <ElButton type="warning">{{ $t('demos.warning') }}</ElButton>
+          <ElButton type="danger">{{ $t('demos.error') }}</ElButton>
         </ElSpace>
       </ElCard>
       <ElCard class="mb-5 w-80">
-        <template #header> Message </template>
+        <template #header>{{ $t('demos.message') }}</template>
         <ElSpace>
-          <ElButton type="info" @click="info"> 信息 </ElButton>
-          <ElButton type="danger" @click="error"> 错误 </ElButton>
-          <ElButton type="warning" @click="warning"> 警告 </ElButton>
-          <ElButton type="success" @click="success"> 成功 </ElButton>
+          <ElButton type="info" @click="info">{{ $t('demos.info') }}</ElButton>
+          <ElButton type="danger" @click="error">{{
+            $t('demos.error')
+          }}</ElButton>
+          <ElButton type="warning" @click="warning">{{
+            $t('demos.warning')
+          }}</ElButton>
+          <ElButton type="success" @click="success">{{
+            $t('demos.success')
+          }}</ElButton>
         </ElSpace>
       </ElCard>
       <ElCard class="mb-5 w-80">
-        <template #header> Notification </template>
+        <template #header>{{ $t('demos.notification') }}</template>
         <ElSpace>
-          <ElButton type="info" @click="notify('info')"> 信息 </ElButton>
-          <ElButton type="danger" @click="notify('error')"> 错误 </ElButton>
-          <ElButton type="warning" @click="notify('warning')"> 警告 </ElButton>
-          <ElButton type="success" @click="notify('success')"> 成功 </ElButton>
+          <ElButton type="info" @click="notify('info')">{{
+            $t('demos.info')
+          }}</ElButton>
+          <ElButton type="danger" @click="notify('error')">{{
+            $t('demos.error')
+          }}</ElButton>
+          <ElButton type="warning" @click="notify('warning')">{{
+            $t('demos.warning')
+          }}</ElButton>
+          <ElButton type="success" @click="notify('success')">{{
+            $t('demos.success')
+          }}</ElButton>
         </ElSpace>
       </ElCard>
       <ElCard class="mb-5 w-auto">
-        <template #header> Segmented </template>
+        <template #header>{{ $t('demos.segmented') }}</template>
         <ElSegmented
           v-model="segmentedValue"
           :options="segmentedOptions"
@@ -101,13 +111,15 @@ const segmentedOptions = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
         />
       </ElCard>
       <ElCard class="mb-5 w-80">
-        <template #header> V-Loading </template>
-        <div class="flex-center size-72" v-loading="true">一些演示的内容</div>
+        <template #header>{{ $t('demos.vLoading') }}</template>
+        <div class="flex-center size-72" v-loading="true">
+          {{ $t('demos.loadingContent') }}
+        </div>
       </ElCard>
       <ElCard class="mb-5 w-80">
         <ElTable :data="tableData" stripe>
-          <ElTable.TableColumn label="测试列1" prop="prop1" />
-          <ElTable.TableColumn label="测试列2" prop="prop2" />
+          <ElTable.TableColumn :label="$t('demos.testColumn1')" prop="prop1" />
+          <ElTable.TableColumn :label="$t('demos.testColumn2')" prop="prop2" />
         </ElTable>
       </ElCard>
     </div>

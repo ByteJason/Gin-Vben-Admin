@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { AboutProps, DescriptionItem } from './about';
 
-import { h } from 'vue';
+import { computed, h } from 'vue';
 
 import {
   GIN_VBEN_ADMIN_GITHUB_URL,
@@ -11,6 +11,7 @@ import {
 } from '@vben/constants';
 
 import { VbenRenderContent } from '@vben-core/shadcn-ui';
+import { $t } from '@vben/locales';
 
 import { Page } from '../../components';
 
@@ -20,11 +21,10 @@ defineOptions({
   name: 'AboutUI',
 });
 
-withDefaults(defineProps<Props>(), {
-  description:
-    '是一个现代化开箱即用的中后台解决方案，采用最新的技术栈，包括 Vue 3.0、Vite、TailwindCSS 和 TypeScript 等前沿技术，代码规范严谨，提供丰富的配置选项，旨在为中大型项目的开发提供现成的开箱即用解决方案及丰富的示例，同时，它也是学习和深入前端技术的一个极佳示例。',
+const props = withDefaults(defineProps<Props>(), {
+  description: '',
   name: 'Gin Vben Admin',
-  title: '关于项目',
+  title: '',
 });
 
 declare global {
@@ -59,36 +59,32 @@ const {
   // vite inject-metadata 插件注入的全局变量
 } = __VBEN_ADMIN_METADATA__ || {};
 
-const projectDescriptionItems: DescriptionItem[] = [
-  {
-    content: version,
-    title: '版本号',
-  },
-  {
-    content: license,
-    title: '开源许可协议',
-  },
-  {
-    content: buildTime,
-    title: '最后构建时间',
-  },
+const pageTitle = computed(() => props.title || String($t('ui.about.title')));
+const pageDescription = computed(
+  () => props.description || String($t('ui.about.description')),
+);
+
+const projectDescriptionItems = computed<DescriptionItem[]>(() => [
+  { content: version, title: String($t('ui.about.version')) },
+  { content: license, title: String($t('ui.about.license')) },
+  { content: buildTime, title: String($t('ui.about.buildTime')) },
   {
     content: renderLink(GIN_VBEN_ADMIN_GITHUB_URL, 'Gin-Vben-Admin'),
-    title: '项目仓库',
+    title: String($t('ui.about.repository')),
   },
   {
     content: renderLink(VBEN_GITHUB_URL, 'Vue Vben Admin'),
-    title: '上游前端项目',
+    title: String($t('ui.about.upstreamProject')),
   },
   {
     content: renderLink(VBEN_DOC_URL, 'Vue Vben Admin Docs'),
-    title: '上游前端文档',
+    title: String($t('ui.about.upstreamDocs')),
   },
   {
     content: renderLink(VBEN_PREVIEW_URL, 'Vue Vben Admin Preview'),
-    title: '上游前端预览',
+    title: String($t('ui.about.upstreamPreview')),
   },
-];
+]);
 
 const dependenciesItems = Object.keys(dependencies).map((key) => ({
   content: dependencies[key],
@@ -102,18 +98,18 @@ const devDependenciesItems = Object.keys(devDependencies).map((key) => ({
 </script>
 
 <template>
-  <Page :title="title">
+  <Page :title="pageTitle">
     <template #description>
       <p class="mt-3 text-sm/6 text-foreground">
         <a :href="GIN_VBEN_ADMIN_GITHUB_URL" class="vben-link" target="_blank">
           {{ name }}
         </a>
-        {{ description }}
+        {{ pageDescription }}
       </p>
     </template>
     <div class="card-box p-5">
       <div>
-        <h5 class="text-lg text-foreground">基本信息</h5>
+        <h5 class="text-lg text-foreground">{{ $t('ui.about.basicInfo') }}</h5>
       </div>
       <div class="mt-4">
         <dl class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
@@ -133,7 +129,9 @@ const devDependenciesItems = Object.keys(devDependencies).map((key) => ({
 
     <div class="card-box mt-6 p-5">
       <div>
-        <h5 class="text-lg text-foreground">生产环境依赖</h5>
+        <h5 class="text-lg text-foreground">
+          {{ $t('ui.about.productionDependencies') }}
+        </h5>
       </div>
       <div class="mt-4">
         <dl class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
@@ -152,7 +150,9 @@ const devDependenciesItems = Object.keys(devDependencies).map((key) => ({
     </div>
     <div class="card-box mt-6 p-5">
       <div>
-        <h5 class="text-lg text-foreground">开发环境依赖</h5>
+        <h5 class="text-lg text-foreground">
+          {{ $t('ui.about.developmentDependencies') }}
+        </h5>
       </div>
       <div class="mt-4">
         <dl class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
