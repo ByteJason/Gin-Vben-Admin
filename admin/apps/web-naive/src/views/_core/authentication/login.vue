@@ -60,8 +60,14 @@ const formSchema = computed((): VbenFormSchema[] => {
         request: getCaptchaApi,
       },
       fieldName: 'captcha',
-      // The server decides whether the challenge is required (risk/default-off policy).
-      rules: z.string().optional(),
+      // A displayed challenge is required; failed/disabled challenge loading keeps
+      // the server-driven risk policy optional.
+      rules: captchaId.value
+        ? z
+            .string()
+            .trim()
+            .min(1, { message: $t('authentication.captchaTip') })
+        : z.string().optional(),
     },
   ];
 });

@@ -126,6 +126,21 @@
       "captcha": "Captcha",
       "i18n": "Bilingual",
       "other": "Other"
+    },
+    "formDescription": "Edit settings in separated category groups and save each changed value independently.",
+    "defaultItemDescription": "Set the effective value for this configuration item.",
+    "sourceLabel": "Source",
+    "sensitive": "Sensitive",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "categoryDescription": {
+      "basic": "Site identity and basic runtime options.",
+      "security": "Token, session, and cookie security policies.",
+      "mail": "Mail transport, sender identity, and connection options.",
+      "file": "File storage, upload limits, and object-storage options.",
+      "captcha": "Image captcha, risk threshold, and challenge lifetime.",
+      "i18n": "Default locale, supported locales, and switching mode.",
+      "other": "Observability and other extension settings."
     }
   },
   "dictionary": {
@@ -783,7 +798,6 @@
     "queued": "Queued",
     "scheduled": "Scheduled",
     "failed": "Failed",
-
     "goVersion": "Go version",
     "os": "Operating system",
     "architecture": "Architecture",

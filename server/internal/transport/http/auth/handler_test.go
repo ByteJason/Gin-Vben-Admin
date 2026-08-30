@@ -457,6 +457,35 @@ func TestLoginActivatesCaptchaAfterRiskFailuresAndResetsOnSuccess(t *testing.T) 
 	}
 }
 
+func TestLoginRejectsIncompletePresentedCaptchaBelowRiskThreshold(t *testing.T) {
+	cfg := testAuthConfig()
+	cfg.CaptchaEnabled = false
+	cfg.CaptchaRiskThreshold = 3
+	service := &fakeAuthService{loginPair: authdomain.TokenPair{AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 60}}
+	provider := appauth.NewMemoryCaptchaProvider(time.Minute)
+	challenge, err := provider.Issue(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewHandler(service, cfg)
+	handler.SetCaptchaProvider(provider)
+	handler.SetCaptchaRiskStore(appauth.NewMemoryCaptchaRiskStore())
+	r := gin.New()
+	RegisterRoutes(r, handler)
+
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/v1/auth/login", strings.NewReader(`{"identifier":"alice","password":"secret","captchaId":"`+challenge.ID+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(res, req)
+
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("incomplete displayed captcha status=%d body=%s", res.Code, res.Body.String())
+	}
+	if service.loginIdentifier != "" {
+		t.Fatalf("incomplete displayed captcha reached login service: %q", service.loginIdentifier)
+	}
+}
+
 func TestCaptchaEnabledFailsClosedWhenProviderIsUnavailable(t *testing.T) {
 	cfg := testAuthConfig()
 	cfg.CaptchaEnabled = true

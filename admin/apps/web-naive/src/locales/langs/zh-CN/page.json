@@ -126,6 +126,21 @@
       "captcha": "验证码",
       "i18n": "双语",
       "other": "其他"
+    },
+    "formDescription": "按分类分组编辑配置；修改后单独保存，避免不同配置相互干扰。",
+    "defaultItemDescription": "设置该配置项的生效值。",
+    "sourceLabel": "来源",
+    "sensitive": "敏感值",
+    "enabled": "已启用",
+    "disabled": "已停用",
+    "categoryDescription": {
+      "basic": "站点名称与基础运行参数。",
+      "security": "令牌、会话与 Cookie 安全策略。",
+      "mail": "邮件服务连接、发件身份与传输策略。",
+      "file": "文件存储、上传限制与对象存储参数。",
+      "captcha": "图片验证码、风险阈值与挑战有效期。",
+      "i18n": "默认语言、可用语言与切换模式。",
+      "other": "观测与其他扩展配置。"
     }
   },
   "dictionary": {
@@ -783,7 +798,6 @@
     "queued": "排队中",
     "scheduled": "已计划",
     "failed": "失败",
-
     "goVersion": "Go 版本",
     "os": "操作系统",
     "architecture": "架构",

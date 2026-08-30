@@ -1,3 +1,4 @@
+export * from './auth-redirect';
 export * from './find-menu-by-path';
 export * from './generate-menus';
 export * from './generate-routes-backend';

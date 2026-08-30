@@ -196,6 +196,13 @@ func (h *Handler) login(c *gin.Context) {
 		response.Error(c, http.StatusServiceUnavailable, 40001, "dependency unavailable")
 		return
 	}
+	// Once a client presents either half of an issued image challenge, treat
+	// the challenge as required even when the account is still below the risk
+	// threshold. This keeps the rendered login form and the HTTP boundary in
+	// agreement and prevents a captchaId-only request from bypassing verify.
+	if strings.TrimSpace(request.CaptchaID) != "" || strings.TrimSpace(request.Captcha) != "" {
+		required = true
+	}
 	if !h.verifyCaptcha(c, ctx, request, required) {
 		return
 	}

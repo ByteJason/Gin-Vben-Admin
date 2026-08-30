@@ -31,7 +31,11 @@ const categories: Array<'all' | SettingCategory> = [
   'file',
   'captcha',
   'i18n',
+  'other',
 ];
+const categoryOrder = categories.filter(
+  (category): category is SettingCategory => category !== 'all',
+);
 const definitions = ref<SettingDefinition[]>([]);
 const values = reactive<Record<string, SettingData>>({});
 const drafts = reactive<Record<string, string>>({});
@@ -47,11 +51,24 @@ const history = ref<SettingData[]>([]);
 const historyLoading = ref(false);
 const historyError = ref('');
 
-const visibleDefinitions = computed(() =>
-  definitions.value.filter(
-    (definition) =>
-      selectedCategory.value === 'all' ||
-      definition.category === selectedCategory.value,
+const groupedDefinitions = computed(() => {
+  const visibleCategories =
+    selectedCategory.value === 'all' ? categoryOrder : [selectedCategory.value];
+
+  return visibleCategories
+    .map((category) => ({
+      category,
+      items: definitions.value.filter(
+        (definition) => definition.category === category,
+      ),
+    }))
+    .filter((group) => group.items.length > 0);
+});
+
+const visibleCount = computed(() =>
+  groupedDefinitions.value.reduce(
+    (total, group) => total + group.items.length,
+    0,
   ),
 );
 
@@ -59,31 +76,81 @@ function categoryLabel(category: 'all' | SettingCategory) {
   return $t(`page.settings.category.${category}`);
 }
 
+function categoryDescription(category: SettingCategory) {
+  return $t(`page.settings.categoryDescription.${category}`);
+}
+
 function sourceLabel(source: string) {
   return $t(`page.settings.source.${source}`);
+}
+
+function hasDraft(definition: SettingDefinition) {
+  return Object.prototype.hasOwnProperty.call(drafts, definition.key);
+}
+
+function decodeValue(raw: string | undefined, definition: SettingDefinition) {
+  if (raw === undefined || definition.sensitive) return '';
+  try {
+    const parsed = JSON.parse(raw);
+    if (definition.kind === 'json') return JSON.stringify(parsed, null, 2);
+    if (parsed === null || parsed === undefined) return '';
+    return String(parsed);
+  } catch {
+    return raw;
+  }
 }
 
 function displayDraft(
   setting: SettingData | undefined,
   definition: SettingDefinition,
 ) {
-  if (!setting) return '';
-  if (drafts[definition.key] !== undefined) return drafts[definition.key];
-  if (definition.sensitive) return '';
-  return setting.value;
+  if (hasDraft(definition)) return drafts[definition.key] ?? '';
+  return decodeValue(setting?.value, definition);
+}
+
+function placeholderValue(definition: SettingDefinition) {
+  if (definition.sensitive) return '••••••';
+  return decodeValue(definition.default, definition);
+}
+
+function booleanValue(definition: SettingDefinition) {
+  return displayDraft(values[definition.key], definition) === 'true';
+}
+
+function updateDraft(definition: SettingDefinition, value: string) {
+  drafts[definition.key] = value;
+}
+
+function toggleBoolean(definition: SettingDefinition) {
+  if (!canManage.value || savingKey.value === definition.key) return;
+  updateDraft(definition, booleanValue(definition) ? 'false' : 'true');
+}
+
+function fieldId(definition: SettingDefinition) {
+  return `setting-${definition.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
 }
 
 function parseDraft(definition: SettingDefinition): unknown {
-  const draft = (drafts[definition.key] ?? '').trim();
-  if (definition.sensitive && draft === '') return undefined;
+  if (!hasDraft(definition)) return undefined;
+  const draft = drafts[definition.key] ?? '';
+  if (definition.sensitive && draft.trim() === '') return undefined;
   if (definition.kind === 'string' || definition.kind === 'secret') {
     return draft;
   }
   try {
-    return JSON.parse(draft);
+    return JSON.parse(draft.trim());
   } catch {
     throw new Error(String($t('page.settings.invalidValue')));
   }
+}
+
+function saveDisabled(definition: SettingDefinition) {
+  return (
+    !canManage.value ||
+    savingKey.value === definition.key ||
+    !hasDraft(definition) ||
+    (definition.sensitive && !(drafts[definition.key] ?? '').trim())
+  );
 }
 
 async function focusError() {
@@ -113,7 +180,7 @@ async function load() {
 }
 
 async function save(definition: SettingDefinition) {
-  if (!canManage.value) return;
+  if (saveDisabled(definition)) return;
   const current = values[definition.key];
   if (!current) return;
   error.value = '';
@@ -133,7 +200,7 @@ async function save(definition: SettingDefinition) {
       expectedVersion: current.version,
       value,
     });
-    drafts[definition.key] = '';
+    delete drafts[definition.key];
     message.value = String($t('page.settings.saved'));
   } catch {
     error.value = String($t('page.settings.saveError'));
@@ -149,8 +216,7 @@ async function testConnection(definition: SettingDefinition) {
   error.value = '';
   message.value = '';
   try {
-    let value: unknown;
-    if (drafts[definition.key]?.trim()) value = parseDraft(definition);
+    const value = hasDraft(definition) ? parseDraft(definition) : undefined;
     const result = await testSettingConnectionApi(definition.key, value);
     message.value = `${String($t('page.settings.connectionSuccess'))} (${result.requestId})`;
   } catch {
@@ -184,6 +250,7 @@ async function rollback(item: SettingData) {
       expectedVersion: current.version,
       version: item.version,
     });
+    delete drafts[historyKey.value];
     message.value = String($t('page.settings.rollbackSuccess'));
     const definition = definitions.value.find(
       (candidate) => candidate.key === historyKey.value,
@@ -234,6 +301,7 @@ onMounted(load);
         v-for="category in categories"
         :key="category"
         :aria-pressed="selectedCategory === category"
+        class="tab-button"
         type="button"
         @click="selectedCategory = category"
       >
@@ -241,75 +309,176 @@ onMounted(load);
       </button>
     </nav>
 
-    <section class="settings-card" aria-labelledby="settings-table-title">
-      <div class="table-heading">
-        <h2 id="settings-table-title">{{ $t('page.settings.schema') }}</h2>
-        <span class="result-count">{{ visibleDefinitions.length }}</span>
+    <section class="settings-summary" aria-live="polite">
+      <div>
+        <strong>{{ categoryLabel(selectedCategory) }}</strong>
+        <span>{{ $t('page.settings.formDescription') }}</span>
       </div>
-      <div class="table-wrap">
-        <table>
-          <caption class="sr-only">
-            {{
-              $t('page.settings.tableLabel')
-            }}
-          </caption>
-          <thead>
-            <tr>
-              <th scope="col">{{ $t('page.settings.key') }}</th>
-              <th scope="col">{{ $t('page.settings.value') }}</th>
-              <th scope="col">{{ $t('page.settings.source') }}</th>
-              <th scope="col">{{ $t('page.settings.version') }}</th>
-              <th scope="col">{{ $t('page.settings.actions') }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-if="loading">
-              <td class="table-state" colspan="5">
-                {{ $t('page.settings.loading') }}
-              </td>
-            </tr>
-            <tr v-else-if="visibleDefinitions.length === 0">
-              <td class="table-state" colspan="5">
-                {{ $t('page.settings.empty') }}
-              </td>
-            </tr>
-            <tr
-              v-for="definition in visibleDefinitions"
-              v-else
-              :key="definition.key"
-            >
-              <th scope="row">
-                <span class="primary-text">{{ definition.key }}</span>
-                <small>{{ categoryLabel(definition.category) }}</small>
-              </th>
-              <td>
-                <input
-                  :aria-label="`${definition.key} ${$t('page.settings.value')}`"
-                  :disabled="!canManage || savingKey === definition.key"
-                  :placeholder="
-                    definition.sensitive ? '••••••' : definition.default
-                  "
-                  :value="displayDraft(values[definition.key], definition)"
-                  :type="definition.sensitive ? 'password' : 'text'"
-                  @input="
-                    drafts[definition.key] = (
-                      $event.target as HTMLInputElement
-                    ).value
-                  "
-                />
-              </td>
-              <td>
-                <span class="source-pill">{{
-                  sourceLabel(values[definition.key]?.source ?? 'default')
-                }}</span>
-              </td>
-              <td>{{ values[definition.key]?.version ?? 0 }}</td>
-              <td class="actions-cell">
+      <span class="result-count">{{ visibleCount }}</span>
+    </section>
+
+    <div v-if="loading" class="page-state">
+      {{ $t('page.settings.loading') }}
+    </div>
+    <div v-else-if="groupedDefinitions.length === 0" class="page-state">
+      {{ $t('page.settings.empty') }}
+    </div>
+    <div v-else class="settings-groups">
+      <section
+        v-for="group in groupedDefinitions"
+        :key="group.category"
+        class="category-panel"
+        :aria-labelledby="`settings-category-${group.category}`"
+      >
+        <header class="category-heading">
+          <div>
+            <h2 :id="`settings-category-${group.category}`">
+              {{ categoryLabel(group.category) }}
+            </h2>
+            <p>{{ categoryDescription(group.category) }}</p>
+          </div>
+          <span class="category-count">{{ group.items.length }}</span>
+        </header>
+
+        <div class="settings-form">
+          <article
+            v-for="definition in group.items"
+            :key="definition.key"
+            class="setting-item"
+          >
+            <div class="setting-copy">
+              <div class="setting-tags">
+                <code class="key-tag">{{ definition.key }}</code>
+                <span v-if="definition.restartRequired" class="policy-tag">
+                  {{ $t('page.settings.restartRequired') }}
+                </span>
+                <span v-if="definition.sensitive" class="policy-tag sensitive">
+                  {{ $t('page.settings.sensitive') }}
+                </span>
+              </div>
+              <p class="setting-description">
+                {{
+                  definition.description ||
+                  $t('page.settings.defaultItemDescription')
+                }}
+              </p>
+              <dl class="setting-meta">
+                <div>
+                  <dt>{{ $t('page.settings.sourceLabel') }}</dt>
+                  <dd>
+                    <span class="source-pill">
+                      {{
+                        sourceLabel(values[definition.key]?.source ?? 'default')
+                      }}
+                    </span>
+                  </dd>
+                </div>
+                <div>
+                  <dt>{{ $t('page.settings.version') }}</dt>
+                  <dd>v{{ values[definition.key]?.version ?? 0 }}</dd>
+                </div>
+                <div v-if="definition.envKey">
+                  <dt>ENV</dt>
+                  <dd class="mono">{{ definition.envKey }}</dd>
+                </div>
+              </dl>
+            </div>
+
+            <div class="setting-editor">
+              <label
+                v-if="definition.kind !== 'bool'"
+                class="field-label"
+                :for="fieldId(definition)"
+              >
+                {{ $t('page.settings.value') }}
+              </label>
+
+              <button
+                v-if="definition.kind === 'bool'"
+                :aria-checked="booleanValue(definition)"
+                :aria-label="`${definition.key} ${$t('page.settings.value')}`"
+                :disabled="!canManage || savingKey === definition.key"
+                class="switch-control"
+                role="switch"
+                type="button"
+                @click="toggleBoolean(definition)"
+              >
+                <span class="switch-track" aria-hidden="true">
+                  <span class="switch-knob"></span>
+                </span>
+                <span>
+                  {{
+                    booleanValue(definition)
+                      ? $t('page.settings.enabled')
+                      : $t('page.settings.disabled')
+                  }}
+                </span>
+              </button>
+
+              <select
+                v-else-if="definition.allowed?.length"
+                :id="fieldId(definition)"
+                :disabled="!canManage || savingKey === definition.key"
+                :value="displayDraft(values[definition.key], definition)"
+                @change="
+                  updateDraft(
+                    definition,
+                    ($event.target as HTMLSelectElement).value,
+                  )
+                "
+              >
+                <option
+                  v-for="option in definition.allowed"
+                  :key="option"
+                  :value="option"
+                >
+                  {{ option }}
+                </option>
+              </select>
+
+              <textarea
+                v-else-if="definition.kind === 'json'"
+                :id="fieldId(definition)"
+                :disabled="!canManage || savingKey === definition.key"
+                :placeholder="placeholderValue(definition)"
+                :value="displayDraft(values[definition.key], definition)"
+                rows="4"
+                spellcheck="false"
+                @input="
+                  updateDraft(
+                    definition,
+                    ($event.target as HTMLTextAreaElement).value,
+                  )
+                "
+              ></textarea>
+
+              <input
+                v-else
+                :id="fieldId(definition)"
+                :disabled="!canManage || savingKey === definition.key"
+                :placeholder="placeholderValue(definition)"
+                :step="definition.kind === 'number' ? 'any' : undefined"
+                :type="
+                  definition.sensitive
+                    ? 'password'
+                    : definition.kind === 'number'
+                      ? 'number'
+                      : 'text'
+                "
+                :value="displayDraft(values[definition.key], definition)"
+                @input="
+                  updateDraft(
+                    definition,
+                    ($event.target as HTMLInputElement).value,
+                  )
+                "
+              />
+
+              <div class="actions-cell">
                 <button
                   v-if="canManage"
-                  :disabled="
-                    definition.sensitive && !drafts[definition.key]?.trim()
-                  "
+                  :disabled="saveDisabled(definition)"
+                  class="action-button primary"
                   type="button"
                   @click="save(definition)"
                 >
@@ -322,6 +491,7 @@ onMounted(load);
                 <button
                   v-if="canManage"
                   :disabled="testingKey === definition.key"
+                  class="action-button"
                   type="button"
                   @click="testConnection(definition)"
                 >
@@ -331,33 +501,38 @@ onMounted(load);
                       : $t('page.settings.connectionTest')
                   }}
                 </button>
-                <button type="button" @click="openHistory(definition)">
+                <button
+                  class="action-button subtle"
+                  type="button"
+                  @click="openHistory(definition)"
+                >
                   {{ $t('page.settings.history') }}
                 </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+    </div>
 
     <aside
       v-if="historyKey"
       class="history-card"
       aria-labelledby="settings-history-title"
     >
-      <div class="table-heading">
-        <h2 id="settings-history-title">
-          {{ $t('page.settings.history') }}: {{ historyKey }}
-        </h2>
-        <button type="button" @click="historyKey = ''">
+      <div class="history-heading">
+        <div>
+          <span class="history-eyebrow">{{ $t('page.settings.history') }}</span>
+          <h2 id="settings-history-title">{{ historyKey }}</h2>
+        </div>
+        <button class="action-button" type="button" @click="historyKey = ''">
           {{ $t('page.settings.close') }}
         </button>
       </div>
       <p v-if="historyError" class="feedback feedback-error">
         {{ historyError }}
       </p>
-      <p v-else-if="historyLoading" class="sr-status" aria-live="polite">
+      <p v-else-if="historyLoading" class="history-state" aria-live="polite">
         {{ $t('page.settings.historyLoading') }}
       </p>
       <ul v-else class="history-list">
@@ -366,6 +541,7 @@ onMounted(load);
           <button
             v-if="canManage"
             :disabled="item.version === values[historyKey]?.version"
+            class="action-button"
             type="button"
             @click="rollback(item)"
           >
@@ -383,7 +559,9 @@ onMounted(load);
 }
 
 .page-heading,
-.table-heading {
+.category-heading,
+.history-heading,
+.settings-summary {
   display: flex;
   gap: 20px;
   align-items: center;
@@ -395,138 +573,350 @@ onMounted(load);
   margin-bottom: 20px;
 }
 
-.eyebrow {
+.eyebrow,
+.history-eyebrow {
   margin: 0;
-  font-size: 0.75rem;
-  font-weight: 700;
+  font-size: 0.72rem;
+  font-weight: 750;
   color: hsl(var(--primary));
   text-transform: uppercase;
   letter-spacing: 0.12em;
 }
 
 h1,
-h2 {
-  margin: 4px 0 8px;
+h2,
+p {
+  margin-top: 0;
 }
 
 h1 {
+  margin-bottom: 8px;
   font-size: clamp(1.5rem, 2vw, 2rem);
+}
+
+h2 {
+  margin-bottom: 6px;
+  font-size: 1rem;
 }
 
 .description {
   max-width: 860px;
-  margin: 0;
+  margin-bottom: 0;
   line-height: 1.6;
   color: hsl(var(--muted-foreground));
 }
 
 .scope-chip,
-.source-pill {
+.source-pill,
+.policy-tag,
+.category-count,
+.result-count {
   display: inline-flex;
   align-items: center;
-  min-height: 28px;
-  padding: 4px 10px;
-  font-size: 0.78rem;
+  justify-content: center;
+  min-height: 26px;
+  padding: 3px 9px;
+  font-size: 0.75rem;
   font-weight: 650;
   color: hsl(var(--primary));
-  background: hsl(var(--primary) / 10%);
+  white-space: nowrap;
+  background: hsl(var(--primary) / 9%);
+  border: 1px solid hsl(var(--primary) / 18%);
   border-radius: 999px;
 }
 
 .category-tabs {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  gap: 24px;
+  padding: 0 2px;
   margin-bottom: 16px;
+  overflow-x: auto;
+  border-bottom: 1px solid hsl(var(--border));
 }
 
-button {
-  min-height: 40px;
-  padding: 8px 12px;
-  color: hsl(var(--foreground));
+.tab-button {
+  position: relative;
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 4px 2px 10px;
+  font-weight: 600;
+  color: hsl(var(--muted-foreground));
   cursor: pointer;
-  background: hsl(var(--background));
-  border: 1px solid hsl(var(--border));
-  border-radius: 8px;
+  background: transparent;
+  border: 0;
 }
 
-button[aria-pressed='true'],
-button.primary {
-  color: hsl(var(--primary-foreground));
+.tab-button::after {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  content: '';
+  background: transparent;
+  border-radius: 999px;
+}
+
+.tab-button[aria-pressed='true'] {
+  color: hsl(var(--primary));
+}
+
+.tab-button[aria-pressed='true']::after {
   background: hsl(var(--primary));
 }
 
-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
+.settings-summary {
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  font-size: 0.84rem;
+  background: hsl(var(--muted) / 42%);
+  border: 1px solid hsl(var(--border));
+  border-radius: 10px;
 }
 
-.settings-card,
-.history-card {
-  padding: 18px;
+.settings-summary > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: baseline;
+}
+
+.settings-summary span:not(.result-count) {
+  color: hsl(var(--muted-foreground));
+}
+
+.settings-groups {
+  display: grid;
+  gap: 20px;
+}
+
+.category-panel,
+.history-card,
+.page-state {
+  overflow: hidden;
   background: hsl(var(--card));
   border: 1px solid hsl(var(--border));
   border-radius: 12px;
   box-shadow: 0 8px 24px hsl(var(--foreground) / 4%);
 }
 
-.history-card {
-  margin-top: 16px;
-}
-
-.table-wrap {
-  overflow-x: auto;
-}
-
-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-th,
-td {
-  min-width: 120px;
-  padding: 12px 10px;
-  vertical-align: middle;
-  text-align: left;
+.category-heading {
+  padding: 16px 18px;
+  background: hsl(var(--muted) / 30%);
   border-bottom: 1px solid hsl(var(--border));
 }
 
-th {
+.category-heading p {
+  margin-bottom: 0;
   font-size: 0.82rem;
-}
-
-td {
-  font-size: 0.88rem;
-}
-
-.primary-text {
-  display: block;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-
-small {
-  display: block;
-  margin-top: 4px;
-  font-weight: 400;
   color: hsl(var(--muted-foreground));
 }
 
-input {
-  width: min(280px, 100%);
+.settings-form {
+  padding: 0 18px;
+}
+
+.setting-item {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.9fr) minmax(320px, 1.25fr);
+  gap: 28px;
+  padding: 20px 0;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.setting-item:last-child {
+  border-bottom: 0;
+}
+
+.setting-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: center;
+}
+
+.key-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 9px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.78rem;
+  font-weight: 650;
+  color: hsl(var(--primary));
+  overflow-wrap: anywhere;
+  background: hsl(var(--primary) / 8%);
+  border: 1px solid hsl(var(--primary) / 20%);
+  border-radius: 6px;
+}
+
+.policy-tag {
+  color: hsl(32deg 85% 32%);
+  background: hsl(38deg 95% 55% / 12%);
+  border-color: hsl(38deg 80% 45% / 24%);
+}
+
+.policy-tag.sensitive {
+  color: hsl(350deg 70% 40%);
+  background: hsl(350deg 75% 55% / 10%);
+  border-color: hsl(350deg 70% 45% / 20%);
+}
+
+.setting-description {
+  margin: 10px 0 12px;
+  font-size: 0.84rem;
+  line-height: 1.55;
+  color: hsl(var(--muted-foreground));
+}
+
+.setting-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin: 0;
+  font-size: 0.75rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.setting-meta div {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.setting-meta dt,
+.setting-meta dd {
+  margin: 0;
+}
+
+.setting-meta dt {
+  font-weight: 650;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
+.setting-editor {
+  align-self: center;
+  min-width: 0;
+}
+
+.field-label {
+  display: block;
+  margin-bottom: 7px;
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
   min-height: 40px;
   padding: 8px 10px;
   color: hsl(var(--foreground));
   background: hsl(var(--background));
   border: 1px solid hsl(var(--border));
   border-radius: 8px;
+  outline: none;
+}
+
+textarea {
+  min-height: 96px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  resize: vertical;
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+button:focus-visible {
+  border-color: hsl(var(--primary));
+  outline: 2px solid hsl(var(--primary) / 28%);
+  outline-offset: 2px;
+}
+
+.switch-control {
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+  min-height: 40px;
+  padding: 4px 0;
+  color: hsl(var(--foreground));
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+}
+
+.switch-track {
+  position: relative;
+  display: inline-flex;
+  width: 42px;
+  height: 24px;
+  background: hsl(var(--muted-foreground) / 28%);
+  border-radius: 999px;
+  transition: background-color 160ms ease;
+}
+
+.switch-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  background: white;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px hsl(0deg 0% 0% / 26%);
+  transition: transform 160ms ease;
+}
+
+.switch-control[aria-checked='true'] .switch-track {
+  background: hsl(var(--primary));
+}
+
+.switch-control[aria-checked='true'] .switch-knob {
+  transform: translateX(18px);
 }
 
 .actions-cell {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  min-width: 280px;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.action-button {
+  min-height: 36px;
+  padding: 6px 11px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+  cursor: pointer;
+  background: hsl(var(--background));
+  border: 1px solid hsl(var(--border));
+  border-radius: 7px;
+}
+
+.action-button.primary {
+  color: hsl(var(--primary-foreground));
+  background: hsl(var(--primary));
+  border-color: hsl(var(--primary));
+}
+
+.action-button.subtle {
+  color: hsl(var(--primary));
+  background: transparent;
+  border-color: transparent;
+}
+
+button:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .feedback {
@@ -545,21 +935,29 @@ input {
   background: hsl(142deg 70% 45% / 14%);
 }
 
-.table-state {
-  padding: 32px;
+.page-state,
+.history-state {
+  padding: 36px 20px;
   color: hsl(var(--muted-foreground));
   text-align: center;
 }
 
-.result-count {
-  color: hsl(var(--muted-foreground));
+.history-card {
+  padding: 18px;
+  margin-top: 20px;
+}
+
+.history-heading h2 {
+  margin: 4px 0 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  overflow-wrap: anywhere;
 }
 
 .history-list {
   display: grid;
   gap: 8px;
   padding: 0;
-  margin: 0;
+  margin: 14px 0 0;
   list-style: none;
 }
 
@@ -568,12 +966,11 @@ input {
   gap: 12px;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 0;
+  padding: 10px 0;
   border-bottom: 1px solid hsl(var(--border));
 }
 
-.sr-status,
-.sr-only {
+.sr-status {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -584,14 +981,41 @@ input {
   clip-path: inset(50%);
 }
 
-@media (max-width: 720px) {
+@media (max-width: 900px) {
+  .setting-item {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+}
+
+@media (max-width: 640px) {
+  .page-heading,
+  .category-heading,
+  .history-heading {
+    align-items: flex-start;
+  }
+
   .page-heading {
     flex-direction: column;
   }
 
-  th,
-  td {
-    min-width: 140px;
+  .category-tabs {
+    gap: 18px;
+  }
+
+  .settings-form,
+  .category-heading {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
+  .setting-meta,
+  .actions-cell {
+    align-items: stretch;
+  }
+
+  .actions-cell .action-button {
+    flex: 1 1 auto;
   }
 }
 
