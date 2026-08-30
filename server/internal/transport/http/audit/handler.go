@@ -21,6 +21,7 @@ func RegisterRoutes(r gin.IRouter, handler *Handler) {
 	auditGroup := r.Group("/api/admin/v1/audit")
 	registerRoutes(auditGroup.Group("/events"), handler)
 	registerRetentionRoute(auditGroup, handler)
+	registerViewRoutes(r.Group("/api/admin/v1/ops"), handler)
 }
 
 // RegisterRoutesOn mounts audit routes below an already-prefixed router
@@ -29,6 +30,20 @@ func RegisterRoutesOn(group gin.IRouter, handler *Handler) {
 	auditGroup := group.Group("/audit")
 	registerRoutes(auditGroup.Group("/events"), handler)
 	registerRetentionRoute(auditGroup, handler)
+	registerViewRoutes(group.Group("/ops"), handler)
+}
+
+// registerViewRoutes exposes the two product-facing projections while keeping
+// the shared audit query and redaction implementation as the source of truth.
+// The legacy /audit/events endpoint remains available for integrations.
+func registerViewRoutes(group gin.IRouter, handler *Handler) {
+	if handler == nil || handler.service == nil {
+		group.GET("/operation-history", disabled)
+		group.GET("/login-logs", disabled)
+		return
+	}
+	group.GET("/operation-history", handler.operationHistory)
+	group.GET("/login-logs", handler.loginLogs)
 }
 
 func registerRoutes(group gin.IRouter, handler *Handler) {
@@ -51,10 +66,25 @@ func registerRetentionRoute(group gin.IRouter, handler *Handler) {
 }
 
 func (h *Handler) query(c *gin.Context) {
+	h.queryWithCategory(c, "")
+}
+
+func (h *Handler) operationHistory(c *gin.Context) {
+	h.queryWithCategory(c, string(auditapp.CategoryOperation))
+}
+
+func (h *Handler) loginLogs(c *gin.Context) {
+	h.queryWithCategory(c, string(auditapp.CategoryLogin))
+}
+
+func (h *Handler) queryWithCategory(c *gin.Context, category string) {
 	filter, err := parseFilter(c)
 	if err != nil {
 		response.Error(c, http.StatusBadRequest, 10000, err.Error())
 		return
+	}
+	if category != "" {
+		filter.Category = auditapp.Category(category)
 	}
 	page, err := h.service.Query(c.Request.Context(), filter)
 	if err != nil {

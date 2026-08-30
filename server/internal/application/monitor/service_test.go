@@ -67,6 +67,12 @@ func (redisStatsProbe) RedisRuntimeStats(context.Context) (RedisRuntimeStats, er
 	}, nil
 }
 
+type backgroundTaskStatsProbe struct{ probeFunc }
+
+func (backgroundTaskStatsProbe) BackgroundTaskRuntimeStats(context.Context) (BackgroundTaskRuntimeStats, error) {
+	return BackgroundTaskRuntimeStats{Queued: 0, Active: 2, Scheduled: 3, Failed: 0, Available: true}, nil
+}
+
 func TestServiceIncludesSafeDependencyPoolStats(t *testing.T) {
 	scope, err := tenant.NewContext("tenant-a", "", true)
 	if err != nil {
@@ -77,7 +83,7 @@ func TestServiceIncludesSafeDependencyPoolStats(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if overview.Database.Pool == nil || *overview.Database.Pool != (DatabasePool{Open: 7, InUse: 4, Idle: 3, Max: 11, WaitCount: 5, WaitDurationMS: 1.25}) {
+	if overview.Database.Pool == nil || *overview.Database.Pool != (DatabasePool{Open: 7, InUse: 4, Active: 4, Idle: 3, Max: 11, WaitCount: 5, WaitDurationMS: 1.25}) {
 		t.Fatalf("database stats = %#v", overview.Database)
 	}
 	if overview.Database.Driver == nil || *overview.Database.Driver != "postgres" || overview.Database.Mode == nil || *overview.Database.Mode != "read_write" {
@@ -91,6 +97,53 @@ func TestServiceIncludesSafeDependencyPoolStats(t *testing.T) {
 	}
 	if overview.Redis.Mode == nil || *overview.Redis.Mode != "single" || !overview.Redis.Capabilities["mode"].Available {
 		t.Fatalf("redis mode = %#v", overview.Redis)
+	}
+}
+
+func TestServerStatusIncludesCanonicalRefreshFixtureAndRuntimeFields(t *testing.T) {
+	scope, err := tenant.NewContext("tenant-a", "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resources := resourceProbeStub{
+		cpu: HostMetric{Status: StatusOK, Cores: number(4), Load1: number(2.0), PerCoreLoad: []float64{0.2, 0.4, 0.6, 0.8}, Capabilities: map[string]Capability{
+			"cores": {Scope: MetricScopeProcess, Available: true, Source: "fixture"}, "load1": {Scope: MetricScopeHost, Available: true, Source: "fixture"}, "perCoreLoad": {Scope: MetricScopeHost, Available: true, Source: "fixture"},
+		}},
+		memory: HostMetric{Status: StatusOK, UsedBytes: number(int64(0)), TotalBytes: number(int64(1024)), Capabilities: map[string]Capability{"usedBytes": {Scope: MetricScopeProcess, Available: true, Source: "fixture"}}},
+		disk:   HostMetric{Status: StatusOK, FreeBytes: number(int64(0)), Capabilities: map[string]Capability{"freeBytes": {Scope: MetricScopeContainer, Available: true, Source: "fixture"}}},
+	}
+	now := time.Date(2026, time.August, 31, 1, 2, 3, 0, time.UTC)
+	status, err := NewService(Config{
+		Start: now.Add(-time.Minute), Clock: func() time.Time { return now }, Resources: resources,
+		Database: databaseStatsProbe{probeFunc{}}, Redis: redisStatsProbe{probeFunc{}}, BackgroundTasks: backgroundTaskStatsProbe{probeFunc{}},
+		DataSource: "fixture", RefreshInterval: 10 * time.Second,
+	}).ServerStatus(tenant.WithContext(context.Background(), scope))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.DataSource != "fixture" || !status.IsSynthetic || !status.Timestamp.Equal(now) || status.RefreshIntervalSeconds != 10 || status.RefreshIntervalMS != 10000 {
+		t.Fatalf("canonical snapshot markers = %#v", status)
+	}
+	if status.Runtime.Compiler == "" || status.Goroutines.Count == nil || *status.Goroutines.Count < 1 {
+		t.Fatalf("runtime/goroutines = %#v / %#v", status.Runtime, status.Goroutines)
+	}
+	if status.CPU.LoadPerCore == nil || *status.CPU.LoadPerCore != 0.5 || len(status.CPU.PerCoreLoad) != 4 {
+		t.Fatalf("per-core CPU fields = %#v", status.CPU)
+	}
+	if status.Database.Pool == nil || status.Database.Pool.Active != status.Database.Pool.InUse || status.Database.Pool.Idle != 3 {
+		t.Fatalf("database active/idle = %#v", status.Database)
+	}
+	if status.BackgroundTasks.Active == nil || *status.BackgroundTasks.Active != 2 || status.BackgroundTasks.Queued == nil || *status.BackgroundTasks.Queued != 0 {
+		t.Fatalf("background task counters = %#v", status.BackgroundTasks)
+	}
+	payload, marshalErr := json.Marshal(status)
+	if marshalErr != nil {
+		t.Fatal(marshalErr)
+	}
+	for _, fragment := range []string{`"dataSource":"fixture"`, `"isSynthetic":true`, `"compiler":`, `"goroutines":`, `"backgroundTasks":`, `"active":4`, `"refreshIntervalSeconds":10`} {
+		if !strings.Contains(string(payload), fragment) {
+			t.Fatalf("canonical JSON missing %s: %s", fragment, payload)
+		}
 	}
 }
 

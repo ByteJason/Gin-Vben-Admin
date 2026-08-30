@@ -36,7 +36,7 @@ func TestLoginCopiesRequestMetadataToSessionAndAudit(t *testing.T) {
 	svc.SetSessionJournal(journal)
 	svc.SetAuditSink(sink)
 	ctx := auth.WithRequestMetadata(tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a"}), auth.RequestMetadata{
-		RequestID: "req-1", DeviceID: "device-1", DeviceName: "Safari", IPAddress: "127.0.0.1", UserAgent: "UA",
+		RequestID: "req-1", DeviceID: "device-1", DeviceName: "Safari", JSFingerprint: "fp-1", IPAddress: "127.0.0.1", UserAgent: "UA",
 	})
 
 	if _, err := svc.Login(ctx, "alice", "correct-password"); err != nil {
@@ -47,5 +47,8 @@ func TestLoginCopiesRequestMetadataToSessionAndAudit(t *testing.T) {
 	}
 	if len(sink.events) != 1 || sink.events[0].RequestID != "req-1" || sink.events[0].IPAddress != "127.0.0.1" || sink.events[0].UserAgent != "UA" {
 		t.Fatalf("audit metadata = %+v", sink.events)
+	}
+	if got := sink.events[0].Metadata; got["deviceId"] != "device-1" || got["deviceName"] != "Safari" || got["jsFingerprint"] != "fp-1" || got["username"] != "alice" {
+		t.Fatalf("audit detail metadata = %+v", got)
 	}
 }

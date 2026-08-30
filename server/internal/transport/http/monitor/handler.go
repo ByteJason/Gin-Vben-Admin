@@ -15,8 +15,9 @@ import (
 )
 
 const (
-	basePath       = "/api/admin/v1/ops/monitor"
-	PermissionRead = "ops:monitor:read"
+	basePath         = "/api/admin/v1/ops/monitor"
+	serverStatusPath = "/api/admin/v1/ops/server-status"
+	PermissionRead   = "ops:monitor:read"
 )
 
 type IAMAccess interface {
@@ -39,26 +40,40 @@ func NewHandlerWithIAM(service *monitorapp.Service, iam IAMAccess) *Handler {
 	return &Handler{service: service, iam: iam}
 }
 
-func RegisterRoutes(r gin.IRouter, handler *Handler) { registerRoutes(r.Group(basePath), handler) }
+func RegisterRoutes(r gin.IRouter, handler *Handler) {
+	registerRoutes(r.Group(basePath), r.Group(serverStatusPath), handler)
+}
 
-func registerRoutes(group gin.IRouter, handler *Handler) {
+func registerRoutes(monitor, serverStatus gin.IRouter, handler *Handler) {
 	if handler == nil || handler.service == nil || handler.iam == nil && !handler.allowLocal {
-		group.GET("", disabled)
+		monitor.GET("", disabled)
+		serverStatus.GET("", disabled)
 		return
 	}
-	group.GET("", handler.overview)
+	monitor.GET("", handler.overview)
+	serverStatus.GET("", handler.serverStatus)
 }
 
 func RegisterRoutesOn(group gin.IRouter, handler *Handler) {
 	ops := group.Group("/ops")
 	if handler == nil || handler.service == nil || handler.iam == nil && !handler.allowLocal {
 		ops.GET("/monitor", disabled)
+		ops.GET("/server-status", disabled)
 		return
 	}
 	ops.GET("/monitor", handler.overview)
+	ops.GET("/server-status", handler.serverStatus)
 }
 
 func (h *Handler) overview(c *gin.Context) {
+	h.respond(c, false)
+}
+
+func (h *Handler) serverStatus(c *gin.Context) {
+	h.respond(c, true)
+}
+
+func (h *Handler) respond(c *gin.Context, canonical bool) {
 	if _, err := tenant.RequireContext(c.Request.Context()); err != nil {
 		response.Error(c, http.StatusBadRequest, 10000, "invalid tenant context")
 		return
@@ -66,7 +81,15 @@ func (h *Handler) overview(c *gin.Context) {
 	if !h.authorize(c) {
 		return
 	}
-	overview, err := h.service.Overview(c.Request.Context())
+	var (
+		overview monitorapp.Overview
+		err      error
+	)
+	if canonical {
+		overview, err = h.service.ServerStatus(c.Request.Context())
+	} else {
+		overview, err = h.service.Overview(c.Request.Context())
+	}
 	if err != nil {
 		response.Error(c, http.StatusServiceUnavailable, 40001, "monitor unavailable")
 		return
@@ -123,7 +146,16 @@ func (h *Handler) authorize(c *gin.Context) bool {
 		response.Error(c, http.StatusForbidden, 30000, "forbidden")
 		return false
 	}
-	allowed, err := h.iam.Authorize(c.Request.Context(), subject, domain.Request{Domain: scope.TenantID, Method: http.MethodGet, Path: basePath})
+	request := domain.Request{Domain: scope.TenantID, Method: http.MethodGet, Path: basePath}
+	allowed, err := h.iam.Authorize(c.Request.Context(), subject, request)
+	// Existing deployments grant ops:monitor:read on /ops/monitor. New
+	// deployments may scope the same permission to /ops/server-status; accept
+	// either path so introducing the canonical endpoint does not break tenants
+	// during a policy rollout.
+	if !allowed && err == nil {
+		request.Path = serverStatusPath
+		allowed, err = h.iam.Authorize(c.Request.Context(), subject, request)
+	}
 	if err != nil || !allowed {
 		response.Error(c, http.StatusForbidden, 30000, "forbidden")
 		return false

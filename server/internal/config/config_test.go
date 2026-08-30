@@ -52,6 +52,40 @@ func TestDefaultAuthTokenTTLsMatchV010Contract(t *testing.T) {
 	}
 }
 
+func TestFileProviderConfigurationLoadsFromYAMLAndEnvironment(t *testing.T) {
+	path := writeConfigFile(t, `
+file:
+  enabled: true
+  provider: local
+  root: ./fixture-files
+  allowed_mimes: [image/png]
+`)
+	t.Setenv("FILE_PROVIDER", "s3")
+	t.Setenv("FILE_ALLOWED_MIMES", "image/jpeg, audio/mpeg")
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got, want := cfg.File.Provider, "s3"; got != want {
+		t.Fatalf("file.provider = %q, want %q", got, want)
+	}
+	if got, want := cfg.File.AllowedMIMEs, []string{"image/jpeg", "audio/mpeg"}; !sameStrings(got, want) {
+		t.Fatalf("file.allowed_mimes = %#v, want %#v", got, want)
+	}
+	if got := cfg.SafeSummary().File.Provider; got != "s3" {
+		t.Fatalf("SafeSummary file.provider = %q, want s3", got)
+	}
+}
+
+func TestFileProviderValidationRejectsUnknownProvider(t *testing.T) {
+	cfg := Default()
+	cfg.File.Provider = "azure"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want unknown file provider error")
+	}
+}
+
 func TestDefaultCaptchaChallengeTTLAndEnvironmentOverride(t *testing.T) {
 	cfg := Default()
 	if cfg.Auth.CaptchaChallengeTTL != 2*time.Minute {

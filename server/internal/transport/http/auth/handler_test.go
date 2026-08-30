@@ -167,6 +167,7 @@ func TestAuthHandlersPropagateRequestMetadata(t *testing.T) {
 	req.Header.Set("X-Request-ID", "req-http")
 	req.Header.Set("X-Device-ID", "device-http")
 	req.Header.Set("X-Device-Name", "Browser")
+	req.Header.Set("X-JS-Fingerprint", "fp-http")
 	req.Header.Set("User-Agent", "test-agent")
 	req.RemoteAddr = "192.0.2.10:4567"
 	res := httptest.NewRecorder()
@@ -174,7 +175,7 @@ func TestAuthHandlersPropagateRequestMetadata(t *testing.T) {
 	if res.Code != http.StatusOK {
 		t.Fatalf("login status = %d; body=%s", res.Code, res.Body.String())
 	}
-	want := appauth.RequestMetadata{RequestID: "req-http", DeviceID: "device-http", DeviceName: "Browser", IPAddress: "192.0.2.10", UserAgent: "test-agent"}
+	want := appauth.RequestMetadata{RequestID: "req-http", DeviceID: "device-http", DeviceName: "Browser", JSFingerprint: "fp-http", IPAddress: "192.0.2.10", UserAgent: "test-agent"}
 	if service.loginMeta != want {
 		t.Fatalf("login metadata = %+v, want %+v", service.loginMeta, want)
 	}

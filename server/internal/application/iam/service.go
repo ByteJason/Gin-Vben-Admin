@@ -1313,6 +1313,7 @@ func (s *Service) ListAccessCodes(ctx context.Context, subject domain.Subject) (
 		return nil, err
 	}
 	codes := make([]string, 0, len(eligible))
+	allowedByCode := make(map[string]bool, len(eligible))
 	for _, permission := range eligible {
 		allowed, authErr := domain.EvaluatePolicies(policies, subject, domain.Request{
 			Domain: subject.Domain,
@@ -1327,10 +1328,47 @@ func (s *Service) ListAccessCodes(ctx context.Context, subject domain.Subject) (
 		}
 		if allowed {
 			codes = append(codes, permission.ID)
+			allowedByCode[permission.ID] = true
+		}
+	}
+	// A menu rename must not strand grants created before the migration. Alias
+	// expansion is one-way from an old code to its canonical replacement and
+	// respects an explicit disabled canonical row in the persisted catalog.
+	activeByCode := make(map[string]bool, len(permissions))
+	for _, permission := range permissions {
+		activeByCode[strings.TrimSpace(permission.ID)] = permission.Active
+	}
+	for canonical, legacyCodes := range productionPermissionAliases() {
+		if !activeByCode[canonical] {
+			continue
+		}
+		if allowedByCode[canonical] {
+			continue
+		}
+		for _, legacy := range legacyCodes {
+			if allowedByCode[legacy] {
+				codes = append(codes, canonical)
+				allowedByCode[canonical] = true
+				break
+			}
 		}
 	}
 	sort.Strings(codes)
 	return codes, nil
+}
+
+// productionPermissionAliases lists stable code renames used by the five-root
+// navigation migration. The old IDs remain in the catalog for policy and
+// rollback compatibility; new menu records reference the canonical IDs.
+func productionPermissionAliases() map[string][]string {
+	return map[string][]string{
+		"ops:server-status:read":     {"ops:monitor:read"},
+		"ops:operation-history:read": {"ops:audit:read"},
+		"ops:login-logs:read":        {"ops:audit:read"},
+		"system:parameters:read":     {"system:settings:read"},
+		"media:library:read":         {"system:files:read"},
+		"media:library:manage":       {"system:files:manage"},
+	}
 }
 
 // mergeProductionPermissions backfills only catalog IDs that an older tenant

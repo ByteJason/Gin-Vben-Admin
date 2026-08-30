@@ -68,6 +68,54 @@ function taskTypeLabel(type: string) {
   return key ? String($t(key)) : type;
 }
 
+function taskDescription(item: TaskDefinition) {
+  const schema = item.payloadSchema as Record<string, unknown> | undefined;
+  const value = schema?.description ?? schema?.title;
+  return typeof value === 'string' && value.trim()
+    ? value
+    : String($t('page.tasks.noDescription'));
+}
+
+function cronFieldMatches(expression: string, value: number) {
+  if (expression === '*') return true;
+  if (expression.startsWith('*/')) {
+    const step = Number(expression.slice(2));
+    return Number.isInteger(step) && step > 0 && value % step === 0;
+  }
+  return expression.split(',').some((part) => Number(part) === value);
+}
+
+function nextExecution(item: TaskDefinition) {
+  if (!item.enabled) return String($t('page.tasks.disabled'));
+  const expression = item.cron?.trim();
+  if (!expression) return String($t('page.tasks.manual'));
+  const aliases: Record<string, string> = {
+    '@daily': '0 0 * * *',
+    '@hourly': '0 * * * *',
+    '@midnight': '0 0 * * *',
+  };
+  const fields = (aliases[expression] ?? expression).split(/\s+/);
+  if (fields.length < 5) return String($t('page.tasks.nextUnknown'));
+  const candidate = new Date();
+  candidate.setSeconds(0, 0);
+  candidate.setMinutes(candidate.getMinutes() + 1);
+  for (let index = 0; index < 7 * 24 * 60; index += 1) {
+    const [minute = '*', hour = '*', day = '*', month = '*', weekday = '*'] =
+      fields;
+    if (
+      cronFieldMatches(minute, candidate.getMinutes()) &&
+      cronFieldMatches(hour, candidate.getHours()) &&
+      cronFieldMatches(day, candidate.getDate()) &&
+      cronFieldMatches(month, candidate.getMonth() + 1) &&
+      cronFieldMatches(weekday, candidate.getDay())
+    ) {
+      return candidate.toLocaleString();
+    }
+    candidate.setMinutes(candidate.getMinutes() + 1);
+  }
+  return String($t('page.tasks.nextUnknown'));
+}
+
 function resetForm() {
   Object.assign(form, emptyForm());
   editingId.value = '';
@@ -306,15 +354,19 @@ onMounted(() => void loadTasks());
             </caption>
             <thead>
               <tr>
+                <th scope="col">{{ $t('page.tasks.id') }}</th>
                 <th scope="col">{{ $t('page.tasks.name') }}</th>
-                <th scope="col">{{ $t('page.tasks.type') }}</th>
-                <th scope="col">{{ $t('page.tasks.status') }}</th>
+                <th scope="col">{{ $t('page.tasks.descriptionField') }}</th>
+                <th scope="col">{{ $t('page.tasks.cron') }}</th>
+                <th scope="col">{{ $t('page.tasks.executor') }}</th>
+                <th scope="col">{{ $t('page.tasks.enabled') }}</th>
+                <th scope="col">{{ $t('page.tasks.nextExecution') }}</th>
                 <th scope="col">{{ $t('page.tasks.actions') }}</th>
               </tr>
             </thead>
             <tbody>
               <tr v-if="!loading && tasks.length === 0">
-                <td class="table-state" colspan="4">
+                <td class="table-state" colspan="8">
                   {{ $t('page.tasks.empty') }}
                 </td>
               </tr>
@@ -323,6 +375,7 @@ onMounted(() => void loadTasks());
                 :key="item.id"
                 :class="{ selected: selectedId === item.id }"
               >
+                <td class="task-id">{{ item.id }}</td>
                 <th scope="row">
                   <button
                     class="link-button"
@@ -330,8 +383,12 @@ onMounted(() => void loadTasks());
                     @click="selectTask(item)"
                   >
                     {{ item.name }}</button
-                  ><small>{{ item.cron || $t('page.tasks.manual') }}</small>
+                  ><small>{{ item.timezone }}</small>
                 </th>
+                <td class="description-cell">{{ taskDescription(item) }}</td>
+                <td class="cron-cell">
+                  {{ item.cron || $t('page.tasks.manual') }}
+                </td>
                 <td>{{ taskTypeLabel(item.type) }}</td>
                 <td>
                   <span
@@ -344,6 +401,7 @@ onMounted(() => void loadTasks());
                     }}</span
                   >
                 </td>
+                <td class="next-cell">{{ nextExecution(item) }}</td>
                 <td class="actions">
                   <button
                     v-if="canManage"

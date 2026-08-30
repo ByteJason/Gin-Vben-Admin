@@ -1,22 +1,19 @@
+import type {
+  FileCategory,
+  FileCategoryInput,
+  FileObject,
+} from '@vben/api-client';
+
 import { ADMIN_ENDPOINTS } from '@vben/api-client';
 
 import { requestClient } from '#/api/request';
 
+export type {
+  FileCategory,
+  FileCategoryInput,
+  FileObject,
+} from '@vben/api-client';
 export type FileACL = 'private' | 'public-read';
-
-export interface FileObject {
-  acl: FileACL;
-  createdAt: string;
-  id: string;
-  key: string;
-  mime: string;
-  name: string;
-  orgId?: string;
-  ownerId: string;
-  sha256?: string;
-  size: number;
-  tenantId?: string;
-}
 
 export interface FilePage {
   items: FileObject[];
@@ -37,6 +34,7 @@ export interface FileCleanupDryRun {
 }
 
 export async function listFilesApi(params?: {
+  categoryId?: string;
   limit?: number;
   offset?: number;
   ownerId?: string;
@@ -44,9 +42,45 @@ export async function listFilesApi(params?: {
   return requestClient.get<FilePage>(ADMIN_ENDPOINTS.listFiles, { params });
 }
 
-export async function uploadFileApi(file: File, acl: FileACL = 'private') {
+export async function listFileCategoriesApi() {
+  return requestClient.get<FileCategory[]>(ADMIN_ENDPOINTS.listFileCategories);
+}
+
+export async function createFileCategoryApi(input: FileCategoryInput) {
+  return requestClient.post<FileCategory>(
+    ADMIN_ENDPOINTS.createFileCategory,
+    input,
+  );
+}
+
+function categoryPath(template: string, id: string) {
+  return template.replace('{id}', encodeURIComponent(id));
+}
+
+export async function updateFileCategoryApi(
+  id: string,
+  input: FileCategoryInput,
+) {
+  return requestClient.put<FileCategory>(
+    categoryPath(ADMIN_ENDPOINTS.updateFileCategory, id),
+    input,
+  );
+}
+
+export async function deleteFileCategoryApi(id: string) {
+  return requestClient.delete<void>(
+    categoryPath(ADMIN_ENDPOINTS.deleteFileCategory, id),
+  );
+}
+
+export async function uploadFileApi(
+  file: File,
+  acl: FileACL = 'private',
+  categoryId?: string,
+) {
   return requestClient.upload<FileObject>(ADMIN_ENDPOINTS.uploadFile, {
     acl,
+    categoryId,
     file,
   });
 }

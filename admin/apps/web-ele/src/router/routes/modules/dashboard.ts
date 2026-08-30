@@ -1,5 +1,4 @@
 import type { RouteRecordRaw } from 'vue-router';
-
 import { $t } from '#/locales';
 
 const routes: RouteRecordRaw[] = [
@@ -8,14 +7,14 @@ const routes: RouteRecordRaw[] = [
       authority: ['dashboard:overview:read'],
       icon: 'lucide:layout-dashboard',
       order: -1,
-      title: $t('page.dashboard.title'),
+      title: $t('page.navigation.dashboard'),
     },
-    name: 'menu-overview',
+    name: 'menu-dashboard',
     path: '/dashboard',
     redirect: '/dashboard/analytics',
     children: [
       {
-        name: 'menu-overview-runtime',
+        name: 'menu-dashboard-analytics',
         path: 'analytics',
         component: () => import('#/views/dashboard/analytics/index.vue'),
         meta: {
@@ -25,41 +24,25 @@ const routes: RouteRecordRaw[] = [
           title: $t('page.dashboard.analytics'),
         },
       },
-      {
-        name: 'Workspace',
-        path: 'workspace',
+    ],
+  },
+  ...[
+    ['/analytics', 'LegacyAnalytics'],
+    ['/workspace', 'LegacyWorkspace'],
+    ['/dashboard/workspace', 'LegacyDashboardWorkspace'],
+  ].map(
+    ([path, name]) =>
+      ({
+        name,
+        path,
         redirect: '/dashboard/analytics',
         meta: {
           hideInBreadcrumb: true,
           hideInMenu: true,
           hideInTab: true,
-          title: $t('page.dashboard.workspace'),
+          title: $t('page.dashboard.analytics'),
         },
-      },
-    ],
-  },
-  {
-    name: 'LegacyAnalytics',
-    path: '/analytics',
-    redirect: '/dashboard/analytics',
-    meta: {
-      hideInBreadcrumb: true,
-      hideInMenu: true,
-      hideInTab: true,
-      title: $t('page.dashboard.analytics'),
-    },
-  },
-  {
-    name: 'LegacyWorkspace',
-    path: '/workspace',
-    redirect: '/dashboard/analytics',
-    meta: {
-      hideInBreadcrumb: true,
-      hideInMenu: true,
-      hideInTab: true,
-      title: $t('page.dashboard.workspace'),
-    },
-  },
+      }) as RouteRecordRaw,
+  ),
 ];
-
 export default routes;

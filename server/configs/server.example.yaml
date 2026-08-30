@@ -118,6 +118,7 @@ mail:
 
 file:
   enabled: true
+  provider: local
   root: ../.runtime/files
   base_url: ""
   max_bytes: 104857600

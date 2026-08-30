@@ -142,6 +142,7 @@ type SMTPAccountConfig struct {
 // application-level interfaces and are intentionally not selected here.
 type FileConfig struct {
 	Enabled      bool     `mapstructure:"enabled" yaml:"enabled"`
+	Provider     string   `mapstructure:"provider" yaml:"provider"`
 	Root         string   `mapstructure:"root" yaml:"root"`
 	BaseURL      string   `mapstructure:"base_url" yaml:"base_url"`
 	MaxBytes     int64    `mapstructure:"max_bytes" yaml:"max_bytes"`
@@ -254,6 +255,7 @@ type MailSummary struct {
 
 type FileSummary struct {
 	Enabled  bool   `json:"enabled"`
+	Provider string `json:"provider"`
 	RootSet  bool   `json:"root_set"`
 	BaseURL  string `json:"base_url"`
 	MaxBytes int64  `json:"max_bytes"`
@@ -323,6 +325,7 @@ func Default() Config {
 		Mail: MailConfig{Port: 1025, Selection: "weighted_random"},
 		File: FileConfig{
 			Enabled:  true,
+			Provider: "local",
 			Root:     filepath.FromSlash("../.runtime/files"),
 			MaxBytes: 100 << 20,
 		},
@@ -434,6 +437,13 @@ func (cfg FileConfig) validate() error {
 	if !cfg.Enabled {
 		return nil
 	}
+	provider := strings.ToLower(strings.TrimSpace(cfg.Provider))
+	if provider == "" {
+		provider = "local"
+	}
+	if provider != "local" && provider != "s3" && provider != "oss" && provider != "cos" {
+		return errors.New("provider must be local, s3, oss, or cos")
+	}
 	if strings.TrimSpace(cfg.Root) == "" {
 		return errors.New("root is required when file provider is enabled")
 	}
@@ -449,6 +459,14 @@ func (cfg FileConfig) validate() error {
 		return errors.New("base_url must be single-line")
 	}
 	return nil
+}
+
+func normalizedFileProvider(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return "local"
+	}
+	return value
 }
 
 func (cfg InstallConfig) validate() error {
@@ -763,6 +781,7 @@ func (cfg Config) SafeSummary() Summary {
 		},
 		File: FileSummary{
 			Enabled:  cfg.File.Enabled,
+			Provider: normalizedFileProvider(cfg.File.Provider),
 			RootSet:  strings.TrimSpace(cfg.File.Root) != "",
 			BaseURL:  cfg.File.BaseURL,
 			MaxBytes: cfg.File.MaxBytes,
@@ -856,6 +875,12 @@ func newViper() *viper.Viper {
 	v.SetDefault("mail.start_tls", cfg.Mail.StartTLS)
 	v.SetDefault("mail.selection", cfg.Mail.Selection)
 	v.SetDefault("mail.accounts", cfg.Mail.Accounts)
+	v.SetDefault("file.enabled", cfg.File.Enabled)
+	v.SetDefault("file.provider", cfg.File.Provider)
+	v.SetDefault("file.root", cfg.File.Root)
+	v.SetDefault("file.base_url", cfg.File.BaseURL)
+	v.SetDefault("file.max_bytes", cfg.File.MaxBytes)
+	v.SetDefault("file.allowed_mimes", cfg.File.AllowedMIMEs)
 	v.SetDefault("install.state_dir", cfg.Install.StateDir)
 	v.SetDefault("install.workspace_root", cfg.Install.WorkspaceRoot)
 	v.SetDefault("tenant.enabled", cfg.Tenant.Enabled)
@@ -941,6 +966,12 @@ var environmentBindings = map[string]string{
 	"mail.from":                      "MAIL_FROM",
 	"mail.start_tls":                 "MAIL_START_TLS",
 	"mail.selection":                 "MAIL_SELECTION",
+	"file.enabled":                   "FILE_ENABLED",
+	"file.provider":                  "FILE_PROVIDER",
+	"file.root":                      "FILE_ROOT",
+	"file.base_url":                  "FILE_BASE_URL",
+	"file.max_bytes":                 "FILE_MAX_BYTES",
+	"file.allowed_mimes":             "FILE_ALLOWED_MIMES",
 	"install.state_dir":              "INSTALL_STATE_DIR",
 	"install.workspace_root":         "INSTALL_WORKSPACE_ROOT",
 	"tenant.enabled":                 "TENANT_ENABLED",
@@ -1020,6 +1051,11 @@ func applyListEnvironmentOverrides(v *viper.Viper, dotEnv map[string]string) {
 		v.Set("i18n.supported_locales", splitCommaSeparated(value))
 	} else if value, ok := dotEnv["I18N_SUPPORTED_LOCALES"]; ok {
 		v.Set("i18n.supported_locales", splitCommaSeparated(value))
+	}
+	if value, ok := os.LookupEnv("FILE_ALLOWED_MIMES"); ok {
+		v.Set("file.allowed_mimes", splitCommaSeparated(value))
+	} else if value, ok := dotEnv["FILE_ALLOWED_MIMES"]; ok {
+		v.Set("file.allowed_mimes", splitCommaSeparated(value))
 	}
 }
 

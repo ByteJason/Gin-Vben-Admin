@@ -6,11 +6,12 @@ import "context"
 // application layer.  HTTP adapters populate it; use cases remain transport
 // agnostic and can persist the same values to session/audit ports.
 type RequestMetadata struct {
-	RequestID  string
-	DeviceID   string
-	DeviceName string
-	IPAddress  string
-	UserAgent  string
+	RequestID     string
+	DeviceID      string
+	DeviceName    string
+	JSFingerprint string
+	IPAddress     string
+	UserAgent     string
 }
 
 type requestMetadataKey struct{}
@@ -39,6 +40,7 @@ func normalizeMetadata(metadata RequestMetadata) RequestMetadata {
 	metadata.RequestID = bounded(metadata.RequestID, 128)
 	metadata.DeviceID = bounded(metadata.DeviceID, 128)
 	metadata.DeviceName = bounded(metadata.DeviceName, 128)
+	metadata.JSFingerprint = bounded(metadata.JSFingerprint, 256)
 	metadata.IPAddress = bounded(metadata.IPAddress, 128)
 	metadata.UserAgent = bounded(metadata.UserAgent, 512)
 	return metadata

@@ -65,6 +65,9 @@ type Config struct {
 	Monitor      MonitorReader
 	Timeout      time.Duration
 	Clock        func() time.Time
+	// DataSource defaults to live. Fixture is intentionally opt-in so deployed
+	// installations never present sample analytics as operational facts.
+	DataSource DataSource
 }
 
 type CountMetric struct {

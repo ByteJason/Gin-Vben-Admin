@@ -1056,6 +1056,52 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
+  /api/admin/v1/ops/operation-history:
+    get:
+      tags: [Audit]
+      operationId: queryOperationHistory
+      summary: 查询运维操作历史
+      description: 仅返回 operation 分类的脱敏审计事件；旧 audit/events 查询接口继续兼容。
+      security: [{BearerAuth: []}]
+      parameters:
+        - { name: actorId, in: query, schema: { type: string } }
+        - { name: action, in: query, schema: { type: string } }
+        - { name: resource, in: query, schema: { type: string } }
+        - { name: outcome, in: query, schema: { type: string } }
+        - { name: requestId, in: query, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 0, maximum: 200, default: 50 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+      responses:
+        '200': { $ref: '#/components/responses/AuditPageResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
+  /api/admin/v1/ops/login-logs:
+    get:
+      tags: [Audit]
+      operationId: queryLoginLogs
+      summary: 查询登录日志
+      description: 仅返回 login 分类的逐次认证尝试事件，并应用统一脱敏规则。
+      security: [{BearerAuth: []}]
+      parameters:
+        - { name: actorId, in: query, schema: { type: string } }
+        - { name: action, in: query, schema: { type: string } }
+        - { name: resource, in: query, schema: { type: string } }
+        - { name: outcome, in: query, schema: { type: string } }
+        - { name: requestId, in: query, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 0, maximum: 200, default: 50 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+      responses:
+        '200': { $ref: '#/components/responses/AuditPageResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
   /api/admin/v1/files:
     get:
       tags: [Files]
@@ -1064,6 +1110,7 @@ paths:
       security: [{BearerAuth: []}]
       parameters:
         - { name: ownerId, in: query, schema: { type: string } }
+        - { name: categoryId, in: query, schema: { type: string } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
         - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
       responses:
@@ -1090,6 +1137,71 @@ paths:
         '415': { $ref: '#/components/responses/FileMIMERejected' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /api/admin/v1/files/categories:
+    get:
+      tags: [Files]
+      operationId: listFileCategories
+      summary: 列出当前租户文件分类
+      security: [{BearerAuth: []}]
+      responses:
+        '200': { $ref: '#/components/responses/FileCategoryListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Files]
+      operationId: createFileCategory
+      summary: 创建文件分类
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FileCategoryInput' }
+      responses:
+        '200': { $ref: '#/components/responses/FileCategoryResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/admin/v1/files/categories/{id}:
+    put:
+      tags: [Files]
+      operationId: updateFileCategory
+      summary: 更新文件分类
+      security: [{BearerAuth: []}]
+      parameters: [{ $ref: '#/components/parameters/FileCategoryId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FileCategoryInput' }
+      responses:
+        '200': { $ref: '#/components/responses/FileCategoryResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Files]
+      operationId: patchFileCategory
+      summary: 局部更新文件分类
+      security: [{BearerAuth: []}]
+      parameters: [{ $ref: '#/components/parameters/FileCategoryId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FileCategoryInput' }
+      responses:
+        '200': { $ref: '#/components/responses/FileCategoryResponse' }
+    delete:
+      tags: [Files]
+      operationId: deleteFileCategory
+      summary: 删除空文件分类
+      security: [{BearerAuth: []}]
+      parameters: [{ $ref: '#/components/parameters/FileCategoryId' }]
+      responses:
+        '200': { $ref: '#/components/responses/EmptySuccessResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/BadRequest' }
   /api/admin/v1/files/{id}:
     get:
       tags: [Files]
@@ -1757,6 +1869,49 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/admin/v1/dashboard/overview:
+    get:
+      tags: [Admin]
+      operationId: getDashboardOverview
+      summary: 获取运行概览分析数据
+      description: 需要 dashboard:overview:read；按租户范围返回可追溯的数据源标记、时间范围、卡片、趋势与公告。
+      security: [{BearerAuth: []}]
+      parameters:
+        - name: preset
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/DashboardOverviewPreset' }
+        - name: timezone
+          in: query
+          required: false
+          schema: { type: string, default: UTC }
+        - name: from
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+        - name: granularity
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/DashboardOverviewGranularity' }
+      responses:
+        '200':
+          description: 当前租户的运行概览分析
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/DashboardOverview' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /api/admin/v1/ops/monitor:
     get:
       tags: [Admin]
@@ -1775,6 +1930,28 @@ paths:
                   - type: object
                     properties:
                       data: { $ref: '#/components/schemas/MonitorOverview' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/admin/v1/ops/server-status:
+    get:
+      tags: [Admin]
+      operationId: getServerStatus
+      summary: 获取规范化服务器状态快照
+      description: 需要 ops:monitor:read；返回与旧 monitor 端点兼容的受限运行时指标及刷新元数据。
+      security: [{BearerAuth: []}]
+      responses:
+        '200':
+          description: 当前进程、容器与依赖状态
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/MonitorServerStatus' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -1832,6 +2009,14 @@ components:
           - observability.tracing.sample_rate
           - observability.otlp.api_key
     FileId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+    FileCategoryId:
       name: id
       in: path
       required: true
@@ -2160,6 +2345,8 @@ components:
         load1: { type: number }
         load5: { type: number }
         load15: { type: number }
+        loadPerCore: { type: number }
+        perCoreLoad: { type: array, items: { type: number } }
         rssBytes: { type: integer, format: int64 }
         usedBytes: { type: integer, format: int64 }
         freeBytes: { type: integer, format: int64 }
@@ -2178,6 +2365,7 @@ components:
         goVersion: { type: string }
         os: { type: string }
         arch: { type: string }
+        compiler: { type: string }
         applicationVersion: { type: string }
         commit: { type: string }
         heapAllocBytes: { type: integer, format: int64, minimum: 0 }
@@ -2193,10 +2381,11 @@ components:
     MonitorDatabasePool:
       type: object
       additionalProperties: false
-      required: [open, inUse, idle, max, waitCount, waitDurationMs, maxIdleClosed, maxIdleTimeClosed, maxLifetimeClosed]
+      required: [open, inUse, active, idle, max, waitCount, waitDurationMs, maxIdleClosed, maxIdleTimeClosed, maxLifetimeClosed]
       properties:
         open: { type: integer, minimum: 0 }
         inUse: { type: integer, minimum: 0 }
+        active: { type: integer, minimum: 0 }
         idle: { type: integer, minimum: 0 }
         max: { type: integer, minimum: 0 }
         waitCount: { type: integer, format: int64, minimum: 0 }
@@ -2251,9 +2440,10 @@ components:
     MonitorOverview:
       type: object
       additionalProperties: false
-      required: [scope, uptimeSeconds, runtime, cpu, memory, disk, database, redis, collectedAt]
+      required: [status, scope, uptimeSeconds, runtime, cpu, memory, disk, database, redis, goroutines, backgroundTasks, collectedAt, timestamp, refreshIntervalSeconds, refreshIntervalMs, dataSource, isSynthetic]
       properties:
         scope: { $ref: '#/components/schemas/MonitorMetricScope' }
+        status: { $ref: '#/components/schemas/MonitorStatus' }
         uptimeSeconds: { type: number, minimum: 0 }
         version: { type: string }
         runtime: { $ref: '#/components/schemas/MonitorRuntimeMetric' }
@@ -2262,7 +2452,41 @@ components:
         disk: { $ref: '#/components/schemas/MonitorHostMetric' }
         database: { $ref: '#/components/schemas/MonitorDatabaseMetric' }
         redis: { $ref: '#/components/schemas/MonitorRedisMetric' }
+        goroutines: { $ref: '#/components/schemas/MonitorGoroutineMetric' }
+        backgroundTasks: { $ref: '#/components/schemas/MonitorBackgroundTaskMetric' }
         collectedAt: { type: string, format: date-time }
+        timestamp: { type: string, format: date-time }
+        refreshIntervalSeconds: { type: integer, minimum: 0 }
+        refreshIntervalMs: { type: integer, format: int64, minimum: 0 }
+        dataSource: { type: string }
+        isSynthetic: { type: boolean }
+    MonitorGoroutineMetric:
+      type: object
+      additionalProperties: false
+      required: [status, capabilities]
+      properties:
+        status: { $ref: '#/components/schemas/MonitorStatus' }
+        count: { type: integer, minimum: 0 }
+        capabilities:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/MonitorCapability' }
+    MonitorBackgroundTaskMetric:
+      type: object
+      additionalProperties: false
+      required: [status, capabilities]
+      properties:
+        status: { $ref: '#/components/schemas/MonitorStatus' }
+        queued: { type: integer, minimum: 0 }
+        active: { type: integer, minimum: 0 }
+        scheduled: { type: integer, minimum: 0 }
+        failed: { type: integer, minimum: 0 }
+        capabilities:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/MonitorCapability' }
+        message: { type: string }
+    MonitorServerStatus:
+      allOf:
+        - $ref: '#/components/schemas/MonitorOverview'
     DashboardStatus:
       type: string
       enum: [ok, degraded, unavailable]
@@ -2323,6 +2547,138 @@ components:
         instance: { $ref: '#/components/schemas/DashboardInstanceMetric' }
         health: { $ref: '#/components/schemas/DashboardHealth' }
         collectedAt: { type: string, format: date-time }
+    DashboardOverviewPreset:
+      type: string
+      enum: [today, yesterday, 24h, 7d, 14d, 30d, this_month, last_month, custom]
+    DashboardOverviewGranularity:
+      type: string
+      enum: [hour, day]
+    DashboardOverviewDataSource:
+      type: string
+      enum: [live, fixture]
+    DashboardOverviewTimeRange:
+      type: object
+      additionalProperties: false
+      required: [preset, timezone, from, to, granularity]
+      properties:
+        preset: { $ref: '#/components/schemas/DashboardOverviewPreset' }
+        timezone: { type: string }
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        granularity: { $ref: '#/components/schemas/DashboardOverviewGranularity' }
+    DashboardOverviewNumberMetric:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: { $ref: '#/components/schemas/DashboardStatus' }
+        value: { type: number }
+        message: { type: string }
+    DashboardOverviewCards:
+      type: object
+      additionalProperties: false
+      required: [visitors, newUsers, paymentAmount, paymentOrders, averageOrderValue]
+      properties:
+        visitors: { $ref: '#/components/schemas/DashboardOverviewNumberMetric' }
+        newUsers: { $ref: '#/components/schemas/DashboardOverviewNumberMetric' }
+        paymentAmount: { $ref: '#/components/schemas/DashboardOverviewNumberMetric' }
+        paymentOrders: { $ref: '#/components/schemas/DashboardOverviewNumberMetric' }
+        averageOrderValue: { $ref: '#/components/schemas/DashboardOverviewNumberMetric' }
+    DashboardOverviewTrendPoint:
+      type: object
+      required: [at, visitors, newUsers, orders, amount]
+      properties:
+        at: { type: string, format: date-time }
+        visitors: { type: number }
+        newUsers: { type: number }
+        orders: { type: number }
+        amount: { type: number }
+    DashboardOverviewDistributionItem:
+      type: object
+      required: [key, label, value]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        value: { type: number }
+    DashboardOverviewTopItem:
+      type: object
+      required: [rank, id, name, value, amount]
+      properties:
+        rank: { type: integer }
+        id: { type: string }
+        name: { type: string }
+        value: { type: number }
+        amount: { type: number }
+    DashboardOverviewAnnouncement:
+      type: object
+      required: [id, title, publishedAt]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        publishedAt: { type: string, format: date-time }
+    DashboardOverview:
+      type: object
+      additionalProperties: false
+      required: [dataSource, isSynthetic, range, cards, trends, distribution, topItems, regions, announcements, collectedAt]
+      properties:
+        dataSource: { $ref: '#/components/schemas/DashboardOverviewDataSource' }
+        isSynthetic: { type: boolean }
+        range: { $ref: '#/components/schemas/DashboardOverviewTimeRange' }
+        cards: { $ref: '#/components/schemas/DashboardOverviewCards' }
+        trends: { type: array, items: { $ref: '#/components/schemas/DashboardOverviewTrendPoint' } }
+        distribution: { type: array, items: { $ref: '#/components/schemas/DashboardOverviewDistributionItem' } }
+        topItems: { type: array, items: { $ref: '#/components/schemas/DashboardOverviewTopItem' } }
+        regions: { type: array, items: { $ref: '#/components/schemas/DashboardOverviewDistributionItem' } }
+        announcements: { type: array, items: { $ref: '#/components/schemas/DashboardOverviewAnnouncement' } }
+        collectedAt: { type: string, format: date-time }
+    FileObject:
+      type: object
+      required: [id, key, name, mime, size, ownerId, tenantId, orgId, acl, createdAt, sha256]
+      properties:
+        id: { type: string }
+        key: { type: string }
+        name: { type: string }
+        mime: { type: string }
+        size: { type: integer, format: int64 }
+        ownerId: { type: string }
+        tenantId: { type: string }
+        orgId: { type: string }
+        acl: { type: string, enum: [private, public-read] }
+        categoryId: { type: string }
+        createdAt: { type: string, format: date-time }
+        sha256: { type: string }
+    FilePage:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/FileObject' } }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+    FileUploadRequest:
+      type: object
+      required: [file]
+      properties:
+        file: { type: string, format: binary }
+        acl: { type: string, enum: [private, public-read] }
+        categoryId: { type: string }
+    FileCategory:
+      type: object
+      required: [id, name, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        parentId: { type: string }
+        tenantId: { type: string }
+        orgId: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    FileCategoryInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1 }
+        parentId: { type: string }
     AuditCategory:
       type: string
       enum: [login, operation, system]
@@ -3065,6 +3421,28 @@ components:
               - type: object
                 properties:
                   data: { $ref: '#/components/schemas/FileObject' }
+    FileCategoryListResponse:
+      description: 文件分类列表
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/SuccessEnvelope'
+              - type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/FileCategory' }
+    FileCategoryResponse:
+      description: 文件分类
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/SuccessEnvelope'
+              - type: object
+                properties:
+                  data: { $ref: '#/components/schemas/FileCategory' }
     EmptySuccessResponse:
       description: 操作成功
       content:

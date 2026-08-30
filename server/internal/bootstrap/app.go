@@ -244,7 +244,12 @@ func New(cfg config.Config) (*App, error) {
 		mailService.SetAttemptRepository(attemptRepository)
 		app.mail = mailService
 	}
-	app.monitor = monitorapp.NewService(monitorapp.Config{Version: "1.0.0-dev", Scope: "process", Start: time.Now(), Database: app.database, Redis: app.redis})
+	monitorConfig := monitorapp.Config{Version: "1.0.0-dev", Scope: "process", Start: time.Now(), Database: app.database, Redis: app.redis, RefreshInterval: 10 * time.Second}
+	if !cfg.Auth.Enabled && cfg.Tenant.Mode == "single" {
+		monitorConfig.DataSource = "fixture"
+		monitorConfig.IsSynthetic = true
+	}
+	app.monitor = monitorapp.NewService(monitorConfig)
 	var dictionaryRepository dictionaryapp.Repository = dictionaryapp.NewMemoryRepository()
 	var dictionaryAudit dictionaryapp.AuditSink = &dictionaryapp.MemoryAuditSink{}
 	if app.database != nil {

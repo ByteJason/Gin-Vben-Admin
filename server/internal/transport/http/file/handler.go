@@ -40,6 +40,11 @@ func registerRoutes(group gin.IRouter, handler *Handler) {
 	group.GET("", handler.list)
 	group.GET("/", handler.list)
 	group.POST("/upload", handler.upload)
+	group.GET("/categories", handler.listCategories)
+	group.POST("/categories", handler.createCategory)
+	group.PUT("/categories/:id", handler.updateCategory)
+	group.PATCH("/categories/:id", handler.updateCategory)
+	group.DELETE("/categories/:id", handler.deleteCategory)
 	group.GET("/cleanup/dry-run", handler.cleanupDryRun)
 	group.GET("/:id", handler.metadata)
 	group.GET("/:id/download", handler.download)
@@ -63,7 +68,7 @@ func (h *Handler) list(c *gin.Context) {
 		response.Error(c, http.StatusBadRequest, 10000, "invalid offset")
 		return
 	}
-	page, err := h.service.List(c.Request.Context(), fileapp.ListFilter{TenantID: scope.TenantID, OrgID: scope.Organization, OwnerID: strings.TrimSpace(c.Query("ownerId")), Limit: limit, Offset: offset})
+	page, err := h.service.List(c.Request.Context(), fileapp.ListFilter{TenantID: scope.TenantID, OrgID: scope.Organization, OwnerID: strings.TrimSpace(c.Query("ownerId")), CategoryID: strings.TrimSpace(c.Query("categoryId")), Limit: limit, Offset: offset})
 	if err != nil {
 		writeError(c, err)
 		return
@@ -114,12 +119,65 @@ func (h *Handler) upload(c *gin.Context) {
 		mime = parsed
 	}
 	acl := fileapp.ACL(strings.TrimSpace(c.PostForm("acl")))
-	item, err := h.service.Upload(c.Request.Context(), fileapp.UploadInput{Name: header.Filename, MIME: mime, Size: int64(len(data)), OwnerID: actorID(c), TenantID: scope.TenantID, OrgID: scope.Organization, ACL: acl, Data: data})
+	item, err := h.service.Upload(c.Request.Context(), fileapp.UploadInput{Name: header.Filename, MIME: mime, Size: int64(len(data)), OwnerID: actorID(c), TenantID: scope.TenantID, OrgID: scope.Organization, ACL: acl, Data: data, CategoryID: strings.TrimSpace(c.PostForm("categoryId"))})
 	if err != nil {
 		writeError(c, err)
 		return
 	}
 	response.OK(c, item)
+}
+
+func (h *Handler) listCategories(c *gin.Context) {
+	scope, ok := requestScope(c)
+	if !ok {
+		return
+	}
+	response.OK(c, h.service.ListCategories(c.Request.Context(), scope.TenantID, scope.Organization))
+}
+func (h *Handler) createCategory(c *gin.Context) {
+	scope, ok := requestScope(c)
+	if !ok {
+		return
+	}
+	var in fileapp.CategoryInput
+	if err := c.ShouldBindJSON(&in); err != nil {
+		response.Error(c, http.StatusBadRequest, 10000, "invalid category")
+		return
+	}
+	item, err := h.service.CreateCategory(c.Request.Context(), in, scope.TenantID, scope.Organization)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	response.OK(c, item)
+}
+func (h *Handler) updateCategory(c *gin.Context) {
+	scope, ok := requestScope(c)
+	if !ok {
+		return
+	}
+	var in fileapp.CategoryInput
+	if err := c.ShouldBindJSON(&in); err != nil {
+		response.Error(c, http.StatusBadRequest, 10000, "invalid category")
+		return
+	}
+	item, err := h.service.UpdateCategory(c.Request.Context(), c.Param("id"), in, scope.TenantID, scope.Organization)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	response.OK(c, item)
+}
+func (h *Handler) deleteCategory(c *gin.Context) {
+	scope, ok := requestScope(c)
+	if !ok {
+		return
+	}
+	if err := h.service.DeleteCategory(c.Request.Context(), c.Param("id"), scope.TenantID, scope.Organization); err != nil {
+		writeError(c, err)
+		return
+	}
+	response.OK(c, nil)
 }
 
 func (h *Handler) metadata(c *gin.Context) {
@@ -268,6 +326,14 @@ func writeError(c *gin.Context, err error) {
 		response.Error(c, http.StatusNotFound, 10001, "file not found")
 	case errors.Is(err, fileapp.ErrAccessDenied):
 		response.Error(c, http.StatusForbidden, 30000, "forbidden")
+	case errors.Is(err, fileapp.ErrCategoryNotFound):
+		response.Error(c, http.StatusNotFound, 10001, "category not found")
+	case errors.Is(err, fileapp.ErrCategoryAccessDenied):
+		response.Error(c, http.StatusForbidden, 30000, "forbidden")
+	case errors.Is(err, fileapp.ErrCategoryNotEmpty):
+		response.Error(c, http.StatusConflict, 10000, "category is not empty")
+	case errors.Is(err, fileapp.ErrInvalidCategory):
+		response.Error(c, http.StatusBadRequest, 10000, "invalid category")
 	case errors.Is(err, fileapp.ErrFileTooLarge):
 		response.Error(c, http.StatusRequestEntityTooLarge, 10000, "file is too large")
 	case errors.Is(err, fileapp.ErrMIMETypeNotAllowed):

@@ -17,6 +17,11 @@ import (
 
 type uncheckedIAMAccess struct{ user domain.User }
 
+type canonicalOnlyIAMAccess struct {
+	user  domain.User
+	paths []string
+}
+
 type scopeObservingResourceProbe struct{ organization chan string }
 
 func (s uncheckedIAMAccess) GetAuthorizationUser(context.Context, string) (domain.User, error) {
@@ -31,6 +36,21 @@ func (s uncheckedIAMAccess) ResolveSubject(ctx context.Context, user domain.User
 }
 func (uncheckedIAMAccess) Authorize(context.Context, domain.Subject, domain.Request) (bool, error) {
 	return true, nil
+}
+
+func (a *canonicalOnlyIAMAccess) GetAuthorizationUser(context.Context, string) (domain.User, error) {
+	return a.user, nil
+}
+func (a *canonicalOnlyIAMAccess) ResolveSubject(ctx context.Context, user domain.User) (domain.Subject, error) {
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return domain.Subject{}, err
+	}
+	return domain.Subject{UserID: user.ID, Domain: scope.TenantID}, nil
+}
+func (a *canonicalOnlyIAMAccess) Authorize(_ context.Context, _ domain.Subject, request domain.Request) (bool, error) {
+	a.paths = append(a.paths, request.Path)
+	return request.Path == serverStatusPath, nil
 }
 
 func (p scopeObservingResourceProbe) CPU(ctx context.Context) (monitorapp.HostMetric, error) {
@@ -181,6 +201,49 @@ func TestMonitorHandlerLocalModeRequiresPlatformAdminAndNoAuthenticatedPrincipal
 				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 			}
 		})
+	}
+}
+
+func TestServerStatusRouteKeepsMonitorCompatibilityAndCanonicalHints(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		ctx := tenant.WithContext(c.Request.Context(), tenant.Context{TenantID: "tenant-a", PlatformAdmin: true})
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	})
+	RegisterRoutes(router, NewHandler(monitorapp.NewService(monitorapp.Config{DataSource: "fixture", IsSynthetic: true})))
+	for _, path := range []string{basePath, serverStatusPath} {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		if response.Code != http.StatusOK {
+			t.Fatalf("path=%s status=%d body=%s", path, response.Code, response.Body.String())
+		}
+		for _, fragment := range []string{`"dataSource":"fixture"`, `"isSynthetic":true`, `"timestamp":`, `"refreshIntervalSeconds":10`} {
+			if !strings.Contains(response.Body.String(), fragment) {
+				t.Fatalf("path=%s response missing %s: %s", path, fragment, response.Body.String())
+			}
+		}
+	}
+}
+
+func TestServerStatusAuthorizationFallsBackToCanonicalPath(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set("auth_claims", authdomain.Claims{Subject: "u1"})
+		c.Request = c.Request.WithContext(tenant.WithContext(c.Request.Context(), tenant.Context{TenantID: "tenant-a"}))
+		c.Next()
+	})
+	access := &canonicalOnlyIAMAccess{user: domain.User{ID: "u1", TenantID: "tenant-a", Active: true}}
+	RegisterRoutes(router, NewHandlerWithIAM(monitorapp.NewService(monitorapp.Config{}), access))
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, serverStatusPath, nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if len(access.paths) != 2 || access.paths[0] != basePath || access.paths[1] != serverStatusPath {
+		t.Fatalf("authorization paths = %#v", access.paths)
 	}
 }
 

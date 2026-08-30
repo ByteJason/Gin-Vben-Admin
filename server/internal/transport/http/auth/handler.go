@@ -438,6 +438,7 @@ func requestContext(c *gin.Context) context.Context {
 	}
 	metadata.DeviceID = c.GetHeader("X-Device-ID")
 	metadata.DeviceName = c.GetHeader("X-Device-Name")
+	metadata.JSFingerprint = c.GetHeader("X-JS-Fingerprint")
 	metadata.UserAgent = c.GetHeader("User-Agent")
 	if c.Request != nil {
 		metadata.IPAddress = c.Request.RemoteAddr

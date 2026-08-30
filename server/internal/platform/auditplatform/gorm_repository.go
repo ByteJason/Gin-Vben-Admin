@@ -85,11 +85,15 @@ func (r *GORMRepository) QueryPage(ctx context.Context, filter auditapp.Filter) 
 	if err != nil {
 		return nil, 0, errors.New("audit repository unavailable")
 	}
-	limit := filter.Offset + filter.Limit
+	limit := filter.Limit
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := query.Order("created_at DESC").Offset(0).Limit(limit).Find(ctx)
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	rows, err := query.Order("created_at DESC").Offset(offset).Limit(limit).Find(ctx)
 	if err != nil {
 		return nil, 0, errors.New("audit repository unavailable")
 	}

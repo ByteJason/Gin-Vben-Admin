@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	dashboardapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/dashboard"
 	iamapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/iam"
@@ -85,6 +86,32 @@ func TestDashboardSummaryRequiresPrincipalAndReturnsEnvelopeWithRealZero(t *test
 				t.Fatalf("response body=%s", response.Body.String())
 			}
 		})
+	}
+}
+
+func TestDashboardOverviewLocalFixtureWithoutIAM(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	svc := dashboardapp.NewService(dashboardapp.Config{DataSource: dashboardapp.DataSourceFixture, Clock: func() time.Time { return time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC) }})
+	RegisterRoutes(r, NewHandler(svc))
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/v1/dashboard/overview?preset=24h", nil)
+	req = req.WithContext(tenant.WithContext(req.Context(), tenant.Context{TenantID: "local", Organization: "default"}))
+	resp := httptest.NewRecorder()
+	r.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	var envelope struct {
+		Data struct {
+			IsSynthetic bool   `json:"isSynthetic"`
+			DataSource  string `json:"dataSource"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if !envelope.Data.IsSynthetic || envelope.Data.DataSource != "fixture" {
+		t.Fatalf("data=%+v", envelope.Data)
 	}
 }
 
@@ -217,5 +244,65 @@ func TestDashboardSummaryNarrowsMissingOrganizationBeforeRepositoryReads(t *test
 	roles := envelope.Data.Counts.Roles
 	if roles.Value == nil || *roles.Value != 3 {
 		t.Fatalf("organization-scoped role count=%#v, body=%s", roles, response.Body.String())
+	}
+}
+
+func TestDashboardOverviewUsesCanonicalPathAndPreservesLegacyPermissionGrant(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := iamapp.NewMemoryStore()
+	if err := store.SaveUser(context.Background(), domain.User{ID: "u1", Username: "admin", TenantID: "tenant-a", Active: true, RoleIDs: []string{"role-overview"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveRole(context.Background(), domain.Role{ID: "role-overview", TenantID: "tenant-a", Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	// The existing /summary policy remains a valid grant during canonical-path migration.
+	if err := store.SavePolicy(context.Background(), domain.Policy{RoleID: "role-overview", PermissionID: PermissionOverviewRead, Domain: "tenant-a", Method: http.MethodGet, Path: basePath, Effect: domain.EffectAllow}); err != nil {
+		t.Fatal(err)
+	}
+	service := dashboardapp.NewService(dashboardapp.Config{DataSource: dashboardapp.DataSourceFixture, Clock: func() time.Time { return time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC) }})
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set("auth_claims", authdomain.Claims{Subject: "u1"})
+		c.Request = c.Request.WithContext(tenant.WithContext(c.Request.Context(), tenant.Context{TenantID: "tenant-a"}))
+		c.Next()
+	})
+	RegisterRoutes(router, NewHandlerWithIAM(service, iamapp.NewService(store)))
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, overviewPath+"?preset=today&timezone=Asia%2FSingapore", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var envelope struct {
+		Data dashboardapp.Overview `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Data.DataSource != dashboardapp.DataSourceFixture || !envelope.Data.IsSynthetic || envelope.Data.Range.Preset != dashboardapp.PresetToday || len(envelope.Data.TopItems) == 0 {
+		t.Fatalf("canonical overview body=%s", recorder.Body.String())
+	}
+}
+
+func TestDashboardOverviewRejectsInvalidQueryBeforeService(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service := dashboardapp.NewService(dashboardapp.Config{DataSource: dashboardapp.DataSourceFixture})
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set("auth_claims", authdomain.Claims{Subject: "u1"})
+		c.Request = c.Request.WithContext(tenant.WithContext(c.Request.Context(), tenant.Context{TenantID: "tenant-a"}))
+		c.Next()
+	})
+	RegisterRoutes(router, NewHandlerWithIAM(service, uncheckedIAMAccess{user: domain.User{ID: "u1", Active: true, TenantID: "tenant-a"}}))
+	for _, requestURL := range []string{
+		overviewPath + "?preset=custom&timezone=UTC",
+		overviewPath + "?preset=today&timezone=Not%2FAZone",
+		overviewPath + "?preset=custom&timezone=UTC&from=2026-01-01&to=2026-05-01",
+	} {
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, requestURL, nil))
+		if recorder.Code != http.StatusBadRequest {
+			t.Fatalf("url=%s status=%d body=%s", requestURL, recorder.Code, recorder.Body.String())
+		}
 	}
 }

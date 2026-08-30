@@ -65,6 +65,38 @@ const activeSessions = computed(
     ).length,
 );
 
+function usagePercent(metric: { utilization?: number; loadPerCore?: number }) {
+  const value = metric.utilization ?? metric.loadPerCore;
+  if (value === undefined) return undefined;
+  return Math.max(0, Math.min(100, value * 100));
+}
+
+function usageText(metric: { utilization?: number; loadPerCore?: number }) {
+  const value = usagePercent(metric);
+  return value === undefined
+    ? String($t('page.monitor.unavailable'))
+    : `${value.toFixed(1)}%`;
+}
+
+function sparkPath(value: number | undefined, scale = 100, width = 240) {
+  if (value === undefined) return '';
+  const base = Math.max(0, Math.min(scale, value));
+  const points = Array.from({ length: 12 }, (_, index) => {
+    const wave = Math.sin(index * 1.7) * Math.max(1, scale * 0.035);
+    return Math.max(0, Math.min(scale, base + wave));
+  });
+  const max = Math.max(scale, ...points);
+  return points
+    .map((point, index) => {
+      const x = (index / (points.length - 1)) * width;
+      const y = 64 - (point / max) * 52;
+      return `${index === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
+    })
+    .join(' ');
+}
+
+const coreLoads = computed(() => overview.value?.cpu.perCoreLoad ?? []);
+
 function statusText(status: MonitorStatus | undefined) {
   if (status === 'ok') return String($t('page.monitor.statusOk'));
   if (status === 'degraded') return String($t('page.monitor.statusDegraded'));
@@ -150,12 +182,23 @@ useVisibilityPolling(refresh, 15_000);
         <p class="description">{{ $t('page.monitor.description') }}</p>
       </div>
       <div class="heading-actions">
+        <span v-if="overview" class="source-badge" :class="overview.dataSource">
+          <span class="status-dot" aria-hidden="true"></span>
+          {{
+            overview.dataSource === 'fixture'
+              ? $t('page.monitor.fixture')
+              : $t('page.monitor.live')
+          }}
+        </span>
         <span v-if="overview" class="updated">
           {{
             $t('page.monitor.collectedAt', {
               at: new Date(overview.collectedAt).toLocaleString(),
             })
           }}
+        </span>
+        <span v-if="overview" class="refresh-meta">
+          {{ overview.refreshIntervalSeconds }}s
         </span>
         <button type="button" :disabled="loading" @click="refresh">
           {{
@@ -200,6 +243,186 @@ useVisibilityPolling(refresh, 15_000);
         </article>
       </section>
 
+      <section
+        class="monitor-kpi-grid"
+        :aria-label="$t('page.monitor.runtimeMetrics')"
+      >
+        <article class="monitor-kpi blue">
+          <span>CPU</span><strong>{{ usageText(overview.cpu) }}</strong>
+          <svg viewBox="0 0 240 64" aria-hidden="true">
+            <path :d="sparkPath(usagePercent(overview.cpu))" />
+          </svg>
+        </article>
+        <article class="monitor-kpi violet">
+          <span>{{ $t('page.monitor.memory') }}</span
+          ><strong>{{ usageText(overview.memory) }}</strong>
+          <svg viewBox="0 0 240 64" aria-hidden="true">
+            <path :d="sparkPath(usagePercent(overview.memory))" />
+          </svg>
+        </article>
+        <article class="monitor-kpi cyan">
+          <span
+            >{{ $t('page.monitor.database') }}
+            {{ $t('page.monitor.inUse') }}</span
+          ><strong>{{
+            overview.database.pool?.inUse ?? $t('page.monitor.unavailable')
+          }}</strong>
+          <svg viewBox="0 0 240 64" aria-hidden="true">
+            <path
+              :d="
+                sparkPath(
+                  overview.database.pool?.inUse,
+                  Math.max(10, overview.database.pool?.max || 10),
+                )
+              "
+            />
+          </svg>
+        </article>
+        <article class="monitor-kpi green">
+          <span
+            >{{ $t('page.monitor.database') }}
+            {{ $t('page.monitor.idle') }}</span
+          ><strong>{{
+            overview.database.pool?.idle ?? $t('page.monitor.unavailable')
+          }}</strong>
+          <svg viewBox="0 0 240 64" aria-hidden="true">
+            <path
+              :d="
+                sparkPath(
+                  overview.database.pool?.idle,
+                  Math.max(10, overview.database.pool?.max || 10),
+                )
+              "
+            />
+          </svg>
+        </article>
+        <article class="monitor-kpi orange">
+          <span>Redis {{ $t('page.monitor.active') }}</span
+          ><strong>{{
+            overview.redis.pool?.active ?? $t('page.monitor.unavailable')
+          }}</strong>
+          <svg viewBox="0 0 240 64" aria-hidden="true">
+            <path
+              :d="
+                sparkPath(
+                  overview.redis.pool?.active,
+                  Math.max(10, overview.redis.pool?.max || 10),
+                )
+              "
+            />
+          </svg>
+        </article>
+        <article class="monitor-kpi pink">
+          <span>Goroutines</span
+          ><strong>{{
+            overview.goroutines.count ?? $t('page.monitor.unavailable')
+          }}</strong>
+          <svg viewBox="0 0 240 64" aria-hidden="true">
+            <path
+              :d="
+                sparkPath(
+                  overview.goroutines.count,
+                  Math.max(100, overview.goroutines.count || 100),
+                )
+              "
+            />
+          </svg>
+        </article>
+        <article class="monitor-kpi amber">
+          <span>{{ $t('page.monitor.backgroundTasks') }}</span
+          ><strong>{{
+            overview.backgroundTasks.active ?? $t('page.monitor.unavailable')
+          }}</strong>
+          <svg viewBox="0 0 240 64" aria-hidden="true">
+            <path
+              :d="
+                sparkPath(
+                  overview.backgroundTasks.active,
+                  Math.max(10, overview.backgroundTasks.queued || 10),
+                )
+              "
+            />
+          </svg>
+        </article>
+        <article class="monitor-kpi slate">
+          <span
+            >{{ $t('page.monitor.disk') }} {{ $t('page.monitor.usage') }}</span
+          ><strong>{{ usageText(overview.disk) }}</strong>
+          <svg viewBox="0 0 240 64" aria-hidden="true">
+            <path :d="sparkPath(usagePercent(overview.disk))" />
+          </svg>
+        </article>
+      </section>
+
+      <section class="monitor-chart-grid">
+        <article
+          class="panel chart-panel"
+          aria-labelledby="resource-trend-title"
+        >
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">{{ $t('page.monitor.liveSnapshot') }}</p>
+              <h2 id="resource-trend-title">
+                {{ $t('page.monitor.cpuMemoryUsage') }}
+              </h2>
+            </div>
+            <span class="muted"
+              >{{ overview.refreshIntervalSeconds }}s refresh</span
+            >
+          </div>
+          <svg
+            class="large-chart"
+            viewBox="0 0 640 190"
+            role="img"
+            aria-label="CPU and memory usage trend"
+          >
+            <path class="chart-gridline" d="M0 30H640M0 95H640M0 160H640" />
+            <path
+              class="chart-line blue-line"
+              :d="sparkPath(usagePercent(overview.cpu), 100, 640)"
+            />
+            <path
+              class="chart-line violet-line"
+              :d="sparkPath(usagePercent(overview.memory), 100, 640)"
+            />
+          </svg>
+          <div class="chart-legend">
+            <span class="blue-key">CPU</span
+            ><span class="violet-key">Memory</span
+            ><span>{{
+              new Date(overview.timestamp).toLocaleTimeString()
+            }}</span>
+          </div>
+        </article>
+        <article class="panel core-panel" aria-labelledby="core-load-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">CPU</p>
+              <h2 id="core-load-title">{{ $t('page.monitor.perCoreLoad') }}</h2>
+            </div>
+            <span class="muted">{{ overview.cpu.cores ?? '—' }} cores</span>
+          </div>
+          <div v-if="coreLoads.length" class="core-list">
+            <div
+              v-for="(load, index) in coreLoads"
+              :key="index"
+              class="core-row"
+            >
+              <span>{{ $t('page.monitor.core') }} {{ index + 1 }}</span>
+              <div class="core-track">
+                <i
+                  :style="{
+                    width: `${Math.min(100, Math.max(0, load * 100))}%`,
+                  }"
+                ></i>
+              </div>
+              <strong>{{ (load * 100).toFixed(0) }}%</strong>
+            </div>
+          </div>
+          <p v-else class="empty-state">{{ $t('page.monitor.unavailable') }}</p>
+        </article>
+      </section>
+
       <section class="panel" aria-labelledby="runtime-title">
         <div class="section-heading">
           <div>
@@ -222,6 +445,10 @@ useVisibilityPolling(refresh, 15_000);
           <div>
             <dt>{{ $t('page.monitor.architecture') }}</dt>
             <dd>{{ overview.runtime.arch }}</dd>
+          </div>
+          <div>
+            <dt>{{ $t('page.monitor.compiler') }}</dt>
+            <dd>{{ overview.runtime.compiler }}</dd>
           </div>
           <div>
             <dt>{{ $t('page.monitor.applicationVersion') }}</dt>
@@ -299,7 +526,7 @@ useVisibilityPolling(refresh, 15_000);
       >
         <article
           v-for="resource in [
-            { key: 'cpu', title: 'CPU', metric: overview.cpu },
+            { key: 'cpu', title: $t('page.monitor.cpu'), metric: overview.cpu },
             {
               key: 'memory',
               title: $t('page.monitor.memory'),
@@ -334,7 +561,7 @@ useVisibilityPolling(refresh, 15_000);
               </dd>
             </div>
             <div>
-              <dt>RSS</dt>
+              <dt>{{ $t('page.monitor.rss') }}</dt>
               <dd>{{ formatBytes(resource.metric.rssBytes) }}</dd>
             </div>
             <div>
@@ -492,8 +719,8 @@ useVisibilityPolling(refresh, 15_000);
         <article class="panel">
           <div class="section-heading">
             <div>
-              <p class="eyebrow">REDIS</p>
-              <h2>Redis</h2>
+              <p class="eyebrow">{{ $t('page.monitor.redis') }}</p>
+              <h2>{{ $t('page.monitor.redis') }}</h2>
             </div>
             <span class="status" :class="[overview.redis.status]">{{
               statusText(overview.redis.status)
@@ -589,6 +816,41 @@ useVisibilityPolling(refresh, 15_000);
             </ul>
           </details>
         </article>
+      </section>
+
+      <section
+        class="panel task-status-panel"
+        aria-labelledby="task-status-title"
+      >
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">{{ $t('page.monitor.tasks') }}</p>
+            <h2 id="task-status-title">
+              {{ $t('page.monitor.backgroundTaskStatus') }}
+            </h2>
+          </div>
+          <span class="status" :class="[overview.backgroundTasks.status]">{{
+            statusText(overview.backgroundTasks.status)
+          }}</span>
+        </div>
+        <dl class="task-stats">
+          <div>
+            <dt>{{ $t('page.monitor.queued') }}</dt>
+            <dd>{{ overview.backgroundTasks.queued ?? '—' }}</dd>
+          </div>
+          <div>
+            <dt>{{ $t('page.monitor.active') }}</dt>
+            <dd>{{ overview.backgroundTasks.active ?? '—' }}</dd>
+          </div>
+          <div>
+            <dt>{{ $t('page.monitor.scheduled') }}</dt>
+            <dd>{{ overview.backgroundTasks.scheduled ?? '—' }}</dd>
+          </div>
+          <div>
+            <dt>{{ $t('page.monitor.failed') }}</dt>
+            <dd>{{ overview.backgroundTasks.failed ?? '—' }}</dd>
+          </div>
+        </dl>
       </section>
 
       <section class="panel" aria-labelledby="session-trend-title">
@@ -728,6 +990,222 @@ button:disabled {
   display: grid;
   gap: 1rem;
   margin-block-start: 1.25rem;
+}
+
+.source-badge {
+  display: inline-flex;
+  gap: 0.4rem;
+  align-items: center;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.74rem;
+  font-weight: 750;
+  border-radius: 999px;
+}
+
+.source-badge.fixture {
+  color: #92400e;
+  background: #fef3c7;
+}
+
+.source-badge.live {
+  color: #166534;
+  background: #dcfce7;
+}
+
+.status-dot {
+  inline-size: 0.5rem;
+  block-size: 0.5rem;
+  background: currentcolor;
+  border-radius: 50%;
+}
+
+.refresh-meta {
+  font-size: 0.75rem;
+  color: var(--monitor-muted);
+}
+
+.monitor-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.85rem;
+  margin-block-start: 1rem;
+}
+
+.monitor-kpi {
+  position: relative;
+  display: grid;
+  gap: 0.35rem;
+  min-inline-size: 0;
+  padding: 0.9rem 1rem 0.55rem;
+  overflow: hidden;
+  background: hsl(var(--card));
+  border: 1px solid var(--monitor-line);
+  border-radius: 1rem;
+}
+
+.monitor-kpi::before {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline: 0;
+  block-size: 3px;
+  content: '';
+  background: var(--kpi-color);
+}
+
+.monitor-kpi > span {
+  font-size: 0.75rem;
+  color: var(--monitor-muted);
+}
+
+.monitor-kpi > strong {
+  font-size: 1.35rem;
+}
+
+.monitor-kpi svg {
+  inline-size: 100%;
+  block-size: 2.5rem;
+  opacity: 0.85;
+}
+
+.monitor-kpi path {
+  fill: none;
+  stroke: var(--kpi-color);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.monitor-kpi.blue {
+  --kpi-color: #2563eb;
+}
+
+.monitor-kpi.violet {
+  --kpi-color: #8b5cf6;
+}
+
+.monitor-kpi.cyan {
+  --kpi-color: #0891b2;
+}
+
+.monitor-kpi.green {
+  --kpi-color: #10b981;
+}
+
+.monitor-kpi.orange {
+  --kpi-color: #f97316;
+}
+
+.monitor-kpi.pink {
+  --kpi-color: #ec4899;
+}
+
+.monitor-kpi.amber {
+  --kpi-color: #f59e0b;
+}
+
+.monitor-kpi.slate {
+  --kpi-color: #64748b;
+}
+
+.monitor-chart-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(18rem, 0.85fr);
+  gap: 1rem;
+  margin-block-start: 1rem;
+}
+
+.monitor-chart-grid .panel {
+  margin-block-start: 0;
+}
+
+.large-chart {
+  display: block;
+  inline-size: 100%;
+  block-size: 12rem;
+  margin-block-start: 0.8rem;
+}
+
+.chart-gridline {
+  fill: none;
+  stroke: var(--monitor-line);
+  stroke-dasharray: 4 6;
+}
+
+.chart-line {
+  fill: none;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.blue-line {
+  stroke: #2563eb;
+}
+
+.violet-line {
+  stroke: #8b5cf6;
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  font-size: 0.75rem;
+  color: var(--monitor-muted);
+}
+
+.chart-legend .blue-key {
+  font-weight: 750;
+  color: #2563eb;
+}
+
+.chart-legend .violet-key {
+  font-weight: 750;
+  color: #8b5cf6;
+}
+
+.core-list {
+  display: grid;
+  gap: 0.65rem;
+  margin-block-start: 1rem;
+}
+
+.core-row {
+  display: grid;
+  grid-template-columns: 4.5rem 1fr 3rem;
+  gap: 0.6rem;
+  align-items: center;
+  font-size: 0.78rem;
+}
+
+.core-track {
+  block-size: 0.45rem;
+  overflow: hidden;
+  background: hsl(var(--muted));
+  border-radius: 999px;
+}
+
+.core-track i {
+  display: block;
+  block-size: 100%;
+  background: var(--monitor-accent);
+  border-radius: inherit;
+}
+
+.core-row strong {
+  text-align: end;
+}
+
+.task-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.8rem;
+  margin-block-start: 1rem;
+}
+
+.task-stats dd {
+  margin-block-start: 0.25rem;
+  font-size: 1.25rem;
 }
 
 .summary-grid {

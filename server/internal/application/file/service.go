@@ -17,12 +17,16 @@ import (
 )
 
 var (
-	ErrFileTooLarge       = errors.New("file exceeds configured size limit")
-	ErrMIMETypeNotAllowed = errors.New("file MIME type is not allowed")
-	ErrFileNotFound       = errors.New("file not found")
-	ErrAccessDenied       = errors.New("file access denied")
-	ErrInvalidUpload      = errors.New("invalid file upload")
-	ErrStorageRead        = errors.New("file storage does not support reads")
+	ErrFileTooLarge         = errors.New("file exceeds configured size limit")
+	ErrMIMETypeNotAllowed   = errors.New("file MIME type is not allowed")
+	ErrFileNotFound         = errors.New("file not found")
+	ErrAccessDenied         = errors.New("file access denied")
+	ErrInvalidUpload        = errors.New("invalid file upload")
+	ErrStorageRead          = errors.New("file storage does not support reads")
+	ErrCategoryNotFound     = errors.New("category not found")
+	ErrCategoryAccessDenied = errors.New("category access denied")
+	ErrCategoryNotEmpty     = errors.New("category is not empty")
+	ErrInvalidCategory      = errors.New("invalid category")
 )
 
 type ACL string
@@ -35,17 +39,18 @@ const (
 // Object is the provider payload. Data is optional for remote providers and
 // is retained by the memory provider solely for deterministic local tests.
 type Object struct {
-	Key       string
-	Name      string
-	MIME      string
-	Size      int64
-	OwnerID   string
-	TenantID  string
-	OrgID     string
-	ACL       ACL
-	CreatedAt time.Time
-	SHA256    string
-	Data      []byte
+	Key        string
+	Name       string
+	MIME       string
+	Size       int64
+	OwnerID    string
+	TenantID   string
+	OrgID      string
+	ACL        ACL
+	CreatedAt  time.Time
+	SHA256     string
+	Data       []byte
+	CategoryID string
 }
 
 // Store is the only object-storage dependency required by Service.
@@ -62,36 +67,54 @@ type Config struct {
 }
 
 type UploadInput struct {
-	Name     string
-	MIME     string
-	Size     int64
-	OwnerID  string
-	TenantID string
-	OrgID    string
-	ACL      ACL
-	Data     []byte
+	Name       string
+	MIME       string
+	Size       int64
+	OwnerID    string
+	TenantID   string
+	OrgID      string
+	ACL        ACL
+	Data       []byte
+	CategoryID string
 }
 
 type File struct {
-	ID        string
-	Key       string
-	Name      string
-	MIME      string
-	Size      int64
-	OwnerID   string
-	TenantID  string
-	OrgID     string
-	ACL       ACL
-	CreatedAt time.Time
-	SHA256    string
+	ID         string
+	Key        string
+	Name       string
+	MIME       string
+	Size       int64
+	OwnerID    string
+	TenantID   string
+	OrgID      string
+	ACL        ACL
+	CreatedAt  time.Time
+	SHA256     string
+	CategoryID string `json:"categoryId,omitempty"`
 }
 
 type ListFilter struct {
-	TenantID string
-	OrgID    string
-	OwnerID  string
-	Limit    int
-	Offset   int
+	TenantID   string
+	OrgID      string
+	OwnerID    string
+	Limit      int
+	Offset     int
+	CategoryID string
+}
+
+type Category struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	ParentID  string    `json:"parentId,omitempty"`
+	TenantID  string    `json:"tenantId,omitempty"`
+	OrgID     string    `json:"orgId,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+type CategoryInput struct {
+	Name     string `json:"name"`
+	ParentID string `json:"parentId,omitempty"`
 }
 
 type Page struct {
@@ -112,12 +135,13 @@ type readableStore interface {
 }
 
 type Service struct {
-	store    Store
-	maxBytes int64
-	allowed  map[string]struct{}
-	clock    func() time.Time
-	mu       sync.RWMutex
-	files    map[string]File
+	store      Store
+	maxBytes   int64
+	allowed    map[string]struct{}
+	clock      func() time.Time
+	mu         sync.RWMutex
+	files      map[string]File
+	categories map[string]Category
 }
 
 func NewService(store Store, config Config) *Service {
@@ -129,7 +153,7 @@ func NewService(store Store, config Config) *Service {
 	if clock == nil {
 		clock = time.Now
 	}
-	return &Service{store: store, maxBytes: config.MaxBytes, allowed: allowed, clock: clock, files: make(map[string]File)}
+	return &Service{store: store, maxBytes: config.MaxBytes, allowed: allowed, clock: clock, files: make(map[string]File), categories: make(map[string]Category)}
 }
 
 func (s *Service) Upload(ctx context.Context, input UploadInput) (File, error) {
@@ -165,11 +189,23 @@ func (s *Service) Upload(ctx context.Context, input UploadInput) (File, error) {
 		sum := sha256.Sum256(data)
 		hash = hex.EncodeToString(sum[:])
 	}
-	object := Object{Key: id, Name: strings.TrimSpace(input.Name), MIME: strings.TrimSpace(input.MIME), Size: input.Size, OwnerID: strings.TrimSpace(input.OwnerID), TenantID: strings.TrimSpace(input.TenantID), OrgID: strings.TrimSpace(input.OrgID), ACL: acl, CreatedAt: now, SHA256: hash, Data: data}
+	categoryID := strings.TrimSpace(input.CategoryID)
+	if categoryID != "" {
+		s.mu.RLock()
+		category, exists := s.categories[categoryID]
+		s.mu.RUnlock()
+		if !exists {
+			return File{}, ErrCategoryNotFound
+		}
+		if category.TenantID != strings.TrimSpace(input.TenantID) || category.OrgID != strings.TrimSpace(input.OrgID) {
+			return File{}, ErrCategoryAccessDenied
+		}
+	}
+	object := Object{Key: id, Name: strings.TrimSpace(input.Name), MIME: strings.TrimSpace(input.MIME), Size: input.Size, OwnerID: strings.TrimSpace(input.OwnerID), TenantID: strings.TrimSpace(input.TenantID), OrgID: strings.TrimSpace(input.OrgID), ACL: acl, CreatedAt: now, SHA256: hash, Data: data, CategoryID: categoryID}
 	if err = s.store.Put(ctx, object); err != nil {
 		return File{}, fmt.Errorf("put file: %w", err)
 	}
-	file := File{ID: id, Key: id, Name: object.Name, MIME: object.MIME, Size: object.Size, OwnerID: object.OwnerID, TenantID: object.TenantID, OrgID: object.OrgID, ACL: object.ACL, CreatedAt: now, SHA256: object.SHA256}
+	file := File{ID: id, Key: id, Name: object.Name, MIME: object.MIME, Size: object.Size, OwnerID: object.OwnerID, TenantID: object.TenantID, OrgID: object.OrgID, ACL: object.ACL, CreatedAt: now, SHA256: object.SHA256, CategoryID: categoryID}
 	s.mu.Lock()
 	s.files[id] = file
 	s.mu.Unlock()
@@ -203,6 +239,9 @@ func (s *Service) List(_ context.Context, filter ListFilter) (Page, error) {
 		if filter.OwnerID != "" && item.OwnerID != filter.OwnerID {
 			continue
 		}
+		if filter.CategoryID != "" && item.CategoryID != filter.CategoryID {
+			continue
+		}
 		items = append(items, item)
 	}
 	s.mu.RUnlock()
@@ -219,6 +258,114 @@ func (s *Service) List(_ context.Context, filter ListFilter) (Page, error) {
 		end = minInt(start+filter.Limit, total)
 	}
 	return Page{Items: items[start:end], Total: total, Limit: filter.Limit, Offset: filter.Offset}, nil
+}
+
+func (s *Service) CreateCategory(_ context.Context, input CategoryInput, tenantID, orgID string) (Category, error) {
+	name := strings.TrimSpace(input.Name)
+	if name == "" {
+		return Category{}, ErrInvalidCategory
+	}
+	parentID := strings.TrimSpace(input.ParentID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if parentID != "" {
+		p, ok := s.categories[parentID]
+		if !ok {
+			return Category{}, ErrCategoryNotFound
+		}
+		if p.TenantID != tenantID || p.OrgID != orgID {
+			return Category{}, ErrCategoryAccessDenied
+		}
+	}
+	id, err := newID()
+	if err != nil {
+		return Category{}, err
+	}
+	now := s.clock().UTC()
+	c := Category{ID: id, Name: name, ParentID: parentID, TenantID: strings.TrimSpace(tenantID), OrgID: strings.TrimSpace(orgID), CreatedAt: now, UpdatedAt: now}
+	s.categories[id] = c
+	return c, nil
+}
+
+func (s *Service) ListCategories(_ context.Context, tenantID, orgID string) []Category {
+	s.mu.RLock()
+	out := make([]Category, 0)
+	for _, c := range s.categories {
+		if c.TenantID == tenantID && c.OrgID == orgID {
+			out = append(out, c)
+		}
+	}
+	s.mu.RUnlock()
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].ParentID == out[j].ParentID {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].ParentID < out[j].ParentID
+	})
+	return out
+}
+
+func (s *Service) UpdateCategory(_ context.Context, id string, input CategoryInput, tenantID, orgID string) (Category, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, ok := s.categories[strings.TrimSpace(id)]
+	if !ok {
+		return Category{}, ErrCategoryNotFound
+	}
+	if c.TenantID != tenantID || c.OrgID != orgID {
+		return Category{}, ErrCategoryAccessDenied
+	}
+	if strings.TrimSpace(input.Name) != "" {
+		c.Name = strings.TrimSpace(input.Name)
+	}
+	if input.ParentID != "" {
+		p, exists := s.categories[strings.TrimSpace(input.ParentID)]
+		if !exists {
+			return Category{}, ErrCategoryNotFound
+		}
+		if p.TenantID != tenantID || p.OrgID != orgID || p.ID == c.ID {
+			return Category{}, ErrCategoryAccessDenied
+		}
+		for ancestor := p; ancestor.ParentID != ""; {
+			if ancestor.ParentID == c.ID {
+				return Category{}, ErrInvalidCategory
+			}
+			next, ok := s.categories[ancestor.ParentID]
+			if !ok {
+				break
+			}
+			ancestor = next
+		}
+		c.ParentID = p.ID
+	}
+	c.UpdatedAt = s.clock().UTC()
+	s.categories[c.ID] = c
+	return c, nil
+}
+
+func (s *Service) DeleteCategory(_ context.Context, id, tenantID, orgID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id = strings.TrimSpace(id)
+	c, ok := s.categories[id]
+	if !ok {
+		return ErrCategoryNotFound
+	}
+	if c.TenantID != tenantID || c.OrgID != orgID {
+		return ErrCategoryAccessDenied
+	}
+	for _, child := range s.categories {
+		if child.ParentID == id {
+			return ErrCategoryNotEmpty
+		}
+	}
+	for _, f := range s.files {
+		if f.CategoryID == id {
+			return ErrCategoryNotEmpty
+		}
+	}
+	delete(s.categories, id)
+	return nil
 }
 
 func (s *Service) Download(ctx context.Context, id, subject, tenantID, orgID string) (File, Object, error) {

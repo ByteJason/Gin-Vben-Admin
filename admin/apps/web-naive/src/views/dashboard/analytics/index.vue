@@ -1,472 +1,609 @@
 <script setup lang="ts">
 import type {
-  AuthApi,
-  DashboardCountMetric,
-  DashboardStatus,
-  DashboardSummary,
+  DashboardOverview,
+  DashboardOverviewDistributionItem,
+  DashboardOverviewPreset,
+  DashboardOverviewTopItem,
 } from '@vben/api-client';
 
-import { computed, ref } from 'vue';
-import { RouterLink } from 'vue-router';
+import { computed, reactive, ref } from 'vue';
 
 import { ManagementPage } from '@vben/common-ui';
 import { useVisibilityPolling } from '@vben/hooks';
-import { useAccessStore } from '@vben/stores';
 
-import { listSessionsApi } from '#/api/core/auth';
-import { getDashboardSummaryApi } from '#/api/core/dashboard';
+import {
+  getDashboardOverviewApi,
+  type DashboardOverviewQuery,
+} from '#/api/core/dashboard';
 import { $t } from '#/locales';
 
-const accessStore = useAccessStore();
-const summary = ref<DashboardSummary>();
-const sessions = ref<AuthApi.SessionInfo[]>([]);
+const presets: Array<{ key: DashboardOverviewPreset; label: string }> = [
+  { key: 'today', label: 'today' },
+  { key: 'yesterday', label: 'yesterday' },
+  { key: '24h', label: '24h' },
+  { key: '7d', label: '7d' },
+  { key: '14d', label: '14d' },
+  { key: '30d', label: '30d' },
+  { key: 'this_month', label: 'thisMonth' },
+  { key: 'last_month', label: 'lastMonth' },
+];
+
+type CardKey = keyof DashboardOverview['cards'];
+type TrendKey = 'visitors' | 'newUsers' | 'amount';
+
+const state = reactive<{
+  from: string;
+  granularity: 'hour' | 'day';
+  preset: DashboardOverviewPreset;
+  to: string;
+}>({
+  from: '',
+  granularity: 'hour',
+  preset: 'today',
+  to: '',
+});
+const overview = ref<DashboardOverview>();
 const loading = ref(false);
-const summaryError = ref('');
-const sessionsError = ref('');
-const sampledAt = ref(Date.now());
+const error = ref('');
+const timezone = ref(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
 
-const canReadMonitor = computed(() =>
-  accessStore.accessCodes.includes('ops:monitor:read'),
+const cardDefinitions: Array<{
+  key: CardKey;
+  label: string;
+  tone: string;
+  currency?: boolean;
+}> = [
+  { key: 'visitors', label: 'visitors', tone: 'blue' },
+  { key: 'newUsers', label: 'newUsers', tone: 'green' },
+  {
+    key: 'paymentAmount',
+    label: 'paymentAmount',
+    tone: 'amber',
+    currency: true,
+  },
+  { key: 'paymentOrders', label: 'paymentOrders', tone: 'violet' },
+  {
+    key: 'averageOrderValue',
+    label: 'averageOrderValue',
+    tone: 'teal',
+    currency: true,
+  },
+];
+
+const cards = computed(() =>
+  cardDefinitions.map((definition) => ({
+    ...definition,
+    metric: overview.value?.cards[definition.key],
+  })),
 );
 
-const countCards = computed(() => {
-  if (!summary.value) return [];
-  return [
-    {
-      key: 'users',
-      label: String($t('page.analytics.users')),
-      metric: summary.value.counts.users,
-    },
-    {
-      key: 'roles',
-      label: String($t('page.analytics.roles')),
-      metric: summary.value.counts.roles,
-    },
-    {
-      key: 'tasks',
-      label: String($t('page.analytics.tasks')),
-      metric: summary.value.counts.tasks,
-    },
-    {
-      key: 'importJobs',
-      label: String($t('page.analytics.imports')),
-      metric: summary.value.counts.importJobs,
-    },
-    {
-      key: 'exportJobs',
-      label: String($t('page.analytics.exports')),
-      metric: summary.value.counts.exportJobs,
-    },
-    {
-      key: 'files',
-      label: String($t('page.analytics.files')),
-      metric: summary.value.counts.files,
-    },
-    {
-      key: 'auditEvents',
-      label: String($t('page.analytics.auditEvents')),
-      metric: summary.value.counts.auditEvents,
-    },
-    {
-      key: 'mailAccounts',
-      label: String($t('page.analytics.mailAccounts')),
-      metric: summary.value.counts.mailAccounts,
-    },
-    {
-      key: 'mailMessages',
-      label: String($t('page.analytics.mailMessages')),
-      metric: summary.value.counts.mailMessages,
-    },
-  ];
+const distributionStyle = computed(() => {
+  const items = overview.value?.distribution ?? [];
+  const total = items.reduce((sum, item) => sum + Math.max(0, item.value), 0);
+  if (!total) return 'conic-gradient(#dbe3ef 0 100%)';
+  let cursor = 0;
+  const colors = ['#2563eb', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6'];
+  return `conic-gradient(${items
+    .map((item, index) => {
+      const start = cursor;
+      cursor += (Math.max(0, item.value) / total) * 100;
+      return `${colors[index % colors.length]} ${start}% ${cursor}%`;
+    })
+    .join(', ')})`;
 });
 
-const activeSessions = computed(
-  () =>
-    sessions.value.filter(
-      (session) =>
-        !session.revoked && Date.parse(session.expiresAt) > sampledAt.value,
-    ).length,
-);
+const trendPoints = computed(() => overview.value?.trends ?? []);
 
-const revokedSessions = computed(
-  () => sessions.value.filter(({ revoked }) => revoked).length,
-);
+function label(key: string, params?: Record<string, unknown>) {
+  const path = `page.analyticsOverview.${key}`;
+  return String(params ? $t(path, params) : $t(path));
+}
 
-const expiringSessions = computed(
-  () =>
-    sessions.value.filter((session) => {
-      if (session.revoked) return false;
-      const remaining = Date.parse(session.expiresAt) - sampledAt.value;
-      return remaining >= 0 && remaining <= 24 * 60 * 60 * 1000;
-    }).length,
-);
+function metricText(
+  metric: { value?: number; status: string } | undefined,
+  currency = false,
+) {
+  if (!metric || metric.value === undefined) return label('unavailable');
+  const value = new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: currency ? 2 : 0,
+    minimumFractionDigits: currency ? 2 : 0,
+  }).format(metric.value);
+  return currency ? `¥ ${value}` : value;
+}
 
-const sessionTrend = computed(() => {
-  const buckets = [
-    {
-      count: 0,
-      label: String($t('page.analytics.hour1')),
-      maxAge: 60 * 60 * 1000,
-    },
-    {
-      count: 0,
-      label: String($t('page.analytics.hours1to6')),
-      maxAge: 6 * 60 * 60 * 1000,
-    },
-    {
-      count: 0,
-      label: String($t('page.analytics.hours6to24')),
-      maxAge: 24 * 60 * 60 * 1000,
-    },
-    {
-      count: 0,
-      label: String($t('page.analytics.hours24Plus')),
-      maxAge: Number.POSITIVE_INFINITY,
-    },
-  ];
-  for (const session of sessions.value) {
-    const age = Math.max(0, sampledAt.value - Date.parse(session.lastSeenAt));
-    const bucket = buckets.find(({ maxAge }) => age <= maxAge);
-    if (bucket) bucket.count += 1;
+function statusText(status?: string) {
+  if (status === 'ok') return label('healthy');
+  if (status === 'degraded') return label('degraded');
+  return label('unavailable');
+}
+
+function formatDate(value?: string) {
+  if (!value) return label('unavailable');
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? label('unavailable')
+    : date.toLocaleString();
+}
+
+function trendPath(key: TrendKey) {
+  const points = trendPoints.value;
+  if (!points.length) return '';
+  const values = points.map((point) => point[key]);
+  const max = Math.max(1, ...values);
+  const width = 640;
+  const height = 190;
+  return values
+    .map((value, index) => {
+      const x =
+        points.length === 1 ? width / 2 : (index / (points.length - 1)) * width;
+      const y = height - (value / max) * (height - 18) - 9;
+      return `${index === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
+    })
+    .join(' ');
+}
+
+function trendAreaPath(key: TrendKey) {
+  const path = trendPath(key);
+  if (!path) return '';
+  return `${path} L 640 190 L 0 190 Z`;
+}
+
+function distributionPercent(item: DashboardOverviewDistributionItem) {
+  const total = (overview.value?.distribution ?? []).reduce(
+    (sum, entry) => sum + Math.max(0, entry.value),
+    0,
+  );
+  return total ? `${((item.value / total) * 100).toFixed(1)}%` : '0%';
+}
+
+function topItemAmount(item: DashboardOverviewTopItem) {
+  return metricText({ value: item.amount, status: 'ok' }, true);
+}
+
+function dateAfter(value: string) {
+  const parsed = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return value;
+  parsed.setDate(parsed.getDate() + 1);
+  return parsed.toISOString();
+}
+
+function queryParams(): DashboardOverviewQuery | undefined {
+  if (state.preset !== 'custom') {
+    return {
+      granularity: state.granularity,
+      preset: state.preset,
+      timezone: timezone.value,
+    };
   }
-  const maximum = Math.max(1, ...buckets.map(({ count }) => count));
-  return buckets.map((bucket) => ({
-    ...bucket,
-    width: `${(bucket.count / maximum) * 100}%`,
-  }));
-});
-
-function statusText(status?: DashboardStatus) {
-  if (status === 'ok') return String($t('page.analytics.statusOk'));
-  if (status === 'degraded') return String($t('page.analytics.statusDegraded'));
-  return String($t('page.analytics.statusUnavailable'));
-}
-
-function countText(metric: DashboardCountMetric) {
-  return metric.value === undefined
-    ? String($t('page.analytics.unavailable'))
-    : new Intl.NumberFormat().format(metric.value);
-}
-
-function formatDuration(seconds?: number) {
-  if (seconds === undefined) return String($t('page.analytics.unavailable'));
-  const days = Math.floor(seconds / 86_400);
-  const hours = Math.floor((seconds % 86_400) / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  return String($t('page.monitor.duration', { days, hours, minutes }));
+  if (!state.from || !state.to) {
+    error.value = label('customRangeRequired');
+    return;
+  }
+  const from = new Date(`${state.from}T00:00:00`);
+  if (Number.isNaN(from.getTime())) {
+    error.value = label('customRangeInvalid');
+    return;
+  }
+  return {
+    from: from.toISOString(),
+    granularity: state.granularity,
+    preset: 'custom',
+    timezone: timezone.value,
+    to: dateAfter(state.to),
+  };
 }
 
 async function refresh() {
   if (loading.value) return;
+  const params = queryParams();
+  if (!params) return;
   loading.value = true;
-  const [summaryResult, sessionsResult] = await Promise.allSettled([
-    getDashboardSummaryApi(),
-    listSessionsApi(),
-  ]);
-  sampledAt.value = Date.now();
-
-  if (summaryResult.status === 'fulfilled') {
-    summary.value = summaryResult.value;
-    summaryError.value = '';
-  } else {
-    summaryError.value = summary.value
-      ? String($t('page.analytics.loadErrorCached'))
-      : String($t('page.analytics.loadError'));
+  error.value = '';
+  try {
+    overview.value = await getDashboardOverviewApi(params);
+  } catch {
+    error.value = label('loadError');
+  } finally {
+    loading.value = false;
   }
-  if (sessionsResult.status === 'fulfilled') {
-    sessions.value = sessionsResult.value;
-    sessionsError.value = '';
-  } else {
-    sessionsError.value = String($t('page.analytics.sessionsError'));
-  }
-  loading.value = false;
 }
 
-useVisibilityPolling(refresh, 15_000);
+function selectPreset(preset: DashboardOverviewPreset) {
+  state.preset = preset;
+  if (preset !== 'custom') {
+    state.from = '';
+    state.to = '';
+  }
+  void refresh();
+}
+
+useVisibilityPolling(refresh, 30_000);
 </script>
 
 <template>
   <ManagementPage
-    class="operations-overview-page"
-    :busy="loading"
-    labelledby="operations-overview-title"
+    class="analytics-overview-page"
+    :aria-busy="loading"
+    aria-labelledby="analytics-overview-title"
   >
     <header class="page-heading">
       <div>
-        <p class="eyebrow">{{ $t('page.analytics.eyebrow') }}</p>
-        <h1 id="operations-overview-title">{{ $t('page.analytics.title') }}</h1>
-        <p class="description">{{ $t('page.analytics.description') }}</p>
+        <p class="eyebrow">{{ label('eyebrow') }}</p>
+        <h1 id="analytics-overview-title">{{ label('title') }}</h1>
+        <p class="description">{{ label('description') }}</p>
       </div>
-      <div class="heading-actions">
-        <span v-if="summary" class="updated">
+      <div class="heading-meta">
+        <span v-if="overview" class="source-badge" :class="overview.dataSource">
+          <span class="status-dot" aria-hidden="true"></span>
           {{
-            $t('page.monitor.collectedAt', {
-              at: new Date(summary.collectedAt).toLocaleString(),
-            })
+            overview.dataSource === 'fixture' ? label('fixture') : label('live')
           }}
         </span>
+        <span v-if="overview" class="updated">{{
+          formatDate(overview.collectedAt)
+        }}</span>
         <button type="button" :disabled="loading" @click="refresh">
-          {{
-            loading
-              ? $t('page.analytics.refreshing')
-              : $t('page.analytics.refresh')
-          }}
+          {{ loading ? label('refreshing') : label('refresh') }}
         </button>
       </div>
     </header>
 
-    <p v-if="summaryError" class="feedback error" role="alert">
-      {{ summaryError }}
-    </p>
-    <p v-if="sessionsError" class="feedback warning" role="status">
-      {{ sessionsError }}
-    </p>
-    <p v-if="loading && !summary" class="loading-state" role="status">
-      {{ $t('page.analytics.loading') }}
+    <section class="range-toolbar" :aria-label="label('rangeLabel')">
+      <div class="preset-list" role="group" :aria-label="label('quickRanges')">
+        <button
+          v-for="item in presets"
+          :key="item.key"
+          type="button"
+          :class="{ active: state.preset === item.key }"
+          :aria-pressed="state.preset === item.key"
+          @click="selectPreset(item.key)"
+        >
+          {{ label(item.label) }}
+        </button>
+        <button
+          type="button"
+          :class="{ active: state.preset === 'custom' }"
+          :aria-pressed="state.preset === 'custom'"
+          @click="selectPreset('custom')"
+        >
+          {{ label('custom') }}
+        </button>
+      </div>
+      <div v-if="state.preset === 'custom'" class="date-fields">
+        <label>
+          <span>{{ label('from') }}</span>
+          <input v-model="state.from" type="date" @change="refresh" />
+        </label>
+        <span class="date-separator" aria-hidden="true">→</span>
+        <label>
+          <span>{{ label('to') }}</span>
+          <input v-model="state.to" type="date" @change="refresh" />
+        </label>
+      </div>
+      <label class="granularity-field">
+        <span>{{ label('granularity') }}</span>
+        <select v-model="state.granularity" @change="refresh">
+          <option value="hour">{{ label('hour') }}</option>
+          <option value="day">{{ label('day') }}</option>
+        </select>
+      </label>
+    </section>
+
+    <p v-if="error" class="feedback error" role="alert">{{ error }}</p>
+    <p v-if="loading && !overview" class="loading-state" role="status">
+      {{ label('loading') }}
     </p>
 
-    <template v-if="summary">
-      <section class="instance-panel" aria-labelledby="instance-title">
-        <div class="instance-copy">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">{{ $t('page.analytics.instance') }}</p>
-              <h2 id="instance-title">
-                {{ $t('page.analytics.instanceStatus') }}
-              </h2>
-            </div>
-            <span class="status" :class="[summary.instance.status]">
-              {{ statusText(summary.instance.status) }}
+    <template v-if="overview">
+      <section class="metric-grid" :aria-label="label('metrics')">
+        <article
+          v-for="card in cards"
+          :key="card.key"
+          class="metric-card"
+          :class="`tone-${card.tone}`"
+        >
+          <div class="metric-heading">
+            <span>{{ label(card.label) }}</span>
+            <span class="metric-status" :class="card.metric?.status">
+              {{ statusText(card.metric?.status) }}
             </span>
           </div>
-          <dl class="instance-grid">
+          <strong>{{ metricText(card.metric, card.currency) }}</strong>
+          <small>{{
+            label('rangeHint', {
+              from: formatDate(overview.range.from),
+              to: formatDate(overview.range.to),
+            })
+          }}</small>
+        </article>
+      </section>
+
+      <section class="chart-grid" aria-label="Trends">
+        <article class="panel chart-panel">
+          <div class="panel-heading">
             <div>
-              <dt>{{ $t('page.analytics.runningStatus') }}</dt>
-              <dd>
-                {{ summary.instance.state || $t('page.analytics.unavailable') }}
-              </dd>
+              <p class="eyebrow">{{ label('trend') }}</p>
+              <h2>{{ label('visitorsTrend') }}</h2>
+            </div>
+            <span class="legend blue">{{ label('visitors') }}</span>
+          </div>
+          <svg
+            class="trend-chart"
+            viewBox="0 0 640 190"
+            role="img"
+            :aria-label="label('visitorsTrend')"
+          >
+            <path class="area blue-fill" :d="trendAreaPath('visitors')" />
+            <path class="line blue-line" :d="trendPath('visitors')" />
+          </svg>
+          <div class="axis-labels">
+            <span>{{ formatDate(trendPoints[0]?.at) }}</span
+            ><span>{{
+              formatDate(trendPoints[trendPoints.length - 1]?.at)
+            }}</span>
+          </div>
+        </article>
+        <article class="panel chart-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">{{ label('trend') }}</p>
+              <h2>{{ label('paymentTrend') }}</h2>
+            </div>
+            <span class="legend amber">{{ label('paymentAmount') }}</span>
+          </div>
+          <svg
+            class="trend-chart"
+            viewBox="0 0 640 190"
+            role="img"
+            :aria-label="label('paymentTrend')"
+          >
+            <path class="area amber-fill" :d="trendAreaPath('amount')" />
+            <path class="line amber-line" :d="trendPath('amount')" />
+          </svg>
+          <div class="axis-labels">
+            <span>{{ formatDate(trendPoints[0]?.at) }}</span
+            ><span>{{
+              formatDate(trendPoints[trendPoints.length - 1]?.at)
+            }}</span>
+          </div>
+        </article>
+        <article class="panel chart-panel compact-chart">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">{{ label('trend') }}</p>
+              <h2>{{ label('newUsersTrend') }}</h2>
+            </div>
+            <span class="legend green">{{ label('newUsers') }}</span>
+          </div>
+          <svg
+            class="trend-chart"
+            viewBox="0 0 640 190"
+            role="img"
+            :aria-label="label('newUsersTrend')"
+          >
+            <path class="area green-fill" :d="trendAreaPath('newUsers')" />
+            <path class="line green-line" :d="trendPath('newUsers')" />
+          </svg>
+        </article>
+        <article class="panel range-panel">
+          <p class="eyebrow">{{ label('selectedRange') }}</p>
+          <h2>
+            {{ formatDate(overview.range.from) }} —
+            {{ formatDate(overview.range.to) }}
+          </h2>
+          <dl>
+            <div>
+              <dt>{{ label('timezone') }}</dt>
+              <dd>{{ overview.range.timezone }}</dd>
             </div>
             <div>
-              <dt>{{ $t('page.analytics.scope') }}</dt>
-              <dd>
-                {{ summary.instance.scope || $t('page.analytics.unavailable') }}
-              </dd>
+              <dt>{{ label('granularity') }}</dt>
+              <dd>{{ overview.range.granularity }}</dd>
             </div>
             <div>
-              <dt>{{ $t('page.analytics.version') }}</dt>
-              <dd>
-                {{
-                  summary.instance.version || $t('page.analytics.unavailable')
-                }}
-              </dd>
-            </div>
-            <div>
-              <dt>{{ $t('page.monitor.uptime') }}</dt>
-              <dd>{{ formatDuration(summary.instance.uptimeSeconds) }}</dd>
+              <dt>{{ label('points') }}</dt>
+              <dd>{{ overview.trends.length }}</dd>
             </div>
           </dl>
-        </div>
-        <div
-          class="health-list"
-          :aria-label="$t('page.analytics.dependencyHealth')"
-        >
-          <div
-            v-for="health in [
-              {
-                key: 'runtime',
-                label: 'Runtime',
-                metric: summary.health.runtime,
-              },
-              {
-                key: 'database',
-                label: 'Database',
-                metric: summary.health.database,
-              },
-              { key: 'redis', label: 'Redis', metric: summary.health.redis },
-            ]"
-            :key="health.key"
-          >
-            <span>{{ health.label }}</span>
-            <strong class="health-state" :class="[health.metric.status]">{{
-              health.metric.state || statusText(health.metric.status)
-            }}</strong>
-          </div>
-        </div>
+        </article>
       </section>
 
-      <section class="counts-section" aria-labelledby="counts-title">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">{{ $t('page.analytics.tenantCounts') }}</p>
-            <h2 id="counts-title">{{ $t('page.analytics.businessData') }}</h2>
+      <section class="lower-grid">
+        <article class="panel distribution-panel">
+          <div class="panel-heading">
+            <h2>{{ label('channelDistribution') }}</h2>
+            <span>{{ label('distributionHint') }}</span>
           </div>
-          <span class="status" :class="[summary.status]">{{
-            $t('page.analytics.overallStatus', {
-              status: statusText(summary.status),
-            })
-          }}</span>
-        </div>
-        <div class="count-grid">
-          <article
-            v-for="card in countCards"
-            :key="card.key"
-            class="count-card"
-          >
-            <span>{{ card.label }}</span>
-            <strong>{{ countText(card.metric) }}</strong>
-            <small class="metric-status" :class="[card.metric.status]">{{
-              statusText(card.metric.status)
-            }}</small>
-            <p v-if="card.metric.message">{{ card.metric.message }}</p>
-          </article>
-        </div>
-      </section>
-
-      <section class="sessions-panel" aria-labelledby="sessions-title">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">{{ $t('page.analytics.deviceSessions') }}</p>
-            <h2 id="sessions-title">
-              {{ $t('page.analytics.deviceSessions') }}
-            </h2>
-          </div>
-          <span class="updated">{{ $t('page.analytics.browserSample') }}</span>
-        </div>
-        <div class="session-summary">
-          <div>
-            <span>{{ $t('page.analytics.all') }}</span
-            ><strong>{{ sessions.length }}</strong>
-          </div>
-          <div>
-            <span>{{ $t('page.analytics.active') }}</span
-            ><strong>{{ activeSessions }}</strong>
-          </div>
-          <div>
-            <span>{{ $t('page.analytics.expiring24h') }}</span
-            ><strong>{{ expiringSessions }}</strong>
-          </div>
-          <div>
-            <span>{{ $t('page.analytics.revoked') }}</span
-            ><strong>{{ revokedSessions }}</strong>
-          </div>
-        </div>
-        <div
-          v-if="sessions.length"
-          class="trend-list"
-          :aria-label="$t('page.analytics.sessionTrend')"
-        >
-          <div
-            v-for="bucket in sessionTrend"
-            :key="bucket.label"
-            class="trend-row"
-          >
-            <span>{{ bucket.label }}</span>
-            <div class="trend-track" aria-hidden="true">
-              <i :style="{ width: bucket.width }"></i>
+          <div class="distribution-content">
+            <div
+              class="donut"
+              :style="{ background: distributionStyle }"
+              role="img"
+              :aria-label="label('channelDistribution')"
+            >
+              <span>{{ metricText(overview.cards.visitors) }}</span
+              ><small>{{ label('visitors') }}</small>
             </div>
-            <strong>{{ bucket.count }}</strong>
+            <ul class="legend-list">
+              <li
+                v-for="(item, index) in overview.distribution"
+                :key="item.key"
+              >
+                <span
+                  class="swatch"
+                  :style="{
+                    background: [
+                      '#2563eb',
+                      '#10b981',
+                      '#f59e0b',
+                      '#ec4899',
+                      '#8b5cf6',
+                    ][index % 5],
+                  }"
+                ></span
+                ><span>{{ item.label }}</span
+                ><strong>{{ distributionPercent(item) }}</strong>
+              </li>
+            </ul>
           </div>
-        </div>
-        <p v-else class="empty-state">
-          {{ $t('page.analytics.emptySessions') }}
-        </p>
-      </section>
-
-      <section class="monitor-entry" aria-labelledby="monitor-entry-title">
-        <div>
-          <p class="eyebrow">{{ $t('page.monitor.eyebrow') }}</p>
-          <h2 id="monitor-entry-title">
-            {{ $t('page.analytics.monitorQuestion') }}
-          </h2>
-          <p>{{ $t('page.analytics.monitorDescription') }}</p>
-        </div>
-        <RouterLink
-          v-if="canReadMonitor"
-          class="monitor-link"
-          to="/system/monitor"
-        >
-          {{ $t('page.analytics.goToMonitor') }}
-        </RouterLink>
-        <span v-else class="permission-note">{{
-          $t('page.analytics.monitorPermission')
-        }}</span>
+        </article>
+        <article class="panel top-items-panel">
+          <div class="panel-heading">
+            <h2>{{ label('topItems') }}</h2>
+            <span>{{ label('amount') }}</span>
+          </div>
+          <ol class="top-items">
+            <li v-for="item in overview.topItems" :key="item.id">
+              <span class="rank">{{ item.rank }}</span
+              ><span class="item-name">{{ item.name }}</span
+              ><strong>{{ topItemAmount(item) }}</strong>
+            </li>
+            <li v-if="!overview.topItems.length" class="empty-inline">
+              {{ label('empty') }}
+            </li>
+          </ol>
+        </article>
+        <article class="panel regions-panel">
+          <div class="panel-heading">
+            <h2>{{ label('regions') }}</h2>
+            <span>{{ label('visitors') }}</span>
+          </div>
+          <table>
+            <caption class="sr-only">
+              {{
+                label('regions')
+              }}
+            </caption>
+            <thead>
+              <tr>
+                <th>{{ label('region') }}</th>
+                <th>{{ label('value') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in overview.regions" :key="item.key">
+                <td>{{ item.label }}</td>
+                <td>{{ item.value }}</td>
+              </tr>
+              <tr v-if="!overview.regions.length">
+                <td colspan="2" class="empty-inline">{{ label('empty') }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </article>
+        <article class="panel announcements-panel">
+          <div class="panel-heading">
+            <h2>{{ label('announcements') }}</h2>
+            <span>{{ label('latest') }}</span>
+          </div>
+          <ul class="announcements">
+            <li v-for="item in overview.announcements" :key="item.id">
+              <span>{{ item.title }}</span
+              ><time :datetime="item.publishedAt">{{
+                formatDate(item.publishedAt)
+              }}</time>
+            </li>
+            <li v-if="!overview.announcements.length" class="empty-inline">
+              {{ label('empty') }}
+            </li>
+          </ul>
+        </article>
       </section>
     </template>
   </ManagementPage>
 </template>
 
 <style scoped>
-.operations-overview-page {
-  --overview-accent: hsl(var(--primary));
-  --overview-line: hsl(var(--border));
-  --overview-muted: hsl(var(--muted-foreground));
+.analytics-overview-page {
+  --line: hsl(var(--border));
+  --muted: hsl(var(--muted-foreground));
 
   color: hsl(var(--foreground));
 }
 
 .page-heading,
-.section-heading,
-.heading-actions,
-.monitor-entry {
+.heading-meta,
+.range-toolbar,
+.preset-list,
+.date-fields,
+.panel-heading,
+.axis-labels,
+.distribution-content,
+.legend-list li,
+.top-items li,
+.announcements li {
   display: flex;
+  align-items: center;
+}
+
+.page-heading,
+.range-toolbar,
+.panel-heading {
   gap: 1rem;
-  align-items: flex-start;
   justify-content: space-between;
 }
 
+.page-heading {
+  flex-wrap: wrap;
+}
+
+.heading-meta {
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  justify-content: flex-end;
+}
+
 .eyebrow {
-  margin: 0 0 0.4rem;
+  margin: 0 0 0.35rem;
   font-size: 0.72rem;
   font-weight: 800;
-  color: var(--overview-accent);
+  color: hsl(var(--primary));
+  text-transform: uppercase;
   letter-spacing: 0.12em;
 }
 
+h1,
+h2,
+p {
+  margin: 0;
+}
+
 h1 {
-  margin: 0 0 0.5rem;
-  font-size: clamp(1.8rem, 3vw, 2.6rem);
+  font-size: clamp(1.7rem, 3vw, 2.5rem);
 }
 
 h2 {
-  margin: 0;
   font-size: 1.08rem;
 }
 
-.description,
-.updated,
-.permission-note,
-.empty-state {
-  color: var(--overview-muted);
-}
-
 .description {
-  max-inline-size: 72ch;
-  margin: 0;
+  max-inline-size: 70ch;
+  margin-block-start: 0.5rem;
+  color: var(--muted);
 }
 
-.heading-actions {
-  align-items: center;
+.updated,
+.panel-heading span,
+.axis-labels,
+.metric-card small,
+.range-panel dt {
+  font-size: 0.78rem;
+  color: var(--muted);
 }
 
 button,
-.monitor-link {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-block-size: 2.5rem;
-  padding: 0 0.9rem;
-  color: inherit;
-  text-decoration: none;
-  cursor: pointer;
-  background: hsl(var(--card));
-  border: 1px solid var(--overview-line);
+input,
+select {
+  min-block-size: 2.45rem;
+  padding: 0.45rem 0.75rem;
+  color: hsl(var(--foreground));
+  background: hsl(var(--background));
+  border: 1px solid var(--line);
   border-radius: 0.6rem;
 }
 
-button:focus-visible,
-.monitor-link:focus-visible {
-  outline: 3px solid color-mix(in srgb, var(--overview-accent) 30%, transparent);
-  outline-offset: 2px;
+button {
+  cursor: pointer;
 }
 
 button:disabled {
@@ -474,243 +611,498 @@ button:disabled {
   opacity: 0.55;
 }
 
-.feedback {
-  padding: 0.8rem 1rem;
-  margin: 1rem 0 0;
-  border-radius: 0.7rem;
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 3px solid color-mix(in srgb, hsl(var(--primary)) 30%, transparent);
+  outline-offset: 2px;
 }
 
-.error {
-  color: hsl(var(--destructive));
-  background: color-mix(in srgb, hsl(var(--destructive)) 10%, hsl(var(--card)));
+.heading-meta button {
+  color: hsl(var(--primary-foreground));
+  background: hsl(var(--primary));
+  border-color: hsl(var(--primary));
 }
 
-.warning {
-  color: #92400e;
-  background: color-mix(in srgb, #f59e0b 12%, hsl(var(--card)));
-}
-
-.loading-state {
-  margin: 1.5rem 0;
-  color: var(--overview-muted);
-}
-
-.instance-panel,
-.counts-section,
-.sessions-panel,
-.monitor-entry {
-  min-inline-size: 0;
-  padding: clamp(1rem, 1.5vw, 1.5rem);
-  margin-block-start: 1rem;
-  background: hsl(var(--card));
-  border: 1px solid var(--overview-line);
-  border-radius: 1rem;
-  box-shadow: 0 0.5rem 1.5rem rgb(15 23 42 / 5%);
-}
-
-.instance-panel {
-  display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(15rem, 0.6fr);
-  gap: 1rem;
-}
-
-.instance-grid,
-.count-grid,
-.session-summary {
-  display: grid;
-  gap: 0.8rem;
-}
-
-.instance-grid {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
-  margin: 1rem 0 0;
-}
-
-.instance-grid dt,
-.count-card > span,
-.session-summary span {
-  font-size: 0.78rem;
-  color: var(--overview-muted);
-}
-
-.instance-grid dd {
-  margin: 0.25rem 0 0;
+.source-badge {
+  display: inline-flex;
+  gap: 0.4rem;
+  align-items: center;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.75rem;
   font-weight: 750;
-  overflow-wrap: anywhere;
-}
-
-.health-list {
-  display: grid;
-  gap: 0.6rem;
-  align-content: start;
-}
-
-.health-list > div {
-  display: flex;
-  gap: 1rem;
-  justify-content: space-between;
-  padding-block-end: 0.55rem;
-  border-block-end: 1px solid var(--overview-line);
-}
-
-.health-state,
-.metric-status {
-  font-size: 0.74rem;
-}
-
-.health-state.ok,
-.metric-status.ok {
-  color: #15803d;
-}
-
-.health-state.degraded,
-.metric-status.degraded {
-  color: #a16207;
-}
-
-.health-state.unavailable,
-.metric-status.unavailable {
-  color: #b91c1c;
-}
-
-.status {
-  flex: none;
-  padding: 0.25rem 0.55rem;
-  font-size: 0.72rem;
-  font-weight: 800;
   border-radius: 999px;
 }
 
-.status.ok {
-  color: #166534;
-  background: #dcfce7;
-}
-
-.status.degraded {
+.source-badge.fixture {
   color: #92400e;
   background: #fef3c7;
 }
 
-.status.unavailable {
-  color: #991b1b;
-  background: #fee2e2;
+.source-badge.live {
+  color: #166534;
+  background: #dcfce7;
 }
 
-.count-grid {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10.5rem), 1fr));
+.status-dot {
+  inline-size: 0.5rem;
+  block-size: 0.5rem;
+  background: currentcolor;
+  border-radius: 50%;
+}
+
+.range-toolbar {
+  flex-wrap: wrap;
+  padding: 1rem;
+  margin-block-start: 1.25rem;
+  background: hsl(var(--card));
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+}
+
+.preset-list {
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.preset-list button {
+  min-block-size: 2.2rem;
+  border-radius: 0.45rem;
+}
+
+.preset-list button.active {
+  color: hsl(var(--primary-foreground));
+  background: hsl(var(--primary));
+  border-color: hsl(var(--primary));
+}
+
+.date-fields {
+  gap: 0.5rem;
+}
+
+.date-fields label,
+.granularity-field {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.date-separator {
+  color: var(--muted);
+}
+
+.granularity-field {
+  min-inline-size: 8rem;
+}
+
+.feedback {
+  padding: 0.75rem 1rem;
+  margin-block-start: 1rem;
+  color: hsl(var(--destructive));
+  background: color-mix(in srgb, hsl(var(--destructive)) 10%, hsl(var(--card)));
+  border-radius: 0.7rem;
+}
+
+.loading-state {
+  padding: 2rem;
+  color: var(--muted);
+  text-align: center;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.85rem;
   margin-block-start: 1rem;
 }
 
-.count-card {
+.metric-card,
+.panel {
+  background: hsl(var(--card));
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  box-shadow: 0 8px 24px rgb(15 23 42 / 4%);
+}
+
+.metric-card {
+  position: relative;
+  padding: 1rem;
+  overflow: hidden;
+}
+
+.metric-card::before {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline: 0;
+  block-size: 3px;
+  content: '';
+  background: var(--tone);
+}
+
+.metric-card strong {
+  display: block;
+  margin-block: 0.75rem 0.3rem;
+  font-size: clamp(1.35rem, 2.6vw, 2rem);
+  letter-spacing: -0.03em;
+}
+
+.metric-heading {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.metric-heading > span:first-child {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.metric-status {
+  font-size: 0.68rem;
+  font-weight: 750;
+}
+
+.metric-status.ok {
+  color: #15803d;
+}
+
+.metric-status.degraded {
+  color: #b45309;
+}
+
+.metric-status.unavailable {
+  color: #64748b;
+}
+
+.tone-blue {
+  --tone: #2563eb;
+}
+
+.tone-green {
+  --tone: #10b981;
+}
+
+.tone-amber {
+  --tone: #f59e0b;
+}
+
+.tone-violet {
+  --tone: #8b5cf6;
+}
+
+.tone-teal {
+  --tone: #0d9488;
+}
+
+.chart-grid,
+.lower-grid {
   display: grid;
-  gap: 0.35rem;
+  gap: 0.85rem;
+  margin-block-start: 0.85rem;
+}
+
+.chart-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.lower-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.panel {
+  padding: 1rem;
+}
+
+.chart-panel {
   min-inline-size: 0;
-  padding: 0.9rem;
-  border: 1px solid var(--overview-line);
-  border-radius: 0.75rem;
 }
 
-.count-card strong {
-  font-size: 1.45rem;
+.chart-panel:nth-child(3),
+.range-panel {
+  grid-column: span 1;
 }
 
-.count-card p {
-  margin: 0.2rem 0 0;
+.trend-chart {
+  display: block;
+  inline-size: 100%;
+  block-size: 12rem;
+  margin-block-start: 0.75rem;
+  overflow: visible;
+  background: linear-gradient(
+    to bottom,
+    transparent 24%,
+    color-mix(in srgb, var(--line) 70%, transparent) 25%,
+    transparent 26%,
+    transparent 49%,
+    color-mix(in srgb, var(--line) 70%, transparent) 50%,
+    transparent 51%,
+    transparent 74%,
+    color-mix(in srgb, var(--line) 70%, transparent) 75%,
+    transparent 76%
+  );
+  border-radius: 0.6rem;
+}
+
+.line {
+  fill: none;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.area {
+  opacity: 0.18;
+}
+
+.blue-line {
+  stroke: #2563eb;
+}
+
+.blue-fill {
+  fill: #2563eb;
+}
+
+.amber-line {
+  stroke: #f59e0b;
+}
+
+.amber-fill {
+  fill: #f59e0b;
+}
+
+.green-line {
+  stroke: #10b981;
+}
+
+.green-fill {
+  fill: #10b981;
+}
+
+.legend {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
   font-size: 0.75rem;
-  color: var(--overview-muted);
+}
+
+.legend::before {
+  inline-size: 0.55rem;
+  block-size: 0.55rem;
+  content: '';
+  background: currentcolor;
+  border-radius: 50%;
+}
+
+.legend.blue {
+  color: #2563eb;
+}
+
+.legend.amber {
+  color: #b45309;
+}
+
+.legend.green {
+  color: #059669;
+}
+
+.axis-labels {
+  gap: 1rem;
+  justify-content: space-between;
+  margin-block-start: 0.35rem;
+}
+
+.range-panel dl {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.65rem;
+  margin-block-start: 1.3rem;
+}
+
+.range-panel dd {
+  margin: 0.25rem 0 0;
+  font-weight: 700;
   overflow-wrap: anywhere;
 }
 
-.session-summary {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+.distribution-content {
+  gap: 1.25rem;
+  align-items: center;
   margin-block-start: 1rem;
 }
 
-.session-summary > div {
+.donut {
   display: grid;
-  gap: 0.35rem;
-  padding-inline-start: 0.7rem;
-  border-inline-start: 3px solid var(--overview-accent);
+  flex: 0 0 10rem;
+  place-content: center;
+  aspect-ratio: 1;
+  text-align: center;
+  border-radius: 50%;
 }
 
-.session-summary strong {
-  font-size: 1.2rem;
+.donut::before {
+  position: absolute;
+  inline-size: 7rem;
+  block-size: 7rem;
+  content: '';
+  background: hsl(var(--card));
+  border-radius: 50%;
 }
 
-.trend-list {
+.donut span,
+.donut small {
+  position: relative;
+  z-index: 1;
+}
+
+.donut span {
+  font-size: 1.3rem;
+  font-weight: 800;
+}
+
+.donut small {
+  color: var(--muted);
+}
+
+.legend-list {
   display: grid;
-  gap: 0.8rem;
-  margin-block-start: 1.2rem;
+  flex: 1;
+  gap: 0.65rem;
+  padding: 0;
+  margin: 0;
+  list-style: none;
 }
 
-.trend-row {
+.legend-list li {
+  gap: 0.5rem;
+}
+
+.legend-list strong {
+  margin-inline-start: auto;
+}
+
+.top-items,
+.announcements {
   display: grid;
-  grid-template-columns: minmax(6rem, 9rem) 1fr 2rem;
-  gap: 0.75rem;
-  align-items: center;
+  gap: 0.2rem;
+  padding: 0;
+  margin: 1rem 0 0;
+  list-style: none;
 }
 
-.trend-track {
-  block-size: 0.55rem;
-  overflow: hidden;
-  background: hsl(var(--muted));
-  border-radius: 999px;
+.top-items li,
+.announcements li {
+  gap: 0.65rem;
+  padding: 0.65rem 0;
+  border-block-end: 1px solid var(--line);
 }
 
-.trend-track i {
-  display: block;
-  block-size: 100%;
-  background: var(--overview-accent);
-  border-radius: inherit;
-}
-
-.monitor-entry {
-  align-items: center;
-}
-
-.monitor-entry p {
-  max-inline-size: 70ch;
-  margin: 0.5rem 0 0;
-  color: var(--overview-muted);
-}
-
-.monitor-link {
-  font-weight: 750;
+.rank {
+  display: grid;
+  place-content: center;
+  inline-size: 1.5rem;
+  block-size: 1.5rem;
+  font-size: 0.75rem;
+  font-weight: 800;
   color: hsl(var(--primary-foreground));
-  white-space: nowrap;
-  background: var(--overview-accent);
-  border-color: var(--overview-accent);
+  background: hsl(var(--primary));
+  border-radius: 0.4rem;
 }
 
-@media (width <= 800px) {
-  .page-heading,
-  .heading-actions,
-  .monitor-entry {
+.item-name {
+  flex: 1;
+}
+
+.announcements time {
+  margin-inline-start: auto;
+  font-size: 0.75rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.empty-inline {
+  color: var(--muted);
+  text-align: center;
+}
+
+table {
+  inline-size: 100%;
+  margin-block-start: 0.75rem;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  padding: 0.65rem 0.35rem;
+  text-align: start;
+  border-block-end: 1px solid var(--line);
+}
+
+th {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.swatch {
+  flex: 0 0 auto;
+  inline-size: 0.65rem;
+  block-size: 0.65rem;
+  border-radius: 50%;
+}
+
+.sr-only {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  white-space: nowrap;
+  border: 0;
+  clip-path: inset(50%);
+}
+
+@media (width <= 1100px) {
+  .metric-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (width <= 760px) {
+  .metric-grid,
+  .chart-grid,
+  .lower-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .chart-panel:nth-child(3),
+  .range-panel {
+    grid-column: auto;
+  }
+
+  .range-toolbar,
+  .heading-meta {
     flex-direction: column;
     align-items: stretch;
   }
 
-  .instance-panel {
-    grid-template-columns: 1fr;
+  .date-fields {
+    align-items: end;
   }
 
-  .session-summary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (width <= 480px) {
-  .session-summary {
-    grid-template-columns: 1fr;
+  .date-fields label,
+  .granularity-field {
+    inline-size: 100%;
   }
 
-  .trend-row {
-    grid-template-columns: 1fr 2rem;
+  .date-separator {
+    display: none;
   }
 
-  .trend-track {
-    grid-row: 2;
-    grid-column: 1 / -1;
+  .distribution-content {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
 

@@ -47,6 +47,32 @@ const endpointLines = operations
   .join('\n');
 const generated = `// Generated from contracts/openapi/admin-v1.yaml; DO NOT EDIT.\n// CONTRACT_SHA256=${contractHash}\n\nexport const ADMIN_API_PREFIX = '/admin/v1' as const;\n\nexport const ADMIN_ENDPOINTS = {\n${endpointLines}\n} as const;\n\nexport const AUTH_API_PREFIX = '/admin/v1/auth' as const;\nexport const AUTH_ENDPOINTS = {\n  captcha: ADMIN_ENDPOINTS.issueAdminAuthCaptcha,\n  codes: ADMIN_ENDPOINTS.getAdminAuthAccessCodes,\n  login: ADMIN_ENDPOINTS.adminAuthLogin,\n  logout: ADMIN_ENDPOINTS.adminAuthLogout,\n  passwordReset: ADMIN_ENDPOINTS.resetAdminPassword,\n  passwordResetRequest: ADMIN_ENDPOINTS.requestAdminPasswordReset,\n  register: ADMIN_ENDPOINTS.adminAuthRegister,\n  refresh: ADMIN_ENDPOINTS.adminAuthRefresh,\n  sessions: ADMIN_ENDPOINTS.listAdminAuthSessions,\n} as const;\n\nexport const MENU_ENDPOINT = ADMIN_ENDPOINTS.listVisibleMenus;\nexport const CURRENT_USER_ENDPOINT = ADMIN_ENDPOINTS.getCurrentAdminUser;
 
+export interface FileCategory {
+  id: string;
+  name: string;
+  parentId?: string;
+  tenantId?: string;
+  orgId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface FileCategoryInput { name: string; parentId?: string; }
+export interface FileObject {
+  id: string;
+  key: string;
+  name: string;
+  mime: string;
+  size: number;
+  ownerId: string;
+  tenantId: string;
+  orgId: string;
+  acl: 'private' | 'public-read';
+  categoryId?: string;
+  createdAt: string;
+  sha256: string;
+}
+export interface FilePage { items: FileObject[]; total: number; limit: number; offset: number; }
+
 export interface SMTPAccount {
   id: string;
   name: string;
@@ -110,6 +136,8 @@ export interface MonitorHostMetric {
   load1?: number;
   load5?: number;
   load15?: number;
+  loadPerCore?: number;
+  perCoreLoad?: number[];
   rssBytes?: number;
   usedBytes?: number;
   freeBytes?: number;
@@ -123,6 +151,7 @@ export interface MonitorRuntimeMetric {
   goVersion: string;
   os: string;
   arch: string;
+  compiler: string;
   applicationVersion?: string;
   commit?: string;
   heapAllocBytes?: number;
@@ -137,6 +166,7 @@ export interface MonitorRuntimeMetric {
 export interface MonitorDatabasePool {
   open: number;
   inUse: number;
+  active: number;
   idle: number;
   max: number;
   waitCount: number;
@@ -177,6 +207,7 @@ export interface MonitorRedisMetric {
   message?: string;
 }
 export interface MonitorOverview {
+  status: MonitorStatus;
   scope: MonitorMetricScope;
   uptimeSeconds: number;
   version?: string;
@@ -186,8 +217,30 @@ export interface MonitorOverview {
   disk: MonitorHostMetric;
   database: MonitorDatabaseMetric;
   redis: MonitorRedisMetric;
+  goroutines: MonitorGoroutineMetric;
+  backgroundTasks: MonitorBackgroundTaskMetric;
   collectedAt: string;
+  timestamp: string;
+  refreshIntervalSeconds: number;
+  refreshIntervalMs: number;
+  dataSource: string;
+  isSynthetic: boolean;
 }
+export interface MonitorGoroutineMetric {
+  status: MonitorStatus;
+  count?: number;
+  capabilities: MonitorCapabilities;
+}
+export interface MonitorBackgroundTaskMetric {
+  status: MonitorStatus;
+  queued?: number;
+  active?: number;
+  scheduled?: number;
+  failed?: number;
+  capabilities: MonitorCapabilities;
+  message?: string;
+}
+export type MonitorServerStatus = MonitorOverview;
 
 export type DashboardStatus = MonitorStatus;
 export interface DashboardCountMetric {
@@ -227,6 +280,64 @@ export interface DashboardSummary {
   counts: DashboardCounts;
   instance: DashboardInstanceMetric;
   health: DashboardHealth;
+  collectedAt: string;
+}
+export type DashboardOverviewPreset = 'today' | 'yesterday' | '24h' | '7d' | '14d' | '30d' | 'this_month' | 'last_month' | 'custom';
+export type DashboardOverviewGranularity = 'hour' | 'day';
+export type DashboardOverviewDataSource = 'live' | 'fixture';
+export interface DashboardOverviewTimeRange {
+  preset: DashboardOverviewPreset;
+  timezone: string;
+  from: string;
+  to: string;
+  granularity: DashboardOverviewGranularity;
+}
+export interface DashboardOverviewNumberMetric {
+  status: DashboardStatus;
+  value?: number;
+  message?: string;
+}
+export interface DashboardOverviewCards {
+  visitors: DashboardOverviewNumberMetric;
+  newUsers: DashboardOverviewNumberMetric;
+  paymentAmount: DashboardOverviewNumberMetric;
+  paymentOrders: DashboardOverviewNumberMetric;
+  averageOrderValue: DashboardOverviewNumberMetric;
+}
+export interface DashboardOverviewTrendPoint {
+  at: string;
+  visitors: number;
+  newUsers: number;
+  orders: number;
+  amount: number;
+}
+export interface DashboardOverviewDistributionItem {
+  key: string;
+  label: string;
+  value: number;
+}
+export interface DashboardOverviewTopItem {
+  rank: number;
+  id: string;
+  name: string;
+  value: number;
+  amount: number;
+}
+export interface DashboardOverviewAnnouncement {
+  id: string;
+  title: string;
+  publishedAt: string;
+}
+export interface DashboardOverview {
+  dataSource: DashboardOverviewDataSource;
+  isSynthetic: boolean;
+  range: DashboardOverviewTimeRange;
+  cards: DashboardOverviewCards;
+  trends: DashboardOverviewTrendPoint[];
+  distribution: DashboardOverviewDistributionItem[];
+  topItems: DashboardOverviewTopItem[];
+  regions: DashboardOverviewDistributionItem[];
+  announcements: DashboardOverviewAnnouncement[];
   collectedAt: string;
 }
 

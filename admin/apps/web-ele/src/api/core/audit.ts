@@ -49,6 +49,18 @@ export async function queryAuditEventsApi(params?: AuditQuery) {
   });
 }
 
+export async function queryOperationHistoryApi(params?: AuditQuery) {
+  return requestClient.get<AuditPage>(ADMIN_ENDPOINTS.queryOperationHistory, {
+    params,
+  });
+}
+
+export async function queryLoginLogsApi(params?: AuditQuery) {
+  return requestClient.get<AuditPage>(ADMIN_ENDPOINTS.queryLoginLogs, {
+    params,
+  });
+}
+
 export async function exportAuditEventsApi(
   params: AuditQuery | undefined,
   format: AuditExportFormat,

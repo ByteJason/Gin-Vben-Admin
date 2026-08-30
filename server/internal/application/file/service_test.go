@@ -86,3 +86,49 @@ func TestMemoryStoreProvidesLocalStoreContract(t *testing.T) {
 		t.Fatalf("deleted object error = %v", err)
 	}
 }
+
+func TestCategoriesEnforceScopeAndRejectCyclesOrNonEmptyDelete(t *testing.T) {
+	svc := NewService(&fakeStore{}, Config{})
+	root, err := svc.CreateCategory(context.Background(), CategoryInput{Name: "Root"}, "t1", "o1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := svc.CreateCategory(context.Background(), CategoryInput{Name: "Child", ParentID: root.ID}, "t1", "o1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = svc.CreateCategory(context.Background(), CategoryInput{Name: "Cross", ParentID: root.ID}, "t2", "o1"); !errors.Is(err, ErrCategoryAccessDenied) {
+		t.Fatalf("cross-scope parent err=%v", err)
+	}
+	if _, err = svc.UpdateCategory(context.Background(), root.ID, CategoryInput{ParentID: child.ID}, "t1", "o1"); !errors.Is(err, ErrInvalidCategory) {
+		t.Fatalf("cycle err=%v", err)
+	}
+	if err = svc.DeleteCategory(context.Background(), root.ID, "t1", "o1"); !errors.Is(err, ErrCategoryNotEmpty) {
+		t.Fatalf("non-empty delete err=%v", err)
+	}
+}
+
+func TestUploadCategoryScopeAndListFilter(t *testing.T) {
+	svc := NewService(&fakeStore{}, Config{})
+	cat, err := svc.CreateCategory(context.Background(), CategoryInput{Name: "Images"}, "t1", "o1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := svc.Upload(context.Background(), UploadInput{Name: "a", Size: 1, TenantID: "t1", OrgID: "o1", CategoryID: cat.ID, Data: []byte("x")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.CategoryID != cat.ID {
+		t.Fatalf("category id=%q", item.CategoryID)
+	}
+	if _, err = svc.Upload(context.Background(), UploadInput{Name: "x", Size: 1, TenantID: "t2", OrgID: "o1", CategoryID: cat.ID, Data: []byte("x")}); !errors.Is(err, ErrCategoryAccessDenied) {
+		t.Fatalf("upload scope err=%v", err)
+	}
+	page, err := svc.List(context.Background(), ListFilter{TenantID: "t1", OrgID: "o1", CategoryID: cat.ID})
+	if err != nil || page.Total != 1 || page.Items[0].ID != item.ID {
+		t.Fatalf("filtered page=%+v err=%v", page, err)
+	}
+	if err = svc.DeleteCategory(context.Background(), cat.ID, "t1", "o1"); !errors.Is(err, ErrCategoryNotEmpty) {
+		t.Fatalf("file-backed delete err=%v", err)
+	}
+}

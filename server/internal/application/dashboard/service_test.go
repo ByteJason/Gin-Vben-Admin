@@ -151,3 +151,50 @@ func TestSummaryScopesPlatformAdministratorCountsToRequestedTenantOrganization(t
 		})
 	}
 }
+
+func TestOverviewFixtureUsesDeterministicHalfOpenRangeAndMarksSynthetic(t *testing.T) {
+	clock := func() time.Time { return time.Date(2026, time.August, 31, 12, 30, 0, 0, time.UTC) }
+	service := NewService(Config{DataSource: DataSourceFixture, Clock: clock})
+	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a", Organization: "org-a"})
+	first, err := service.Overview(ctx, OverviewQuery{Preset: PresetToday, Timezone: "Asia/Singapore"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.Overview(ctx, OverviewQuery{Preset: PresetToday, Timezone: "Asia/Singapore"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.DataSource != DataSourceFixture || !first.IsSynthetic || first.Range.Timezone != "Asia/Singapore" {
+		t.Fatalf("fixture source/range = %#v", first)
+	}
+	if !first.CollectedAt.Equal(clock().UTC()) {
+		t.Fatalf("fixture collection timestamp = %s, want %s", first.CollectedAt, clock().UTC())
+	}
+	if !first.Range.From.Equal(time.Date(2026, time.August, 31, 0, 0, 0, 0, time.FixedZone("", 8*3600))) || !first.Range.To.Equal(first.Range.From.AddDate(0, 0, 1)) {
+		t.Fatalf("today is not local half-open day: %#v", first.Range)
+	}
+	if len(first.Trends) != 24 || first.Cards.Visitors.Value == nil || *first.Cards.Visitors.Value != *second.Cards.Visitors.Value {
+		t.Fatalf("fixture is not deterministic: first=%#v second=%#v", first, second)
+	}
+	if len(first.Distribution) == 0 || len(first.TopItems) == 0 || len(first.Regions) == 0 || len(first.Announcements) == 0 {
+		t.Fatalf("fixture modules missing: %#v", first)
+	}
+}
+
+func TestOverviewRejectsInvalidTimezoneAndOverlongCustomRange(t *testing.T) {
+	service := NewService(Config{DataSource: DataSourceFixture, Clock: func() time.Time { return time.Unix(0, 0) }})
+	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a"})
+	if _, err := service.Overview(ctx, OverviewQuery{Preset: PresetToday, Timezone: "Mars/Olympus"}); !errors.Is(err, ErrInvalidOverviewQuery) {
+		t.Fatalf("invalid timezone error = %v", err)
+	}
+	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	to := from.Add(90*24*time.Hour + time.Second)
+	if _, err := service.Overview(ctx, OverviewQuery{Preset: PresetCustom, Timezone: "UTC", From: &from, To: &to}); !errors.Is(err, ErrInvalidOverviewQuery) {
+		t.Fatalf("overlong custom range error = %v", err)
+	}
+	to = from.Add(90 * 24 * time.Hour)
+	overview, err := service.Overview(ctx, OverviewQuery{Preset: PresetCustom, Timezone: "UTC", From: &from, To: &to, Granularity: "day"})
+	if err != nil || !overview.Range.To.Equal(to) || len(overview.Trends) != 90 {
+		t.Fatalf("90-day custom overview=%#v err=%v", overview.Range, err)
+	}
+}

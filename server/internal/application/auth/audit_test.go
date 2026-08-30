@@ -2,6 +2,7 @@ package auth_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -38,6 +39,40 @@ func TestSuccessfulLoginRecordsAuditEvent(t *testing.T) {
 	event := sink.events[0]
 	if event.EventType != authdomain.AuditLogin || event.Outcome != authdomain.AuditOutcomeSuccess || event.UserID != "u1" || event.SessionID == "" {
 		t.Fatalf("audit event = %+v", event)
+	}
+}
+
+func TestFailedLoginRecordsEveryAttemptWithBoundedDeviceMetadata(t *testing.T) {
+	hasher := authplatform.BcryptHasher{Cost: 4}
+	hash, err := hasher.Hash("correct-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink := &auditSink{}
+	svc := auth.NewService(
+		userRepo{user: authdomain.User{ID: "u1", Identifier: "alice", PasswordHash: hash, Active: true}},
+		hasher,
+		authplatform.NewJWTService([]byte("test-secret"), time.Minute, time.Hour),
+		authplatform.NewMemorySessionStore(),
+	)
+	svc.SetAuditSink(sink)
+	ctx := auth.WithRequestMetadata(context.Background(), auth.RequestMetadata{
+		RequestID: "req-failed", DeviceID: "device-failed", DeviceName: "Firefox",
+		JSFingerprint: "fingerprint-failed", IPAddress: "192.0.2.15", UserAgent: "Mozilla/5.0",
+	})
+
+	if _, err := svc.Login(ctx, "alice", "wrong-password"); !errors.Is(err, authdomain.ErrInvalidCredentials) {
+		t.Fatalf("Login() error = %v", err)
+	}
+	if len(sink.events) != 1 {
+		t.Fatalf("audit event count = %d, want 1", len(sink.events))
+	}
+	event := sink.events[0]
+	if event.EventType != authdomain.AuditLogin || event.Outcome != authdomain.AuditOutcomeFailure || event.UserID != "u1" || event.RequestID != "req-failed" || event.IPAddress != "192.0.2.15" {
+		t.Fatalf("failed login audit = %+v", event)
+	}
+	if event.Metadata["username"] != "alice" || event.Metadata["deviceId"] != "device-failed" || event.Metadata["deviceName"] != "Firefox" || event.Metadata["jsFingerprint"] != "fingerprint-failed" || event.Metadata["reason"] != "invalid_credentials" {
+		t.Fatalf("failed login metadata = %+v", event.Metadata)
 	}
 }
 

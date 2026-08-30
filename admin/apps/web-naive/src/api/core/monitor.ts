@@ -1,13 +1,19 @@
-import type { MonitorOverview } from '@vben/api-client';
+import type { MonitorServerStatus } from '@vben/api-client';
 
 import { ADMIN_ENDPOINTS } from '@vben/api-client';
 
 import { requestClient } from '#/api/request';
 
-export type { MonitorOverview } from '@vben/api-client';
+export type { MonitorOverview, MonitorServerStatus } from '@vben/api-client';
 
-export function getMonitorOverviewApi() {
-  return requestClient.get<MonitorOverview>(ADMIN_ENDPOINTS.getMonitorOverview);
+export function getServerStatusApi() {
+  return requestClient.get<MonitorServerStatus>(
+    ADMIN_ENDPOINTS.getServerStatus,
+  );
 }
 
-export const refreshMonitorOverviewApi = getMonitorOverviewApi;
+export function getMonitorOverviewApi() {
+  return getServerStatusApi();
+}
+
+export const refreshMonitorOverviewApi = getServerStatusApi;

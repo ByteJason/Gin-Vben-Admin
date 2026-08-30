@@ -55,6 +55,8 @@ func NewStaticComponentRegistry() *StaticComponentRegistry {
 		{ID: "system.audit", Component: "/system/audit/index.vue", Label: "Audit", Kind: "page"},
 		{ID: "system.tasks", Component: "/system/tasks/index.vue", Label: "Tasks", Kind: "page"},
 		{ID: "system.import-export", Component: "/system/import-export/index.vue", Label: "Import/export", Kind: "page"},
+		{ID: "ops.operation-history", Component: "/ops/operation-history/index.vue", Label: "Operation history", Kind: "page"},
+		{ID: "ops.login-logs", Component: "/ops/login-logs/index.vue", Label: "Login logs", Kind: "page"},
 	}
 	byValue := make(map[string]Component, len(entries))
 	for _, entry := range entries {

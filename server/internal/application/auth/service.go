@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/authdomain"
@@ -103,6 +104,9 @@ func (s *Service) Login(ctx context.Context, identifier, password string) (authd
 			return authdomain.TokenPair{}, authdomain.ErrDependencyUnavailable
 		}
 		if locked {
+			if err := s.recordLoginAttempt(ctx, "", identifier, "locked"); err != nil {
+				return authdomain.TokenPair{}, authdomain.ErrDependencyUnavailable
+			}
 			return authdomain.TokenPair{}, authdomain.ErrAccountLocked
 		}
 	}
@@ -114,7 +118,7 @@ func (s *Service) Login(ctx context.Context, identifier, password string) (authd
 		return authdomain.TokenPair{}, authdomain.ErrDependencyUnavailable
 	}
 	if !user.Active || s.hasher.Compare(user.PasswordHash, password) != nil {
-		return s.failedLogin(ctx, identifier)
+		return s.failedLoginForUser(ctx, user.ID, identifier)
 	}
 	if s.attempts != nil {
 		// Clear the failure state before issuing credentials so a reset error
@@ -161,6 +165,7 @@ func (s *Service) Login(ctx context.Context, identifier, password string) (authd
 		UserID: user.ID, SessionID: session.ID, EventType: authdomain.AuditLogin,
 		Outcome: authdomain.AuditOutcomeSuccess, RequestID: metadata.RequestID,
 		IPAddress: metadata.IPAddress, UserAgent: metadata.UserAgent,
+		Metadata: loginMetadata(metadata, identifier, "success"),
 	}); err != nil {
 		_ = s.sess.Revoke(ctx, session.ID)
 		return authdomain.TokenPair{}, authdomain.ErrDependencyUnavailable
@@ -169,17 +174,55 @@ func (s *Service) Login(ctx context.Context, identifier, password string) (authd
 }
 
 func (s *Service) failedLogin(ctx context.Context, identifier string) (authdomain.TokenPair, error) {
-	if s.attempts == nil {
-		return authdomain.TokenPair{}, authdomain.ErrInvalidCredentials
+	return s.failedLoginForUser(ctx, "", identifier)
+}
+
+func (s *Service) failedLoginForUser(ctx context.Context, userID, identifier string) (authdomain.TokenPair, error) {
+	locked := false
+	if s.attempts != nil {
+		var err error
+		locked, err = s.attempts.RecordFailure(ctx, identifier)
+		if err != nil {
+			return authdomain.TokenPair{}, authdomain.ErrDependencyUnavailable
+		}
 	}
-	locked, err := s.attempts.RecordFailure(ctx, identifier)
-	if err != nil {
+	reason := "invalid_credentials"
+	if locked {
+		reason = "locked"
+	}
+	if err := s.recordLoginAttempt(ctx, userID, identifier, reason); err != nil {
 		return authdomain.TokenPair{}, authdomain.ErrDependencyUnavailable
 	}
 	if locked {
 		return authdomain.TokenPair{}, authdomain.ErrAccountLocked
 	}
 	return authdomain.TokenPair{}, authdomain.ErrInvalidCredentials
+}
+
+func (s *Service) recordLoginAttempt(ctx context.Context, userID, identifier, reason string) error {
+	metadata := RequestMetadataFromContext(ctx)
+	return s.recordAudit(ctx, authdomain.AuditEvent{
+		UserID: userID, EventType: authdomain.AuditLogin, Outcome: authdomain.AuditOutcomeFailure,
+		RequestID: metadata.RequestID, IPAddress: metadata.IPAddress, UserAgent: metadata.UserAgent,
+		Metadata: loginMetadata(metadata, identifier, reason),
+	})
+}
+
+func loginMetadata(metadata RequestMetadata, identifier, reason string) map[string]string {
+	values := map[string]string{"reason": reason}
+	if value := strings.TrimSpace(identifier); value != "" {
+		values["username"] = value
+	}
+	if value := strings.TrimSpace(metadata.DeviceID); value != "" {
+		values["deviceId"] = value
+	}
+	if value := strings.TrimSpace(metadata.DeviceName); value != "" {
+		values["deviceName"] = value
+	}
+	if value := strings.TrimSpace(metadata.JSFingerprint); value != "" {
+		values["jsFingerprint"] = value
+	}
+	return values
 }
 
 func (s *Service) Refresh(ctx context.Context, refreshToken string) (authdomain.TokenPair, error) {
@@ -228,6 +271,7 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (authdomain.
 		UserID: claims.Subject, SessionID: claims.SessionID, EventType: authdomain.AuditRefresh,
 		Outcome: authdomain.AuditOutcomeSuccess, RequestID: metadata.RequestID,
 		IPAddress: metadata.IPAddress, UserAgent: metadata.UserAgent,
+		Metadata: loginMetadata(metadata, "", "refresh"),
 	}); err != nil {
 		_ = s.sess.Revoke(ctx, claims.SessionID)
 		return authdomain.TokenPair{}, authdomain.ErrDependencyUnavailable
@@ -255,6 +299,7 @@ func (s *Service) Logout(ctx context.Context, sessionID string) error {
 		SessionID: sessionID, EventType: authdomain.AuditLogout,
 		Outcome: authdomain.AuditOutcomeSuccess, RequestID: metadata.RequestID,
 		IPAddress: metadata.IPAddress, UserAgent: metadata.UserAgent,
+		Metadata: loginMetadata(metadata, "", "logout"),
 	}); err != nil {
 		return authdomain.ErrDependencyUnavailable
 	}

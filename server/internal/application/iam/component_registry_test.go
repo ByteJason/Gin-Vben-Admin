@@ -59,6 +59,8 @@ func TestStaticComponentRegistryCoversSeededProductionPages(t *testing.T) {
 		"/system/audit/index.vue",
 		"/system/tasks/index.vue",
 		"/system/import-export/index.vue",
+		"/ops/operation-history/index.vue",
+		"/ops/login-logs/index.vue",
 	} {
 		if err := registry.Validate(component); err != nil {
 			t.Errorf("seeded component %q is not registered: %v", component, err)

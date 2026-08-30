@@ -237,7 +237,7 @@ func TestLegacyEmptyCatalogFallsBackToProductionPermissionsAndMenus(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(routes) != 4 {
+	if len(routes) != 5 {
 		t.Fatalf("legacy production route roots=%d routes=%+v", len(routes), routes)
 	}
 }
@@ -265,7 +265,7 @@ func TestLegacyPartialPermissionCatalogStillUnlocksProductionMenuFallback(t *tes
 	for _, root := range routes {
 		leafCount += len(root.Children)
 	}
-	if len(routes) != 4 || leafCount != 14 {
+	if len(routes) != 5 || leafCount != 16 {
 		t.Fatalf("legacy partial catalog routes=%d leaves=%d routes=%+v", len(routes), leafCount, routes)
 	}
 }

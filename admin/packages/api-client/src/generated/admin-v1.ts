@@ -1,5 +1,5 @@
 // Generated from contracts/openapi/admin-v1.yaml; DO NOT EDIT.
-// CONTRACT_SHA256=4f9a53020aeee1bab04d4865d2cdc1fc8745dd62537b2edca65a545202a75395
+// CONTRACT_SHA256=02a81c31821d284aa5bf095b54baa7c4ef33fc64bfaa2198a493d2b051f85139
 
 export const ADMIN_API_PREFIX = '/admin/v1' as const;
 
@@ -53,8 +53,15 @@ export const ADMIN_ENDPOINTS = {
   queryAuditEvents: '/admin/v1/audit/events',
   exportAuditEvents: '/admin/v1/audit/events/export',
   auditRetentionDryRun: '/admin/v1/audit/retention/dry-run',
+  queryOperationHistory: '/admin/v1/ops/operation-history',
+  queryLoginLogs: '/admin/v1/ops/login-logs',
   listFiles: '/admin/v1/files',
   uploadFile: '/admin/v1/files/upload',
+  listFileCategories: '/admin/v1/files/categories',
+  createFileCategory: '/admin/v1/files/categories',
+  updateFileCategory: '/admin/v1/files/categories/{id}',
+  patchFileCategory: '/admin/v1/files/categories/{id}',
+  deleteFileCategory: '/admin/v1/files/categories/{id}',
   getFile: '/admin/v1/files/{id}',
   deleteFile: '/admin/v1/files/{id}',
   downloadFile: '/admin/v1/files/{id}/download',
@@ -98,7 +105,9 @@ export const ADMIN_ENDPOINTS = {
   sendEmailMessage: '/admin/v1/mail/messages',
   getEmailMessage: '/admin/v1/mail/messages/{id}',
   getDashboardSummary: '/admin/v1/dashboard/summary',
+  getDashboardOverview: '/admin/v1/dashboard/overview',
   getMonitorOverview: '/admin/v1/ops/monitor',
+  getServerStatus: '/admin/v1/ops/server-status',
 } as const;
 
 export const AUTH_API_PREFIX = '/admin/v1/auth' as const;
@@ -116,6 +125,32 @@ export const AUTH_ENDPOINTS = {
 
 export const MENU_ENDPOINT = ADMIN_ENDPOINTS.listVisibleMenus;
 export const CURRENT_USER_ENDPOINT = ADMIN_ENDPOINTS.getCurrentAdminUser;
+
+export interface FileCategory {
+  id: string;
+  name: string;
+  parentId?: string;
+  tenantId?: string;
+  orgId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface FileCategoryInput { name: string; parentId?: string; }
+export interface FileObject {
+  id: string;
+  key: string;
+  name: string;
+  mime: string;
+  size: number;
+  ownerId: string;
+  tenantId: string;
+  orgId: string;
+  acl: 'private' | 'public-read';
+  categoryId?: string;
+  createdAt: string;
+  sha256: string;
+}
+export interface FilePage { items: FileObject[]; total: number; limit: number; offset: number; }
 
 export interface SMTPAccount {
   id: string;
@@ -180,6 +215,8 @@ export interface MonitorHostMetric {
   load1?: number;
   load5?: number;
   load15?: number;
+  loadPerCore?: number;
+  perCoreLoad?: number[];
   rssBytes?: number;
   usedBytes?: number;
   freeBytes?: number;
@@ -193,6 +230,7 @@ export interface MonitorRuntimeMetric {
   goVersion: string;
   os: string;
   arch: string;
+  compiler: string;
   applicationVersion?: string;
   commit?: string;
   heapAllocBytes?: number;
@@ -207,6 +245,7 @@ export interface MonitorRuntimeMetric {
 export interface MonitorDatabasePool {
   open: number;
   inUse: number;
+  active: number;
   idle: number;
   max: number;
   waitCount: number;
@@ -247,6 +286,7 @@ export interface MonitorRedisMetric {
   message?: string;
 }
 export interface MonitorOverview {
+  status: MonitorStatus;
   scope: MonitorMetricScope;
   uptimeSeconds: number;
   version?: string;
@@ -256,8 +296,30 @@ export interface MonitorOverview {
   disk: MonitorHostMetric;
   database: MonitorDatabaseMetric;
   redis: MonitorRedisMetric;
+  goroutines: MonitorGoroutineMetric;
+  backgroundTasks: MonitorBackgroundTaskMetric;
   collectedAt: string;
+  timestamp: string;
+  refreshIntervalSeconds: number;
+  refreshIntervalMs: number;
+  dataSource: string;
+  isSynthetic: boolean;
 }
+export interface MonitorGoroutineMetric {
+  status: MonitorStatus;
+  count?: number;
+  capabilities: MonitorCapabilities;
+}
+export interface MonitorBackgroundTaskMetric {
+  status: MonitorStatus;
+  queued?: number;
+  active?: number;
+  scheduled?: number;
+  failed?: number;
+  capabilities: MonitorCapabilities;
+  message?: string;
+}
+export type MonitorServerStatus = MonitorOverview;
 
 export type DashboardStatus = MonitorStatus;
 export interface DashboardCountMetric {
@@ -297,6 +359,64 @@ export interface DashboardSummary {
   counts: DashboardCounts;
   instance: DashboardInstanceMetric;
   health: DashboardHealth;
+  collectedAt: string;
+}
+export type DashboardOverviewPreset = 'today' | 'yesterday' | '24h' | '7d' | '14d' | '30d' | 'this_month' | 'last_month' | 'custom';
+export type DashboardOverviewGranularity = 'hour' | 'day';
+export type DashboardOverviewDataSource = 'live' | 'fixture';
+export interface DashboardOverviewTimeRange {
+  preset: DashboardOverviewPreset;
+  timezone: string;
+  from: string;
+  to: string;
+  granularity: DashboardOverviewGranularity;
+}
+export interface DashboardOverviewNumberMetric {
+  status: DashboardStatus;
+  value?: number;
+  message?: string;
+}
+export interface DashboardOverviewCards {
+  visitors: DashboardOverviewNumberMetric;
+  newUsers: DashboardOverviewNumberMetric;
+  paymentAmount: DashboardOverviewNumberMetric;
+  paymentOrders: DashboardOverviewNumberMetric;
+  averageOrderValue: DashboardOverviewNumberMetric;
+}
+export interface DashboardOverviewTrendPoint {
+  at: string;
+  visitors: number;
+  newUsers: number;
+  orders: number;
+  amount: number;
+}
+export interface DashboardOverviewDistributionItem {
+  key: string;
+  label: string;
+  value: number;
+}
+export interface DashboardOverviewTopItem {
+  rank: number;
+  id: string;
+  name: string;
+  value: number;
+  amount: number;
+}
+export interface DashboardOverviewAnnouncement {
+  id: string;
+  title: string;
+  publishedAt: string;
+}
+export interface DashboardOverview {
+  dataSource: DashboardOverviewDataSource;
+  isSynthetic: boolean;
+  range: DashboardOverviewTimeRange;
+  cards: DashboardOverviewCards;
+  trends: DashboardOverviewTrendPoint[];
+  distribution: DashboardOverviewDistributionItem[];
+  topItems: DashboardOverviewTopItem[];
+  regions: DashboardOverviewDistributionItem[];
+  announcements: DashboardOverviewAnnouncement[];
   collectedAt: string;
 }
 

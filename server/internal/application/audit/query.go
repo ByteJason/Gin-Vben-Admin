@@ -110,7 +110,18 @@ func (s *Service) Query(ctx context.Context, filter Filter) (Page, error) {
 		err    error
 	)
 	if paged, ok := s.repo.(PageRepository); ok {
+		// PageRepository implementations apply offset/limit in the storage
+		// query. Do not slice the returned page a second time; doing so would
+		// skip rows whenever an administrator moves past the first page.
 		events, total, err = paged.QueryPage(ctx, filter)
+		if err != nil {
+			return Page{}, err
+		}
+		page := Page{Total: total, Limit: filter.Limit, Offset: filter.Offset, Items: make([]Event, 0, len(events))}
+		for _, event := range events {
+			page.Items = append(page.Items, normalizeEvent(event))
+		}
+		return page, nil
 	} else {
 		events, err = s.repo.Query(ctx, filter)
 		total = len(events)
@@ -255,19 +266,59 @@ func redactMap(input map[string]any) map[string]any {
 	}
 	output := make(map[string]any, len(input))
 	for key, value := range input {
-		lower := strings.ToLower(key)
+		lower := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(key, "-", "_"), " ", "_"))
 		if strings.Contains(lower, "password") || strings.Contains(lower, "secret") || strings.Contains(lower, "token") || strings.Contains(lower, "authorization") || strings.Contains(lower, "api_key") || strings.Contains(lower, "apikey") {
 			output[key] = "[REDACTED]"
+			continue
+		}
+		// Device identifiers and browser fingerprints are useful for correlating
+		// attempts, but the default operations view must not expose the raw
+		// stable identifier. Keep the key so the UI can label the field while
+		// replacing its value at the read boundary.
+		if strings.Contains(lower, "fingerprint") || lower == "device_id" || lower == "deviceid" {
+			output[key] = maskIdentifier(value)
 			continue
 		}
 		switch nested := value.(type) {
 		case map[string]any:
 			output[key] = redactMap(nested)
+		case []any:
+			output[key] = redactSlice(nested)
 		default:
 			output[key] = value
 		}
 	}
 	return output
+}
+
+func redactSlice(input []any) []any {
+	if input == nil {
+		return nil
+	}
+	output := make([]any, len(input))
+	for index, value := range input {
+		switch nested := value.(type) {
+		case map[string]any:
+			output[index] = redactMap(nested)
+		case []any:
+			output[index] = redactSlice(nested)
+		default:
+			output[index] = value
+		}
+	}
+	return output
+}
+
+func maskIdentifier(value any) string {
+	text, ok := value.(string)
+	if !ok || strings.TrimSpace(text) == "" {
+		return "[MASKED]"
+	}
+	text = strings.TrimSpace(text)
+	if len(text) <= 8 {
+		return "[MASKED]"
+	}
+	return text[:4] + "…" + text[len(text)-4:]
 }
 
 func cloneEvent(event Event) Event {

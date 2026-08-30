@@ -127,7 +127,13 @@ func newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasksAndRunsAndImportExport
 	if importExportService != nil {
 		auxiliary.ImportExport = importexporthttp.NewHandler(importExportService)
 	}
-	dashboardConfig := dashboardapp.Config{}
+	dashboardConfig := dashboardapp.Config{DataSource: dashboardapp.DataSourceLive}
+	// The dependency-free single-node profile is the local development fixture;
+	// expose deterministic business analytics there while keeping authenticated
+	// deployments on the live collector path.
+	if !cfg.Auth.Enabled && cfg.Tenant.Mode == "single" {
+		dashboardConfig.DataSource = dashboardapp.DataSourceFixture
+	}
 	if iamService != nil {
 		dashboardConfig.IAM = iamService
 	}
@@ -149,8 +155,11 @@ func newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasksAndRunsAndImportExport
 	if monitorService != nil {
 		dashboardConfig.Monitor = monitorService
 	}
+	dashboardService := dashboardapp.NewService(dashboardConfig)
 	if iamService != nil {
-		auxiliary.Dashboard = dashboardhttp.NewHandlerWithIAM(dashboardapp.NewService(dashboardConfig), iamService)
+		auxiliary.Dashboard = dashboardhttp.NewHandlerWithIAM(dashboardService, iamService)
+	} else if dashboardConfig.DataSource == dashboardapp.DataSourceFixture {
+		auxiliary.Dashboard = dashboardhttp.NewHandler(dashboardService)
 	}
 	tenantPolicy := httpmiddleware.TenantPolicy{
 		Mode:                  cfg.Tenant.Mode,

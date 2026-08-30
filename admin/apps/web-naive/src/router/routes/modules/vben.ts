@@ -1,106 +1,16 @@
 import type { RouteRecordRaw } from 'vue-router';
-
-import {
-  VBEN_ANT_PREVIEW_URL,
-  VBEN_DOC_URL,
-  VBEN_ELE_PREVIEW_URL,
-  VBEN_GITHUB_URL,
-  VBEN_LOGO_URL,
-} from '@vben/constants';
-import { SvgAntdvLogoIcon } from '@vben/icons';
-
-import { IFrameView } from '#/layouts';
 import { $t } from '#/locales';
 
-const developmentRoutes: RouteRecordRaw[] = [
-  {
-    meta: {
-      badgeType: 'dot',
-      icon: VBEN_LOGO_URL,
-      order: 9998,
-      title: $t('demos.vben.title'),
-    },
-    name: 'VbenProject',
-    path: '/vben-admin',
-    children: [
+// The profile page remains a development-only compatibility entry; upstream
+// Vben links and component examples are intentionally not part of production routes.
+const routes: RouteRecordRaw[] = import.meta.env.DEV
+  ? [
       {
-        name: 'VbenDocument',
-        path: 'document',
-        component: IFrameView,
-        meta: {
-          icon: 'lucide:book-open-text',
-          link: VBEN_DOC_URL,
-          title: $t('demos.vben.document'),
-        },
+        name: 'Profile',
+        path: '/profile',
+        component: () => import('#/views/_core/profile/index.vue'),
+        meta: { hideInMenu: true, title: $t('page.auth.profile') },
       },
-      {
-        name: 'VbenGithub',
-        path: 'github',
-        component: IFrameView,
-        meta: {
-          icon: 'mdi:github',
-          link: VBEN_GITHUB_URL,
-          title: 'Github',
-        },
-      },
-      {
-        name: 'VbenAntd',
-        path: 'antd',
-        component: IFrameView,
-        meta: {
-          badgeType: 'dot',
-          icon: SvgAntdvLogoIcon,
-          link: VBEN_ANT_PREVIEW_URL,
-          title: $t('demos.vben.antdv'),
-        },
-      },
-      {
-        name: 'VbenElementPlus',
-        path: 'ele',
-        component: IFrameView,
-        meta: {
-          badgeType: 'dot',
-          icon: 'logos:element',
-          link: VBEN_ELE_PREVIEW_URL,
-          title: $t('demos.vben.element-plus'),
-        },
-      },
-    ],
-  },
-];
-
-const routes: RouteRecordRaw[] = [
-  ...(import.meta.env.DEV ? developmentRoutes : []),
-  {
-    name: 'VbenAboutLegacy',
-    path: '/vben-admin/about',
-    redirect: '/gin-vben-admin/about',
-    meta: {
-      hideInMenu: true,
-      title: $t('demos.vben.about'),
-    },
-  },
-  {
-    name: 'VbenAbout',
-    path: '/gin-vben-admin/about',
-    component: () => import('#/views/_core/about/index.vue'),
-    meta: {
-      hideInMenu: true,
-      icon: 'lucide:copyright',
-      title: $t('demos.vben.about'),
-      order: 9999,
-    },
-  },
-  {
-    name: 'Profile',
-    path: '/profile',
-    component: () => import('#/views/_core/profile/index.vue'),
-    meta: {
-      icon: 'lucide:user',
-      hideInMenu: true,
-      title: $t('page.auth.profile'),
-    },
-  },
-];
-
+    ]
+  : [];
 export default routes;

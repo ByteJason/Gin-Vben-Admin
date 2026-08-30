@@ -8,10 +8,9 @@ import { AuthenticationLoginExpiredModal } from '@vben/common-ui';
 import {
   GIN_VBEN_ADMIN_GITHUB_URL,
   GIN_VBEN_ADMIN_ISSUES_URL,
-  VBEN_DOC_URL,
 } from '@vben/constants';
 import { useWatermark } from '@vben/hooks';
-import { BookOpenText, CircleHelp, SvgGithubIcon } from '@vben/icons';
+import { CircleHelp, SvgGithubIcon } from '@vben/icons';
 import {
   BasicLayout,
   LockScreen,
@@ -48,26 +47,6 @@ const menus = computed(() => [
           },
           icon: 'lucide:user',
           text: $t('page.auth.profile'),
-        },
-      ]
-    : []),
-  {
-    handler: () => {
-      router.push({ name: 'VbenAbout' });
-    },
-    icon: 'lucide:info',
-    text: $t('demos.vben.about'),
-  },
-  ...(import.meta.env.DEV
-    ? [
-        {
-          handler: () => {
-            openWindow(VBEN_DOC_URL, {
-              target: '_blank',
-            });
-          },
-          icon: BookOpenText,
-          text: `Vue Vben Admin ${$t('ui.widgets.document')}`,
         },
       ]
     : []),

@@ -20,7 +20,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestInitialNavigationSeedIsIdempotentAndContainsFourProductionGroups(t *testing.T) {
+func TestInitialNavigationSeedIsIdempotentAndContainsFiveProductionGroups(t *testing.T) {
 	store := &memoryNavigationSeedStore{
 		menus:       make(map[string]initialMenuSeed),
 		permissions: make(map[string]initialPermissionSeed),
@@ -34,14 +34,14 @@ func TestInitialNavigationSeedIsIdempotentAndContainsFourProductionGroups(t *tes
 		t.Fatalf("second seed: %v", err)
 	}
 	_, permissionSeeds := initialNavigationSeeds()
-	if len(first.MenuIDs) != 18 || len(first.PermissionIDs) != len(permissionSeeds) || len(second.MenuIDs) != 0 || len(second.PermissionIDs) != 0 {
+	if len(first.MenuIDs) != 21 || len(first.PermissionIDs) != len(permissionSeeds) || len(second.MenuIDs) != 0 || len(second.PermissionIDs) != 0 {
 		t.Fatalf("seed receipts first=%+v second=%+v", first, second)
 	}
 
-	if len(store.menus) != 18 || len(store.permissions) != len(permissionSeeds) {
+	if len(store.menus) != 21 || len(store.permissions) != len(permissionSeeds) {
 		t.Fatalf("seed counts menus=%d permissions=%d", len(store.menus), len(store.permissions))
 	}
-	wantRoots := []string{"menu-identity", "menu-operations", "menu-overview", "menu-system-config"}
+	wantRoots := []string{"menu-identity", "menu-media", "menu-operations", "menu-overview", "menu-system-config"}
 	var roots []string
 	childCounts := make(map[string]int)
 	for id, menu := range store.menus {
@@ -63,19 +63,22 @@ func TestInitialNavigationSeedIsIdempotentAndContainsFourProductionGroups(t *tes
 	if !reflect.DeepEqual(roots, wantRoots) {
 		t.Fatalf("roots=%v want=%v", roots, wantRoots)
 	}
-	if childCounts["menu-overview"] != 1 || childCounts["menu-identity"] != 4 || childCounts["menu-system-config"] != 5 || childCounts["menu-operations"] != 4 {
+	if childCounts["menu-overview"] != 1 || childCounts["menu-identity"] != 4 || childCounts["menu-system-config"] != 5 || childCounts["menu-operations"] != 5 || childCounts["menu-media"] != 1 {
 		t.Fatalf("child counts=%v", childCounts)
 	}
 	for id, wantName := range map[string]string{
-		"menu-system-settings":    "系统设置",
-		"menu-system-mail":        "邮件服务",
-		"menu-operations-monitor": "资源监控",
+		"menu-system-settings":      "系统配置",
+		"menu-system-mail":          "邮件服务",
+		"menu-operations-monitor":   "服务器状态",
+		"menu-identity-menus":       "菜单元数据",
+		"menu-identity-permissions": "权限元数据",
+		"menu-media":                "媒体管理",
 	} {
 		if got := store.menus[id].Name; got != wantName {
 			t.Fatalf("menu %s name=%q want=%q", id, got, wantName)
 		}
 	}
-	if got := store.permissions["dashboard:overview:read"].Path; got != "/api/admin/v1/dashboard/summary" {
+	if got := store.permissions["dashboard:overview:read"].Path; got != "/api/admin/v1/dashboard/overview" {
 		t.Fatalf("dashboard overview permission path=%q", got)
 	}
 
