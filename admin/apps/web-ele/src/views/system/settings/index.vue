@@ -180,6 +180,7 @@ async function load() {
 }
 
 async function save(definition: SettingDefinition) {
+  if (!canManage.value) return;
   if (saveDisabled(definition)) return;
   const current = values[definition.key];
   if (!current) return;

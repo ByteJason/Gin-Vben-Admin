@@ -19,7 +19,7 @@ const defaultPreferences: Preferences = {
     contentPaddingTop: 0,
     defaultAvatar:
       'https://unpkg.com/@vbenjs/static-source@0.1.7/source/avatar-v1.webp',
-    defaultHomePath: '/dashboard/analytics',
+    defaultHomePath: '/dashboard',
     dynamicTitle: true,
     enableCheckUpdates: true,
     enableCopyPreferences: true,

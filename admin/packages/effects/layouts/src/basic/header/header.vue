@@ -292,7 +292,7 @@ function clearPreferencesAndLogout() {
       </template>
     </slot>
   </template>
-  <div class="flex-center hidden lg:block">
+  <div class="layout-breadcrumb flex-center hidden min-w-0 md:block">
     <slot name="breadcrumb"></slot>
   </div>
   <template
@@ -303,11 +303,11 @@ function clearPreferencesAndLogout() {
   </template>
   <div
     :class="`menu-align-${preferences.header.menuAlign}`"
-    class="flex h-full min-w-0 flex-1 items-center"
+    class="flex h-full min-w-0 flex-1 items-center gap-1"
   >
     <slot name="menu"></slot>
   </div>
-  <div class="flex h-full min-w-0 shrink-0 items-center">
+  <div class="flex h-full min-w-0 shrink-0 items-center gap-1">
     <template v-for="slot in rightSlots" :key="slot.name">
       <slot :name="slot.name">
         <template v-if="slot.name === 'global-search'">
@@ -404,5 +404,43 @@ function clearPreferencesAndLogout() {
 
 .menu-align-end {
   --menu-align: end;
+}
+
+.layout-breadcrumb {
+  max-inline-size: min(42vw, 32rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layout-breadcrumb :deep(*) {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+.layout-breadcrumb :deep([data-slot='breadcrumb-list']) {
+  flex-wrap: nowrap;
+  min-inline-size: 0;
+  overflow: hidden;
+}
+
+.layout-breadcrumb :deep([data-slot='breadcrumb-item']) {
+  min-inline-size: 0;
+  flex: 0 1 auto;
+}
+
+.layout-breadcrumb :deep([data-slot='breadcrumb-separator']) {
+  flex: 0 0 auto;
+}
+
+.layout-breadcrumb :deep([data-slot='breadcrumb-link']),
+.layout-breadcrumb :deep([data-slot='breadcrumb-page']),
+.layout-breadcrumb :deep([data-slot='breadcrumb-link'] > div),
+.layout-breadcrumb :deep([data-slot='breadcrumb-page'] > div),
+.layout-breadcrumb :deep([data-slot='breadcrumb-item'] > div) {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

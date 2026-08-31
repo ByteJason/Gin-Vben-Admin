@@ -19,29 +19,36 @@ test('admin shell exposes one IAM-owned access-code contract', () => {
   assert.match(client, /codes: ADMIN_ENDPOINTS\.getAdminAuthAccessCodes/);
 });
 
-test('public information architecture freezes the four production groups', () => {
+test('public information architecture freezes the five production groups', () => {
   const architecture = read('docs/admin-information-architecture.md');
   const normalized = architecture.replaceAll('`', '');
   const expected = [
-    ['概览', '运行概览', '/dashboard/analytics', 'dashboard:overview:read'],
-    ['身份与权限', '用户管理', '/iam/users', 'iam:users:read'],
-    ['身份与权限', '角色管理', '/iam/roles', 'iam:roles:read'],
-    ['身份与权限', '菜单管理', '/iam/menus', 'iam:menus:read'],
-    ['身份与权限', '权限列表', '/iam/permissions', 'iam:permissions:read'],
-    ['系统配置', '系统设置', '/system/settings', 'system:settings:read'],
-    ['系统配置', '字典管理', '/system/dictionary', 'system:dictionary:read'],
-    ['系统配置', '邮件服务', '/system/mail', 'system:mail:read'],
-    ['系统配置', '文件中心', '/system/files', 'system:files:read'],
+    ['仪表盘', '（直接进入）', '/dashboard', 'dashboard:overview:read'],
+    ['后台权限', '用户管理', '/iam/users', 'iam:users:read'],
+    ['后台权限', '角色管理', '/iam/roles', 'iam:roles:read'],
+    ['后台权限', '菜单管理', '/iam/menus', 'iam:menus:read'],
+    ['后台权限', '权限管理', '/iam/permissions', 'iam:permissions:read'],
+    ['系统管理', '系统设置', '/system/settings', 'system:settings:read'],
+    ['系统管理', '参数管理', '/system/parameters', 'system:parameters:read'],
+    ['系统管理', '字典管理', '/system/dictionary', 'system:dictionary:read'],
+    ['系统管理', '邮件服务', '/system/mail', 'system:mail:read'],
     [
-      '系统配置',
+      '系统管理',
       '可观测设置',
       '/system/observability',
       'system:observability:read',
     ],
-    ['运维中心', '资源监控', '/system/monitor', 'ops:monitor:read'],
-    ['运维中心', '审计日志', '/system/audit', 'ops:audit:read'],
-    ['运维中心', '任务管理', '/system/tasks', 'ops:tasks:read'],
-    ['运维中心', '数据作业', '/system/import-export', 'ops:data-jobs:read'],
+    ['运维监控', '服务器状态', '/ops/server-status', 'ops:server-status:read'],
+    [
+      '运维监控',
+      '操作历史',
+      '/ops/operation-history',
+      'ops:operation-history:read',
+    ],
+    ['运维监控', '登录日志', '/ops/login-logs', 'ops:login-logs:read'],
+    ['运维监控', '定时任务', '/ops/tasks', 'ops:tasks:read'],
+    ['运维监控', '数据作业', '/ops/data-jobs', 'ops:data-jobs:read'],
+    ['媒体管理', '媒体库', '/media/library', 'media:library:read'],
   ];
 
   for (const row of expected) {
@@ -51,7 +58,7 @@ test('public information architecture freezes the four production groups', () =>
     );
   }
   assert.match(architecture, /`mixed` 过渡模式/);
-  assert.match(architecture, /`\/analytics`[\s\S]*?`\/dashboard\/analytics`/);
+  assert.match(architecture, /`\/dashboard\/analytics`[\s\S]*?`\/dashboard`/);
   assert.match(architecture, /数据库[\s\S]*?Redis[\s\S]*?不回传/);
 });
 
@@ -68,7 +75,7 @@ test('public information architecture distinguishes read, manage and support cap
     'system:settings:manage',
     'system:dictionary:manage',
     'system:mail:manage',
-    'system:files:manage',
+    'media:library:manage',
     'system:observability:manage',
     'ops:tasks:manage',
     'ops:data-jobs:manage',

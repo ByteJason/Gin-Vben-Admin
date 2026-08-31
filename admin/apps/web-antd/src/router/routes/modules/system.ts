@@ -26,7 +26,7 @@ const page = (
 
 const routes: RouteRecordRaw[] = [
   {
-    name: 'menu-system',
+    name: 'menu-system-config',
     path: '/system',
     redirect: '/system/dictionary',
     meta: {
@@ -87,7 +87,7 @@ const routes: RouteRecordRaw[] = [
     ],
   },
   {
-    name: 'menu-ops',
+    name: 'menu-operations',
     path: '/ops',
     redirect: '/ops/server-status',
     meta: {
@@ -106,7 +106,7 @@ const routes: RouteRecordRaw[] = [
     },
     children: [
       page(
-        'menu-ops-server-status',
+        'menu-operations-monitor',
         'server-status',
         () => import('#/views/system/monitor/index.vue'),
         ['ops:monitor:read', 'ops:server-status:read'],
@@ -114,7 +114,7 @@ const routes: RouteRecordRaw[] = [
         'lucide:monitor-cog',
       ),
       page(
-        'menu-ops-operation-history',
+        'menu-operations-audit',
         'operation-history',
         () => import('#/views/ops/operation-history/index.vue'),
         ['ops:audit:read', 'ops:operation-history:read'],
@@ -122,7 +122,7 @@ const routes: RouteRecordRaw[] = [
         'lucide:scroll-text',
       ),
       page(
-        'menu-ops-login-logs',
+        'menu-operations-login-logs',
         'login-logs',
         () => import('#/views/ops/login-logs/index.vue'),
         ['ops:audit:read', 'ops:login-logs:read'],
@@ -130,7 +130,7 @@ const routes: RouteRecordRaw[] = [
         'lucide:log-in',
       ),
       page(
-        'menu-ops-tasks',
+        'menu-operations-tasks',
         'tasks',
         () => import('#/views/system/tasks/index.vue'),
         'ops:tasks:read',
@@ -138,7 +138,7 @@ const routes: RouteRecordRaw[] = [
         'lucide:workflow',
       ),
       page(
-        'menu-ops-data-jobs',
+        'menu-operations-data-jobs',
         'data-jobs',
         () => import('#/views/system/import-export/index.vue'),
         'ops:data-jobs:read',
@@ -165,7 +165,7 @@ const routes: RouteRecordRaw[] = [
       hideInTab: true,
       title: $t('page.audit.title'),
     },
-    name: 'menu-operations-audit',
+    name: 'LegacySystemAudit',
     path: '/system/audit',
   },
   {

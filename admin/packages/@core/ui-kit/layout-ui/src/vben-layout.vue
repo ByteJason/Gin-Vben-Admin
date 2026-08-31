@@ -637,7 +637,7 @@ const layoutStaticHeaderTarget = `#${idLayoutStaticHeader}`;
     <div
       ref="mainRef"
       data-layout-region="main"
-      class="relative flex min-h-0 flex-1 flex-col overflow-hidden"
+      class="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
     >
       <Teleport defer :disabled="headerFixed" :to="layoutStaticHeaderTarget">
         <div
@@ -699,7 +699,7 @@ const layoutStaticHeaderTarget = `#${idLayoutStaticHeader}`;
         ref="contentRef"
         data-layout-region="scroll"
         :style="layoutScrollStyle"
-        class="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto bg-background-deep"
+        class="layout-scroll-region flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto bg-background-deep"
       >
         <div :id="idLayoutStaticHeader" class="contents"></div>
 
@@ -755,6 +755,11 @@ const layoutStaticHeaderTarget = `#${idLayoutStaticHeader}`;
 .mobile-sidebar-mask-enter-from,
 .mobile-sidebar-mask-leave-to {
   opacity: 0;
+}
+
+.layout-scroll-region {
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 @media (prefers-reduced-motion: reduce) {

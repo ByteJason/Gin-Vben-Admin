@@ -4,6 +4,7 @@ import type {
   DashboardOverviewDistributionItem,
   DashboardOverviewPreset,
   DashboardOverviewTopItem,
+  DashboardSummary,
 } from '@vben/api-client';
 
 import { computed, reactive, ref } from 'vue';
@@ -13,6 +14,7 @@ import { useVisibilityPolling } from '@vben/hooks';
 
 import {
   getDashboardOverviewApi,
+  getDashboardSummaryApi,
   type DashboardOverviewQuery,
 } from '#/api/core/dashboard';
 import { $t } from '#/locales';
@@ -43,9 +45,13 @@ const state = reactive<{
   to: '',
 });
 const overview = ref<DashboardOverview>();
+const summary = ref<DashboardSummary>();
 const loading = ref(false);
 const error = ref('');
 const timezone = ref(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
+let refreshSequence = 0;
+let requestInFlight = false;
+let refreshQueued = false;
 
 const cardDefinitions: Array<{
   key: CardKey;
@@ -93,6 +99,41 @@ const distributionStyle = computed(() => {
 });
 
 const trendPoints = computed(() => overview.value?.trends ?? []);
+
+type SummaryCountKey = keyof DashboardSummary['counts'];
+
+const summaryCardDefinitions: Array<{
+  key: SummaryCountKey;
+  label: string;
+  tone: string;
+}> = [
+  { key: 'users', label: 'users', tone: 'blue' },
+  { key: 'roles', label: 'roles', tone: 'green' },
+  { key: 'tasks', label: 'tasks', tone: 'amber' },
+  { key: 'importJobs', label: 'importJobs', tone: 'violet' },
+  { key: 'exportJobs', label: 'exportJobs', tone: 'teal' },
+  { key: 'files', label: 'files', tone: 'blue' },
+  { key: 'auditEvents', label: 'auditEvents', tone: 'green' },
+  { key: 'mailAccounts', label: 'mailAccounts', tone: 'amber' },
+  { key: 'mailMessages', label: 'mailMessages', tone: 'violet' },
+];
+
+const summaryCards = computed(() =>
+  summaryCardDefinitions.map((definition) => ({
+    ...definition,
+    metric: summary.value?.counts[definition.key],
+  })),
+);
+
+const summaryHealth = computed(() => {
+  const health = summary.value?.health;
+  if (!health) return [];
+  return [
+    { key: 'runtime', metric: health.runtime },
+    { key: 'database', metric: health.database },
+    { key: 'redis', metric: health.redis },
+  ];
+});
 
 function label(key: string, params?: Record<string, unknown>) {
   const path = `page.analyticsOverview.${key}`;
@@ -194,17 +235,63 @@ function queryParams(): DashboardOverviewQuery | undefined {
 }
 
 async function refresh() {
-  if (loading.value) return;
+  if (requestInFlight) {
+    // Keep the latest toolbar selection instead of dropping it while the
+    // overview/summary pair is still settling.
+    refreshQueued = true;
+    return;
+  }
   const params = queryParams();
   if (!params) return;
+  const sequence = ++refreshSequence;
+  requestInFlight = true;
   loading.value = true;
   error.value = '';
+
+  const showLoadedState = () => {
+    if (sequence === refreshSequence) loading.value = false;
+  };
+
+  // Ask for the rich overview and the stable service summary together. Older
+  // deployments may expose only the summary endpoint; showing that response
+  // immediately keeps the dashboard useful while the richer projection is
+  // upgraded or unavailable.
+  const overviewRequest = getDashboardOverviewApi(params)
+    .then((value) => {
+      if (sequence === refreshSequence) {
+        overview.value = value;
+        showLoadedState();
+      }
+      return true;
+    })
+    .catch(() => false);
+  const summaryRequest = getDashboardSummaryApi()
+    .then((value) => {
+      if (sequence === refreshSequence) {
+        summary.value = value;
+        showLoadedState();
+      }
+      return true;
+    })
+    .catch(() => false);
+
   try {
-    overview.value = await getDashboardOverviewApi(params);
-  } catch {
-    error.value = label('loadError');
+    const [overviewLoaded, summaryLoaded] = await Promise.all([
+      overviewRequest,
+      summaryRequest,
+    ]);
+    if (sequence === refreshSequence) {
+      if (!overviewLoaded && !summaryLoaded && !overview.value) {
+        error.value = label('loadError');
+      }
+      loading.value = false;
+    }
   } finally {
-    loading.value = false;
+    requestInFlight = false;
+    if (refreshQueued) {
+      refreshQueued = false;
+      void refresh();
+    }
   }
 }
 
@@ -290,9 +377,95 @@ useVisibilityPolling(refresh, 30_000);
     </section>
 
     <p v-if="error" class="feedback error" role="alert">{{ error }}</p>
-    <p v-if="loading && !overview" class="loading-state" role="status">
+    <p
+      v-if="loading && !overview && !summary"
+      class="loading-state"
+      role="status"
+    >
       {{ label('loading') }}
     </p>
+
+    <section
+      v-if="summary && !overview"
+      class="summary-fallback"
+      :aria-label="label('serviceSummary')"
+    >
+      <div class="summary-fallback-heading">
+        <div>
+          <p class="eyebrow">{{ label('serviceSummaryEyebrow') }}</p>
+          <h2>{{ label('serviceSummary') }}</h2>
+          <p class="description">{{ label('summaryFallback') }}</p>
+        </div>
+        <span class="updated">
+          {{
+            label('summaryCollectedAt', {
+              value: formatDate(summary.collectedAt),
+            })
+          }}
+        </span>
+      </div>
+
+      <div class="metric-grid summary-grid">
+        <article
+          v-for="card in summaryCards"
+          :key="card.key"
+          class="metric-card"
+          :class="`tone-${card.tone}`"
+        >
+          <div class="metric-heading">
+            <span>{{ label(card.label) }}</span>
+            <span class="metric-status" :class="card.metric?.status">
+              {{ statusText(card.metric?.status) }}
+            </span>
+          </div>
+          <strong>{{ metricText(card.metric) }}</strong>
+        </article>
+      </div>
+
+      <div class="summary-detail-grid">
+        <article class="panel summary-health-panel">
+          <div class="panel-heading">
+            <h2>{{ label('health') }}</h2>
+            <span>{{ statusText(summary.status) }}</span>
+          </div>
+          <dl class="health-list">
+            <div v-for="item in summaryHealth" :key="item.key">
+              <dt>{{ label(item.key) }}</dt>
+              <dd :class="item.metric.status">
+                {{ statusText(item.metric.status) }}
+                <span v-if="item.metric.state"> · {{ item.metric.state }}</span>
+              </dd>
+            </div>
+          </dl>
+        </article>
+        <article class="panel summary-instance-panel">
+          <div class="panel-heading">
+            <h2>{{ label('instance') }}</h2>
+            <span>{{ statusText(summary.instance.status) }}</span>
+          </div>
+          <dl class="instance-list">
+            <div>
+              <dt>{{ label('state') }}</dt>
+              <dd>{{ summary.instance.state || label('unavailable') }}</dd>
+            </div>
+            <div>
+              <dt>{{ label('version') }}</dt>
+              <dd>{{ summary.instance.version || label('unavailable') }}</dd>
+            </div>
+            <div>
+              <dt>{{ label('uptime') }}</dt>
+              <dd>
+                {{
+                  summary.instance.uptimeSeconds === undefined
+                    ? label('unavailable')
+                    : `${Math.round(summary.instance.uptimeSeconds)}s`
+                }}
+              </dd>
+            </div>
+          </dl>
+        </article>
+      </div>
+    </section>
 
     <template v-if="overview">
       <section class="metric-grid" :aria-label="label('metrics')">
@@ -318,7 +491,7 @@ useVisibilityPolling(refresh, 30_000);
         </article>
       </section>
 
-      <section class="chart-grid" aria-label="Trends">
+      <section class="chart-grid" :aria-label="label('trends')">
         <article class="panel chart-panel">
           <div class="panel-heading">
             <div>
@@ -328,6 +501,7 @@ useVisibilityPolling(refresh, 30_000);
             <span class="legend blue">{{ label('visitors') }}</span>
           </div>
           <svg
+            v-if="trendPoints.length"
             class="trend-chart"
             viewBox="0 0 640 190"
             role="img"
@@ -336,7 +510,8 @@ useVisibilityPolling(refresh, 30_000);
             <path class="area blue-fill" :d="trendAreaPath('visitors')" />
             <path class="line blue-line" :d="trendPath('visitors')" />
           </svg>
-          <div class="axis-labels">
+          <p v-else class="chart-empty" role="status">{{ label('empty') }}</p>
+          <div v-if="trendPoints.length" class="axis-labels">
             <span>{{ formatDate(trendPoints[0]?.at) }}</span
             ><span>{{
               formatDate(trendPoints[trendPoints.length - 1]?.at)
@@ -352,6 +527,7 @@ useVisibilityPolling(refresh, 30_000);
             <span class="legend amber">{{ label('paymentAmount') }}</span>
           </div>
           <svg
+            v-if="trendPoints.length"
             class="trend-chart"
             viewBox="0 0 640 190"
             role="img"
@@ -360,7 +536,8 @@ useVisibilityPolling(refresh, 30_000);
             <path class="area amber-fill" :d="trendAreaPath('amount')" />
             <path class="line amber-line" :d="trendPath('amount')" />
           </svg>
-          <div class="axis-labels">
+          <p v-else class="chart-empty" role="status">{{ label('empty') }}</p>
+          <div v-if="trendPoints.length" class="axis-labels">
             <span>{{ formatDate(trendPoints[0]?.at) }}</span
             ><span>{{
               formatDate(trendPoints[trendPoints.length - 1]?.at)
@@ -376,6 +553,7 @@ useVisibilityPolling(refresh, 30_000);
             <span class="legend green">{{ label('newUsers') }}</span>
           </div>
           <svg
+            v-if="trendPoints.length"
             class="trend-chart"
             viewBox="0 0 640 190"
             role="img"
@@ -384,6 +562,7 @@ useVisibilityPolling(refresh, 30_000);
             <path class="area green-fill" :d="trendAreaPath('newUsers')" />
             <path class="line green-line" :d="trendPath('newUsers')" />
           </svg>
+          <p v-else class="chart-empty" role="status">{{ label('empty') }}</p>
         </article>
         <article class="panel range-panel">
           <p class="eyebrow">{{ label('selectedRange') }}</p>
@@ -527,6 +706,7 @@ useVisibilityPolling(refresh, 30_000);
 .preset-list,
 .date-fields,
 .panel-heading,
+.summary-fallback-heading,
 .axis-labels,
 .distribution-content,
 .legend-list li,
@@ -538,13 +718,19 @@ useVisibilityPolling(refresh, 30_000);
 
 .page-heading,
 .range-toolbar,
-.panel-heading {
+.panel-heading,
+.summary-fallback-heading {
   gap: 1rem;
   justify-content: space-between;
 }
 
 .page-heading {
   flex-wrap: wrap;
+}
+
+.page-heading > div:first-child,
+.summary-fallback-heading > div:first-child {
+  min-inline-size: 0;
 }
 
 .heading-meta {
@@ -580,6 +766,7 @@ h2 {
   max-inline-size: 70ch;
   margin-block-start: 0.5rem;
   color: var(--muted);
+  line-height: 1.5;
 }
 
 .updated,
@@ -635,13 +822,15 @@ select:focus-visible {
 }
 
 .source-badge.fixture {
-  color: #92400e;
-  background: #fef3c7;
+  color: hsl(var(--foreground));
+  background: color-mix(in srgb, hsl(var(--warning)) 20%, hsl(var(--card)));
+  border: 1px solid color-mix(in srgb, hsl(var(--warning)) 55%, var(--line));
 }
 
 .source-badge.live {
-  color: #166534;
-  background: #dcfce7;
+  color: hsl(var(--foreground));
+  background: color-mix(in srgb, hsl(var(--success)) 20%, hsl(var(--card)));
+  border: 1px solid color-mix(in srgb, hsl(var(--success)) 55%, var(--line));
 }
 
 .status-dot {
@@ -717,6 +906,79 @@ select:focus-visible {
   margin-block-start: 1rem;
 }
 
+.summary-fallback {
+  padding: 1rem;
+  margin-block-start: 1rem;
+  background: hsl(var(--card) / 0.35);
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+}
+
+.summary-fallback-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.summary-fallback-heading h2 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.summary-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-block-start: 1rem;
+}
+
+.summary-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+  margin-block-start: 0.85rem;
+}
+
+.health-list,
+.instance-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 1rem 0 0;
+}
+
+.health-list > div,
+.instance-list > div {
+  display: flex;
+  gap: 1rem;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-block-end: 0.65rem;
+  border-block-end: 1px solid var(--line);
+}
+
+.health-list dt,
+.instance-list dt {
+  color: var(--muted);
+}
+
+.health-list dd,
+.instance-list dd {
+  margin: 0;
+  font-weight: 700;
+  text-align: end;
+  overflow-wrap: anywhere;
+}
+
+.health-list dd.ok {
+  color: color-mix(in srgb, hsl(var(--success)) 70%, hsl(var(--foreground)));
+}
+
+.health-list dd.degraded {
+  color: color-mix(in srgb, hsl(var(--warning)) 70%, hsl(var(--foreground)));
+}
+
+.health-list dd.unavailable {
+  color: hsl(var(--muted-foreground));
+}
+
 .metric-card,
 .panel {
   background: hsl(var(--card));
@@ -765,15 +1027,15 @@ select:focus-visible {
 }
 
 .metric-status.ok {
-  color: #15803d;
+  color: color-mix(in srgb, hsl(var(--success)) 70%, hsl(var(--foreground)));
 }
 
 .metric-status.degraded {
-  color: #b45309;
+  color: color-mix(in srgb, hsl(var(--warning)) 70%, hsl(var(--foreground)));
 }
 
 .metric-status.unavailable {
-  color: #64748b;
+  color: hsl(var(--muted-foreground));
 }
 
 .tone-blue {
@@ -817,6 +1079,16 @@ select:focus-visible {
 
 .chart-panel {
   min-inline-size: 0;
+}
+
+.chart-empty {
+  display: grid;
+  min-block-size: 12rem;
+  place-items: center;
+  margin-block-start: 0.75rem;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--line) 18%, transparent);
+  border-radius: 0.6rem;
 }
 
 .chart-panel:nth-child(3),
@@ -896,15 +1168,15 @@ select:focus-visible {
 }
 
 .legend.blue {
-  color: #2563eb;
+  color: color-mix(in srgb, hsl(var(--primary)) 75%, hsl(var(--foreground)));
 }
 
 .legend.amber {
-  color: #b45309;
+  color: color-mix(in srgb, hsl(var(--warning)) 70%, hsl(var(--foreground)));
 }
 
 .legend.green {
-  color: #059669;
+  color: color-mix(in srgb, hsl(var(--success)) 70%, hsl(var(--foreground)));
 }
 
 .axis-labels {
@@ -1064,7 +1336,8 @@ th {
 }
 
 @media (width <= 1100px) {
-  .metric-grid {
+  .metric-grid,
+  .summary-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
@@ -1072,8 +1345,13 @@ th {
 @media (width <= 760px) {
   .metric-grid,
   .chart-grid,
-  .lower-grid {
+  .lower-grid,
+  .summary-detail-grid {
     grid-template-columns: 1fr;
+  }
+
+  .summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .chart-panel:nth-child(3),
@@ -1082,7 +1360,8 @@ th {
   }
 
   .range-toolbar,
-  .heading-meta {
+  .heading-meta,
+  .summary-fallback-heading {
     flex-direction: column;
     align-items: stretch;
   }
@@ -1103,6 +1382,12 @@ th {
   .distribution-content {
     flex-direction: column;
     align-items: flex-start;
+  }
+}
+
+@media (width <= 480px) {
+  .summary-grid {
+    grid-template-columns: 1fr;
   }
 }
 

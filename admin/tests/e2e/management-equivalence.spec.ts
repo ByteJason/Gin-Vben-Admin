@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 
 const breakpoints = [375, 768, 1440, 1920, 2560];
 const managementPages = [
-  { path: '/dashboard/analytics', endpoint: '/dashboard/summary' },
+  { path: '/dashboard', endpoint: '/dashboard/overview' },
   { path: '/system/monitor', endpoint: '/ops/monitor' },
   { path: '/system/settings', endpoint: '/settings' },
   { path: '/system/audit', endpoint: '/audit/events' },
@@ -28,7 +28,7 @@ const fixtureUser = {
     'ops:tasks:read',
     'ops:data-jobs:read',
   ],
-  homePath: '/system/files',
+  homePath: '/dashboard',
   id: 'b107-fixture-user',
   realName: 'B10.7 Fixture',
   roles: ['super'],
@@ -113,6 +113,55 @@ test.beforeEach(async ({ page }, testInfo) => {
             userAgent: 'fixture',
           },
         ]),
+        contentType: 'application/json',
+        status: 200,
+      });
+      return;
+    }
+    if (pathname.endsWith('/dashboard/overview')) {
+      await route.fulfill({
+        body: envelope({
+          announcements: [
+            {
+              id: 'fixture-announcement',
+              publishedAt: '2026-08-25T00:00:00Z',
+              title: 'Fixture overview is ready',
+            },
+          ],
+          cards: {
+            averageOrderValue: { status: 'ok', value: 120 },
+            newUsers: { status: 'ok', value: 4 },
+            paymentAmount: { status: 'ok', value: 480 },
+            paymentOrders: { status: 'ok', value: 4 },
+            visitors: { status: 'ok', value: 18 },
+          },
+          collectedAt: '2026-08-25T00:30:00Z',
+          dataSource: 'fixture',
+          distribution: [
+            { key: 'web', label: 'Web', value: 56 },
+            { key: 'mobile', label: 'Mobile', value: 31 },
+            { key: 'api', label: 'API', value: 13 },
+          ],
+          isSynthetic: true,
+          range: {
+            from: '2026-08-25T00:00:00Z',
+            granularity: 'hour',
+            preset: 'today',
+            timezone: 'UTC',
+            to: '2026-08-26T00:00:00Z',
+          },
+          regions: [{ key: 'apac', label: 'APAC', value: 100 }],
+          topItems: [],
+          trends: [
+            {
+              amount: 480,
+              at: '2026-08-25T00:00:00Z',
+              newUsers: 4,
+              orders: 4,
+              visitors: 18,
+            },
+          ],
+        }),
         contentType: 'application/json',
         status: 200,
       });

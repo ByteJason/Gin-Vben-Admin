@@ -277,7 +277,7 @@ func (h *Handler) currentUser(c *gin.Context) {
 	}
 	response.OK(c, currentUserResponse{
 		UserID: user.ID, Username: user.Username, RealName: user.DisplayName,
-		Roles: append([]string(nil), subject.RoleIDs...), HomePath: "/dashboard/analytics",
+		Roles: append([]string(nil), subject.RoleIDs...), HomePath: "/dashboard",
 		AccessCodes: accessCodes,
 	})
 }

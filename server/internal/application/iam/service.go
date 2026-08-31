@@ -2307,7 +2307,11 @@ func (s *Service) ListMenus(ctx context.Context) ([]domain.Menu, error) {
 	if !ok {
 		return nil, ErrRepositoryMissing
 	}
-	return repo.ListMenus(ctx)
+	menus, err := repo.ListMenus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return canonicalizeProductionMenus(menus), nil
 }
 
 // ListMenuRoutes projects the current tenant's visible menu records into the
@@ -2317,6 +2321,7 @@ func (s *Service) ListMenuRoutes(ctx context.Context) ([]MenuRoute, error) {
 	if err != nil {
 		return nil, err
 	}
+	menus = canonicalizeProductionMenus(menus)
 	return s.buildValidatedMenuRoutes(menus)
 }
 
@@ -2336,7 +2341,43 @@ func (s *Service) ListMenuRoutesForSubject(ctx context.Context, subject domain.S
 	if len(menus) == 0 {
 		menus = ProductionMenuCatalog()
 	}
+	menus = canonicalizeProductionMenus(menus)
 	return s.buildValidatedMenuRoutes(filterMenusByAccessCodes(menus, codes))
+}
+
+// canonicalizeProductionMenus keeps the route projection compatible with
+// installations created before the dashboard became a first-level page. The
+// stable production IDs are reserved installer records, so this normalization
+// is intentionally limited to those IDs and leaves tenant-defined records
+// untouched. It runs before permission filtering so the retired child cannot
+// keep the old nested branch alive.
+func canonicalizeProductionMenus(menus []domain.Menu) []domain.Menu {
+	canonical := make([]domain.Menu, 0, len(menus))
+	for _, menu := range menus {
+		switch menu.ID {
+		case "menu-overview-runtime":
+			continue
+		case "menu-overview":
+			if menu.Path == "/dashboard" {
+				menu.Type = domain.MenuTypeMenu
+				menu.Component = "/dashboard/analytics/index.vue"
+				menu.Redirect = ""
+				if strings.TrimSpace(menu.Permission) == "" {
+					menu.Permission = "dashboard:overview:read"
+				}
+			}
+		case "menu-identity-menus":
+			if menu.Name == "菜单元数据" {
+				menu.Name = "菜单管理"
+			}
+		case "menu-identity-permissions":
+			if menu.Name == "权限元数据" {
+				menu.Name = "权限管理"
+			}
+		}
+		canonical = append(canonical, menu)
+	}
+	return canonical
 }
 
 func (s *Service) buildValidatedMenuRoutes(menus []domain.Menu) ([]MenuRoute, error) {

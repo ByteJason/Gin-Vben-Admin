@@ -559,7 +559,7 @@ paths:
     patch:
       tags: [IAM]
       operationId: updateIAMMenu
-      summary: 更新菜单元数据
+      summary: 更新菜单
       security: [{BearerAuth: []}]
       requestBody:
         required: true

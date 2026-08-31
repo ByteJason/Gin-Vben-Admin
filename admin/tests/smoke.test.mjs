@@ -151,7 +151,7 @@ test('management templates expose Gin Vben Admin branding and the supplied logo'
     /GIN_VBEN_ADMIN_GITHUB_URL\s*=\s*'https:\/\/github\.com\/ByteJason\/Gin-Vben-Admin'/,
   );
   assert.match(about, /:href="GIN_VBEN_ADMIN_GITHUB_URL"/);
-  assert.match(about, /title: '上游前端项目'/);
+  assert.match(about, /ui\.about\.upstreamProject/);
   assert.match(about, /renderLink\(VBEN_GITHUB_URL, 'Vue Vben Admin'\)/);
   const pwaOptions = readFileSync(
     resolve(root, 'internal/vite-config/src/options.ts'),
@@ -234,15 +234,10 @@ test('management templates expose Gin Vben Admin branding and the supplied logo'
     );
     assert.match(basicLayout, /GIN_VBEN_ADMIN_GITHUB_URL/);
     assert.doesNotMatch(basicLayout, /VBEN_GITHUB_URL/);
-    assert.match(
-      basicLayout,
-      /text: `Vue Vben Admin \$\{\$t\('ui\.widgets\.document'\)\}`/,
-    );
-    assert.match(routeModule, /path: '\/gin-vben-admin\/about'/);
-    assert.match(
-      routeModule,
-      /path: '\/vben-admin\/about',[\s\S]*?redirect: '\/gin-vben-admin\/about'/,
-    );
+    assert.match(basicLayout, /text: \$t\('ui\.widgets\.qa'\)/);
+    assert.match(routeModule, /import\.meta\.env\.DEV/);
+    assert.match(routeModule, /name: 'Profile'/);
+    assert.doesNotMatch(routeModule, /gin-vben-admin\/about|vben-admin\/about/);
     assert.equal(englishDemos.vben.title, 'Vue Vben Admin (Upstream)');
     assert.equal(chineseDemos.vben.title, 'Vue Vben Admin（上游）');
 

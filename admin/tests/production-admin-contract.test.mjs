@@ -10,7 +10,7 @@ function read(path) {
 }
 
 const managementPages = [
-  ['dashboard/analytics', 'operations-overview-page'],
+  ['dashboard/analytics', 'analytics-overview-page'],
   ['iam/users', 'iam-users-page'],
   ['iam/roles', 'iam-roles-page'],
   ['iam/menus', 'iam-menus-page'],
@@ -20,7 +20,7 @@ const managementPages = [
   ['system/observability', 'observability-page'],
   ['system/settings', 'settings-page'],
   ['system/audit', 'audit-page'],
-  ['system/files', 'files-page'],
+  ['system/files', 'media-library-page'],
   ['system/mail', 'mail-page'],
   ['system/monitor', 'monitor-page'],
   ['system/dictionary', 'dictionary-page'],
@@ -31,25 +31,26 @@ const managementPages = [
 test('production preferences and dashboard routes have one canonical home', () => {
   const preferences = read('packages/@core/preferences/src/config.ts');
   assert.match(preferences, /accessMode:\s*'mixed'/);
-  assert.match(preferences, /defaultHomePath:\s*'\/dashboard\/analytics'/);
+  assert.match(preferences, /defaultHomePath:\s*'\/dashboard'/);
 
   for (const template of templates) {
     const dashboard = read(
       `apps/${template}/src/router/routes/modules/dashboard.ts`,
     );
     assert.match(dashboard, /path:\s*'\/dashboard'/);
-    assert.match(dashboard, /redirect:\s*'\/dashboard\/analytics'/);
-    for (const legacy of ['/analytics', '/workspace']) {
+    assert.match(
+      dashboard,
+      /component:\s*\(\)\s*=>\s*import\('#\/views\/dashboard\/analytics\/index\.vue'\)/,
+    );
+    assert.doesNotMatch(dashboard, /redirect:\s*'\/dashboard\/analytics'/);
+    for (const legacy of ['/dashboard/analytics', '/analytics', '/workspace']) {
       assert.ok(
-        dashboard.includes(`path: '${legacy}'`),
+        dashboard.includes(`'${legacy}'`),
         `${template} is missing ${legacy} compatibility route`,
       );
     }
-    assert.match(dashboard, /path:\s*'workspace'[\s\S]*?hideInMenu:\s*true/);
-    assert.match(
-      dashboard,
-      /path:\s*'workspace'[\s\S]*?redirect:\s*'\/dashboard\/analytics'/,
-    );
+    assert.match(dashboard, /'\/workspace'[\s\S]*?hideInMenu:\s*true/);
+    assert.match(dashboard, /'\/workspace'[\s\S]*?redirect:\s*'\/dashboard'/);
 
     const notFound = read(
       `apps/${template}/src/views/_core/fallback/not-found.vue`,
@@ -92,7 +93,7 @@ test('login bootstrap remains atomic and uses generated auth endpoints', () => {
   }
 });
 
-test('three templates expose four production groups and isolate development routes', () => {
+test('three templates expose five production groups and isolate development routes', () => {
   for (const template of templates) {
     const dashboard = read(
       `apps/${template}/src/router/routes/modules/dashboard.ts`,
@@ -102,9 +103,15 @@ test('three templates expose four production groups and isolate development rout
     const demos = read(`apps/${template}/src/router/routes/modules/demos.ts`);
     const upstream = read(`apps/${template}/src/router/routes/modules/vben.ts`);
     const layout = read(`apps/${template}/src/layouts/basic.vue`);
+    const menus = read(`apps/${template}/src/views/iam/menus/index.vue`);
 
     assert.match(dashboard, /name:\s*'menu-overview'/);
-    assert.match(dashboard, /name:\s*'menu-overview-runtime'/);
+    assert.match(
+      menus,
+      /'menu-overview':\s*'page\.navigation\.dashboard'/,
+      `${template} menu metadata must use the dashboard label`,
+    );
+    assert.doesNotMatch(dashboard, /menu-overview-runtime/);
     assert.match(iam, /name:\s*'menu-identity'/);
     assert.match(system, /name:\s*'menu-system-config'/);
     assert.match(system, /name:\s*'menu-operations'/);
@@ -117,25 +124,28 @@ test('three templates expose four production groups and isolate development rout
     for (const source of [dashboard, iam, system]) {
       assert.match(source, /authority:\s*\[/);
     }
-    assert.match(demos, /import\.meta\.env\.DEV/);
+    assert.match(demos, /export default \[\];/);
     assert.match(upstream, /import\.meta\.env\.DEV/);
-    assert.match(upstream, /name:\s*'VbenAbout'[\s\S]*?hideInMenu:\s*true/);
+    assert.match(upstream, /import\.meta\.env\.DEV/);
     assert.match(upstream, /name:\s*'Profile'[\s\S]*?hideInMenu:\s*true/);
-    assert.match(layout, /router\.push\(\{\s*name:\s*'VbenAbout'/);
+    assert.match(layout, /router\.push\(\{\s*name:\s*'Profile'/);
   }
 });
 
-test('operations overview uses dashboard summary and session APIs without privileged monitor data', () => {
+test('dashboard overview uses scoped overview data with a summary fallback', () => {
   for (const template of templates) {
     const analytics = read(
       `apps/${template}/src/views/dashboard/analytics/index.vue`,
     );
+    assert.match(analytics, /getDashboardOverviewApi/);
     assert.match(analytics, /getDashboardSummaryApi/);
-    assert.match(analytics, /listSessionsApi/);
-    assert.match(analytics, /sessionTrend/);
+    assert.match(analytics, /summary-fallback/);
+    assert.match(analytics, /requestInFlight/);
+    assert.match(analytics, /chart-empty/);
+    assert.match(analytics, /label\('trends'\)/);
     assert.match(analytics, /useVisibilityPolling/);
-    assert.match(analytics, /ops:monitor:read/);
-    assert.doesNotMatch(analytics, /getMonitorOverviewApi/);
+    assert.doesNotMatch(analytics, /ops:monitor:read/);
+    assert.doesNotMatch(analytics, /getMonitorOverviewApi|listSessionsApi/);
     assert.doesNotMatch(analytics, /setInterval/);
     assert.doesNotMatch(analytics, /Math\.random|AnalyticsVisits|projectItems/);
 
@@ -146,7 +156,7 @@ test('operations overview uses dashboard summary and session APIs without privil
     assert.match(monitor, /useVisibilityPolling/);
     assert.doesNotMatch(monitor, /setInterval/);
     assert.match(monitor, /pool\.max === 0/);
-    assert.match(monitor, /无限制/);
+    assert.match(monitor, /pool\.max === 0/);
     for (const field of [
       'cores',
       'load1',

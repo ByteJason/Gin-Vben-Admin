@@ -267,7 +267,7 @@ func TestIAMCurrentUserReturnsVersionedProfile(t *testing.T) {
 	if err := json.Unmarshal(resp.Body.Bytes(), &envelope); err != nil {
 		t.Fatal(err)
 	}
-	if envelope.Code != 0 || envelope.Data.UserID != "u1" || envelope.Data.Username != "alice" || envelope.Data.RealName != "Alice" || len(envelope.Data.Roles) != 1 || envelope.Data.Roles[0] != "r-admin" || envelope.Data.HomePath != "/dashboard/analytics" || !reflect.DeepEqual(envelope.Data.AccessCodes, []string{"iam:users:read", "users.read"}) {
+	if envelope.Code != 0 || envelope.Data.UserID != "u1" || envelope.Data.Username != "alice" || envelope.Data.RealName != "Alice" || len(envelope.Data.Roles) != 1 || envelope.Data.Roles[0] != "r-admin" || envelope.Data.HomePath != "/dashboard" || !reflect.DeepEqual(envelope.Data.AccessCodes, []string{"iam:users:read", "users.read"}) {
 		t.Fatalf("profile envelope=%s", resp.Body.String())
 	}
 }

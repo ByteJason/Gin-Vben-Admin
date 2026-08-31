@@ -34,11 +34,11 @@ func TestInitialNavigationSeedIsIdempotentAndContainsFiveProductionGroups(t *tes
 		t.Fatalf("second seed: %v", err)
 	}
 	_, permissionSeeds := initialNavigationSeeds()
-	if len(first.MenuIDs) != 21 || len(first.PermissionIDs) != len(permissionSeeds) || len(second.MenuIDs) != 0 || len(second.PermissionIDs) != 0 {
+	if len(first.MenuIDs) != 20 || len(first.PermissionIDs) != len(permissionSeeds) || len(second.MenuIDs) != 0 || len(second.PermissionIDs) != 0 {
 		t.Fatalf("seed receipts first=%+v second=%+v", first, second)
 	}
 
-	if len(store.menus) != 21 || len(store.permissions) != len(permissionSeeds) {
+	if len(store.menus) != 20 || len(store.permissions) != len(permissionSeeds) {
 		t.Fatalf("seed counts menus=%d permissions=%d", len(store.menus), len(store.permissions))
 	}
 	wantRoots := []string{"menu-identity", "menu-media", "menu-operations", "menu-overview", "menu-system-config"}
@@ -63,15 +63,15 @@ func TestInitialNavigationSeedIsIdempotentAndContainsFiveProductionGroups(t *tes
 	if !reflect.DeepEqual(roots, wantRoots) {
 		t.Fatalf("roots=%v want=%v", roots, wantRoots)
 	}
-	if childCounts["menu-overview"] != 1 || childCounts["menu-identity"] != 4 || childCounts["menu-system-config"] != 5 || childCounts["menu-operations"] != 5 || childCounts["menu-media"] != 1 {
+	if childCounts["menu-overview"] != 0 || childCounts["menu-identity"] != 4 || childCounts["menu-system-config"] != 5 || childCounts["menu-operations"] != 5 || childCounts["menu-media"] != 1 {
 		t.Fatalf("child counts=%v", childCounts)
 	}
 	for id, wantName := range map[string]string{
 		"menu-system-settings":      "系统配置",
 		"menu-system-mail":          "邮件服务",
 		"menu-operations-monitor":   "服务器状态",
-		"menu-identity-menus":       "菜单元数据",
-		"menu-identity-permissions": "权限元数据",
+		"menu-identity-menus":       "菜单管理",
+		"menu-identity-permissions": "权限管理",
 		"menu-media":                "媒体管理",
 	} {
 		if got := store.menus[id].Name; got != wantName {
@@ -221,6 +221,30 @@ func TestNavigationSeedRowMatchRequiresExactNullableRepresentation(t *testing.T)
 	permissionRow.OrgID = &space
 	if permissionRow.matches(permission) {
 		t.Fatal("blank organization must not be treated as canonical NULL")
+	}
+}
+
+func TestLegacyNavigationMigrationRecognizesOnlyInstallerOwnedShape(t *testing.T) {
+	menus, _ := initialNavigationSeeds()
+	dashboard := menus[0]
+	legacyRoot := navigationMenuSeedRow{
+		ID: dashboard.ID, TenantID: initialTenantID, Name: "仪表盘", Path: "/dashboard",
+		MenuType: "directory", Redirect: optionalSeedString("/dashboard/analytics"), Icon: optionalSeedString("lucide:layout-dashboard"),
+		Visible: true, Status: "active",
+	}
+	if !legacyMenuCanMigrate(legacyRoot, dashboard) {
+		t.Fatal("legacy dashboard root was not recognized")
+	}
+	legacyRoot.Name = "custom dashboard"
+	if legacyMenuCanMigrate(legacyRoot, dashboard) {
+		t.Fatal("custom dashboard row was treated as an installer migration")
+	}
+	runtime := navigationMenuSeedRow{
+		ID: legacyOverviewRuntimeMenuID, TenantID: initialTenantID, ParentID: optionalSeedString("menu-overview"),
+		Name: "数据概览", Path: "/dashboard/analytics", MenuType: "menu", Component: optionalSeedString("/dashboard/analytics/index.vue"),
+	}
+	if !isLegacyOverviewRuntimeRow(runtime) {
+		t.Fatal("legacy runtime child was not recognized")
 	}
 }
 

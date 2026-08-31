@@ -28,7 +28,7 @@
 - Prometheus 指标和 OTLP tracing 导出（默认关闭，可在管理端配置）
 - Windows、macOS、Linux 通用的 Node.js 开发命令
 - 源码运行与 Docker Compose 部署
-- 四组生产菜单、真实运行概览与数据库/Redis 资源监控
+- 五组生产菜单、仪表盘运营概览与数据库/Redis 资源监控
 
 ## 技术选型
 
@@ -297,7 +297,7 @@ ADMIN_UI=naive docker compose -f deploy/docker-compose.yml up -d --build
 CI 建议用矩阵分别验证三套 UI；每次使用同一份 `admin/pnpm-lock.yaml`，不生成分叉 lockfile。
 没有 `ADMIN_UI` 且没有本机选择时，构建门禁会提示先选择目标。
 
-登录后默认进入 `/dashboard/analytics`“运行概览”。生产菜单、兼容路由、访问码与各页面职责见 [`docs/admin-information-architecture.md`](docs/admin-information-architecture.md)。
+登录后默认进入 `/dashboard` 仪表盘。生产菜单、兼容路由、访问码与各页面职责见 [`docs/admin-information-architecture.md`](docs/admin-information-architecture.md)。
 
 编辑本地 `server/configs/server.yaml` 或设置环境变量后，使用显式命令管理数据库建表迁移。全新安装由
 `server/migrations/schema.go` 注册 `server/internal/platform/persistence/model` 中的 Model，

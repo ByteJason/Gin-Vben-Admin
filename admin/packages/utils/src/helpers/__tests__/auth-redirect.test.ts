@@ -4,7 +4,7 @@ import { resolveAuthRedirect } from '../auth-redirect';
 
 describe('resolveAuthRedirect', () => {
   const options = {
-    fallback: '/dashboard/analytics',
+    fallback: '/dashboard',
     loginPath: '/auth/login',
   };
 

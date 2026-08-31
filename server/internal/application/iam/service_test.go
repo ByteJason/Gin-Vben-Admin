@@ -265,8 +265,36 @@ func TestLegacyPartialPermissionCatalogStillUnlocksProductionMenuFallback(t *tes
 	for _, root := range routes {
 		leafCount += len(root.Children)
 	}
-	if len(routes) != 5 || leafCount != 16 {
+	if len(routes) != 5 || leafCount != 15 {
 		t.Fatalf("legacy partial catalog routes=%d leaves=%d routes=%+v", len(routes), leafCount, routes)
+	}
+}
+
+func TestMenuRouteProjectionFlattensLegacyDashboardNode(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "default"})
+	for _, menu := range []domain.Menu{
+		{ID: "menu-overview", Name: "仪表盘", Path: "/dashboard", Type: domain.MenuTypeDirectory, Redirect: "/dashboard/analytics", Visible: true, Active: true},
+		{ID: "menu-overview-runtime", ParentID: "menu-overview", Name: "运行概览", Path: "/dashboard/analytics", Type: domain.MenuTypeMenu, Component: "/dashboard/analytics/index.vue", Permission: "dashboard:overview:read", Visible: true, Active: true},
+	} {
+		if err := store.SaveMenu(ctx, menu); err != nil {
+			t.Fatal(err)
+		}
+	}
+	service := NewService(store)
+	menus, err := service.ListMenus(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(menus) != 1 || menus[0].ID != "menu-overview" || menus[0].Type != domain.MenuTypeMenu || menus[0].Redirect != "" {
+		t.Fatalf("canonical management menus=%+v", menus)
+	}
+	routes, err := service.ListMenuRoutes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != 1 || routes[0].Name != "menu-overview" || routes[0].Path != "/dashboard" || routes[0].Component != "/dashboard/analytics/index.vue" || len(routes[0].Children) != 0 || routes[0].Redirect != "" {
+		t.Fatalf("flattened routes=%+v", routes)
 	}
 }
 

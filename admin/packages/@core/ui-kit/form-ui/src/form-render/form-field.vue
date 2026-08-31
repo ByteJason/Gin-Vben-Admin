@@ -556,7 +556,7 @@ onUnmounted(() => {
           </FormDescription>
 
           <Transition name="slide-up" v-if="!compact">
-            <FormMessage class="absolute" />
+            <FormMessage class="mt-1" />
           </Transition>
         </div>
       </FormItem>

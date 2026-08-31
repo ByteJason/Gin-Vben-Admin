@@ -3,30 +3,19 @@ import { $t } from '#/locales';
 
 const routes: RouteRecordRaw[] = [
   {
+    component: () => import('#/views/dashboard/analytics/index.vue'),
     meta: {
       authority: ['dashboard:overview:read'],
+      affixTab: true,
       icon: 'lucide:layout-dashboard',
       order: -1,
       title: $t('page.navigation.dashboard'),
     },
-    name: 'menu-dashboard',
+    name: 'menu-overview',
     path: '/dashboard',
-    redirect: '/dashboard/analytics',
-    children: [
-      {
-        name: 'menu-dashboard-analytics',
-        path: 'analytics',
-        component: () => import('#/views/dashboard/analytics/index.vue'),
-        meta: {
-          authority: ['dashboard:overview:read'],
-          affixTab: true,
-          icon: 'lucide:area-chart',
-          title: $t('page.dashboard.analytics'),
-        },
-      },
-    ],
   },
   ...[
+    ['/dashboard/analytics', 'LegacyDashboardAnalytics'],
     ['/analytics', 'LegacyAnalytics'],
     ['/workspace', 'LegacyWorkspace'],
     ['/dashboard/workspace', 'LegacyDashboardWorkspace'],
@@ -35,12 +24,12 @@ const routes: RouteRecordRaw[] = [
       ({
         name,
         path,
-        redirect: '/dashboard/analytics',
+        redirect: '/dashboard',
         meta: {
           hideInBreadcrumb: true,
           hideInMenu: true,
           hideInTab: true,
-          title: $t('page.dashboard.analytics'),
+          title: $t('page.navigation.dashboard'),
         },
       }) as RouteRecordRaw,
   ),

@@ -61,7 +61,6 @@ const selectionPanel = document.querySelector('#selection-panel');
 const resetUIButton = document.querySelector('#reset-ui-button');
 const planForm = document.querySelector('#plan-form');
 const modeChoice = document.querySelector('#mode-choice');
-const localeMode = document.querySelector('#locale-mode');
 const localeChoice = document.querySelector('#locale-choice');
 const localeSuggestion = document.querySelector('#locale-suggestion');
 const planButton = document.querySelector('#plan-button');
@@ -1344,7 +1343,8 @@ async function requestInstallation(event) {
     const dependencies = dependencyFormValues();
     const payload = {
       mode: modeChoice.value,
-      localeMode: localeMode.value,
+      // The installer only asks for the default locale. The server keeps the
+      // backwards-compatible locale mode default (single) when omitted.
       locale: localeChoice.value,
       database: dependencies.database,
       redis: dependencies.redis,

@@ -27,8 +27,10 @@ import {
 import { $t } from '#/locales';
 
 const { hasAccessByCodes } = useAccess();
-const canManage = computed(() =>
-  hasAccessByCodes(['system:files:manage', 'media:library:manage']),
+const canManage = computed(
+  () =>
+    hasAccessByCodes(['media:library:manage']) ||
+    hasAccessByCodes(['system:files:manage']),
 );
 const categories = ref<FileCategory[]>([]);
 const selectedCategoryId = ref('');
@@ -275,11 +277,8 @@ async function download(item: FileObject, preview = false) {
 }
 
 async function deleteItem(item: FileObject) {
-  if (
-    !canManage.value ||
-    !window.confirm(String($t('page.files.confirmDelete')))
-  )
-    return;
+  if (!canManage.value) return;
+  if (!window.confirm(String($t('page.files.confirmDelete')))) return;
   actionId.value = item.id;
   error.value = '';
   try {
@@ -451,7 +450,7 @@ onMounted(async () => {
         </form>
       </aside>
 
-      <main class="files-content">
+      <section class="files-content">
         <section
           v-if="canManage"
           class="upload-card"
@@ -610,7 +609,7 @@ onMounted(async () => {
             }}
           </p>
         </section>
-      </main>
+      </section>
     </div>
   </ManagementPage>
 </template>

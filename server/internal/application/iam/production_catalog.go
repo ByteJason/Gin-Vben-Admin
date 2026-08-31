@@ -14,8 +14,9 @@ func ProductionMenuCatalog() []domain.Menu {
 		// The first five roots and their requested children are the production
 		// information architecture. Legacy IDs stay stable so existing grants and
 		// audit references remain addressable during the rename/move migration.
-		{ID: "menu-overview", Name: "仪表盘", Path: "/dashboard", Type: domain.MenuTypeDirectory, Redirect: "/dashboard/analytics", Icon: "lucide:layout-dashboard", Sort: 0, Visible: true, Active: true},
-		{ID: "menu-overview-runtime", ParentID: "menu-overview", Name: "数据概览", Path: "/dashboard/analytics", Type: domain.MenuTypeMenu, Component: "/dashboard/analytics/index.vue", Icon: "lucide:area-chart", Permission: "dashboard:overview:read", Sort: 0, Visible: true, Active: true},
+		// The dashboard is a page route itself; it no longer owns a nested runtime
+		// child. Existing installations migrate the former child out of navigation.
+		{ID: "menu-overview", Name: "仪表盘", Path: "/dashboard", Type: domain.MenuTypeMenu, Component: "/dashboard/analytics/index.vue", Icon: "lucide:layout-dashboard", Permission: "dashboard:overview:read", Sort: 0, Visible: true, Active: true},
 
 		{ID: "menu-operations", Name: "运维监控", Path: "/ops", Type: domain.MenuTypeDirectory, Redirect: "/ops/server-status", Icon: "lucide:activity", Sort: 10, Visible: true, Active: true},
 		{ID: "menu-operations-monitor", ParentID: "menu-operations", Name: "服务器状态", Path: "/ops/server-status", Type: domain.MenuTypeMenu, Component: "/system/monitor/index.vue", Icon: "lucide:monitor-cog", Permission: "ops:server-status:read", Sort: 0, Visible: true, Active: true},
@@ -26,8 +27,8 @@ func ProductionMenuCatalog() []domain.Menu {
 
 		{ID: "menu-identity", Name: "后台权限", Path: "/iam", Type: domain.MenuTypeDirectory, Redirect: "/iam/roles", Icon: "lucide:shield-check", Sort: 20, Visible: true, Active: true},
 		{ID: "menu-identity-roles", ParentID: "menu-identity", Name: "角色管理", Path: "/iam/roles", Type: domain.MenuTypeMenu, Component: "/iam/roles/index.vue", Icon: "lucide:shield-check", Permission: "iam:roles:read", Sort: 0, Visible: true, Active: true},
-		{ID: "menu-identity-menus", ParentID: "menu-identity", Name: "菜单元数据", Path: "/iam/menus", Type: domain.MenuTypeMenu, Component: "/iam/menus/index.vue", Icon: "lucide:menu", Permission: "iam:menus:read", Sort: 10, Visible: true, Active: true},
-		{ID: "menu-identity-permissions", ParentID: "menu-identity", Name: "权限元数据", Path: "/iam/permissions", Type: domain.MenuTypeMenu, Component: "/iam/permissions/index.vue", Icon: "lucide:key-round", Permission: "iam:permissions:read", Sort: 20, Visible: true, Active: true},
+		{ID: "menu-identity-menus", ParentID: "menu-identity", Name: "菜单管理", Path: "/iam/menus", Type: domain.MenuTypeMenu, Component: "/iam/menus/index.vue", Icon: "lucide:menu", Permission: "iam:menus:read", Sort: 10, Visible: true, Active: true},
+		{ID: "menu-identity-permissions", ParentID: "menu-identity", Name: "权限管理", Path: "/iam/permissions", Type: domain.MenuTypeMenu, Component: "/iam/permissions/index.vue", Icon: "lucide:key-round", Permission: "iam:permissions:read", Sort: 20, Visible: true, Active: true},
 		{ID: "menu-identity-users", ParentID: "menu-identity", Name: "用户管理", Path: "/iam/users", Type: domain.MenuTypeMenu, Component: "/iam/users/index.vue", Icon: "lucide:user-round-search", Permission: "iam:users:read", Sort: 30, Visible: true, Active: true},
 
 		{ID: "menu-system-config", Name: "系统管理", Path: "/system", Type: domain.MenuTypeDirectory, Redirect: "/system/dictionary", Icon: "lucide:settings", Sort: 30, Visible: true, Active: true},

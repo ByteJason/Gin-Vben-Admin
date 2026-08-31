@@ -57,7 +57,10 @@ const style = computed((): CSSProperties => {
 </script>
 
 <template>
-  <main :style="style" class="relative min-h-0 min-w-0">
+  <main
+    :style="style"
+    class="relative flex min-h-0 min-w-0 w-full flex-1 flex-col"
+  >
     <div
       v-if="$slots.overlay"
       data-layout-region="content-overlay"

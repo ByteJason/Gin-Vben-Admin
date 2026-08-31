@@ -71,8 +71,7 @@ const menuForm = reactive<MenuForm>(defaultForm());
 const formError = ref('');
 
 const localizedMenuKeys: Record<string, string> = {
-  'menu-overview': 'page.dashboard.title',
-  'menu-overview-runtime': 'page.dashboard.analytics',
+  'menu-overview': 'page.navigation.dashboard',
   'menu-identity': 'page.iam.group',
   'menu-identity-users': 'page.iam.users',
   'menu-identity-roles': 'page.iam.roles',

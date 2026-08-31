@@ -4,34 +4,36 @@
 
 ## 1. 导航原则
 
-- 登录后的唯一首页是 `/dashboard/analytics`，页面名称为“运行概览”。`/`、`/dashboard`、旧 `/analytics` 与 `/dashboard/workspace` 最终都收敛到该地址。
+- 登录后的唯一首页是 `/dashboard`，仪表盘作为一级菜单直接打开运营概览页面。`/`、旧 `/dashboard/analytics`、`/analytics` 与 `/dashboard/workspace` 最终都收敛到该地址。
 - 生产侧栏只显示产品功能。上游 Vben 示例、组件演示和未接入真实 API 的模板入口只在开发模式提供，不进入安装种子。
 - 菜单采用 `mixed` 过渡模式：优先消费服务端 `/api/admin/v1/menu/all`；新安装会写入确定性的生产菜单种子；旧库菜单为空时，前端使用同构静态菜单兜底。服务端仍是 API 授权的唯一裁决者。
 - 页面容器占满 `<main>` 可用宽度，外层不设置固定 `max-width`；页面边距在 375/768/1024/1440 断点自适应。表单正文可在页面内部限制可读宽度，数据表和监控面板不限制。
 - 导航可见性使用访问码控制；直接输入 URL 仍必须经过服务端权限校验。超级管理员由服务端通配策略覆盖，不在前端硬编码绕过。
 
-## 2. 生产菜单（当前运行基线：B1.7b 四组）
+## 2. 生产菜单（当前运行基线：B1.7c 五组）
 
-> 当前代码与安装种子仍运行本节四组；B1.7c 五组目标见第 8 节，完成 P1 菜单迁移和三套 UI 验收后再切换。第 8 节是已确认的目标，不把规划状态写成当前运行状态。
+> 当前代码与安装种子统一使用本节五组菜单；旧深链继续保留为隐藏重定向。
 
 | 一级菜单 | 二级菜单 | 路由 | 访问码 | 页面内容 |
 |---|---|---|---|---|
-| 概览 | 运行概览 | `/dashboard/analytics` | `dashboard:overview:read` | 实例、版本与运行时间；数据库、Redis、任务等真实服务状态摘要；快捷进入资源监控；无数据时显示空态，不生成演示指标 |
-| 身份与权限 | 用户管理 | `/iam/users` | `iam:users:read` | 用户查询、分页、创建/编辑、启停、软删除、重置密码、角色分配与登录记录 |
-| 身份与权限 | 角色管理 | `/iam/roles` | `iam:roles:read` | 角色列表与创建；权限和数据范围关系维护；成员分配仍在用户管理页完成，未闭环的详情编辑/删除明确标记为待完成 |
-| 身份与权限 | 菜单管理 | `/iam/menus` | `iam:menus:read` | 目录/菜单/按钮树、组件白名单、访问码、排序、启停及动态路由发布数据 |
-| 身份与权限 | 权限列表 | `/iam/permissions` | `iam:permissions:read` | API/按钮权限元数据与状态；策略、数据范围改由角色详情承载 |
-| 系统配置 | 系统设置 | `/system/settings` | `system:settings:read` | 基础、安全、语言、第三方等配置分类、校验和版本信息 |
-| 系统配置 | 字典管理 | `/system/dictionary` | `system:dictionary:read` | 字典类型、条目、双语文本、排序与状态 |
-| 系统配置 | 邮件服务 | `/system/mail` | `system:mail:read` | SMTP 账号池、连接测试和投递记录；普通管理页暂不展示邮件正文详情 |
-| 系统配置 | 文件中心 | `/system/files` | `system:files:read` | 当前本地 provider 的对象元数据、上传下载、签名 URL、访问控制、删除和清理预检；远程对象存储尚未交付 |
-| 系统配置 | 可观测设置 | `/system/observability` | `system:observability:read` | metrics、trace、日志导出开关与目标配置；不与实时资源监控混用 |
-| 运维中心 | 资源监控 | `/system/monitor` | `ops:monitor:read` | 实例/build/runtime；CPU、内存、文件系统；数据库与 Redis 健康、延迟、连接池及非敏感计数；15 秒实时会话趋势和局部降级 |
-| 运维中心 | 审计日志 | `/system/audit` | `ops:audit:read` | 登录、授权、配置和数据操作审计的筛选、详情与导出 |
-| 运维中心 | 任务管理 | `/system/tasks` | `ops:tasks:read` | 调度、手动运行、取消、重试、日志、并发和失败状态 |
-| 运维中心 | 数据作业 | `/system/import-export` | `ops:data-jobs:read` | 模板、导入预检、异步导入导出、进度、错误行与下载状态 |
+| 仪表盘 | （直接进入） | `/dashboard` | `dashboard:overview:read` | 运营概览、实例与服务状态；按时间范围展示可用业务数据；无数据时显示空态，不生成演示指标 |
+| 后台权限 | 用户管理 | `/iam/users` | `iam:users:read` | 用户查询、分页、创建/编辑、启停、软删除、重置密码、角色分配与登录记录 |
+| 后台权限 | 角色管理 | `/iam/roles` | `iam:roles:read` | 角色列表与创建；权限和数据范围关系维护；成员分配仍在用户管理页完成，未闭环的详情编辑/删除明确标记为待完成 |
+| 后台权限 | 菜单管理 | `/iam/menus` | `iam:menus:read` | 目录/菜单/按钮树、组件白名单、访问码、排序、启停及动态路由发布数据 |
+| 后台权限 | 权限管理 | `/iam/permissions` | `iam:permissions:read` | API/按钮权限与状态；策略、数据范围改由角色详情承载 |
+| 系统管理 | 系统设置 | `/system/settings` | `system:settings:read` | 基础、安全、语言、第三方等配置分类、校验和版本信息 |
+| 系统管理 | 参数管理 | `/system/parameters` | `system:parameters:read` | 系统参数分区与生效来源；沿用系统设置页的版本与校验能力 |
+| 系统管理 | 字典管理 | `/system/dictionary` | `system:dictionary:read` | 字典类型、条目、双语文本、排序与状态 |
+| 系统管理 | 邮件服务 | `/system/mail` | `system:mail:read` | SMTP 账号池、连接测试和投递记录；普通管理页暂不展示邮件正文详情 |
+| 系统管理 | 可观测设置 | `/system/observability` | `system:observability:read` | metrics、trace、日志导出开关与目标配置；不与实时资源监控混用 |
+| 运维监控 | 服务器状态 | `/ops/server-status` | `ops:server-status:read` | 实例/build/runtime；CPU、内存、文件系统；数据库与 Redis 健康、延迟、连接池及非敏感计数；实时会话趋势和局部降级 |
+| 运维监控 | 操作历史 | `/ops/operation-history` | `ops:operation-history:read` | 登录、授权、配置和数据操作审计的筛选、详情与导出 |
+| 运维监控 | 登录日志 | `/ops/login-logs` | `ops:login-logs:read` | 登录事件、设备、IP、时间和撤销状态查询 |
+| 运维监控 | 定时任务 | `/ops/tasks` | `ops:tasks:read` | 调度、手动运行、取消、重试、日志、并发和失败状态 |
+| 运维监控 | 数据作业 | `/ops/data-jobs` | `ops:data-jobs:read` | 模板、导入预检、异步导入导出、进度、错误行与下载状态 |
+| 媒体管理 | 媒体库 | `/media/library` | `media:library:read` | 当前本地 provider 的对象元数据、上传下载、签名 URL、访问控制、删除和清理预检；远程对象存储尚未交付 |
 
-一级分组的稳定标识与路径分别为：`menu-overview`/`/dashboard`、`menu-identity`/`/iam`、`menu-system-config`/`/configuration`、`menu-operations`/`/operations`。二级项保留已有业务 URL，避免破坏深链和书签。
+一级分组的稳定标识与路径分别为：`menu-overview`/`/dashboard`、`menu-identity`/`/iam`、`menu-system-config`/`/system`、`menu-operations`/`/ops`、`menu-media`/`/media`。二级项保留已有业务 URL，旧地址通过隐藏重定向兼容。
 
 ### 2.1 读取、管理与页面依赖访问码
 
@@ -39,20 +41,22 @@
 
 | 页面 | 读取访问码 | 写操作访问码 | 辅助依赖访问码 |
 |---|---|---|---|
-| 运行概览 | `dashboard:overview:read` | — | — |
+| 仪表盘 | `dashboard:overview:read` | — | — |
 | 用户管理 | `iam:users:read` | `iam:users:manage` | `iam:roles:read`（角色选项）、`iam:roles:manage`（成员关系写入） |
 | 角色管理 | `iam:roles:read` | `iam:roles:manage` | `iam:permissions:read`、`iam:data-scopes:read` |
 | 菜单管理 | `iam:menus:read` | `iam:menus:manage` | `iam:components:read`（组件白名单） |
-| 权限列表 | `iam:permissions:read` | — | — |
+| 权限管理 | `iam:permissions:read` | — | — |
 | 系统设置 | `system:settings:read` | `system:settings:manage` | — |
 | 字典管理 | `system:dictionary:read` | `system:dictionary:manage` | `system:settings:read`（可选读取 i18n 策略；无权时不请求并采用编译默认） |
 | 邮件服务 | `system:mail:read` | `system:mail:manage` | — |
-| 文件中心 | `system:files:read` | `system:files:manage` | — |
+| 媒体库 | `media:library:read` | `media:library:manage` | `system:files:read`（旧文件中心访问码，仅作为迁移兼容） |
 | 可观测设置 | `system:observability:read` | `system:observability:manage` | — |
 | 资源监控 | `ops:monitor:read` | — | — |
 | 审计日志 | `ops:audit:read` | —（导出与保留预检均为只读 GET） | — |
 | 任务管理 | `ops:tasks:read` | `ops:tasks:manage` | — |
 | 数据作业 | `ops:data-jobs:read` | `ops:data-jobs:manage` | — |
+
+旧文件中心访问码 `system:files:read`/`system:files:manage` 保留在权限目录中，用于迁移期间的兼容校验，不再生成可见菜单。
 
 兼容深链 `/iam/policies` 与 `/iam/data-scopes` 不进入生产菜单；读取分别使用 `iam:policies:read`、`iam:data-scopes:read`，写入分别使用 `iam:policies:manage`、`iam:data-scopes:manage`。平台管理员默认由安装时的通配策略获得全部访问码；其他主体只要被明确授予 `ops:monitor:read` 也可以访问资源监控，页面不以角色名称硬编码放行。
 
@@ -73,14 +77,14 @@
 
 | 旧入口 | 当前行为 | 说明 |
 |---|---|---|
-| `/analytics` | 重定向到 `/dashboard/analytics` | 修复旧 `homePath` |
-| `/workspace`、`/dashboard/workspace` | 重定向到 `/dashboard/analytics` | 合并两套演示首页 |
+| `/dashboard/analytics`、`/analytics` | 重定向到 `/dashboard` | 保留旧首页书签 |
+| `/workspace`、`/dashboard/workspace` | 重定向到 `/dashboard` | 合并两套演示首页 |
 | `/iam/policies` | 保留兼容访问，不进生产菜单 | 策略关系转入角色详情 |
 | `/iam/data-scopes` | 保留兼容访问，不进生产菜单 | 数据范围关系转入角色详情 |
 | `/profile` 及模板注册/找回/扫码入口 | `/profile` 仅开发模式注册；其余功能闭环前不进生产菜单 | 避免生产构建暴露模拟交互 |
 | Vben demo/example 路由 | 仅开发模式 | 不写入安装菜单种子，也不计入业务验收 |
 
-404 页“返回首页”必须使用当前用户的 `homePath`，没有用户资料时回退 `/dashboard/analytics`，不得制造 `/` → 旧路由 → 404 的跳转链。
+404 页“返回首页”必须使用当前用户的 `homePath`，没有用户资料时回退 `/dashboard`，不得制造 `/` → 旧路由 → 404 的跳转链。
 
 ## 5. 登录与访问码契约
 
@@ -94,8 +98,8 @@
 
 Ant Design Vue、Element Plus 与 Naive UI 必须共享相同的路由、权限、API 适配器和页面壳契约，同时保留各自组件实现。验收至少覆盖：
 
-1. 登录后只出现上述四个一级分组，顺序和二级项一致。
-2. `/`、登录回跳、404 返回首页和旧地址都落到“运行概览”。
+1. 登录后只出现仪表盘、运维监控、后台权限、系统管理、媒体管理五个一级菜单，顺序和子项一致。
+2. `/`、登录回跳、404 返回首页和旧地址都落到仪表盘 `/dashboard`。
 3. 375/768/1024/1440 宽度无页面级固定最大宽度、无整页横向滚动；宽表只在自己的滚动容器内滚动。
 4. 运行概览与资源监控覆盖 loading、empty、degraded、error、stale 和真实零值。
 5. 键盘焦点、语义标题、状态文本、深浅主题和 reduced-motion 行为等价。
@@ -106,20 +110,20 @@ Ant Design Vue、Element Plus 与 Naive UI 必须共享相同的路由、权限�
 
 ## 8. 已确认的下一版目标 IA：B1.7c 管理端控制台（2026-08-31）
 
-> 本节记录已确认的目标状态，开发从 P1 开始前仍以第 2 节四组菜单作为运行基线；完成菜单迁移与三套 UI 验收后，目标表替换为当前生产表。用户已对 Round 1 Q1–Q16 全部选择推荐默认。
+> 本节记录已确认并已落地的目标状态。用户已对 Round 1 Q1–Q16 全部选择推荐默认。
 
-### 8.1 五组菜单目标
+### 8.1 五组菜单
 
 | 顺序 | 一级菜单 | 二级菜单 | canonical 路由 | 兼容旧路由 |
 |---:|---|---|---|---|
-| 1 | 仪表盘 | （直接进入） | `/dashboard/analytics` | `/`、`/dashboard`、`/analytics`、`/workspace`、`/dashboard/workspace` |
+| 1 | 仪表盘 | （直接进入） | `/dashboard` | `/`、`/dashboard/analytics`、`/analytics`、`/workspace`、`/dashboard/workspace` |
 | 2 | 运维监控 | 服务器状态 | `/ops/server-status` | `/system/monitor` |
 | 2 | 运维监控 | 操作历史 | `/ops/operation-history` | `/system/audit` |
 | 2 | 运维监控 | 登录日志 | `/ops/login-logs` | `/iam/users/:id/login-events` 查询投影 |
 | 2 | 运维监控 | 定时任务 | `/ops/tasks` | `/system/tasks` |
 | 3 | 后台权限 | 角色管理 | `/iam/roles` | 原路径 |
-| 3 | 后台权限 | 菜单管理 | `/iam/menus` | 原路径；“菜单元数据”仅作旧显示名 |
-| 3 | 后台权限 | 权限管理 | `/iam/permissions` | 原路径；“权限元数据”仅作旧显示名 |
+| 3 | 后台权限 | 菜单管理 | `/iam/menus` | 原路径 |
+| 3 | 后台权限 | 权限管理 | `/iam/permissions` | 原路径 |
 | 3 | 后台权限 | 用户管理 | `/iam/users` | 原路径 |
 | 4 | 系统管理 | 字典管理 | `/system/dictionary` | 原路径 |
 | 4 | 系统管理 | 参数管理 | `/system/parameters` | `/system/settings` 参数分区 |
@@ -130,7 +134,7 @@ Ant Design Vue、Element Plus 与 Naive UI 必须共享相同的路由、权限�
 
 ### 8.2 目标页面契约摘要
 
-- 仪表盘使用后端业务层确定性 fixture 与 live 双源，时间快捷项为今天、昨天、近24小时、近7天、近14天、近30天、本月、上月、自定义；响应显式标注 `dataSource`/`isSynthetic`。
+- 仪表盘使用后端业务层确定性 fixture 与 live 双源，时间快捷项为今天、昨天、近24小时、近7天、近14天、近30天、本月、上月、自定义；响应显式标注 `dataSource`/`isSynthetic`。接口暂不可用时展示服务摘要，不让页面停留在空白加载态。
 - 服务器状态首屏覆盖 CPU、内存、磁盘、DB 连接与空闲活跃连接、Redis、协程、后台任务、每核负载，默认 10 秒轮询；Go/OS/编译器、网络、服务状态和日志摘要进入折叠区。
 - 操作历史、登录日志和定时任务分别采用变更需求稿 `OPS-HISTORY-CHANGE`、`OPS-LOGIN-CHANGE`、`OPS-TASK-CHANGE` 字段；媒体库采用无限级目录和 local-first provider seam。
 - 旧路由、访问码和数据边界按 DEC-079–DEC-094 迁移；接口存在不代表真实 provider 或生产历史时序已验收。

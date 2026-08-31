@@ -261,6 +261,93 @@ type navigationPermissionSeedRow struct {
 
 func (navigationPermissionSeedRow) TableName() string { return "permissions" }
 
+const legacyOverviewRuntimeMenuID = "menu-overview-runtime"
+
+// MigrateLegacyNavigation reconciles only installer-owned rows from the old
+// dashboard shape. The former runtime child is retained for audit/reference
+// integrity but hidden and disabled so it cannot be projected as a nested
+// navigation item. User-created rows with other IDs are never touched.
+func (s gormNavigationSeedStore) MigrateLegacyNavigation() error {
+	if s.tx == nil {
+		return ErrIdentityInstallation
+	}
+	rows, err := gorm.G[navigationMenuSeedRow](s.tx).
+		Where("id = ? AND tenant_id = ?", legacyOverviewRuntimeMenuID, initialTenantID).
+		Find(seedContext(s.tx))
+	if err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	if len(rows) > 1 {
+		return newNavigationSeedConflict("menu", legacyOverviewRuntimeMenuID)
+	}
+	row := rows[0]
+	if !isLegacyOverviewRuntimeRow(row) {
+		// The stable installer ID is reserved, but an edited row is left intact;
+		// route projection filters the legacy ID and therefore still keeps the
+		// visible navigation tree flat without overwriting tenant data.
+		return nil
+	}
+	return updateNavigationMenuSeedRow(s.tx, row.ID, initialMenuSeed{
+		ID: row.ID, ParentID: row.ParentIDString(), Name: row.Name, Path: row.Path,
+		Type: row.MenuType, Component: row.ComponentString(), Redirect: row.RedirectString(),
+		Icon: row.IconString(), Permission: row.PermissionString(), Sort: row.SortOrder,
+		Visible: false, Active: false, KeepAlive: row.KeepAlive, External: row.External,
+	})
+}
+
+func isLegacyOverviewRuntimeRow(row navigationMenuSeedRow) bool {
+	return row.ID == legacyOverviewRuntimeMenuID && row.TenantID == initialTenantID &&
+		row.ParentID != nil && *row.ParentID == "menu-overview" &&
+		(row.Name == "运行概览" || row.Name == "数据概览") && row.Path == "/dashboard/analytics" &&
+		row.MenuType == "menu" && row.ComponentString() == "/dashboard/analytics/index.vue"
+}
+
+// These tiny accessors keep nullable seed fields readable in the migration
+// projection and avoid manufacturing empty strings in the database update.
+func (row navigationMenuSeedRow) ParentIDString() string   { return seedString(row.ParentID) }
+func (row navigationMenuSeedRow) ComponentString() string  { return seedString(row.Component) }
+func (row navigationMenuSeedRow) RedirectString() string   { return seedString(row.Redirect) }
+func (row navigationMenuSeedRow) IconString() string       { return seedString(row.Icon) }
+func (row navigationMenuSeedRow) PermissionString() string { return seedString(row.Permission) }
+
+func seedString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func updateNavigationMenuSeedRow(tx *gorm.DB, id string, seed initialMenuSeed) error {
+	rows, err := gorm.G[navigationMenuSeedRow](tx).
+		Where("id = ? AND tenant_id = ?", id, initialTenantID).
+		Set(clause.Assignments(map[string]any{
+			"parent_id":  optionalSeedString(seed.ParentID),
+			"name":       seed.Name,
+			"path":       seed.Path,
+			"menu_type":  seed.Type,
+			"component":  optionalSeedString(seed.Component),
+			"redirect":   optionalSeedString(seed.Redirect),
+			"icon":       optionalSeedString(seed.Icon),
+			"permission": optionalSeedString(seed.Permission),
+			"sort_order": seed.Sort,
+			"visible":    seed.Visible,
+			"status":     statusForSeed(seed.Active),
+			"keep_alive": seed.KeepAlive,
+			"external":   seed.External,
+		})).
+		Update(seedContext(tx))
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return errors.New("legacy navigation row was not updated")
+	}
+	return nil
+}
+
 func (s gormNavigationSeedStore) EnsureMenu(menu initialMenuSeed) (bool, error) {
 	if s.tx == nil {
 		return false, ErrIdentityInstallation
@@ -272,6 +359,12 @@ func (s gormNavigationSeedStore) EnsureMenu(menu initialMenuSeed) (bool, error) 
 		return false, err
 	}
 	if len(existing) != 0 {
+		if len(existing) == 1 && legacyMenuCanMigrate(existing[0], menu) {
+			if err := updateNavigationMenuSeedRow(s.tx, existing[0].ID, menu); err != nil {
+				return false, err
+			}
+			return false, nil
+		}
 		if len(existing) == 1 && existing[0].matches(menu) {
 			return false, nil
 		}
@@ -279,6 +372,24 @@ func (s gormNavigationSeedStore) EnsureMenu(menu initialMenuSeed) (bool, error) 
 	}
 	result := s.createMenu(menu)
 	return result.Error == nil, result.Error
+}
+
+func legacyMenuCanMigrate(row navigationMenuSeedRow, seed initialMenuSeed) bool {
+	if row.TenantID != initialTenantID || row.OrgID != nil || row.ID != seed.ID {
+		return false
+	}
+	switch seed.ID {
+	case "menu-overview":
+		return row.Path == "/dashboard" && row.MenuType == "directory" &&
+			row.Component == nil && row.Redirect != nil && *row.Redirect == "/dashboard/analytics" &&
+			row.Name == "仪表盘"
+	case "menu-identity-menus":
+		return row.Name == "菜单元数据" && row.Path == seed.Path
+	case "menu-identity-permissions":
+		return row.Name == "权限元数据" && row.Path == seed.Path
+	default:
+		return false
+	}
 }
 
 func (s gormNavigationSeedStore) EnsurePermission(permission initialPermissionSeed) (bool, error) {

@@ -74,3 +74,24 @@ func TestProductionPermissionCatalogIncludesIAMEditorDependencies(t *testing.T) 
 		}
 	}
 }
+
+func TestProductionMenuCatalogUsesDashboardAsDirectFirstLevelPage(t *testing.T) {
+	menus := ProductionMenuCatalog()
+	byID := make(map[string]domain.Menu, len(menus))
+	for _, menu := range menus {
+		byID[menu.ID] = menu
+	}
+	dashboard, ok := byID["menu-overview"]
+	if !ok {
+		t.Fatal("production catalog is missing the dashboard menu")
+	}
+	if dashboard.ParentID != "" || dashboard.Path != "/dashboard" || dashboard.Type != domain.MenuTypeMenu || dashboard.Component != "/dashboard/analytics/index.vue" || dashboard.Redirect != "" || dashboard.Permission != "dashboard:overview:read" {
+		t.Fatalf("dashboard menu=%+v", dashboard)
+	}
+	if _, exists := byID["menu-overview-runtime"]; exists {
+		t.Fatal("retired nested runtime menu remains in the production catalog")
+	}
+	if byID["menu-identity-menus"].Name != "菜单管理" || byID["menu-identity-permissions"].Name != "权限管理" {
+		t.Fatalf("renamed IAM menus=%q/%q", byID["menu-identity-menus"].Name, byID["menu-identity-permissions"].Name)
+	}
+}

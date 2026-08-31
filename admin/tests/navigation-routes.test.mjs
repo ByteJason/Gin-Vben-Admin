@@ -23,6 +23,13 @@ test('B1.7c exposes the same five production navigation groups in every UI', () 
         new RegExp(`path: ['"]${path}['"]`),
         `${app}: ${path}`,
       );
+    const dashboardSource = route(app, 'dashboard.ts');
+    assert.match(dashboardSource, /path:\s*['"]\/dashboard['"]/);
+    assert.match(
+      dashboardSource,
+      /component:\s*\(\)\s*=>\s*import\(['"]#\/views\/dashboard\/analytics\/index\.vue['"]\)/,
+    );
+    assert.doesNotMatch(route(app, 'dashboard.ts'), /menu-overview-runtime/);
     assert.match(modules, /\/ops\/server-status|path: ['"]server-status['"]/);
     assert.match(
       modules,
@@ -45,6 +52,7 @@ test('B1.7c keeps legacy deep links as hidden redirects', () => {
       .join('\n');
     for (const path of [
       '/analytics',
+      '/dashboard/analytics',
       '/workspace',
       '/dashboard/workspace',
       '/system/monitor',

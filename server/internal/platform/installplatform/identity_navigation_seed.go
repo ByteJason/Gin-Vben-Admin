@@ -26,6 +26,14 @@ type initialNavigationSeedStore interface {
 	EnsurePermission(initialPermissionSeed) (bool, error)
 }
 
+// initialNavigationSeedMigrator is implemented by stores that can reconcile
+// installer-owned navigation rows from the previous catalog shape. Keeping it
+// optional preserves the small in-memory seam used by unit tests and custom
+// installers.
+type initialNavigationSeedMigrator interface {
+	MigrateLegacyNavigation() error
+}
+
 type initialNavigationSeedReceipt struct {
 	MenuIDs       []string
 	PermissionIDs []string
@@ -39,6 +47,11 @@ func seedInitialNavigation(store initialNavigationSeedStore) (initialNavigationS
 		return initialNavigationSeedReceipt{}, ErrIdentityInstallation
 	}
 	menus, permissions := initialNavigationSeeds()
+	if migrator, ok := store.(initialNavigationSeedMigrator); ok {
+		if err := migrator.MigrateLegacyNavigation(); err != nil {
+			return initialNavigationSeedReceipt{}, err
+		}
+	}
 	receipt := initialNavigationSeedReceipt{
 		MenuIDs: make([]string, 0, len(menus)), PermissionIDs: make([]string, 0, len(permissions)),
 	}

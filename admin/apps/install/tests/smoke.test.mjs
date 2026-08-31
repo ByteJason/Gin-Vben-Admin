@@ -37,7 +37,7 @@ test('installation shell is independent and exposes an accessible status region'
   }
   assert.match(html, /id="mode-choice"/);
   assert.match(html, /<option value="dev" selected>开发调试（推荐）<\/option>/);
-  assert.match(html, /id="locale-mode"/);
+  assert.doesNotMatch(html, /id="locale-mode"/);
   assert.match(html, /id="locale-choice"/);
   assert.match(html, /id="locale-suggestion"/);
   assert.match(html, /id="plan-panel"/);
@@ -163,7 +163,7 @@ test('installation shell is independent and exposes an accessible status region'
   assert.match(script, /selectedUi/);
   assert.match(script, /selectedUi\s*:/);
   assert.match(script, /JSON\.stringify\(\{ mode \}\)/);
-  assert.match(script, /localeMode/);
+  assert.doesNotMatch(script, /localeMode/);
   assert.match(script, /localeChoice/);
   assert.match(script, /canCleanup/);
   assert.match(script, /databaseDriver/);
@@ -895,7 +895,6 @@ test('the public installation flow wires immediate and asynchronous completed st
       const adminPasswordConfirm = { value: 'Admin123', focus() {} };
       const adminUsername = { value: 'fixture_admin' };
       const modeChoice = { value: 'dev' };
-      const localeMode = { value: 'single' };
       const localeChoice = { value: 'zh-CN' };
       const applyButton = { disabled: false, textContent: '' };
       const applyResult = { textContent: '', dataset: {}, setAttribute() {}, focus() {} };
@@ -903,9 +902,13 @@ test('the public installation flow wires immediate and asynchronous completed st
       const setProgress = () => events.push('progress-reset');
       const announceApplyError = () => events.push('announce-failure');
       const dependencyFormValues = () => ({ database: {}, redis: {} });
-      const submitInstallationRequest = async () => scenario === 'immediate'
-        ? { response: { ok: false, status: 409 }, envelope: { code: 10006, traceId: 'completed-request' } }
-        : { response: { ok: true, status: 202 }, envelope: { code: 0, data: { id: 'completed-job', state: 'running' } } };
+      let submittedPayload = null;
+      const submitInstallationRequest = async (payload) => {
+        submittedPayload = payload;
+        return scenario === 'immediate'
+          ? { response: { ok: false, status: 409 }, envelope: { code: 10006, traceId: 'completed-request' } }
+          : { response: { ok: true, status: 202 }, envelope: { code: 0, data: { id: 'completed-job', state: 'running' } } };
+      };
       const reconcileCompletedInstallation = async () => { events.push('reconcile-completed'); return true; };
       const renderInstallationFailure = () => events.push('render-failure');
       const renderJobProgress = () => events.push('render-progress');
@@ -918,7 +921,7 @@ test('the public installation flow wires immediate and asynchronous completed st
       ${completionDetected}
       ${requestInstallation}
       await requestInstallation({ preventDefault() {} });
-      return { events, password: adminPassword.value };
+      return { events, password: adminPassword.value, submittedPayload };
     })();
   `)();
 
@@ -931,6 +934,8 @@ test('the public installation flow wires immediate and asynchronous completed st
     immediate.events.join(','),
     /announce-failure|render-failure|set-failed-actions/,
   );
+  assert.equal(immediate.submittedPayload.locale, 'zh-CN');
+  assert.equal(Object.hasOwn(immediate.submittedPayload, 'localeMode'), false);
 
   const asynchronous = await run('asynchronous');
   assert.deepEqual(
@@ -945,6 +950,8 @@ test('the public installation flow wires immediate and asynchronous completed st
     asynchronous.events.join(','),
     /announce-failure|render-failure|set-failed-actions/,
   );
+  assert.equal(asynchronous.submittedPayload.locale, 'zh-CN');
+  assert.equal(Object.hasOwn(asynchronous.submittedPayload, 'localeMode'), false);
 });
 
 test('editing one dependency marks only its own successful check as stale', () => {
