@@ -422,15 +422,18 @@ curl -X POST "$ADMIN_ORIGIN/api/admin/v1/notification/templates/TEMPLATE_ID/test
 | `GET/POST` | `/api/admin/v1/files/categories` | `listFileCategories` / `createFileCategory` |
 | `PUT/PATCH/DELETE` | `/api/admin/v1/files/categories/{id}` | `updateFileCategory` / `patchFileCategory` / `deleteFileCategory` |
 | `GET/DELETE` | `/api/admin/v1/files/{id}` | `getFile` / `deleteFile` |
-| `GET` | `/api/admin/v1/files/{id}/download`、`/preview` | `downloadFile` / `previewFile` |
+| `GET` | `/api/admin/v1/files/{id}/download`、`/api/admin/v1/files/{id}/preview` | `downloadFile` / `previewFile` |
 | `POST` | `/api/admin/v1/files/{id}/signed-url` | `signFileURL` |
 | `GET` | `/api/admin/v1/files/cleanup/dry-run` | `fileCleanupDryRun` / `cleanupDryRunApi` |
 
 三套 UI 共用生成 client、权限码、错误 key 和引导步骤 schema；SMTP/媒体库页面的“使用说明”入口
-打开侧边抽屉，固定提供“普通使用流程”和“开发者对接流程”。当前 files adapter 的可复用函数包括
-`listFilesApi`、`listFileCategoriesApi`、`uploadFileApi`、`getFileApi`、`downloadFileApi`、
-`signedFileUrlApi`、`deleteFileApi`、`cleanupDryRunApi`；mail adapter 包括
-`listSMTPAccountsApi`、`saveSMTPAccountApi`、`testSMTPAccountApi`、`listEmailMessagesApi`。
+打开侧边抽屉，固定提供“普通使用流程”和“开发者对接流程”。当前 files adapter 的导出函数包括
+`listFilesApi`、`listFileCategoriesApi`、`createFileCategoryApi`、`updateFileCategoryApi`、
+`deleteFileCategoryApi`、`uploadFileApi`、`getFileApi`、`downloadFileApi`、`deleteFileApi`、
+`signedFileUrlApi`、`cleanupDryRunApi`；mail adapter 包括 `listSMTPAccountsApi`、
+`saveSMTPAccountApi`、`testSMTPAccountApi`、`deleteSMTPAccountApi`、`listEmailMessagesApi`。
+OpenAPI 兼容表中的 `getEmailMessage`/`sendEmailMessage` 当前没有同名 UI adapter，业务模块应使用
+Go 端口；完整 UI 导出以各套 `src/api/core/{files,mail}.ts` 为准。
 
 ## 8. 稳定错误 key
 
