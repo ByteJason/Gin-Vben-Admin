@@ -33,11 +33,14 @@
 - 源码运行与 Docker Compose 部署
 - 五组生产菜单、仪表盘运营概览与数据库/Redis 资源监控
 
-## 公共能力开发入口
+## 公共能力开发入口（规划中，待验收后实现）
 
-- **SMTP 与通知：** 业务模块通过 `MailSender`、`NotificationService` 和
+> 当前提交的是需求、开发规划和公开对接契约；Go 端口、管理 API、迁移与三套 UI 尚未进入实现阶段。
+> 完成验收并收到“开始编程”确认后，按文档 P0–P7 执行。
+
+- **SMTP 与通知（计划入口）：** 业务模块将通过 `MailSender`、`NotificationService` 和
   `VerificationCodeService` 注入调用；账号池、模板、验证码策略和发送审计由管理端统一维护。
-- **媒体库：** 业务模块通过 `MediaCatalog` 查询 MIME 类型族、分类和子分类，保存资源 ID，
+- **媒体库（计划入口）：** 业务模块将通过 `MediaCatalog` 查询 MIME 类型族、分类和子分类，保存资源 ID，
   并通过 `MediaUsageService` 维护 Logo 等业务引用。
 - **管理端引导：** SMTP 与媒体库页面提供普通使用、开发者对接两类侧边抽屉流程，三套 UI
   共享步骤 schema 与错误 key。
