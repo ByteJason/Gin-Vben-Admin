@@ -6,7 +6,10 @@
 
 ## 项目链接
 
-- 项目文档：
+- 项目文档：[公开文档总览](docs/README.md)
+- 公共能力需求：[SMTP、验证码、通知与媒体库需求](docs/requirements/common-capabilities.md)
+- 公共能力 API 对接参考：[文件、方法、参数、返回值与 Demo](docs/integration/common-capabilities-api.md)
+- 公共能力开发指南：[SMTP、媒体库与 Logo](docs/development/common-capabilities.md)
 - 在线演示：
 - 贡献指南：
 - 交流群：
@@ -29,6 +32,19 @@
 - Windows、macOS、Linux 通用的 Node.js 开发命令
 - 源码运行与 Docker Compose 部署
 - 五组生产菜单、仪表盘运营概览与数据库/Redis 资源监控
+
+## 公共能力开发入口
+
+- **SMTP 与通知：** 业务模块通过 `MailSender`、`NotificationService` 和
+  `VerificationCodeService` 注入调用；账号池、模板、验证码策略和发送审计由管理端统一维护。
+- **媒体库：** 业务模块通过 `MediaCatalog` 查询 MIME 类型族、分类和子分类，保存资源 ID，
+  并通过 `MediaUsageService` 维护 Logo 等业务引用。
+- **管理端引导：** SMTP 与媒体库页面提供普通使用、开发者对接两类侧边抽屉流程，三套 UI
+  共享步骤 schema 与错误 key。
+- 详细接口、数据模型、状态机、迁移顺序、测试和回滚见
+  [`docs/development/common-capabilities.md`](docs/development/common-capabilities.md)。
+- 需要直接接线时，优先查阅
+  [`docs/integration/common-capabilities-api.md`](docs/integration/common-capabilities-api.md)；该页按文件、方法、参数、返回值和 Demo 编排。
 
 ## 技术选型
 
