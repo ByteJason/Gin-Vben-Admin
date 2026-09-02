@@ -420,11 +420,11 @@ curl -X POST "$ADMIN_ORIGIN/api/admin/v1/notification/templates/TEMPLATE_ID/test
 | `GET` | `/api/admin/v1/files` | `listFiles`；旧 offset 分页 |
 | `POST` | `/api/admin/v1/files/upload` | `uploadFile` |
 | `GET/POST` | `/api/admin/v1/files/categories` | `listFileCategories` / `createFileCategory` |
-| `PUT/PATCH/DELETE` | `/api/admin/v1/files/categories/{id}` | 分类更新/删除 |
+| `PUT/PATCH/DELETE` | `/api/admin/v1/files/categories/{id}` | `updateFileCategory` / `patchFileCategory` / `deleteFileCategory` |
 | `GET/DELETE` | `/api/admin/v1/files/{id}` | `getFile` / `deleteFile` |
 | `GET` | `/api/admin/v1/files/{id}/download`、`/preview` | `downloadFile` / `previewFile` |
 | `POST` | `/api/admin/v1/files/{id}/signed-url` | `signFileURL` |
-| `GET` | `/api/admin/v1/files/cleanup/dry-run` | `cleanupDryRunApi` |
+| `GET` | `/api/admin/v1/files/cleanup/dry-run` | `fileCleanupDryRun` / `cleanupDryRunApi` |
 
 三套 UI 共用生成 client、权限码、错误 key 和引导步骤 schema；SMTP/媒体库页面的“使用说明”入口
 打开侧边抽屉，固定提供“普通使用流程”和“开发者对接流程”。当前 files adapter 的可复用函数包括
@@ -452,4 +452,4 @@ curl -X POST "$ADMIN_ORIGIN/api/admin/v1/notification/templates/TEMPLATE_ID/test
 
 - 本文是规划契约，不表示 Go 端口、迁移、管理 API 或 UI 已上线。
 - P0 冻结实际包版本、operationId、migration 版本和错误码后，再实现 adapter 与契约测试。
-- 兼容 `/api/admin/v1/files`、`/system/files` 路径，完成真实调用方切换和 UAT 后再清理重复链路。
+- 兼容后端 API `/api/admin/v1/files` 与前端 UI 路由 `/system/files`，完成真实调用方切换和 UAT 后再清理重复链路。

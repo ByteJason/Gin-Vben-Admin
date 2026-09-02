@@ -381,7 +381,7 @@ ready → deleting (soft delete) → deleted (physical cleanup job)
 ### 7.1 管理 API（HTTP）
 
 HTTP 仅供管理端和受控测试，不是业务模块公共调用入口。具体目标端点、当前 `/mail/*` 与 `/files/*`
-兼容端点及方法/operationId 见 [精简 API 对接参考](../integration/common-capabilities-api.md#9-管理端-http配置与测试)。目标资源：
+兼容端点及方法/operationId 见 [精简 API 对接参考](../integration/common-capabilities-api.md#7-管理端-http)。目标资源：
 
 ```text
 /api/admin/v1/notification/callers
@@ -398,7 +398,7 @@ HTTP 仅供管理端和受控测试，不是业务模块公共调用入口。具
 /api/admin/v1/branding/logo
 ```
 
-现有 `/api/admin/v1/files` 与 `/system/files` 保留兼容窗口，由 adapter 转发到 `MediaCatalog`；新媒体端点统一使用 cursor、scope、MIME/category filters 和 `selectable`/`disabledReason` 元数据。所有 ID 路径参数 URL 编码，TTL 有上限（推荐默认 15 分钟、最大 24 小时）。
+现有后端 `/api/admin/v1/files` 与前端 UI 路由 `/system/files` 保留兼容窗口，由 adapter 转发到 `MediaCatalog`；新媒体端点统一使用 cursor、scope、MIME/category filters 和 `selectable`/`disabledReason` 元数据。所有 ID 路径参数 URL 编码，TTL 有上限（推荐默认 15 分钟、最大 24 小时）。
 
 管理 DTO 要区分 create/update patch：布尔值、数字和“保留原密码”使用指针/field mask/显式 clear 标记，避免零值语义歧义。密钥只返回 `passwordConfigured` 等摘要，secret 字段保持写入专用。
 
