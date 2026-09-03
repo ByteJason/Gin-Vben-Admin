@@ -1804,6 +1804,43 @@ paths:
       operationId: listEmailMessages
       summary: 查询脱敏邮件投递记录
       security: [{BearerAuth: []}]
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [pending, sending, retrying, sent, failed] }
+        - name: accountId
+          in: query
+          required: false
+          schema: { type: string }
+        - name: callerKey
+          in: query
+          required: false
+          schema: { type: string }
+        - name: source
+          in: query
+          required: false
+          schema: { type: string, enum: [business, template_test, system] }
+        - name: keyword
+          in: query
+          required: false
+          schema: { type: string, maxLength: 128 }
+        - name: from
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0, maximum: 200, default: 50 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0, default: 0 }
       responses:
         '200':
           description: 邮件记录分页
@@ -3103,6 +3140,11 @@ components:
         orgId: { type: string }
         smtpAccountId: { type: string }
         senderId: { type: string }
+        callerKey: { type: string }
+        templateKey: { type: string }
+        locale: { type: string }
+        isTest: { type: boolean }
+        relayStatus: { type: string }
         subject: { type: string }
         recipients: { type: array, items: { $ref: '#/components/schemas/EmailRecipient' } }
         body: { type: string, readOnly: true }

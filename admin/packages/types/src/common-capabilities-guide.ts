@@ -3,6 +3,7 @@ export interface CapabilityGuide {
   audience: string;
   steps: string[];
   developer: string[];
+  examples?: string[];
   locales?: Partial<Record<'en-US' | 'zh-CN', CapabilityGuideLocale>>;
 }
 
@@ -11,6 +12,7 @@ export interface CapabilityGuideLocale {
   audience: string;
   steps: string[];
   developer: string[];
+  examples?: string[];
 }
 
 export const commonCapabilitiesGuide = {
@@ -18,42 +20,63 @@ export const commonCapabilitiesGuide = {
     title: 'SMTP integration guide',
     audience: 'For operators configuring reliable outbound email.',
     steps: [
-      'Create an SMTP account with host, port, sender identity, and TLS mode.',
-      'Save the account, enable it, then run Test connection.',
-      'Use weighted accounts for gradual rollout and review delivery records.',
+      'On SMTP accounts, enter the host, port, sender identity, credentials, and TLS mode.',
+      'Save and enable the account, then run Test connection to verify DNS, handshake, and authentication.',
+      'On Callers, register the module key and choose the account pool, default account, and weighted or round-robin routing.',
+      'On Templates, maintain subject, body, variables, and zh-CN/en-US variants; preview before publishing.',
+      'On Verification policies, set length, charset, TTL, failure and rate limits; review results on Delivery records.',
     ],
     developer: [
-      'Call the SMTP account API with tenant-scoped credentials.',
-      'Store passwords server-side; send only redacted status to clients.',
-      'Retry transient provider errors and correlate requests with delivery IDs.',
+      'Create a stable caller key and route it to one or more enabled SMTP account IDs; routing changes take effect without a service restart.',
+      'Publish a locale-aware notification template, pass only declared variables, and use the template test action before rollout.',
+      'Issue and verify challenges through the verification API; keep recipient validation, idempotency keys, and delivery IDs in the calling service.',
+    ],
+    examples: [
+      'Template test: POST /api/admin/v1/notification/templates/{templateKey}/test with {"recipient":"user@example.test","locale":"zh-CN","variables":{"code":"123456"}}.',
+      'Challenge flow: POST /api/admin/v1/notification/verification/challenges, then POST /api/admin/v1/notification/verification/challenges/{id}/verify with {"code":"123456"}.',
+      'Delivery lookup: GET /api/admin/v1/mail/messages?status=failed&limit=20; correlate the returned message id with your request log.',
     ],
     locales: {
       'zh-CN': {
         title: 'SMTP 对接使用说明',
         audience: '面向配置可靠外发邮件的运维人员。',
         steps: [
-          '新建 SMTP 账号，填写主机、端口、发件人和 TLS 模式。',
-          '保存并启用账号，然后执行连接测试。',
-          '使用加权账号池逐步发布，并查看投递记录。',
+          '在“SMTP 账户”页新建账号，填写主机、端口、发件人、认证信息和 TLS 模式。',
+          '保存并启用账号，点击“测试连接”确认 DNS、握手和认证均通过。',
+          '在“调用者”页登记模块调用键，选择账号池、默认账号及加权随机或轮询策略。',
+          '在“通知模板”页维护主题、正文、变量和 zh-CN/en-US 多语言版本，先预览再发布。',
+          '在“验证码策略”页设置位数、字符集、有效期、失败次数和频率；最后在“投递记录”页查询结果。',
         ],
         developer: [
-          '使用租户范围的凭据调用 SMTP 账号和通知公共 API。',
-          '密码只在服务端保存，客户端只展示脱敏状态。',
-          '对临时 provider 错误重试，并用投递 ID 关联请求。',
+          '先创建稳定的调用者键，并将其路由到一个或多个已启用 SMTP 账号；路由保存后无需重启服务即可生效。',
+          '发布支持多语言的通知模板，只传入模板声明的变量，并在发布前使用模板测试。',
+          '通过验证码挑战接口完成发送与校验；调用方负责收件人校验、幂等键和投递 ID 关联。',
+        ],
+        examples: [
+          '模板测试：POST /api/admin/v1/notification/templates/{templateKey}/test，请求体 {"recipient":"user@example.test","locale":"zh-CN","variables":{"code":"123456"}}。',
+          '验证码流程：先 POST /api/admin/v1/notification/verification/challenges，再用 {"code":"123456"} POST /api/admin/v1/notification/verification/challenges/{id}/verify。',
+          '投递查询：GET /api/admin/v1/mail/messages?status=failed&limit=20，用返回的 message id 关联业务日志。',
         ],
       },
       'en-US': {
         title: 'SMTP integration guide',
         audience: 'For operators configuring reliable outbound email.',
         steps: [
-          'Create an SMTP account with host, port, sender identity, and TLS mode.',
-          'Save the account, enable it, then run Test connection.',
-          'Use weighted accounts for gradual rollout and review delivery records.',
+          'On SMTP accounts, enter the host, port, sender identity, credentials, and TLS mode.',
+          'Save and enable the account, then run Test connection to verify DNS, handshake, and authentication.',
+          'On Callers, register the module key and choose the account pool, default account, and weighted or round-robin routing.',
+          'On Templates, maintain subject, body, variables, and zh-CN/en-US variants; preview before publishing.',
+          'On Verification policies, set length, charset, TTL, failure and rate limits; review results on Delivery records.',
         ],
         developer: [
-          'Call the SMTP account API with tenant-scoped credentials.',
-          'Store passwords server-side; send only redacted status to clients.',
-          'Retry transient provider errors and correlate requests with delivery IDs.',
+          'Create a stable caller key and route it to one or more enabled SMTP account IDs; routing changes take effect without a service restart.',
+          'Publish a locale-aware notification template, pass only declared variables, and use the template test action before rollout.',
+          'Issue and verify challenges through the verification API; keep recipient validation, idempotency keys, and delivery IDs in the calling service.',
+        ],
+        examples: [
+          'Template test: POST /api/admin/v1/notification/templates/{templateKey}/test with {"recipient":"user@example.test","locale":"en-US","variables":{"code":"123456"}}.',
+          'Challenge flow: POST /api/admin/v1/notification/verification/challenges, then POST /api/admin/v1/notification/verification/challenges/{id}/verify with {"code":"123456"}.',
+          'Delivery lookup: GET /api/admin/v1/mail/messages?status=failed&limit=20; correlate the returned message id with your request log.',
         ],
       },
     },

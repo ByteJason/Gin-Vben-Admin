@@ -190,9 +190,57 @@ type SendInput struct {
 }
 
 type MessageFilter struct {
-	Status string
-	Limit  int
-	Offset int
+	AccountID string
+	CallerKey string
+	From      *time.Time
+	Keyword   string
+	Limit     int
+	Offset    int
+	Source    string
+	Status    string
+	To        *time.Time
+}
+
+func (f MessageFilter) matches(message EmailMessage) bool {
+	if f.Status != "" && string(message.Status) != strings.TrimSpace(f.Status) {
+		return false
+	}
+	if accountID := strings.TrimSpace(f.AccountID); accountID != "" && message.SMTPAccountID != accountID {
+		return false
+	}
+	if callerKey := strings.TrimSpace(f.CallerKey); callerKey != "" && message.CallerKey != callerKey {
+		return false
+	}
+	if f.From != nil && message.CreatedAt.Before(*f.From) {
+		return false
+	}
+	if f.To != nil && message.CreatedAt.After(*f.To) {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(f.Source)) {
+	case "business":
+		if message.IsTest || (strings.TrimSpace(message.CallerKey) == "" && strings.TrimSpace(message.TemplateKey) == "") {
+			return false
+		}
+	case "template_test", "template-test", "test":
+		if !message.IsTest {
+			return false
+		}
+	case "system":
+		if message.IsTest || strings.TrimSpace(message.CallerKey) != "" || strings.TrimSpace(message.TemplateKey) != "" {
+			return false
+		}
+	}
+	if keyword := strings.ToLower(strings.TrimSpace(f.Keyword)); keyword != "" {
+		haystack := strings.ToLower(strings.Join([]string{message.ID, message.Subject, message.CallerKey, message.TemplateKey}, " "))
+		for _, recipient := range message.Recipients {
+			haystack += " " + strings.ToLower(recipient.Address)
+		}
+		if !strings.Contains(haystack, keyword) {
+			return false
+		}
+	}
+	return true
 }
 
 type MessagePage struct {

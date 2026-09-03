@@ -1,5 +1,5 @@
 // Generated from contracts/openapi/admin-v1.yaml; DO NOT EDIT.
-// CONTRACT_SHA256=47a7d05b8f2fa7b05d0b92c8a12d382a229d4a13ddfaeb7f09d93380558a0506
+// CONTRACT_SHA256=d9141a14ca2a5151512f23f9828c43bf8453abc180c730c1d35566bafad5558c
 
 export const ADMIN_API_PREFIX = '/admin/v1' as const;
 

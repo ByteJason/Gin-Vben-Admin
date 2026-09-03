@@ -157,10 +157,14 @@ func (r *MemoryMessageRepository) List(ctx context.Context, tenantID, orgID stri
 	if filter.Limit < 0 || filter.Offset < 0 {
 		return MessagePage{}, ErrInvalidSend
 	}
+	limit := filter.Limit
+	if limit == 0 {
+		limit = 50
+	}
 	r.mu.RLock()
 	items := make([]EmailMessage, 0, len(r.items))
 	for _, item := range r.items {
-		if item.DeletedAt != nil || !matchesScope(item.TenantID, item.OrgID, tenantID, orgID) || (filter.Status != "" && string(item.Status) != filter.Status) {
+		if item.DeletedAt != nil || !matchesScope(item.TenantID, item.OrgID, tenantID, orgID) || !filter.matches(item) {
 			continue
 		}
 		items = append(items, cloneMessage(item))
@@ -178,15 +182,15 @@ func (r *MemoryMessageRepository) List(ctx context.Context, tenantID, orgID stri
 		start = total
 	}
 	end := total
-	if filter.Limit > 0 && start+filter.Limit < end {
-		end = start + filter.Limit
+	if start+limit < end {
+		end = start + limit
 	}
 	views := make([]MessageView, 0, end-start)
 	for _, item := range items[start:end] {
 		view, _ := messageView(item)
 		views = append(views, view)
 	}
-	return MessagePage{Items: views, Total: total, Limit: filter.Limit, Offset: filter.Offset}, nil
+	return MessagePage{Items: views, Total: total, Limit: limit, Offset: filter.Offset}, nil
 }
 
 func (r *MemoryMessageRepository) Get(ctx context.Context, id string, scope ...string) (EmailMessage, error) {

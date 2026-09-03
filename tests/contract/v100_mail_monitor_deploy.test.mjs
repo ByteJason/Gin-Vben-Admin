@@ -55,7 +55,25 @@ for (const app of apps) {
     for (const token of ['listSMTPAccountsApi', 'saveSMTPAccountApi', 'testSMTPAccountApi', 'testNotificationTemplateApi', 'deleteSMTPAccountApi']) {
       assert.match(read(mailApi), new RegExp(token), `${app}/${token}`);
     }
-    for (const token of ['load', 'save', 'test', 'test-feedback', 'completeTemplateVariables', 'weight', 'implicit', 'TLS', 'password']) {
+    for (const token of [
+      'load',
+      'save',
+      'test',
+      'test-feedback',
+      'completeTemplateVariables',
+      'testRecipientRequired',
+      'validateTemplateRecipient',
+      'mail-tab-accounts',
+      'mail-tab-callers',
+      'mail-tab-templates',
+      'mail-tab-policies',
+      'mail-tab-records',
+      'guideExamples',
+      'weight',
+      'implicit',
+      'TLS',
+      'password',
+    ]) {
       assert.match(read(mailView), new RegExp(token, 'i'), `${app}/${token}`);
     }
     for (const token of ['getMonitorOverviewApi', 'refresh']) {

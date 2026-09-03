@@ -2,7 +2,7 @@
 
 > **状态：** `implemented-slice`（公共端口、运行时、管理 API 与 OpenAPI 首个切片已落地）
 > **批次：** `B1.7d-common-capabilities`
-> **更新时间：** 2026-09-03
+> **更新时间：** 2026-09-04
 
 本文是业务开发者的直接对接入口：列出已实现文件、导出方法、参数、返回值、稳定错误和 Demo。
 业务模块在同一 Go 进程内通过端口调用；管理端 HTTP 只负责配置、资源维护和受控测试发送。
@@ -105,6 +105,34 @@ type SendRequest struct {
 管理端按 caller 维护 SMTP 账号 allowlist、默认账号、权重和 `weighted_random`/`round_robin` 策略；
 禁用、不健康或冷却账号在 dispatch 时排除。模板 CRUD、发布和多语言变体只在管理端完成。
 管理端自身使用预置 caller（键 `system.admin`）；其他模块由后台登记稳定 `caller_key` 后接入。
+
+### 3.1 管理端投递记录查询
+
+**文件：** `admin/apps/web-antd/src/api/core/mail.ts`（`web-ele`、`web-naive` 同步）
+
+`listEmailMessagesApi` 支持以下可选筛选参数；服务端按租户/组织范围过滤并固定按创建时间倒序返回。
+
+| 参数 | 类型 | 说明 |
+| --- | --- | --- |
+| `status` | `pending\|sending\|retrying\|sent\|failed` | 投递状态 |
+| `accountId` | `string` | SMTP 账号 ID |
+| `callerKey` | `string` | 调用者键 |
+| `source` | `business\|template_test\|system` | 投递来源 |
+| `keyword` | `string` | 在主题、收件人、调用者或模板键中检索 |
+| `from` / `to` | RFC3339 | 创建时间范围 |
+| `limit` / `offset` | `number` | 分页，默认 50/0 |
+
+```ts
+const page = await listEmailMessagesApi({
+  source: 'template_test',
+  status: 'failed',
+  from: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+  limit: 20,
+});
+// page.items: [{ id, subject, recipients, smtpAccountId, isTest, status, attemptCount, ... }]
+```
+
+`getEmailMessageApi(id)` 只返回脱敏详情；正文需要额外权限并显式传 `includeBody=true`，管理界面默认不请求正文。
 
 ## 4. 通知与验证码
 
@@ -460,13 +488,14 @@ curl -X POST "$ADMIN_ORIGIN/api/admin/v1/notification/verification/challenges/CH
 | `GET` | `/api/admin/v1/files/cleanup/dry-run` | `fileCleanupDryRun` / `cleanupDryRunApi` |
 
 三套 UI 共用生成 client、权限码、错误 key 和引导步骤 schema；SMTP/媒体库页面的“使用说明”入口
-打开侧边抽屉，固定提供“普通使用流程”和“开发者对接流程”。当前 files adapter 的导出函数包括
+打开侧边抽屉，固定提供“普通使用流程”“开发者对接流程”和“调用示例”三段内容。当前 files adapter 的导出函数包括
 `listFilesApi`、`listFileCategoriesApi`、`createFileCategoryApi`、`updateFileCategoryApi`、
 `deleteFileCategoryApi`、`uploadFileApi`、`getFileApi`、`downloadFileApi`、`deleteFileApi`、
 `signedFileUrlApi`、`cleanupDryRunApi`、`listMediaResourcesApi`、`uploadMediaResourceApi`、
 `getMediaResourceApi`、`updateMediaResourceApi`、`deleteMediaResourceApi`、`openMediaResourceApi`、
 `signMediaResourceUrlApi`、`listMediaUsagesApi`；mail adapter 包括 `listSMTPAccountsApi`、
-`saveSMTPAccountApi`、`testSMTPAccountApi`、`deleteSMTPAccountApi`、`listEmailMessagesApi`。
+`saveSMTPAccountApi`、`testSMTPAccountApi`、`deleteSMTPAccountApi`、`listEmailMessagesApi`、
+`getEmailMessageApi`。
 OpenAPI 兼容表中的 `getEmailMessage`/`sendEmailMessage` 当前没有同名 UI adapter，业务模块应使用
 Go 端口；完整 UI 导出以各套 `src/api/core/{files,mail}.ts` 为准。
 

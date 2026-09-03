@@ -43,8 +43,8 @@
   `VerificationCodeService` 注入调用；账号池、模板、验证码策略和发送审计由管理端统一维护。
 - **媒体库（公共入口）：** 业务模块通过 `MediaCatalog` 查询 MIME 类型族、分类和子分类，保存资源 ID，
   并通过 `MediaUsageService` 维护 Logo 等业务引用。
-- **管理端引导：** SMTP 与媒体库页面提供普通使用、开发者对接两类侧边抽屉流程，三套 UI
-  共享步骤 schema 与错误 key。
+- **管理端引导：** SMTP 与媒体库页面提供普通使用、开发者对接和调用示例三类侧边抽屉流程，三套 UI
+  共享步骤 schema 与错误 key；邮件服务页面按 SMTP 账户、调用者、通知模板、验证码策略、投递记录五个 Tag 组织操作。
 - 详细接口、数据模型、状态机、迁移顺序、测试和回滚见
   [`docs/development/common-capabilities.md`](docs/development/common-capabilities.md)。
 - 需要直接接线时，优先查阅

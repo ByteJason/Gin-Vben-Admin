@@ -187,6 +187,30 @@ func (r *GORMMessageRepository) List(ctx context.Context, tenantID, orgID string
 	if strings.TrimSpace(filter.Status) != "" {
 		query = query.Where("status = ?", strings.TrimSpace(filter.Status))
 	}
+	if accountID := strings.TrimSpace(filter.AccountID); accountID != "" {
+		query = query.Where("smtp_account_id = ?", accountID)
+	}
+	if filter.From != nil {
+		query = query.Where("created_at >= ?", *filter.From)
+	}
+	if filter.To != nil {
+		query = query.Where("created_at <= ?", *filter.To)
+	}
+	if callerKey := strings.TrimSpace(filter.CallerKey); callerKey != "" {
+		query = query.Where("caller_key = ?", callerKey)
+	}
+	switch strings.ToLower(strings.TrimSpace(filter.Source)) {
+	case "business":
+		query = query.Where("is_test = ? AND (caller_key IS NOT NULL OR template_key IS NOT NULL)", false)
+	case "template_test", "template-test", "test":
+		query = query.Where("is_test = ?", true)
+	case "system":
+		query = query.Where("is_test = ? AND caller_key IS NULL AND template_key IS NULL", false)
+	}
+	if keyword := strings.TrimSpace(filter.Keyword); keyword != "" {
+		pattern := "%" + strings.ToLower(keyword) + "%"
+		query = query.Where("LOWER(id) LIKE ? OR LOWER(subject) LIKE ? OR LOWER(caller_key) LIKE ? OR LOWER(template_key) LIKE ? OR id IN (SELECT message_id FROM email_recipients WHERE LOWER(address) LIKE ? AND deleted_at IS NULL)", pattern, pattern, pattern, pattern, pattern)
+	}
 	total, err := query.Count(ctx, "*")
 	if err != nil {
 		return mailapp.MessagePage{}, err
@@ -211,7 +235,7 @@ func (r *GORMMessageRepository) List(ctx context.Context, tenantID, orgID string
 		view, _ := messageView(toMessage(record, recipients))
 		items = append(items, view)
 	}
-	return mailapp.MessagePage{Items: items, Total: int(total), Limit: filter.Limit, Offset: filter.Offset}, nil
+	return mailapp.MessagePage{Items: items, Total: int(total), Limit: limit, Offset: filter.Offset}, nil
 }
 
 func (r *GORMMessageRepository) Get(ctx context.Context, id string, scope ...string) (mailapp.EmailMessage, error) {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	mailapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/mail"
 	authdomain "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/authdomain"
@@ -121,7 +122,27 @@ func (h *Handler) listMessages(c *gin.Context) {
 	if _, ok := requestScope(c); !ok {
 		return
 	}
-	page, err := h.service.ListMessages(c.Request.Context(), mailapp.MessageFilter{Status: strings.TrimSpace(c.Query("status")), Limit: queryInt(c.Query("limit"), 50), Offset: queryInt(c.Query("offset"), 0)})
+	from, err := queryTime(c.Query("from"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, 10000, "invalid from time")
+		return
+	}
+	to, err := queryTime(c.Query("to"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, 10000, "invalid to time")
+		return
+	}
+	page, err := h.service.ListMessages(c.Request.Context(), mailapp.MessageFilter{
+		AccountID: strings.TrimSpace(c.Query("accountId")),
+		CallerKey: strings.TrimSpace(c.Query("callerKey")),
+		From:      from,
+		Keyword:   strings.TrimSpace(c.Query("keyword")),
+		Limit:     queryInt(c.Query("limit"), 50),
+		Offset:    queryInt(c.Query("offset"), 0),
+		Source:    strings.TrimSpace(c.Query("source")),
+		Status:    strings.TrimSpace(c.Query("status")),
+		To:        to,
+	})
 	if err != nil {
 		writeError(c, err)
 		return
@@ -193,6 +214,18 @@ func queryInt(value string, fallback int) int {
 		return fallback
 	}
 	return parsed
+}
+
+func queryTime(value string) (*time.Time, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, nil
+	}
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return nil, err
+	}
+	return &parsed, nil
 }
 
 func writeError(c *gin.Context, err error) {

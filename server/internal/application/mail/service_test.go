@@ -167,6 +167,45 @@ func TestServiceRequiresPasswordWhenChangingSMTPUsername(t *testing.T) {
 		t.Fatalf("UpdateAccount() error = %v, want ErrInvalidAccount", err)
 	}
 }
+
+func TestMemoryMessageFilterSupportsRecordTabs(t *testing.T) {
+	repo := NewMemoryMessageRepository()
+	ctx := testMailContext(t)
+	now := time.Now().UTC()
+	fixtures := []EmailMessage{
+		{ID: "business-1", TenantID: "tenant-a", OrgID: "org-a", CallerKey: "auth.login", TemplateKey: "security.login", SMTPAccountID: "smtp-a", Subject: "Login notice", Recipients: []Recipient{{Address: "alice@example.test", Kind: "to"}}, Status: StatusSent, CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour)},
+		{ID: "test-1", TenantID: "tenant-a", OrgID: "org-a", IsTest: true, SMTPAccountID: "smtp-b", Subject: "Template preview", Recipients: []Recipient{{Address: "bob@example.test", Kind: "to"}}, Status: StatusFailed, CreatedAt: now.Add(-2 * time.Hour), UpdatedAt: now.Add(-2 * time.Hour)},
+		{ID: "system-1", TenantID: "tenant-a", OrgID: "org-a", SMTPAccountID: "smtp-a", Subject: "System maintenance", Recipients: []Recipient{{Address: "ops@example.test", Kind: "to"}}, Status: StatusPending, CreatedAt: now.Add(-3 * time.Hour), UpdatedAt: now.Add(-3 * time.Hour)},
+	}
+	for _, fixture := range fixtures {
+		if _, err := repo.Create(ctx, fixture); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page, err := repo.List(ctx, "tenant-a", "org-a", MessageFilter{Source: "template_test", Keyword: "bob@", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Total != 1 || len(page.Items) != 1 || page.Items[0].ID != "test-1" {
+		t.Fatalf("filtered page = %#v", page)
+	}
+	page, err = repo.List(ctx, "tenant-a", "org-a", MessageFilter{CallerKey: "auth.login", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Total != 1 || len(page.Items) != 1 || page.Items[0].ID != "business-1" {
+		t.Fatalf("caller page = %#v", page)
+	}
+	from := now.Add(-90 * time.Minute)
+	page, err = repo.List(ctx, "tenant-a", "org-a", MessageFilter{AccountID: "smtp-a", From: &from, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Total != 1 || page.Items[0].ID != "business-1" {
+		t.Fatalf("account/time page = %#v", page)
+	}
+}
+
 func TestServiceNilReceiverSendReturnsRepositoryError(t *testing.T) {
 	var service *Service
 	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a"})
