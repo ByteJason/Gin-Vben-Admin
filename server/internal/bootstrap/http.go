@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	"context"
 	"io/fs"
 	"net/http"
 
@@ -14,14 +15,17 @@ import (
 	installer "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/installer"
 	mailapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/mail"
 	monitorapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/monitor"
+	notificationapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/notification"
 	settingsapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/settings"
 	tasksapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/tasks"
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/config"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/installplatform"
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/webassets"
 	adminhttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/admin"
 	audithttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/audit"
 	authhttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/auth"
+	commoncapabilitieshttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/commoncapabilities"
 	dashboardhttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/dashboard"
 	dictionaryhttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/dictionary"
 	filehttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/file"
@@ -100,7 +104,18 @@ func newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasksAndRunsAndImportExport
 	}
 	auxiliary := adminhttp.AuxiliaryRoutes{IAM: iamService}
 	if settingsService != nil {
-		auxiliary.Settings = settingshttp.NewHandler(settingsService)
+		var actorResolver settingshttp.ActorResolver
+		// Only the explicit dependency-free single-node profile receives a
+		// server-owned actor. An auth-disabled multi-tenant deployment still
+		// needs a verified actor at this boundary; otherwise settings writes
+		// would bypass the tenant/admin authorization contract.
+		if !cfg.Auth.Enabled && (!cfg.Tenant.Enabled || cfg.Tenant.Mode == "single") {
+			// The unauthenticated single-node profile is an explicit local fixture;
+			// give its settings endpoint the same server-owned actor used by the
+			// common management adapter so Logo selection is immediately usable.
+			actorResolver = func(*gin.Context) settingsapp.Actor { return settingsapp.Actor{ID: "system.admin"} }
+		}
+		auxiliary.Settings = settingshttp.NewHandler(settingsService, actorResolver)
 	}
 	if auditService != nil {
 		auxiliary.Audit = audithttp.NewHandler(auditService)
@@ -111,6 +126,32 @@ func newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasksAndRunsAndImportExport
 	if mailService != nil {
 		auxiliary.Mail = mailhttp.NewHandler(mailService)
 	}
+	// Common capabilities are registered independently of the legacy mail/file
+	// compatibility handlers. A media-only deployment still exposes the same
+	// versioned routes and returns a precise 503 for the missing dependency.
+	runtime := notificationapp.NewRuntime(notificationapp.RuntimeConfig{DefaultLocale: "zh-CN", RequireTenant: true, StrictRegistration: true})
+	_ = runtime.SeedBuiltInDefaults()
+	if mailService != nil {
+		runtime.SetMailer(mailapp.NotificationMailer{Service: mailService})
+	}
+	var catalog fileapp.MediaCatalog
+	var usage fileapp.MediaUsageService
+	if fileService != nil {
+		adapter := fileapp.NewCatalog(fileService)
+		catalog = adapter
+		usage = adapter.UsageService()
+		// Reconcile the bundled image 1 before the picker is first opened. The
+		// operation is hash/idempotency guarded and leaves tenant resources alone.
+		presetTenant := cfg.Tenant.DefaultID
+		if presetTenant == "" {
+			presetTenant = "default"
+		}
+		presetCtx := tenant.WithContext(context.Background(), tenant.Context{TenantID: presetTenant, PlatformAdmin: true})
+		_, _ = adapter.ReconcilePreset(presetCtx, fileapp.DefaultPresetAsset())
+	}
+	capabilities := commoncapabilitieshttp.NewHandler(runtime, catalog, usage)
+	capabilities.Mail = mailService
+	auxiliary.CommonCapabilities = capabilities
 	if monitorService != nil {
 		if iamService != nil {
 			auxiliary.Monitor = monitorhttp.NewHandlerWithIAM(monitorService, iamService)

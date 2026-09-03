@@ -14,8 +14,9 @@ import (
 var expectedSchemaTables = []string{
 	"app_metadata", "tenants", "organizations", "users", "roles", "user_roles",
 	"menus", "permissions", "iam_policies", "iam_data_scopes", "auth_sessions",
-	"auth_audit_events", "setting_versions", "file_objects", "smtp_accounts",
-	"email_messages", "email_recipients", "email_delivery_attempts", "dictionary_types",
+	"auth_audit_events", "setting_versions", "file_objects", "media_categories", "media_usages", "smtp_accounts",
+	"email_messages", "email_recipients", "email_delivery_attempts", "notification_callers", "notification_caller_accounts",
+	"notification_templates", "notification_template_locales", "notification_template_versions", "verification_policies", "verification_challenges", "dictionary_types",
 	"dictionary_items", "dictionary_cache_versions", "task_definitions", "task_runs",
 	"task_run_logs", "import_export_jobs", "import_export_errors", "import_export_artifacts",
 }

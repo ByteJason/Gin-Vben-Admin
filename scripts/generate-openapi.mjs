@@ -73,6 +73,28 @@ export interface FileObject {
 }
 export interface FilePage { items: FileObject[]; total: number; limit: number; offset: number; }
 
+export type MediaURLPurpose = 'preview' | 'download';
+export interface MediaResource {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+  sha256: string;
+  categoryId?: string;
+  scopeType: 'system' | 'tenant' | 'org';
+  acl: 'private' | 'public-read';
+  status: 'pending' | 'ready' | 'failed' | 'deleting' | 'deleted';
+  selectable: boolean;
+  disabledReason?: string;
+  metadata?: Record<string, string>;
+  urlHints?: Record<string, boolean>;
+  reconcileKey?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface MediaPage { items: MediaResource[]; total: number; limit: number; offset: number; nextCursor?: string; hasMore: boolean; }
+export interface MediaSignedURL { url: string; expiresAt: string; }
+
 export interface SMTPAccount {
   id: string;
   name: string;

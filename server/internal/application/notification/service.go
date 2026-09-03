@@ -33,12 +33,27 @@ type Message struct {
 	// Recipients carries the complete envelope recipient set for transports
 	// that can deliver one message to several addresses. To remains the
 	// backwards-compatible single-recipient field and is used as a fallback.
-	Recipients []string  `json:"-"`
-	Subject    string    `json:"subject"`
-	Body       string    `json:"-"`
-	Status     Status    `json:"status"`
-	ErrorCode  string    `json:"errorCode,omitempty"`
-	CreatedAt  time.Time `json:"createdAt"`
+	Recipients []string `json:"-"`
+	Subject    string   `json:"subject"`
+	Body       string   `json:"-"`
+	// The following correlation fields are populated by trusted application
+	// adapters. They are deliberately omitted from the legacy JSON envelope so
+	// existing transport clients keep the same shape while the SMTP service can
+	// route and audit a message by caller/template/purpose.
+	CallerKey          string   `json:"-"`
+	TemplateKey        string   `json:"-"`
+	TemplateGeneration string   `json:"-"`
+	PolicyGeneration   string   `json:"-"`
+	Locale             string   `json:"-"`
+	Mode               SendMode `json:"-"`
+	IsTest             bool     `json:"-"`
+	ChallengeID        string   `json:"-"`
+	// IdempotencyKey is a trusted correlation value propagated to durable
+	// delivery adapters. It is never serialized in the legacy public envelope.
+	IdempotencyKey string    `json:"-"`
+	Status         Status    `json:"status"`
+	ErrorCode      string    `json:"errorCode,omitempty"`
+	CreatedAt      time.Time `json:"createdAt"`
 }
 
 type SendInput struct {
@@ -89,6 +104,8 @@ type SMTPAccount struct {
 	Enabled     bool
 	Name        string
 	TenantID    string
+	OrgID       string
+	ScopeType   string
 	Host        string
 	Port        int
 	Username    string

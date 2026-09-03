@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Gin Vben Admin</title>
+  <desc id="desc">Default system logo asset</desc>
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2563eb"/>
+      <stop offset="1" stop-color="#14b8a6"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="#0f172a"/>
+  <path d="M128 122h256v66H198v68h154v58H198v76h186v66H128z" fill="url(#g)"/>
+  <circle cx="376" cy="156" r="30" fill="#f8fafc"/>
+</svg>

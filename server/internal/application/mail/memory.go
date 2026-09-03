@@ -58,7 +58,7 @@ func (r *MemoryAccountRepository) Create(ctx context.Context, account Account) (
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, item := range r.items {
-		if item.DeletedAt != nil || item.TenantID != account.TenantID {
+		if item.DeletedAt != nil || item.TenantID != account.TenantID || item.OrgID != account.OrgID {
 			continue
 		}
 		if strings.EqualFold(item.Name, account.Name) || (strings.EqualFold(item.Host, account.Host) && item.Port == account.Port && strings.EqualFold(item.Username, account.Username)) {
@@ -75,11 +75,12 @@ func (r *MemoryAccountRepository) Update(ctx context.Context, account Account) (
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[account.ID]; !ok {
+	existing, ok := r.items[account.ID]
+	if !ok || existing.DeletedAt != nil || existing.TenantID != account.TenantID || existing.OrgID != account.OrgID {
 		return Account{}, ErrAccountNotFound
 	}
 	for id, item := range r.items {
-		if id == account.ID || item.DeletedAt != nil || item.TenantID != account.TenantID {
+		if id == account.ID || item.DeletedAt != nil || item.TenantID != account.TenantID || item.OrgID != account.OrgID {
 			continue
 		}
 		if strings.EqualFold(item.Name, account.Name) || (strings.EqualFold(item.Host, account.Host) && item.Port == account.Port && strings.EqualFold(item.Username, account.Username)) {
@@ -126,7 +127,7 @@ func (r *MemoryMessageRepository) Create(ctx context.Context, message EmailMessa
 	}
 	if message.IdempotencyKey != "" {
 		for _, existing := range r.items {
-			if existing.DeletedAt == nil && existing.TenantID == message.TenantID && existing.IdempotencyKey == message.IdempotencyKey {
+			if existing.DeletedAt == nil && existing.TenantID == message.TenantID && existing.OrgID == message.OrgID && existing.CallerKey == message.CallerKey && existing.TemplateKey == message.TemplateKey && existing.IdempotencyKey == message.IdempotencyKey {
 				return EmailMessage{}, errors.New("email message idempotency conflict")
 			}
 		}
@@ -141,7 +142,8 @@ func (r *MemoryMessageRepository) Update(ctx context.Context, message EmailMessa
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.items[message.ID]; !ok {
+	existing, ok := r.items[message.ID]
+	if !ok || existing.DeletedAt != nil || existing.TenantID != message.TenantID || existing.OrgID != message.OrgID {
 		return EmailMessage{}, ErrMessageNotFound
 	}
 	r.items[message.ID] = cloneMessage(message)
@@ -215,6 +217,20 @@ func (r *MemoryMessageRepository) GetByIdempotency(ctx context.Context, tenantID
 	return EmailMessage{}, ErrMessageNotFound
 }
 
+func (r *MemoryMessageRepository) GetByIdempotencyScope(ctx context.Context, tenantID, orgID, caller, template, key string) (EmailMessage, error) {
+	if err := contextErr(ctx); err != nil {
+		return EmailMessage{}, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, item := range r.items {
+		if item.DeletedAt == nil && item.TenantID == tenantID && item.OrgID == orgID && item.CallerKey == caller && item.TemplateKey == template && item.IdempotencyKey == key {
+			return cloneMessage(item), nil
+		}
+	}
+	return EmailMessage{}, ErrMessageNotFound
+}
+
 type MemoryAttemptRepository struct {
 	mu    sync.Mutex
 	items []Attempt
@@ -275,7 +291,17 @@ func cloneMessage(item EmailMessage) EmailMessage {
 }
 
 func messageView(item EmailMessage) (MessageView, error) {
-	return MessageView{ID: item.ID, TenantID: item.TenantID, OrgID: item.OrgID, SMTPAccountID: item.SMTPAccountID, SenderID: item.SenderID, Subject: item.Subject, Recipients: cloneRecipients(item.Recipients), BodyDigest: item.BodyDigest, Status: item.Status, AttemptCount: item.AttemptCount, ProviderMessageID: item.ProviderMessageID, LastErrorCode: item.LastErrorCode, SentAt: item.SentAt, IdempotencyKey: item.IdempotencyKey, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}, nil
+	return MessageView{
+		ID: item.ID, TenantID: item.TenantID, OrgID: item.OrgID, ScopeType: item.ScopeType,
+		SMTPAccountID: item.SMTPAccountID, SenderID: item.SenderID, CallerKey: item.CallerKey,
+		TemplateKey: item.TemplateKey, TemplateGeneration: item.TemplateGeneration,
+		PolicyGeneration: item.PolicyGeneration, Locale: item.Locale, IsTest: item.IsTest,
+		ChallengeID: item.ChallengeID, RelayStatus: item.RelayStatus, Subject: item.Subject,
+		Recipients: cloneRecipients(item.Recipients), BodyDigest: item.BodyDigest, Status: item.Status,
+		AttemptCount: item.AttemptCount, ProviderMessageID: item.ProviderMessageID,
+		LastErrorCode: item.LastErrorCode, SentAt: item.SentAt, IdempotencyKey: item.IdempotencyKey,
+		CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
+	}, nil
 }
 
 var _ AccountRepository = (*MemoryAccountRepository)(nil)

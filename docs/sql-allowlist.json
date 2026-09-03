@@ -5,9 +5,23 @@
     {
       "id": "MIGRATION_POSTGRES_TABLE_COMMENT",
       "path": "server/migrations/schema.go",
-      "line_regex": "\\.Exec\\(\\\"COMMENT ON TABLE",
+      "line_regex": "\\.Exec\\(statement,",
       "reason": "PostgreSQL 的表备注由 GORM Migrator 建表后使用 COMMENT ON TABLE 写入；表名和备注均来自固定模型映射。",
       "test": "go -C server test ./migrations -run TestCreateTableDDLHasCommentsAndNoForeignKeys"
+    },
+    {
+      "id": "MIGRATION_V002_POSTGRES_TABLE_COMMENT",
+      "path": "server/migrations/versions/admin/v002_common_capabilities.go",
+      "line_regex": "\\.Exec\\(statement,",
+      "reason": "公共能力版本迁移为 PostgreSQL 新增表写入固定模型备注；表名和备注均来自持久化模型注册表。",
+      "test": "go -C server test ./migrations/versions/admin -run TestCommonCapabilities"
+    },
+    {
+      "id": "MIGRATION_V002_METADATA_BACKFILL",
+      "path": "server/migrations/versions/admin/v002_common_capabilities.go",
+      "line_regex": "\\.Unscoped\\(\\)\\.Model\\(&persistencemodel\\.FileObject",
+      "reason": "旧 file_objects 行的新增 JSON 元数据列需包含软删除记录的固定 {} 回填，随后才收紧 NOT NULL。",
+      "test": "go -C server test ./migrations/versions/admin -run TestMetadataCompatibility"
     },
     {
       "id": "IAM_AUTHORIZATION_SCOPE_COMPAT",

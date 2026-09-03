@@ -72,10 +72,30 @@ func ProductionPermissionCatalog() []domain.Permission {
 		{ID: "system:dictionary:manage", Name: "管理字典", Method: "*", Path: "/api/admin/v1/dictionaries/*", Active: true},
 		{ID: "system:mail:read", Name: "查看邮件服务", Method: http.MethodGet, Path: "/api/admin/v1/mail/*", Active: true},
 		{ID: "system:mail:manage", Name: "管理邮件服务", Method: "*", Path: "/api/admin/v1/mail/*", Active: true},
+		{ID: "system:mail:test", Name: "测试邮件账号", Method: http.MethodPost, Path: "/api/admin/v1/mail/accounts/:id/test", Active: true},
+		// Common notification resources use their own permission families so a
+		// caller/template editor can be delegated without granting every mail
+		// account operation. The trailing wildcard covers the collection root and
+		// its registered resource routes while preserving method boundaries.
+		{ID: "notification:callers:read", Name: "查看通知调用者", Method: http.MethodGet, Path: "/api/admin/v1/notification/callers/*", Active: true},
+		{ID: "notification:callers:manage", Name: "管理通知调用者", Method: "*", Path: "/api/admin/v1/notification/callers/*", Active: true},
+		{ID: "notification:accounts:read", Name: "查看通知账号", Method: http.MethodGet, Path: "/api/admin/v1/notification/accounts/*", Active: true},
+		{ID: "notification:accounts:manage", Name: "管理通知账号", Method: "*", Path: "/api/admin/v1/notification/accounts/*", Active: true},
+		{ID: "notification:templates:read", Name: "查看通知模板", Method: http.MethodGet, Path: "/api/admin/v1/notification/templates/*", Active: true},
+		{ID: "notification:templates:manage", Name: "管理通知模板", Method: "*", Path: "/api/admin/v1/notification/templates/*", Active: true},
+		{ID: "notification:templates:publish", Name: "发布通知模板", Method: http.MethodPost, Path: "/api/admin/v1/notification/templates/:id/publish", Active: true},
+		{ID: "notification:templates:test", Name: "测试通知模板", Method: http.MethodPost, Path: "/api/admin/v1/notification/templates/:id/test", Active: true},
+		{ID: "notification:verification:read", Name: "查看验证码挑战", Method: http.MethodGet, Path: "/api/admin/v1/notification/verification/*", Active: true},
+		{ID: "notification:verification:manage", Name: "管理验证码挑战", Method: "*", Path: "/api/admin/v1/notification/verification/*", Active: true},
+		{ID: "notification:verification-policies:read", Name: "查看验证码策略", Method: http.MethodGet, Path: "/api/admin/v1/notification/verification-policies/*", Active: true},
+		{ID: "notification:verification-policies:manage", Name: "管理验证码策略", Method: http.MethodPatch, Path: "/api/admin/v1/notification/verification-policies/:policy_key", Active: true},
 		{ID: "system:files:read", Name: "查看文件", Method: http.MethodGet, Path: "/api/admin/v1/files/*", Active: true},
 		{ID: "system:files:manage", Name: "管理文件", Method: "*", Path: "/api/admin/v1/files/*", Active: true},
-		{ID: "media:library:read", Name: "查看媒体库", Method: http.MethodGet, Path: "/api/admin/v1/files", Active: true},
-		{ID: "media:library:manage", Name: "管理媒体库", Method: "*", Path: "/api/admin/v1/files", Active: true},
+		// Media is the canonical resource surface. The IAM evaluator keeps an
+		// explicit /files <-> /media compatibility bridge so persisted grants
+		// from the migration window continue to authorize both adapters.
+		{ID: "media:library:read", Name: "查看媒体库", Method: http.MethodGet, Path: "/api/admin/v1/media/*", Active: true},
+		{ID: "media:library:manage", Name: "管理媒体库", Method: "*", Path: "/api/admin/v1/media/*", Active: true},
 		{ID: "system:observability:read", Name: "查看可观测设置", Method: http.MethodGet, Path: "/api/admin/v1/observability/settings/*", Active: true},
 		{ID: "system:observability:manage", Name: "管理可观测设置", Method: http.MethodPut, Path: "/api/admin/v1/observability/settings/*", Active: true},
 		{ID: "ops:monitor:read", Name: "查看资源监控", Method: http.MethodGet, Path: "/api/admin/v1/ops/monitor", Active: true},

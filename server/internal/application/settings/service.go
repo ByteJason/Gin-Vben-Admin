@@ -80,6 +80,7 @@ func DefaultDefinitions() map[string]Definition {
 	return map[string]Definition{
 		"site.name":                         {Key: "site.name", Category: CategoryBasic, Kind: KindString, Default: `"Gin-Vben-Admin"`, EnvKey: "SITE_NAME", YAMLPath: "site.name"},
 		"basic.site_name":                   {Key: "basic.site_name", Category: CategoryBasic, Kind: KindString, Default: `"Gin-Vben-Admin"`, Description: "管理端显示名称", EnvKey: "SITE_NAME", YAMLPath: "site.name"},
+		"branding":                          {Key: "branding", Category: CategoryBasic, Kind: KindJSON, Default: `{}`, Description: "品牌媒体资源引用（例如 logoResourceId）"},
 		"security.jwt_secret":               {Key: "security.jwt_secret", Category: CategorySecurity, Kind: KindSecret, Sensitive: true, Default: `""`, Description: "签发访问令牌的运行时密钥", RestartRequired: true, EnvKey: "AUTH_JWT_SECRET", YAMLPath: "auth.jwt_secret"},
 		"security.access_ttl":               {Key: "security.access_ttl", Category: CategorySecurity, Kind: KindString, Default: `"30m"`, RestartRequired: true, EnvKey: "AUTH_ACCESS_TTL", YAMLPath: "auth.access_ttl"},
 		"security.refresh_ttl":              {Key: "security.refresh_ttl", Category: CategorySecurity, Kind: KindString, Default: `"168h"`, RestartRequired: true, EnvKey: "AUTH_REFRESH_TTL", YAMLPath: "auth.refresh_ttl"},
@@ -248,6 +249,7 @@ type Service struct {
 	repo        Repository
 	audit       AuditSink
 	cache       CacheInvalidator
+	runtime     *RuntimeSnapshotStore
 	authorizer  Authorizer
 	definitions map[string]Definition
 	sources     SourceResolver
@@ -269,6 +271,16 @@ func (s *Service) SetSourceResolver(resolver SourceResolver) { s.sources = resol
 func (s *Service) SetEncryptor(encryptor Encryptor) { s.encryptor = encryptor }
 
 func (s *Service) SetConnectionTester(tester ConnectionTester) { s.connection = tester }
+
+// SetRuntimeSnapshotStore attaches the hot-reload publication seam used by
+// SMTP callers, templates, verification policies and mutable media settings.
+// Startup-only topology (database, Redis and object-store roots) remains
+// outside this store.
+func (s *Service) SetRuntimeSnapshotStore(store *RuntimeSnapshotStore) {
+	if s != nil {
+		s.runtime = store
+	}
+}
 
 // Definitions returns a stable, read-only schema view for administration UIs.
 // Secret defaults are never exposed by this method; callers only receive the
@@ -371,6 +383,9 @@ func (s *Service) Update(ctx context.Context, actor Actor, input UpdateInput) (S
 	if err := s.invalidateAndAudit(ctx, actor, input.Key, record.Version, "update"); err != nil {
 		return Setting{}, err
 	}
+	if err := s.publishRuntime(ctx, input.Key, definition, input.Value); err != nil {
+		return Setting{}, err
+	}
 	return s.present(record, definition), nil
 }
 
@@ -414,7 +429,25 @@ func (s *Service) Rollback(ctx context.Context, actor Actor, input RollbackInput
 	if err := s.invalidateAndAudit(ctx, actor, input.Key, record.Version, "rollback"); err != nil {
 		return Setting{}, err
 	}
+	if err := s.publishRuntime(ctx, input.Key, definition, source.RawValue); err != nil {
+		return Setting{}, err
+	}
 	return s.present(record, definition), nil
+}
+
+// publishRuntime mirrors a committed, non-secret final state into the
+// process-local hot-reload snapshot. Sensitive values stay encrypted in the
+// repository and are intentionally never copied into an in-memory snapshot or
+// subscriber callback. The caller validates the candidate before persistence;
+// RuntimeSnapshotStore performs a second JSON validation at publication time.
+func (s *Service) publishRuntime(ctx context.Context, key string, definition Definition, raw []byte) error {
+	if s == nil || s.runtime == nil || definition.Sensitive {
+		return nil
+	}
+	if _, err := s.runtime.Update(ctx, key, raw); err != nil {
+		return err
+	}
+	return nil
 }
 
 // TestConnection validates the effective value for a category without

@@ -1847,6 +1847,545 @@ paths:
         '200': { $ref: '#/components/responses/SuccessResponse' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/admin/v1/notification/callers:
+    get:
+      tags: [Notification]
+      operationId: listNotificationCallers
+      summary: 查询通知调用者
+      security: [{BearerAuth: []}]
+      responses:
+        '200': { $ref: '#/components/responses/NotificationCallerListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Notification]
+      operationId: createNotificationCaller
+      summary: 创建通知调用者
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NotificationCallerInput' }
+      responses:
+        '200': { $ref: '#/components/responses/NotificationCallerResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/admin/v1/notification/callers/{id}:
+    get:
+      tags: [Notification]
+      operationId: getNotificationCaller
+      summary: 查询通知调用者详情
+      security: [{BearerAuth: []}]
+      parameters: [{ $ref: '#/components/parameters/NotificationCallerId' }]
+      responses:
+        '200': { $ref: '#/components/responses/NotificationCallerResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Notification]
+      operationId: updateNotificationCaller
+      summary: 更新通知调用者最终态
+      security: [{BearerAuth: []}]
+      parameters: [{ $ref: '#/components/parameters/NotificationCallerId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NotificationCallerPatch' }
+      responses:
+        '200': { $ref: '#/components/responses/NotificationCallerResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    put:
+      tags: [Notification]
+      operationId: replaceNotificationCaller
+      summary: 替换通知调用者最终态（PATCH 兼容别名）
+      security: [{BearerAuth: []}]
+      parameters: [{ $ref: '#/components/parameters/NotificationCallerId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NotificationCallerPatch' }
+      responses:
+        '200': { $ref: '#/components/responses/NotificationCallerResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [Notification]
+      operationId: deleteNotificationCaller
+      summary: 停用通知调用者
+      security: [{BearerAuth: []}]
+      parameters: [{ $ref: '#/components/parameters/NotificationCallerId' }]
+      responses:
+        '200': { $ref: '#/components/responses/EmptySuccessResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/admin/v1/notification/accounts:
+    get:
+      tags: [Notification]
+      operationId: listNotificationAccounts
+      summary: 查询通知 SMTP 账号池
+      security: [{BearerAuth: []}]
+      responses:
+        '200': { $ref: '#/components/responses/SMTPAccountListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Notification]
+      operationId: createNotificationAccount
+      summary: 创建通知 SMTP 账号
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SMTPAccountInput' }
+      responses:
+        '200': { $ref: '#/components/responses/SMTPAccountResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /api/admin/v1/notification/accounts/{id}:
+    patch:
+      tags: [Notification]
+      operationId: updateNotificationAccount
+      summary: 更新通知 SMTP 账号
+      security: [{BearerAuth: []}]
+      parameters: [{ $ref: '#/components/parameters/NotificationAccountId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SMTPAccountInput' }
+      responses:
+        '200': { $ref: '#/components/responses/SMTPAccountResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Notification]
+      operationId: replaceNotificationAccount
+      summary: 替换通知 SMTP 账号最终态（PATCH 兼容别名）
+      security: [{BearerAuth: []}]
+      parameters: [{ $ref: '#/components/parameters/NotificationAccountId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SMTPAccountInput' }
+      responses:
+        '200': { $ref: '#/components/responses/SMTPAccountResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Notification]
+      operationId: deleteNotificationAccount
+      summary: 停用通知 SMTP 账号
+      security: [{BearerAuth: []}]
+      parameters: [{ $ref: '#/components/parameters/NotificationAccountId' }]
+      responses:
+        '200': { $ref: '#/components/responses/EmptySuccessResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/admin/v1/notification/templates:
+    get:
+      tags: [Notification]
+      operationId: listNotificationTemplates
+      summary: 查询通知模板
+      security: [{BearerAuth: []}]
+      responses:
+        '200': { $ref: '#/components/responses/NotificationTemplateListResponse' }
+    post:
+      tags: [Notification]
+      operationId: createNotificationTemplate
+      summary: 创建通知模板
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NotificationTemplateInput' }
+      responses:
+        '200': { $ref: '#/components/responses/NotificationTemplateResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /api/admin/v1/notification/templates/{id}:
+    patch:
+      tags: [Notification]
+      operationId: updateNotificationTemplate
+      summary: 更新通知模板
+      security: [{BearerAuth: []}]
+      parameters: [{ $ref: '#/components/parameters/NotificationTemplateId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NotificationTemplateInput' }
+      responses:
+        '200': { $ref: '#/components/responses/NotificationTemplateResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Notification]
+      operationId: replaceNotificationTemplate
+      summary: 替换通知模板最终态（PATCH 兼容别名）
+      security: [{BearerAuth: []}]
+      parameters: [{ $ref: '#/components/parameters/NotificationTemplateId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NotificationTemplateInput' }
+      responses:
+        '200': { $ref: '#/components/responses/NotificationTemplateResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Notification]
+      operationId: deleteNotificationTemplate
+      summary: 停用通知模板
+      security: [{BearerAuth: []}]
+      parameters: [{ $ref: '#/components/parameters/NotificationTemplateId' }]
+      responses:
+        '200': { $ref: '#/components/responses/EmptySuccessResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/admin/v1/notification/templates/{id}/publish:
+    post:
+      tags: [Notification]
+      operationId: publishNotificationTemplate
+      summary: 发布通知模板
+      security: [{BearerAuth: []}]
+      parameters: [{ $ref: '#/components/parameters/NotificationTemplateId' }]
+      responses:
+        '200': { $ref: '#/components/responses/NotificationTemplateResponse' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/admin/v1/notification/templates/{id}/test:
+    post:
+      tags: [Notification]
+      operationId: testNotificationTemplate
+      summary: 发送通知模板测试邮件
+      security: [{BearerAuth: []}]
+      parameters: [{ $ref: '#/components/parameters/NotificationTemplateId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NotificationTemplateTestInput' }
+      responses:
+        '200': { $ref: '#/components/responses/NotificationTemplateTestResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /api/admin/v1/notification/verification-policies:
+    get:
+      tags: [Notification]
+      operationId: listVerificationPolicies
+      summary: 查询验证码策略
+      security: [{BearerAuth: []}]
+      responses:
+        '200': { $ref: '#/components/responses/VerificationPolicyListResponse' }
+  /api/admin/v1/notification/verification-policies/{policy_key}:
+    patch:
+      tags: [Notification]
+      operationId: updateVerificationPolicy
+      summary: 更新验证码策略
+      security: [{BearerAuth: []}]
+      parameters: [{ $ref: '#/components/parameters/VerificationPolicyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VerificationPolicyInput' }
+      responses:
+        '200': { $ref: '#/components/responses/VerificationPolicyResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    put:
+      tags: [Notification]
+      operationId: replaceVerificationPolicy
+      summary: 替换验证码策略最终态（PATCH 兼容别名）
+      security: [{BearerAuth: []}]
+      parameters: [{ $ref: '#/components/parameters/VerificationPolicyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VerificationPolicyInput' }
+      responses:
+        '200': { $ref: '#/components/responses/VerificationPolicyResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/admin/v1/notification/verification/challenges:
+    post:
+      tags: [Notification]
+      operationId: issueVerificationChallenge
+      summary: 签发并发送验证码
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VerificationIssueInput' }
+      responses:
+        '200': { $ref: '#/components/responses/VerificationChallengeResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/admin/v1/notification/verification/challenges/{id}:
+    get:
+      tags: [Notification]
+      operationId: getVerificationChallenge
+      summary: 查询验证码挑战状态
+      security: [{BearerAuth: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      responses:
+        '200': { $ref: '#/components/responses/VerificationChallengeResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/admin/v1/notification/verification/challenges/{id}/verify:
+    post:
+      tags: [Notification]
+      operationId: verifyVerificationChallenge
+      summary: 校验并消费验证码
+      security: [{BearerAuth: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VerificationVerifyInput' }
+      responses:
+        '200': { $ref: '#/components/responses/VerificationVerifyResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /api/admin/v1/media/library:
+    get:
+      tags: [Media]
+      operationId: listMediaLibrary
+      summary: 分页查询媒体资源库
+      security: [{BearerAuth: []}]
+      parameters:
+        - { name: mime, in: query, schema: { type: string } }
+        - { name: mimeFamily, in: query, schema: { type: string, example: image/* } }
+        - { name: categoryId, in: query, schema: { type: string } }
+        - { name: includeDescendants, in: query, schema: { type: boolean, default: false } }
+        - { name: scopeType, in: query, schema: { type: string, enum: [system, tenant, org] } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - name: offset
+          in: query
+          required: false
+          deprecated: true
+          description: 旧客户端兼容的偏移量；同时提供 cursor 时以 cursor 为准。
+          schema: { type: integer, minimum: 0, default: 0 }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: status, in: query, schema: { type: string, enum: [pending, ready, failed, deleting, deleted] } }
+        - { name: ownerId, in: query, schema: { type: string } }
+      responses:
+        '200': { $ref: '#/components/responses/MediaPageResponse' }
+    post:
+      tags: [Media]
+      operationId: uploadMediaResource
+      summary: 上传媒体资源
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { $ref: '#/components/schemas/MediaUploadRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/MediaResourceResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /api/admin/v1/media/library/{id}:
+    patch:
+      tags: [Media]
+      operationId: updateMediaResource
+      summary: 更新媒体分类和元数据
+      security: [{BearerAuth: []}]
+      parameters: [{ $ref: '#/components/parameters/MediaResourceId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MediaResourcePatch' }
+      responses:
+        '200': { $ref: '#/components/responses/MediaResourceResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Media]
+      operationId: replaceMediaResource
+      summary: 替换媒体资源元数据（PATCH 兼容别名）
+      security: [{BearerAuth: []}]
+      parameters: [{ $ref: '#/components/parameters/MediaResourceId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MediaResourcePatch' }
+      responses:
+        '200': { $ref: '#/components/responses/MediaResourceResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Media]
+      operationId: deleteMediaResource
+      summary: 软删除媒体资源
+      security: [{BearerAuth: []}]
+      parameters:
+        - { $ref: '#/components/parameters/MediaResourceId' }
+        - { name: Idempotency-Key, in: header, required: false, schema: { type: string, maxLength: 191 } }
+      responses:
+        '200': { $ref: '#/components/responses/EmptySuccessResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/admin/v1/media/library/{id}/usage:
+    get:
+      tags: [Media]
+      operationId: listMediaResourceUsage
+      summary: 查询指定媒体资源引用
+      security: [{BearerAuth: []}]
+      parameters: [{ $ref: '#/components/parameters/MediaResourceId' }]
+      responses:
+        '200': { $ref: '#/components/responses/MediaUsageListResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/admin/v1/media/categories:
+    get:
+      tags: [Media]
+      operationId: listMediaCategories
+      summary: 查询媒体分类树
+      security: [{BearerAuth: []}]
+      parameters:
+        - { name: parentId, in: query, schema: { type: string } }
+        - { name: scopeType, in: query, schema: { type: string, enum: [system, tenant, org] } }
+        - { name: includeDescendants, in: query, schema: { type: boolean, default: false } }
+      responses:
+        '200': { $ref: '#/components/responses/MediaCategoryListResponse' }
+    post:
+      tags: [Media]
+      operationId: createMediaCategory
+      summary: 创建媒体分类
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MediaCategoryInput' }
+      responses:
+        '200': { $ref: '#/components/responses/MediaCategoryResponse' }
+  /api/admin/v1/media/categories/{id}:
+    patch:
+      tags: [Media]
+      operationId: updateMediaCategory
+      summary: 更新媒体分类
+      security: [{BearerAuth: []}]
+      parameters: [{ $ref: '#/components/parameters/MediaCategoryId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MediaCategoryPatch' }
+      responses:
+        '200': { $ref: '#/components/responses/MediaCategoryResponse' }
+    delete:
+      tags: [Media]
+      operationId: deleteMediaCategory
+      summary: 删除媒体分类
+      security: [{BearerAuth: []}]
+      parameters: [{ $ref: '#/components/parameters/MediaCategoryId' }]
+      responses:
+        '200': { $ref: '#/components/responses/EmptySuccessResponse' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/admin/v1/media/usages:
+    get:
+      tags: [Media]
+      operationId: listMediaUsages
+      summary: 查询媒体资源引用
+      security: [{BearerAuth: []}]
+      parameters: [{ name: resourceId, in: query, required: true, schema: { type: string } }]
+      responses:
+        '200': { $ref: '#/components/responses/MediaUsageListResponse' }
+  /api/admin/v1/media/usages/{id}:
+    post:
+      tags: [Media]
+      operationId: attachMediaUsage
+      summary: 绑定媒体资源引用
+      security: [{BearerAuth: []}]
+      parameters: [{ $ref: '#/components/parameters/MediaUsageId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MediaUsageInput' }
+      responses:
+        '200': { $ref: '#/components/responses/MediaUsageResponse' }
+    delete:
+      tags: [Media]
+      operationId: detachMediaUsage
+      summary: 解除媒体资源引用
+      security: [{BearerAuth: []}]
+      parameters: [{ $ref: '#/components/parameters/MediaUsageId' }]
+      responses:
+        '200': { $ref: '#/components/responses/EmptySuccessResponse' }
+  /api/admin/v1/media/resources/{id}:
+    get:
+      tags: [Media]
+      operationId: getMediaResource
+      summary: 查询媒体资源元数据
+      security: [{BearerAuth: []}]
+      parameters: [{ $ref: '#/components/parameters/MediaResourceId' }]
+      responses:
+        '200': { $ref: '#/components/responses/MediaResourceResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/admin/v1/media/resources/{id}/open:
+    get:
+      tags: [Media]
+      operationId: openMediaResource
+      summary: 受控读取媒体资源
+      security: [{BearerAuth: []}]
+      parameters:
+        - { $ref: '#/components/parameters/MediaResourceId' }
+        - name: Range
+          in: header
+          required: false
+          description: 可选的单个 RFC 9110 bytes 范围；多范围请求返回 416。
+          schema: { type: string, example: bytes=0-1023 }
+      responses:
+        '200': { $ref: '#/components/responses/MediaBinaryResponse' }
+        '206': { $ref: '#/components/responses/MediaBinaryResponse' }
+        '416':
+          description: 不支持的或超出边界的字节范围
+          headers:
+            Accept-Ranges:
+              description: 支持的范围单位
+              schema: { type: string, example: bytes }
+            Content-Range:
+              description: 当前表示的有效范围；无可满足范围时返回 bytes */size
+              schema: { type: string, example: 'bytes */2048' }
+  /api/admin/v1/media/resources/{id}/signed-url:
+    get:
+      tags: [Media]
+      operationId: signMediaResourceURL
+      summary: 创建媒体短期签名 URL
+      security: [{BearerAuth: []}]
+      parameters:
+        - { $ref: '#/components/parameters/MediaResourceId' }
+        - { name: purpose, in: query, required: true, schema: { type: string, enum: [preview, download] } }
+        - { name: ttlSeconds, in: query, schema: { type: integer, minimum: 1, maximum: 3600, default: 900 } }
+      responses:
+        '200': { $ref: '#/components/responses/MediaSignedURLResponse' }
+    post:
+      tags: [Media]
+      operationId: createMediaResourceSignedURL
+      summary: 创建媒体短期签名 URL（JSON 兼容入口）
+      security: [{BearerAuth: []}]
+      parameters:
+        - { $ref: '#/components/parameters/MediaResourceId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MediaSignedURLRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/MediaSignedURLResponse' }
   /api/admin/v1/dashboard/summary:
     get:
       tags: [Admin]
@@ -2024,8 +2563,278 @@ components:
         type: string
         minLength: 1
         maxLength: 128
+    NotificationCallerId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 128 }
+    NotificationAccountId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 128 }
+    NotificationTemplateId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 128 }
+    VerificationPolicyKey:
+      name: policy_key
+      in: path
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 128 }
+    MediaResourceId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 128 }
+    MediaCategoryId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 128 }
+    MediaUsageId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 128 }
   schemas:
 
+    NotificationCaller:
+      type: object
+      required: [id, callerKey, name, enabled, systemOwned]
+      properties:
+        id: { type: string }
+        key: { type: string }
+        callerKey: { type: string, pattern: '^[A-Za-z0-9._-]+$' }
+        name: { type: string }
+        module: { type: string }
+        enabled: { type: boolean }
+        systemOwned: { type: boolean }
+        scopeType: { type: string, enum: [system, tenant, org] }
+        capabilities: { type: array, items: { type: string } }
+        smtpAccountIds: { type: array, items: { type: string } }
+        defaultAccountId: { type: string }
+        routingPolicy: { type: string, enum: [weighted_random, round_robin] }
+        weights: { type: object, additionalProperties: { type: integer, minimum: 1 } }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    NotificationCallerInput:
+      type: object
+      properties:
+        key: { type: string, pattern: '^[A-Za-z0-9._-]+$' }
+        callerKey: { type: string, pattern: '^[A-Za-z0-9._-]+$' }
+        name: { type: string, minLength: 1 }
+        module: { type: string }
+        enabled: { type: boolean }
+        capabilities: { type: array, items: { type: string } }
+        smtpAccountIds: { type: array, items: { type: string } }
+        defaultAccountId: { type: string }
+        routingPolicy: { type: string, enum: [weighted_random, round_robin] }
+        weights: { type: object, additionalProperties: { type: integer, minimum: 1 } }
+    NotificationCallerPatch:
+      allOf: [{ $ref: '#/components/schemas/NotificationCallerInput' }]
+    NotificationTemplate:
+      type: object
+      required: [id, templateKey, enabled, published]
+      properties:
+        id: { type: string }
+        key: { type: string }
+        templateKey: { type: string }
+        purpose: { type: string }
+        defaultLocale: { type: string }
+        locale: { type: string }
+        subject: { type: string }
+        body: { type: string }
+        variables: { type: array, items: { type: string } }
+        locales: { type: object, additionalProperties: { $ref: '#/components/schemas/NotificationTemplateLocale' } }
+        enabled: { type: boolean }
+        published: { type: boolean }
+        status: { type: string, enum: [draft, published, disabled] }
+        generation: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    NotificationTemplateLocale:
+      type: object
+      required: [locale, subject, body]
+      properties:
+        locale: { type: string }
+        subject: { type: string }
+        body: { type: string }
+    NotificationTemplateInput:
+      type: object
+      properties:
+        templateKey: { type: string }
+        key: { type: string }
+        purpose: { type: string }
+        defaultLocale: { type: string }
+        locale: { type: string }
+        subject: { type: string }
+        body: { type: string }
+        variables: { type: array, items: { type: string } }
+        locales: { type: object, additionalProperties: { $ref: '#/components/schemas/NotificationTemplateLocale' } }
+        enabled: { type: boolean }
+        published: { type: boolean }
+    NotificationTemplateTestInput:
+      type: object
+      required: [recipient, locale, variables]
+      properties:
+        recipient: { type: string, format: email }
+        locale: { type: string, enum: [zh-CN, en-US] }
+        variables: { type: object, additionalProperties: { type: string } }
+    NotificationTemplateTestResult:
+      type: object
+      required: [messageId, status, isTest]
+      properties:
+        messageId: { type: string }
+        status: { type: string, enum: [queued, sent, failed] }
+        isTest: { type: boolean, const: true }
+    VerificationPolicy:
+      type: object
+      required: [policyKey, codeLength, ttlSeconds, maxFailures, resendIntervalSeconds, hourlyLimit]
+      properties:
+        policyKey: { type: string }
+        key: { type: string }
+        callerKey: { type: string }
+        purpose: { type: string }
+        codeLength: { type: integer, minimum: 4, maximum: 10 }
+        charset: { type: string }
+        ttlSeconds: { type: integer, minimum: 60, maximum: 1800 }
+        maxFailures: { type: integer, minimum: 1 }
+        resendIntervalSeconds: { type: integer, minimum: 1, maximum: 1800 }
+        hourlyLimit: { type: integer, minimum: 1 }
+        updatedAt: { type: string, format: date-time }
+    VerificationPolicyInput:
+      type: object
+      properties:
+        key: { type: string }
+        callerKey: { type: string }
+        purpose: { type: string }
+        codeLength: { type: integer, minimum: 4, maximum: 10 }
+        length: { type: integer, minimum: 4, maximum: 10 }
+        charset: { type: string }
+        ttlSeconds: { type: integer, minimum: 60, maximum: 1800 }
+        maxFailures: { type: integer, minimum: 1 }
+        resendIntervalSeconds: { type: integer, minimum: 1, maximum: 1800 }
+        resendAfterSeconds: { type: integer, minimum: 1, maximum: 1800 }
+        hourlyLimit: { type: integer, minimum: 1 }
+        maxSendsPerHour: { type: integer, minimum: 1 }
+    VerificationIssueInput:
+      type: object
+      required: [purpose, recipient]
+      properties:
+        callerKey: { type: string }
+        purpose: { type: string }
+        recipient: { type: string, format: email }
+        locale: { type: string }
+        variables: { type: object, additionalProperties: { type: string } }
+        idempotencyKey: { type: string }
+    VerificationVerifyInput:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string, minLength: 1, maxLength: 32 }
+        idempotencyKey: { type: string }
+    VerificationChallenge:
+      type: object
+      required: [id, expiresAt, status]
+      properties:
+        id: { type: string }
+        expiresAt: { type: string, format: date-time }
+        status: { type: string, enum: [pending_send, active, consumed, expired, superseded, locked, send_failed] }
+    VerificationVerifyResult:
+      type: object
+      required: [verified]
+      properties:
+        verified: { type: boolean, const: true }
+    MediaResource:
+      type: object
+      required: [id, name, mime, size, sha256, scopeType, acl, status, selectable, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        mime: { type: string }
+        size: { type: integer, format: int64 }
+        sha256: { type: string }
+        categoryId: { type: string }
+        scopeType: { type: string, enum: [system, tenant, org] }
+        acl: { type: string, enum: [private, public-read] }
+        status: { type: string, enum: [pending, ready, failed, deleting, deleted] }
+        selectable: { type: boolean }
+        disabledReason: { type: string }
+        metadata: { type: object, additionalProperties: { type: string } }
+        urlHints: { type: object, additionalProperties: { type: boolean } }
+        reconcileKey: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    MediaUploadRequest:
+      type: object
+      required: [file]
+      properties:
+        file: { type: string, format: binary }
+        name: { type: string }
+        mime: { type: string }
+        acl: { type: string, enum: [private, public-read] }
+        categoryId: { type: string }
+        metadata: { type: object, additionalProperties: { type: string } }
+    MediaResourcePatch:
+      type: object
+      properties:
+        name: { type: string }
+        categoryId: { type: string }
+        status: { type: string, enum: [ready, deleting] }
+        metadata: { type: object, additionalProperties: { type: string } }
+    MediaSignedURLRequest:
+      type: object
+      required: [purpose]
+      properties:
+        purpose: { type: string, enum: [preview, download] }
+        ttlSeconds: { type: integer, minimum: 1, maximum: 3600, default: 900 }
+    MediaCategory:
+      type: object
+      required: [id, name, path, scopeType]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        path: { type: string }
+        parentId: { type: string }
+        scopeType: { type: string, enum: [system, tenant, org] }
+        enabled: { type: boolean }
+    MediaCategoryInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1 }
+        parentId: { type: string }
+    MediaCategoryPatch:
+      type: object
+      properties:
+        name: { type: string }
+        enabled: { type: boolean }
+    MediaUsage:
+      type: object
+      required: [id, resourceId, module, entityType, entityId, field]
+      properties:
+        id: { type: string }
+        resourceId: { type: string }
+        module: { type: string }
+        entityType: { type: string }
+        entityId: { type: string }
+        field: { type: string }
+        createdAt: { type: string, format: date-time }
+    MediaUsageInput:
+      type: object
+      description: 引用目标资源由路径参数决定；resourceId 仅为旧客户端兼容字段，服务端以路径为准。
+      required: [module, entityType, entityId, field]
+      properties:
+        resourceId:
+          type: string
+          deprecated: true
+          description: 旧客户端兼容字段；如提供也由路径参数覆盖。
+        module: { type: string }
+        entityType: { type: string }
+        entityId: { type: string }
+        field: { type: string }
     DictionaryType:
       type: object
       required: [id, code, nameZhCN, nameEnUS, status, sortOrder, systemOwned, cacheVersion, createdAt, updatedAt]
@@ -2662,6 +3471,23 @@ components:
         file: { type: string, format: binary }
         acl: { type: string, enum: [private, public-read] }
         categoryId: { type: string }
+    FileSignedURLRequest:
+      type: object
+      properties:
+        ttlSeconds: { type: integer, minimum: 1, maximum: 86400, default: 900 }
+    FileSignedURL:
+      type: object
+      required: [url, expiresIn]
+      properties:
+        url: { type: string, format: uri }
+        expiresIn: { type: integer, minimum: 1 }
+    FileCleanupDryRun:
+      type: object
+      required: [cutoff, matchingCount, bytes]
+      properties:
+        cutoff: { type: string, format: date-time }
+        matchingCount: { type: integer, minimum: 0 }
+        bytes: { type: integer, format: int64, minimum: 0 }
     FileCategory:
       type: object
       required: [id, name, createdAt, updatedAt]
@@ -3374,6 +4200,101 @@ components:
               - type: object
                 properties:
                   data: { $ref: '#/components/schemas/SettingConnectionTest' }
+    NotificationCallerListResponse:
+      description: 通知调用者列表
+      content:
+        application/json:
+          schema: { allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, properties: { data: { type: array, items: { $ref: '#/components/schemas/NotificationCaller' } } } }] }
+    NotificationCallerResponse:
+      description: 通知调用者
+      content:
+        application/json:
+          schema: { allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, properties: { data: { $ref: '#/components/schemas/NotificationCaller' } } }] }
+    SMTPAccountListResponse:
+      description: SMTP 账号列表
+      content:
+        application/json:
+          schema: { allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, properties: { data: { type: array, items: { $ref: '#/components/schemas/SMTPAccount' } } } }] }
+    SMTPAccountResponse:
+      description: SMTP 账号
+      content:
+        application/json:
+          schema: { allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, properties: { data: { $ref: '#/components/schemas/SMTPAccount' } } }] }
+    NotificationTemplateListResponse:
+      description: 通知模板列表
+      content:
+        application/json:
+          schema: { allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, properties: { data: { type: array, items: { $ref: '#/components/schemas/NotificationTemplate' } } } }] }
+    NotificationTemplateResponse:
+      description: 通知模板
+      content:
+        application/json:
+          schema: { allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, properties: { data: { $ref: '#/components/schemas/NotificationTemplate' } } }] }
+    NotificationTemplateTestResponse:
+      description: 模板测试投递结果
+      content:
+        application/json:
+          schema: { allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, properties: { data: { $ref: '#/components/schemas/NotificationTemplateTestResult' } } }] }
+    VerificationPolicyListResponse:
+      description: 验证码策略列表
+      content:
+        application/json:
+          schema: { allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, properties: { data: { type: array, items: { $ref: '#/components/schemas/VerificationPolicy' } } } }] }
+    VerificationPolicyResponse:
+      description: 验证码策略
+      content:
+        application/json:
+          schema: { allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, properties: { data: { $ref: '#/components/schemas/VerificationPolicy' } } }] }
+    VerificationChallengeResponse:
+      description: 验证码挑战状态
+      content:
+        application/json:
+          schema: { allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, properties: { data: { $ref: '#/components/schemas/VerificationChallenge' } } }] }
+    VerificationVerifyResponse:
+      description: 验证码校验结果
+      content:
+        application/json:
+          schema: { allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, properties: { data: { $ref: '#/components/schemas/VerificationVerifyResult' } } }] }
+    MediaPageResponse:
+      description: 媒体资源分页
+      content:
+        application/json:
+          schema: { allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, properties: { data: { type: object, required: [items, total, limit, offset, hasMore], properties: { items: { type: array, items: { $ref: '#/components/schemas/MediaResource' } }, total: { type: integer, minimum: 0 }, limit: { type: integer, minimum: 1 }, offset: { type: integer, minimum: 0 }, nextCursor: { type: string }, hasMore: { type: boolean } } } } }] }
+    MediaResourceResponse:
+      description: 媒体资源
+      content:
+        application/json:
+          schema: { allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, properties: { data: { $ref: '#/components/schemas/MediaResource' } } }] }
+    MediaCategoryListResponse:
+      description: 媒体分类列表
+      content:
+        application/json:
+          schema: { allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, properties: { data: { type: array, items: { $ref: '#/components/schemas/MediaCategory' } } } }] }
+    MediaCategoryResponse:
+      description: 媒体分类
+      content:
+        application/json:
+          schema: { allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, properties: { data: { $ref: '#/components/schemas/MediaCategory' } } }] }
+    MediaUsageListResponse:
+      description: 媒体引用列表
+      content:
+        application/json:
+          schema: { allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, properties: { data: { type: array, items: { $ref: '#/components/schemas/MediaUsage' } } } }] }
+    MediaUsageResponse:
+      description: 媒体引用
+      content:
+        application/json:
+          schema: { allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, properties: { data: { $ref: '#/components/schemas/MediaUsage' } } }] }
+    MediaBinaryResponse:
+      description: 媒体二进制内容
+      content:
+        application/octet-stream:
+          schema: { type: string, format: binary }
+    MediaSignedURLResponse:
+      description: 媒体短期签名 URL
+      content:
+        application/json:
+          schema: { allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, properties: { data: { type: object, required: [url, expiresAt], properties: { url: { type: string, format: uri }, expiresAt: { type: string, format: date-time } } } } }] }
     AuditPageResponse:
       description: 审计事件查询成功
       content:

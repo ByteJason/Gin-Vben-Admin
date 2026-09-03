@@ -1,9 +1,9 @@
 # 公共能力需求：SMTP、验证码、通知与媒体库
 
-> **状态：** `accepted-pending-implementation`
+> **状态：** `in-progress`（需求已确认，首个实现切片已落地）
 > **批次：** `B1.7d-common-capabilities`
 > **确认日期：** 2026-09-02
-> **说明：** 本文是已确认需求的公开摘要；业务代码、数据库迁移和界面实现等待验收后再启动。
+> **说明：** 本文是已确认需求的公开摘要；当前实现、契约和验收记录持续同步，未收口项以开发文档的差异表为准。
 
 ## 1. 目标
 
@@ -45,7 +45,7 @@
    challenge。投递记录保存脱敏结果、provider message ID、重试次数和审计关联。
    模板测试请求包含受控收件人、locale 和变量，返回 `message_id/status/is_test`，并执行 allowlist、
    固定测试变量与审计校验。
-   规划管理端入口为 `POST /api/admin/v1/notification/templates/{id}/test`，请求体为
+   管理端入口为 `POST /api/admin/v1/notification/templates/{id}/test`，请求体为
    `{recipient, locale, variables}`，服务端固定 `is_test=true` 且不创建验证码 challenge。
 5. 账号、调用者、路由、模板和通知策略保存最终态后即时生效；界面仅呈现最终态与审计，
    不设置业务版本号流程。运行时缓存失效在集群内目标为 5 秒以内；加密根密钥和 provider
@@ -89,18 +89,18 @@ SMTP 页面和媒体库页面各有“使用说明”入口，点击打开侧边
 审计事件、任务队列/outbox、幂等键、字典/i18n、统一错误与分页、request/trace ID、结构化日志、
 指标和健康检查。短信、Webhook、推送、Feature Flag、全文媒体搜索和标签体系列入后续路线。
 
-## 4. 实施计划（代码启动后）
+## 4. 实施计划与当前进度
 
 | 阶段 | 交付 |
 |---|---|
-| P0 | 冻结 Go/OpenAPI 端口、DTO、错误码、权限矩阵、迁移草案、状态机和共享引导 schema；先写 RED 契约测试。 |
-| P1 | caller/account/template/策略数据模型、最终态设置、审计、ETag 冲突和热更新。 |
-| P2 | outbox/jobs relay、测试发送、验证码状态/限流/幂等和失败补偿。 |
-| P3 | `MediaCatalog`、分类/作用域/引用、provider seam、预置图片 1 与迁移。 |
-| P4 | 管理 API 与三套 UI 的 SMTP、模板、验证码、媒体库、Logo 选择/上传。 |
-| P5 | 双引导侧边抽屉、共享 schema、双语、权限和可访问性验收。 |
-| P6 | 将一个真实密码找回或通知调用方切换到公共端口，完成端到端回归。 |
-| P7 | 双库迁移、Go/前端测试、E2E、axe、OpenAPI、证据、回滚和 UAT 全部收口；之后删除临时任务正文。 |
+| P0 | **已完成首轮**：Go/OpenAPI 端口、DTO、错误码映射、权限边界、迁移草案、状态机和共享引导 schema 已冻结。 |
+| P1 | **已落地切片**：caller/account/template/策略运行时、最终态更新和热更新入口已提供；持久化审计接线继续收口。 |
+| P2 | **部分完成**：测试发送、验证码状态/限流/幂等已提供；持久化 outbox/jobs relay 与失败补偿待收口。 |
+| P3 | **已落地切片**：`MediaCatalog`、分类/作用域/引用、provider seam、预置资源 reconcile 和迁移模型已提供。 |
+| P4 | **已落地切片**：管理 API、OpenAPI 路径和三套 UI 的 SMTP/媒体库引导已接入；模板管理 UI 与 Logo 业务接线继续完善。 |
+| P5 | **已落地切片**：共享双语引导 schema、侧边抽屉、焦点/Escape/响应式行为已接入并进行一致性验收。 |
+| P6 | **待执行**：将真实密码找回或通知调用方切换到公共端口，完成端到端回归。 |
+| P7 | **待执行**：双库迁移、Go/前端测试、E2E、axe、证据、回滚和 UAT 全部收口；完成后清理临时任务正文。 |
 
 ## 5. 验收门槛
 
@@ -117,5 +117,5 @@ SMTP 页面和媒体库页面各有“使用说明”入口，点击打开侧边
 - [完整公共能力开发使用文档](../development/common-capabilities.md)
 - [公开文档总览](../README.md)
 
-实现前以本文和精简 API 参考作为对接契约；正式开发完成后补入实际包路径、migration 版本、
-OpenAPI 操作 ID、错误码清单和真实验证记录。
+实现以本文和精简 API 参考作为对接契约；当前代码路径、migration 草案、OpenAPI 操作 ID、错误码清单
+和验证记录已在开发/对接文档中维护，后续收口后再补齐生产部署证据。

@@ -1,6 +1,7 @@
 package admin
 
 import (
+	commoncapabilitieshttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/commoncapabilities"
 	"github.com/gin-gonic/gin"
 
 	audithttp "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/audit"
@@ -22,17 +23,18 @@ import (
 // container optional preserves the dependency-free router seam used by health
 // and contract tests.
 type AuxiliaryRoutes struct {
-	Settings     *settingshttp.Handler
-	Audit        *audithttp.Handler
-	Files        *filehttp.Handler
-	Mail         *mailhttp.Handler
-	Monitor      *monitorhttp.Handler
-	Dashboard    *dashboardhttp.Handler
-	Dictionary   *dictionaryhttp.Handler
-	Tasks        *taskshttp.Handler
-	ImportExport *importexporthttp.Handler
-	IAM          httpmiddleware.IAMAccess
-	TenantPolicy *httpmiddleware.TenantPolicy
+	Settings           *settingshttp.Handler
+	Audit              *audithttp.Handler
+	Files              *filehttp.Handler
+	Mail               *mailhttp.Handler
+	Monitor            *monitorhttp.Handler
+	Dashboard          *dashboardhttp.Handler
+	Dictionary         *dictionaryhttp.Handler
+	Tasks              *taskshttp.Handler
+	ImportExport       *importexporthttp.Handler
+	IAM                httpmiddleware.IAMAccess
+	TenantPolicy       *httpmiddleware.TenantPolicy
+	CommonCapabilities *commoncapabilitieshttp.Handler
 }
 
 func RegisterRoutes(r gin.IRouter, authHandlers ...*authhttp.Handler) {
@@ -73,6 +75,7 @@ func RegisterRoutesWithIAM(r gin.IRouter, authHandler *authhttp.Handler, iamHand
 		dictionaryhttp.RegisterRoutesOn(protected, capabilities.Dictionary)
 		taskshttp.RegisterRoutesOn(protected, capabilities.Tasks)
 		importexporthttp.RegisterRoutesOn(protected, capabilities.ImportExport)
+		commoncapabilitieshttp.RegisterRoutesOn(protected, capabilities.CommonCapabilities)
 		return
 	}
 	// When authentication is deliberately disabled for a local single-node
@@ -89,4 +92,5 @@ func RegisterRoutesWithIAM(r gin.IRouter, authHandler *authhttp.Handler, iamHand
 	dictionaryhttp.RegisterRoutesOn(localScoped, capabilities.Dictionary)
 	taskshttp.RegisterRoutesOn(localScoped, capabilities.Tasks)
 	importexporthttp.RegisterRoutesOn(localScoped, capabilities.ImportExport)
+	commoncapabilitieshttp.RegisterRoutesOn(localScoped, capabilities.CommonCapabilities)
 }

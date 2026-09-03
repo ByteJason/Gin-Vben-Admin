@@ -92,6 +92,34 @@ func TestAuthorizerPathPrefixIncludesCollectionRootAndDescendants(t *testing.T) 
 	}
 }
 
+func TestAuthorizerKeepsMediaFilesCompatibilityBridgeScoped(t *testing.T) {
+	policies := NewMemoryPolicyStore()
+	if err := policies.AddPolicy(Policy{Subject: "u1", Method: "GET", Path: "/api/admin/v1/files/*", Effect: EffectAllow}); err != nil {
+		t.Fatal(err)
+	}
+	authorizer := NewAuthorizer(policies)
+	for _, path := range []string{
+		"/api/admin/v1/files",
+		"/api/admin/v1/files/upload",
+		"/api/admin/v1/media/library",
+		"/api/admin/v1/media/resources/logo/open",
+	} {
+		allowed, err := authorizer.Authorize(context.Background(), Subject{UserID: "u1"}, Request{Method: "GET", Path: path})
+		if err != nil || !allowed {
+			t.Fatalf("media compatibility policy should allow %q: allowed=%v err=%v", path, allowed, err)
+		}
+	}
+	for _, path := range []string{
+		"/api/admin/v1/files-archive",
+		"/api/admin/v1/metadata",
+	} {
+		allowed, err := authorizer.Authorize(context.Background(), Subject{UserID: "u1"}, Request{Method: "GET", Path: path})
+		if !errors.Is(err, ErrAccessDenied) || allowed {
+			t.Fatalf("compatibility bridge escaped catalog roots for %q: allowed=%v err=%v", path, allowed, err)
+		}
+	}
+}
+
 func TestDataScopeResolverMatchesRoleAndCopiesIDs(t *testing.T) {
 	p := NewMemoryPolicyStore()
 	p.Add(DataScope{RoleID: "role-org", Resource: "orders", Scope: ScopeOrg, IDs: []string{"org-a"}})

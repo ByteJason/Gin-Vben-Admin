@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 
@@ -79,7 +80,7 @@ func (r *GORMAccountRepository) Create(ctx context.Context, account mailapp.Acco
 	// Duplicate detection participates in the following write, so pin it to
 	// the primary and avoid a replica-lag false negative immediately after an
 	// account was created.
-	_, duplicate := gorm.G[smtpAccountRecord](r.db.Write(ctx)).Where("tenant_id = ? AND deleted_at IS NULL AND (account_name = ? OR (host = ? AND port = ? AND username = ?))", account.TenantID, account.Name, account.Host, int32(account.Port), account.Username).First(ctx)
+	_, duplicate := gorm.G[smtpAccountRecord](r.db.Write(ctx)).Where("tenant_id = ? AND (org_id = ? OR (org_id IS NULL AND ? = '')) AND deleted_at IS NULL AND (account_name = ? OR (host = ? AND port = ? AND username = ?))", account.TenantID, account.OrgID, account.OrgID, account.Name, account.Host, int32(account.Port), account.Username).First(ctx)
 	if duplicate == nil {
 		return mailapp.Account{}, mailapp.ErrAccountConflict
 	}
@@ -104,7 +105,7 @@ func (r *GORMAccountRepository) Update(ctx context.Context, account mailapp.Acco
 		}
 		return mailapp.Account{}, err
 	}
-	_, dupErr := gorm.G[smtpAccountRecord](r.db.Write(ctx)).Where("tenant_id = ? AND deleted_at IS NULL AND id <> ? AND (account_name = ? OR (host = ? AND port = ? AND username = ?))", account.TenantID, account.ID, account.Name, account.Host, int32(account.Port), account.Username).First(ctx)
+	_, dupErr := gorm.G[smtpAccountRecord](r.db.Write(ctx)).Where("tenant_id = ? AND (org_id = ? OR (org_id IS NULL AND ? = '')) AND deleted_at IS NULL AND id <> ? AND (account_name = ? OR (host = ? AND port = ? AND username = ?))", account.TenantID, account.OrgID, account.OrgID, account.ID, account.Name, account.Host, int32(account.Port), account.Username).First(ctx)
 	if dupErr == nil {
 		return mailapp.Account{}, mailapp.ErrAccountConflict
 	}
@@ -112,8 +113,12 @@ func (r *GORMAccountRepository) Update(ctx context.Context, account mailapp.Acco
 		return mailapp.Account{}, dupErr
 	}
 	record = fromAccount(account)
-	if _, err := gorm.G[smtpAccountRecord](r.db.Write(ctx)).Where("id = ?", account.ID).Set(clause.Assignments(map[string]any{"tenant_id": record.TenantID, "org_id": record.OrgID, "account_name": record.AccountName, "enabled": record.Enabled, "host": record.Host, "port": record.Port, "username": record.Username, "password_ciphertext": record.PasswordCiphertext, "weight": record.Weight, "from_email": record.FromEmail, "from_name": record.FromName, "implicit_tls": record.ImplicitTLS, "updated_at": record.UpdatedAt})).Update(ctx); err != nil {
+	rows, err := gorm.G[smtpAccountRecord](r.db.Write(ctx)).Where("id = ? AND tenant_id = ? AND (org_id = ? OR (org_id IS NULL AND ? = '')) AND deleted_at IS NULL", account.ID, account.TenantID, account.OrgID, account.OrgID).Set(clause.Assignments(map[string]any{"tenant_id": record.TenantID, "org_id": record.OrgID, "scope_type": record.ScopeType, "account_name": record.AccountName, "enabled": record.Enabled, "host": record.Host, "port": record.Port, "username": record.Username, "password_ciphertext": record.PasswordCiphertext, "weight": record.Weight, "from_email": record.FromEmail, "from_name": record.FromName, "implicit_tls": record.ImplicitTLS, "updated_at": record.UpdatedAt})).Update(ctx)
+	if err != nil {
 		return mailapp.Account{}, err
+	}
+	if rows == 0 {
+		return mailapp.Account{}, mailapp.ErrAccountNotFound
 	}
 	return toAccount(record), nil
 }
@@ -164,8 +169,12 @@ func (r *GORMMessageRepository) Update(ctx context.Context, message mailapp.Emai
 		return mailapp.EmailMessage{}, errors.New("mail repository is not initialized")
 	}
 	record := fromMessage(message)
-	if _, err := gorm.G[emailMessageRecord](r.db.Write(ctx)).Where("id = ? AND tenant_id = ? AND deleted_at IS NULL", message.ID, message.TenantID).Set(clause.Assignments(map[string]any{"smtp_account_id": record.SMTPAccountID, "sender_id": record.SenderID, "subject": record.Subject, "body_ciphertext": record.BodyCiphertext, "body_digest": record.BodyDigest, "status": record.Status, "attempt_count": record.AttemptCount, "provider_message_id": record.ProviderMessageID, "last_error_code": record.LastErrorCode, "sent_at": record.SentAt, "idempotency_key": record.IdempotencyKey, "updated_at": record.UpdatedAt})).Update(ctx); err != nil {
+	rows, err := gorm.G[emailMessageRecord](r.db.Write(ctx)).Where("id = ? AND tenant_id = ? AND (org_id = ? OR (org_id IS NULL AND ? = '')) AND deleted_at IS NULL", message.ID, message.TenantID, message.OrgID, message.OrgID).Set(clause.Assignments(map[string]any{"scope_type": record.ScopeType, "smtp_account_id": record.SMTPAccountID, "sender_id": record.SenderID, "caller_key": record.CallerKey, "template_key": record.TemplateKey, "template_generation": record.TemplateGeneration, "policy_generation": record.PolicyGeneration, "locale": record.Locale, "is_test": record.IsTest, "challenge_id": record.ChallengeID, "relay_status": record.RelayStatus, "subject": record.Subject, "body_ciphertext": record.BodyCiphertext, "body_digest": record.BodyDigest, "status": record.Status, "attempt_count": record.AttemptCount, "provider_message_id": record.ProviderMessageID, "last_error_code": record.LastErrorCode, "sent_at": record.SentAt, "idempotency_key": record.IdempotencyKey, "idempotency_scope_hash": record.IdempotencyScopeHash, "updated_at": record.UpdatedAt})).Update(ctx)
+	if err != nil {
 		return mailapp.EmailMessage{}, err
+	}
+	if rows == 0 {
+		return mailapp.EmailMessage{}, mailapp.ErrMessageNotFound
 	}
 	return r.Get(ctx, message.ID, message.TenantID, message.OrgID)
 }
@@ -230,7 +239,32 @@ func (r *GORMMessageRepository) GetByIdempotency(ctx context.Context, tenantID, 
 	}
 	record, err := gorm.G[emailMessageRecord](r.db.Read(ctx)).Scopes(messageScope(tenantID, "")).Where("idempotency_key = ? AND deleted_at IS NULL", key).First(ctx)
 	if err != nil {
-		return mailapp.EmailMessage{}, mailapp.ErrMessageNotFound
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return mailapp.EmailMessage{}, mailapp.ErrMessageNotFound
+		}
+		return mailapp.EmailMessage{}, err
+	}
+	recipients, err := r.recipients(ctx, record.ID)
+	if err != nil {
+		return mailapp.EmailMessage{}, err
+	}
+	return toMessage(record, recipients), nil
+}
+
+func (r *GORMMessageRepository) GetByIdempotencyScope(ctx context.Context, tenantID, orgID, caller, template, key string) (mailapp.EmailMessage, error) {
+	if r == nil || r.db == nil {
+		return mailapp.EmailMessage{}, mailapp.ErrRepositoryFailure
+	}
+	query := gorm.G[emailMessageRecord](r.db.Read(ctx)).Scopes(messageScope(tenantID, orgID)).Where(
+		"idempotency_key = ? AND COALESCE(caller_key, '') = ? AND COALESCE(template_key, '') = ? AND deleted_at IS NULL",
+		strings.TrimSpace(key), strings.TrimSpace(caller), strings.TrimSpace(template),
+	)
+	record, err := query.First(ctx)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return mailapp.EmailMessage{}, mailapp.ErrMessageNotFound
+		}
+		return mailapp.EmailMessage{}, err
 	}
 	recipients, err := r.recipients(ctx, record.ID)
 	if err != nil {
@@ -266,6 +300,7 @@ func (r *GORMMessageRepository) Append(ctx context.Context, attempt mailapp.Atte
 func createAccount(ctx context.Context, db *gorm.DB, record smtpAccountRecord) error {
 	return gormquery.CreateValues[smtpAccountRecord](ctx, db, map[string]any{
 		"id": record.ID, "tenant_id": record.TenantID, "org_id": record.OrgID,
+		"scope_type":   record.ScopeType,
 		"account_name": record.AccountName, "enabled": record.Enabled, "host": record.Host,
 		"port": record.Port, "username": record.Username, "password_ciphertext": record.PasswordCiphertext,
 		"weight": record.Weight, "from_email": record.FromEmail, "from_name": record.FromName,
@@ -277,10 +312,14 @@ func createAccount(ctx context.Context, db *gorm.DB, record smtpAccountRecord) e
 func createMessage(ctx context.Context, db *gorm.DB, record emailMessageRecord) error {
 	return gormquery.CreateValues[emailMessageRecord](ctx, db, map[string]any{
 		"id": record.ID, "tenant_id": record.TenantID, "org_id": record.OrgID,
+		"scope_type": record.ScopeType, "caller_key": record.CallerKey, "template_key": record.TemplateKey,
+		"template_generation": record.TemplateGeneration, "policy_generation": record.PolicyGeneration,
+		"locale": record.Locale, "is_test": record.IsTest, "challenge_id": record.ChallengeID,
+		"relay_status":    record.RelayStatus,
 		"smtp_account_id": record.SMTPAccountID, "sender_id": record.SenderID, "subject": record.Subject,
 		"body_ciphertext": record.BodyCiphertext, "body_digest": record.BodyDigest, "status": record.Status,
 		"attempt_count": record.AttemptCount, "provider_message_id": record.ProviderMessageID,
-		"last_error_code": record.LastErrorCode, "sent_at": record.SentAt, "idempotency_key": record.IdempotencyKey,
+		"last_error_code": record.LastErrorCode, "sent_at": record.SentAt, "idempotency_key": record.IdempotencyKey, "idempotency_scope_hash": record.IdempotencyScopeHash,
 		"created_at": record.CreatedAt, "updated_at": record.UpdatedAt, "deleted_at": record.DeletedAt,
 	})
 }
@@ -328,19 +367,19 @@ func optionalScope(scope []string) (string, string) {
 
 func toAccount(record smtpAccountRecord) mailapp.Account {
 	password := binaryBytes(record.PasswordCiphertext)
-	return mailapp.Account{ID: record.ID, TenantID: record.TenantID, OrgID: stringValue(record.OrgID), Name: record.AccountName, Enabled: record.Enabled, Host: record.Host, Port: int(record.Port), Username: record.Username, PasswordConfigured: len(password) > 0, PasswordCiphertext: password, Weight: int(record.Weight), FromEmail: record.FromEmail, FromName: record.FromName, ImplicitTLS: record.ImplicitTLS, CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt, DeletedAt: record.DeletedAt}
+	return mailapp.Account{ID: record.ID, TenantID: record.TenantID, OrgID: stringValue(record.OrgID), ScopeType: record.ScopeType, Name: record.AccountName, Enabled: record.Enabled, Host: record.Host, Port: int(record.Port), Username: record.Username, PasswordConfigured: len(password) > 0, PasswordCiphertext: password, Weight: int(record.Weight), FromEmail: record.FromEmail, FromName: record.FromName, ImplicitTLS: record.ImplicitTLS, CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt, DeletedAt: record.DeletedAt}
 }
 
 func fromAccount(account mailapp.Account) smtpAccountRecord {
-	return smtpAccountRecord{ID: account.ID, TenantID: account.TenantID, OrgID: stringPtrIfNonEmpty(account.OrgID), AccountName: account.Name, Enabled: account.Enabled, Host: account.Host, Port: int32(account.Port), Username: account.Username, PasswordCiphertext: binaryPtr(account.PasswordCiphertext), Weight: int32(account.Weight), FromEmail: account.FromEmail, FromName: account.FromName, ImplicitTLS: account.ImplicitTLS, CreatedAt: account.CreatedAt, UpdatedAt: account.UpdatedAt, DeletedAt: account.DeletedAt}
+	return smtpAccountRecord{ID: account.ID, TenantID: account.TenantID, OrgID: stringPtrIfNonEmpty(account.OrgID), ScopeType: account.ScopeType, AccountName: account.Name, Enabled: account.Enabled, Host: account.Host, Port: int32(account.Port), Username: account.Username, PasswordCiphertext: binaryPtr(account.PasswordCiphertext), Weight: int32(account.Weight), FromEmail: account.FromEmail, FromName: account.FromName, ImplicitTLS: account.ImplicitTLS, CreatedAt: account.CreatedAt, UpdatedAt: account.UpdatedAt, DeletedAt: account.DeletedAt}
 }
 
 func toMessage(record emailMessageRecord, recipients []mailapp.Recipient) mailapp.EmailMessage {
-	return mailapp.EmailMessage{ID: record.ID, TenantID: record.TenantID, OrgID: stringValue(record.OrgID), SMTPAccountID: stringValue(record.SMTPAccountID), SenderID: stringValue(record.SenderID), Subject: record.Subject, Recipients: append([]mailapp.Recipient(nil), recipients...), BodyCiphertext: append([]byte(nil), record.BodyCiphertext...), BodyDigest: record.BodyDigest, Status: mailapp.Status(record.Status), AttemptCount: int(record.AttemptCount), ProviderMessageID: stringValue(record.ProviderMessageID), LastErrorCode: stringValue(record.LastErrorCode), SentAt: record.SentAt, IdempotencyKey: stringValue(record.IdempotencyKey), CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt, DeletedAt: record.DeletedAt}
+	return mailapp.EmailMessage{ID: record.ID, TenantID: record.TenantID, OrgID: stringValue(record.OrgID), ScopeType: record.ScopeType, SMTPAccountID: stringValue(record.SMTPAccountID), SenderID: stringValue(record.SenderID), CallerKey: stringValue(record.CallerKey), TemplateKey: stringValue(record.TemplateKey), TemplateGeneration: uint64String(record.TemplateGeneration), PolicyGeneration: stringValue(record.PolicyGeneration), Locale: stringValue(record.Locale), IsTest: record.IsTest, ChallengeID: stringValue(record.ChallengeID), RelayStatus: record.RelayStatus, Subject: record.Subject, Recipients: append([]mailapp.Recipient(nil), recipients...), BodyCiphertext: append([]byte(nil), record.BodyCiphertext...), BodyDigest: record.BodyDigest, Status: mailapp.Status(record.Status), AttemptCount: int(record.AttemptCount), ProviderMessageID: stringValue(record.ProviderMessageID), LastErrorCode: stringValue(record.LastErrorCode), SentAt: record.SentAt, IdempotencyKey: stringValue(record.IdempotencyKey), IdempotencyScopeHash: stringValue(record.IdempotencyScopeHash), CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt, DeletedAt: record.DeletedAt}
 }
 
 func fromMessage(message mailapp.EmailMessage) emailMessageRecord {
-	return emailMessageRecord{ID: message.ID, TenantID: message.TenantID, OrgID: stringPtrIfNonEmpty(message.OrgID), SMTPAccountID: stringPtrIfNonEmpty(message.SMTPAccountID), SenderID: stringPtrIfNonEmpty(message.SenderID), Subject: message.Subject, BodyCiphertext: model.BinaryValue(append([]byte(nil), message.BodyCiphertext...)), BodyDigest: message.BodyDigest, Status: string(message.Status), AttemptCount: int32(message.AttemptCount), ProviderMessageID: stringPtrIfNonEmpty(message.ProviderMessageID), LastErrorCode: stringPtrIfNonEmpty(message.LastErrorCode), SentAt: message.SentAt, IdempotencyKey: stringPtrIfNonEmpty(message.IdempotencyKey), CreatedAt: message.CreatedAt, UpdatedAt: message.UpdatedAt, DeletedAt: message.DeletedAt}
+	return emailMessageRecord{ID: message.ID, TenantID: message.TenantID, OrgID: stringPtrIfNonEmpty(message.OrgID), ScopeType: message.ScopeType, SMTPAccountID: stringPtrIfNonEmpty(message.SMTPAccountID), SenderID: stringPtrIfNonEmpty(message.SenderID), CallerKey: stringPtrIfNonEmpty(message.CallerKey), TemplateKey: stringPtrIfNonEmpty(message.TemplateKey), TemplateGeneration: parseUint64Ptr(message.TemplateGeneration), PolicyGeneration: stringPtrIfNonEmpty(message.PolicyGeneration), Locale: stringPtrIfNonEmpty(message.Locale), IsTest: message.IsTest, ChallengeID: stringPtrIfNonEmpty(message.ChallengeID), RelayStatus: message.RelayStatus, Subject: message.Subject, BodyCiphertext: model.BinaryValue(append([]byte(nil), message.BodyCiphertext...)), BodyDigest: message.BodyDigest, Status: string(message.Status), AttemptCount: int32(message.AttemptCount), ProviderMessageID: stringPtrIfNonEmpty(message.ProviderMessageID), LastErrorCode: stringPtrIfNonEmpty(message.LastErrorCode), SentAt: message.SentAt, IdempotencyKey: stringPtrIfNonEmpty(message.IdempotencyKey), IdempotencyScopeHash: stringPtrIfNonEmpty(message.IdempotencyScopeHash), CreatedAt: message.CreatedAt, UpdatedAt: message.UpdatedAt, DeletedAt: message.DeletedAt}
 }
 
 func stringValue(value *string) string {
@@ -373,8 +412,30 @@ func binaryPtr(value []byte) *model.BinaryValue {
 	return &copyValue
 }
 
+func uint64String(value *uint64) string {
+	if value == nil {
+		return ""
+	}
+	// The application/runtime representation is deliberately opaque and uses
+	// the `g-` prefix. Preserve it when loading a durable record so an
+	// idempotent retry compares the same value that was originally sent.
+	return "g-" + strconv.FormatUint(*value, 10)
+}
+
+func parseUint64Ptr(value string) *uint64 {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	parsed, err := strconv.ParseUint(strings.TrimPrefix(value, "g-"), 10, 64)
+	if err != nil {
+		return nil
+	}
+	return &parsed
+}
+
 func messageView(message mailapp.EmailMessage) (mailapp.MessageView, error) {
-	return mailapp.MessageView{ID: message.ID, TenantID: message.TenantID, OrgID: message.OrgID, SMTPAccountID: message.SMTPAccountID, SenderID: message.SenderID, Subject: message.Subject, Recipients: append([]mailapp.Recipient(nil), message.Recipients...), BodyDigest: message.BodyDigest, Status: message.Status, AttemptCount: message.AttemptCount, ProviderMessageID: message.ProviderMessageID, LastErrorCode: message.LastErrorCode, SentAt: message.SentAt, IdempotencyKey: message.IdempotencyKey, CreatedAt: message.CreatedAt, UpdatedAt: message.UpdatedAt}, nil
+	return mailapp.MessageView{ID: message.ID, TenantID: message.TenantID, OrgID: message.OrgID, ScopeType: message.ScopeType, SMTPAccountID: message.SMTPAccountID, SenderID: message.SenderID, CallerKey: message.CallerKey, TemplateKey: message.TemplateKey, TemplateGeneration: message.TemplateGeneration, PolicyGeneration: message.PolicyGeneration, Locale: message.Locale, IsTest: message.IsTest, ChallengeID: message.ChallengeID, RelayStatus: message.RelayStatus, Subject: message.Subject, Recipients: append([]mailapp.Recipient(nil), message.Recipients...), BodyDigest: message.BodyDigest, Status: message.Status, AttemptCount: message.AttemptCount, ProviderMessageID: message.ProviderMessageID, LastErrorCode: message.LastErrorCode, SentAt: message.SentAt, IdempotencyKey: message.IdempotencyKey, CreatedAt: message.CreatedAt, UpdatedAt: message.UpdatedAt}, nil
 }
 
 func newRecordID() string {
@@ -390,4 +451,5 @@ func newRecordID() string {
 var _ mailapp.AccountRepository = (*GORMAccountRepository)(nil)
 var _ mailapp.MessageRepository = (*GORMMessageRepository)(nil)
 var _ mailapp.IdempotencyRepository = (*GORMMessageRepository)(nil)
+var _ mailapp.ScopedIdempotencyRepository = (*GORMMessageRepository)(nil)
 var _ mailapp.AttemptRepository = (*GORMMessageRepository)(nil)

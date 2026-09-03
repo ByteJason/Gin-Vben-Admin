@@ -433,7 +433,9 @@ func contextOrBackground(c *gin.Context) context.Context {
 // metadata helper before they can reach durable session/audit storage.
 func requestContext(c *gin.Context) context.Context {
 	ctx := contextOrBackground(c)
-	metadata := appauth.RequestMetadata{}
+	// Preserve metadata installed by the bearer middleware (principal, locale,
+	// trace and trusted caller) while refreshing transport-specific headers.
+	metadata := appauth.RequestMetadataFromContext(ctx)
 	if c == nil {
 		return appauth.WithRequestMetadata(ctx, metadata)
 	}
@@ -593,6 +595,34 @@ func Middleware(service appauth.AuthService) gin.HandlerFunc {
 			return
 		}
 		c.Set("auth_claims", claims)
+		// Install the verified principal and request correlation metadata before
+		// downstream tenant/IAM/common-capability middleware runs.  The token
+		// subject is the only trusted principal source; caller and locale values
+		// already installed by an earlier trusted adapter are preserved.
+		ctx := contextOrBackground(c)
+		metadata := appauth.RequestMetadataFromContext(ctx)
+		metadata.PrincipalID = claims.Subject
+		if metadata.RequestID == "" {
+			if value, ok := c.Get("request_id"); ok {
+				metadata.RequestID, _ = value.(string)
+			}
+		}
+		if metadata.RequestID == "" {
+			metadata.RequestID = c.GetHeader(httpmiddleware.RequestIDHeader)
+		}
+		if metadata.TraceID == "" {
+			metadata.TraceID = metadata.RequestID
+		}
+		if metadata.Locale == "" {
+			// Keep locale parsing deliberately small at this boundary. The
+			// notification runtime owns the complete fallback chain.
+			if value := strings.TrimSpace(c.GetHeader("Accept-Language")); value != "" {
+				metadata.Locale = strings.TrimSpace(strings.Split(value, ",")[0])
+			}
+		}
+		ctx = appauth.WithRequestMetadata(ctx, metadata)
+		ctx = appauth.WithCapabilityMetadata(ctx, metadata.CallerKey, metadata.Locale, metadata.TraceID, metadata.PrincipalID)
+		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 	}
 }

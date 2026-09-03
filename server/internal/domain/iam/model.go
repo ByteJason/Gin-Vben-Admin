@@ -661,6 +661,13 @@ func pathMatches(policy, request string) bool {
 	if policy == "*" || policy == request {
 		return true
 	}
+	// The media capability moved from the legacy /files adapter to the
+	// canonical /media surface. Keep this narrowly-scoped bridge while old
+	// permission rows and clients are still present; it is deliberately limited
+	// to the two catalog roots and never treats arbitrary prefixes as aliases.
+	if mediaCompatibilityPathMatches(policy, request) {
+		return true
+	}
 	if strings.HasSuffix(policy, "/*") {
 		prefix := strings.TrimSuffix(policy, "*")
 		// A collection prefix includes both its root and descendants. Keeping
@@ -681,6 +688,23 @@ func pathMatches(policy, request string) bool {
 		}
 	}
 	return len(pp) > 0
+}
+
+func mediaCompatibilityPathMatches(policy, request string) bool {
+	const (
+		legacyRoot    = "/api/admin/v1/files"
+		canonicalRoot = "/api/admin/v1/media"
+	)
+	return (mediaCatalogPattern(policy, legacyRoot) && mediaCatalogRequest(request, canonicalRoot)) ||
+		(mediaCatalogPattern(policy, canonicalRoot) && mediaCatalogRequest(request, legacyRoot))
+}
+
+func mediaCatalogPattern(value, root string) bool {
+	return value == root || value == root+"/*"
+}
+
+func mediaCatalogRequest(value, root string) bool {
+	return value == root || strings.HasPrefix(value, root+"/")
 }
 
 func contains(values []string, want string) bool {

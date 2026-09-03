@@ -167,3 +167,11 @@ func TestServiceRequiresPasswordWhenChangingSMTPUsername(t *testing.T) {
 		t.Fatalf("UpdateAccount() error = %v, want ErrInvalidAccount", err)
 	}
 }
+func TestServiceNilReceiverSendReturnsRepositoryError(t *testing.T) {
+	var service *Service
+	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a"})
+	_, err := service.Send(ctx, SendInput{IdempotencyKey: "retry-1", Recipients: []string{"user@example.test"}, Subject: "subject", Body: "body"})
+	if !errors.Is(err, ErrRepositoryFailure) {
+		t.Fatalf("error=%v, want ErrRepositoryFailure", err)
+	}
+}

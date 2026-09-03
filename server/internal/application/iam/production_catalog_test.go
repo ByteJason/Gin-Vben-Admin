@@ -12,12 +12,14 @@ func TestProductionPermissionCatalogSeparatesAuxiliaryReadAndManageBoundaries(t 
 	byID := make(map[string]struct {
 		method string
 		path   string
+		active bool
 	}, len(catalog))
 	for _, permission := range catalog {
 		byID[permission.ID] = struct {
 			method string
 			path   string
-		}{method: permission.Method, path: permission.Path}
+			active bool
+		}{method: permission.Method, path: permission.Path, active: permission.Active}
 	}
 
 	for _, want := range []struct {
@@ -29,8 +31,13 @@ func TestProductionPermissionCatalogSeparatesAuxiliaryReadAndManageBoundaries(t 
 		{readCode: "system:dictionary:read", manageCode: "system:dictionary:manage", path: "/api/admin/v1/dictionaries/*"},
 		{readCode: "system:mail:read", manageCode: "system:mail:manage", path: "/api/admin/v1/mail/*"},
 		{readCode: "system:files:read", manageCode: "system:files:manage", path: "/api/admin/v1/files/*"},
+		{readCode: "media:library:read", manageCode: "media:library:manage", path: "/api/admin/v1/media/*"},
 		{readCode: "ops:tasks:read", manageCode: "ops:tasks:manage", path: "/api/admin/v1/tasks/*"},
 		{readCode: "ops:data-jobs:read", manageCode: "ops:data-jobs:manage", path: "/api/admin/v1/import-export/*"},
+		{readCode: "notification:callers:read", manageCode: "notification:callers:manage", path: "/api/admin/v1/notification/callers/*"},
+		{readCode: "notification:accounts:read", manageCode: "notification:accounts:manage", path: "/api/admin/v1/notification/accounts/*"},
+		{readCode: "notification:templates:read", manageCode: "notification:templates:manage", path: "/api/admin/v1/notification/templates/*"},
+		{readCode: "notification:verification:read", manageCode: "notification:verification:manage", path: "/api/admin/v1/notification/verification/*"},
 	} {
 		read, readOK := byID[want.readCode]
 		manage, manageOK := byID[want.manageCode]
@@ -39,6 +46,18 @@ func TestProductionPermissionCatalogSeparatesAuxiliaryReadAndManageBoundaries(t 
 		}
 		if !manageOK || manage.method != "*" || manage.path != want.path {
 			t.Fatalf("manage permission %q = %+v exists=%v", want.manageCode, manage, manageOK)
+		}
+	}
+	for _, want := range []domain.Permission{
+		{ID: "system:mail:test", Method: http.MethodPost, Path: "/api/admin/v1/mail/accounts/:id/test"},
+		{ID: "notification:templates:publish", Method: http.MethodPost, Path: "/api/admin/v1/notification/templates/:id/publish"},
+		{ID: "notification:templates:test", Method: http.MethodPost, Path: "/api/admin/v1/notification/templates/:id/test"},
+		{ID: "notification:verification-policies:read", Method: http.MethodGet, Path: "/api/admin/v1/notification/verification-policies/*"},
+		{ID: "notification:verification-policies:manage", Method: http.MethodPatch, Path: "/api/admin/v1/notification/verification-policies/:policy_key"},
+	} {
+		got, ok := byID[want.ID]
+		if !ok || got.method != want.Method || got.path != want.Path || !got.active {
+			t.Fatalf("permission %q=%+v exists=%v", want.ID, got, ok)
 		}
 	}
 

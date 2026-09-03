@@ -70,6 +70,9 @@ func TestNewBuildsConfiguredHTTPServerAndKeepsDependenciesOptional(t *testing.T)
 	if app.Database() != nil || app.Redis() != nil {
 		t.Fatal("disabled dependencies must not be constructed")
 	}
+	if app.Settings() == nil {
+		t.Fatal("local single-node fixture should expose in-process settings for branding")
+	}
 	if app.Readiness() == nil {
 		t.Fatal("readiness checker must always be constructed")
 	}
@@ -124,6 +127,53 @@ func TestNewBuildsConfiguredHTTPServerAndKeepsDependenciesOptional(t *testing.T)
 	app.HTTPServer().Handler.ServeHTTP(response, request)
 	if response.Code != http.StatusNotFound {
 		t.Fatalf("ordinary build installation page = %d, want 404", response.Code)
+	}
+}
+
+func TestLocalSettingsEndpointUsesServerOwnedActorForBranding(t *testing.T) {
+	cfg := config.Default()
+	cfg.Auth.Enabled = false
+	cfg.Database.Enabled = false
+	cfg.Redis.Enabled = false
+	service := settingsapp.NewService(settingsapp.NewMemoryRepository(), nil, nil, nil)
+	server := newHTTPServerWithPlanAndCaptcha(
+		cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, service, nil, nil, nil,
+	)
+	body := strings.NewReader(`{"value":{"logoResourceId":"asset-1"},"expectedVersion":0}`)
+	request := httptest.NewRequest(http.MethodPut, "/api/admin/v1/settings/branding", body)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	server.Handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `logoResourceId`) {
+		t.Fatalf("branding update status=%d body=%s", response.Code, response.Body.String())
+	}
+	get := httptest.NewRequest(http.MethodGet, "/api/admin/v1/settings/branding", nil)
+	getResponse := httptest.NewRecorder()
+	server.Handler.ServeHTTP(getResponse, get)
+	if getResponse.Code != http.StatusOK || !strings.Contains(getResponse.Body.String(), `logoResourceId`) {
+		t.Fatalf("branding get status=%d body=%s", getResponse.Code, getResponse.Body.String())
+	}
+}
+
+func TestAuthDisabledMultiTenantSettingsStillRequiresActor(t *testing.T) {
+	cfg := config.Default()
+	cfg.Auth.Enabled = false
+	cfg.Tenant.Enabled = true
+	cfg.Tenant.Mode = "multi"
+	cfg.Database.Enabled = false
+	cfg.Redis.Enabled = false
+	service := settingsapp.NewService(settingsapp.NewMemoryRepository(), nil, nil, nil)
+	server := newHTTPServerWithPlanAndCaptcha(
+		cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, service, nil, nil, nil,
+	)
+	body := strings.NewReader(`{"value":{"logoResourceId":"asset-1"},"expectedVersion":0}`)
+	request := httptest.NewRequest(http.MethodPut, "/api/admin/v1/settings/branding", body)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set(cfg.Tenant.TenantHeader, "tenant-a")
+	response := httptest.NewRecorder()
+	server.Handler.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), `"code":30000`) {
+		t.Fatalf("multi-tenant settings status=%d body=%s, want forbidden", response.Code, response.Body.String())
 	}
 }
 

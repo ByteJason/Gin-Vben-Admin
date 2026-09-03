@@ -13,8 +13,8 @@ import (
 
 func TestDefinitionsExposeOneCommentedModelPerTable(t *testing.T) {
 	definitions := Definitions()
-	if len(definitions) != 27 {
-		t.Fatalf("model definition count = %d, want 27", len(definitions))
+	if len(definitions) != 36 {
+		t.Fatalf("model definition count = %d, want 36", len(definitions))
 	}
 	seen := make(map[string]struct{}, len(definitions))
 	comments := TableComments()
@@ -58,12 +58,89 @@ func TestModelsForPreservesModuleBoundaries(t *testing.T) {
 	if got := len(ModelsFor(ModuleAudit)); got != 1 {
 		t.Fatalf("audit model count = %d, want 1", got)
 	}
-	if got := len(ModelsFor(ModuleAdmin)); got != 21 {
-		t.Fatalf("admin model count = %d, want 21", got)
+	if got := len(ModelsFor(ModuleAdmin)); got != 30 {
+		t.Fatalf("admin model count = %d, want 30", got)
 	}
 	for _, value := range All() {
 		if ModuleFor(value) == "" {
 			t.Fatalf("model %T has no module", value)
+		}
+	}
+}
+
+func TestScopedUniqueIndexesCarryTenantAndOrganizationDimensions(t *testing.T) {
+	want := map[string]struct {
+		index  string
+		fields []string
+	}{
+		"notification_callers":   {index: "uq_notification_callers_scope_key", fields: []string{"tenant_id", "org_id", "scope_type", "caller_key"}},
+		"notification_templates": {index: "uq_notification_templates_scope_key", fields: []string{"tenant_id", "org_id", "scope_type", "template_key"}},
+		"verification_policies":  {index: "uq_verification_policies_scope_key", fields: []string{"tenant_id", "org_id", "scope_type", "policy_key"}},
+		"media_categories":       {index: "uq_media_categories_scope_parent_name", fields: []string{"tenant_id", "org_id", "scope_type", "parent_id", "name"}},
+	}
+	for _, definition := range Definitions() {
+		parsed, err := schema.Parse(definition.New(), &sync.Map{}, schema.NamingStrategy{})
+		if err != nil {
+			t.Fatalf("parse %T: %v", definition.New(), err)
+		}
+		expected, ok := want[parsed.Table]
+		if !ok {
+			continue
+		}
+		var found *schema.Index
+		for _, index := range parsed.ParseIndexes() {
+			if index.Name == expected.index {
+				found = index
+				break
+			}
+		}
+		if found == nil {
+			t.Fatalf("table %s is missing scoped unique index %s", parsed.Table, expected.index)
+		}
+		actual := make(map[string]struct{}, len(found.Fields))
+		for _, field := range found.Fields {
+			actual[field.DBName] = struct{}{}
+		}
+		for _, field := range expected.fields {
+			if _, ok := actual[field]; !ok {
+				t.Fatalf("table %s index %s is missing scoped field %s", parsed.Table, expected.index, field)
+			}
+		}
+		delete(want, parsed.Table)
+	}
+	if len(want) != 0 {
+		t.Fatalf("scoped unique index checks did not visit tables: %v", want)
+	}
+}
+
+func TestMySQLIndexKeyWidthsStayWithinInnoDBLimit(t *testing.T) {
+	// The schema is shared by MySQL and PostgreSQL.  A worst-case utf8mb4
+	// estimate catches accidental full-value indexes on long varchar columns
+	// (InnoDB's default key limit is 3072 bytes) before a fresh install fails.
+	const maxInnoDBKeyBytes = 3072
+	for _, definition := range Definitions() {
+		parsed, err := schema.Parse(definition.New(), &sync.Map{}, schema.NamingStrategy{})
+		if err != nil {
+			t.Fatalf("parse %T: %v", definition.New(), err)
+		}
+		for _, index := range parsed.ParseIndexes() {
+			bytes := 0
+			for _, option := range index.Fields {
+				length := option.Length
+				if length == 0 {
+					length = int(option.Field.Size)
+				}
+				if length > 0 && (option.Field.DataType == schema.String || option.Field.DataType == schema.Bytes) {
+					bytes += length * 4
+				} else {
+					// Numeric/time keys are bounded well below a varchar's
+					// worst-case width; eight bytes is a conservative estimate.
+					bytes += 8
+				}
+			}
+			if bytes > maxInnoDBKeyBytes {
+				t.Fatalf("table %s index %s estimated key width %d exceeds %d bytes", parsed.Table, index.Name, bytes, maxInnoDBKeyBytes)
+			}
 		}
 	}
 }

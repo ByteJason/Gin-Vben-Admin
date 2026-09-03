@@ -1,5 +1,5 @@
 // Generated from contracts/openapi/admin-v1.yaml; DO NOT EDIT.
-// CONTRACT_SHA256=02a81c31821d284aa5bf095b54baa7c4ef33fc64bfaa2198a493d2b051f85139
+// CONTRACT_SHA256=f4a1ed3f4722882411f01a714e8a9cd4137ab607968a8603e16cd0e486b48b96
 
 export const ADMIN_API_PREFIX = '/admin/v1' as const;
 
@@ -104,6 +104,47 @@ export const ADMIN_ENDPOINTS = {
   listEmailMessages: '/admin/v1/mail/messages',
   sendEmailMessage: '/admin/v1/mail/messages',
   getEmailMessage: '/admin/v1/mail/messages/{id}',
+  listNotificationCallers: '/admin/v1/notification/callers',
+  createNotificationCaller: '/admin/v1/notification/callers',
+  getNotificationCaller: '/admin/v1/notification/callers/{id}',
+  updateNotificationCaller: '/admin/v1/notification/callers/{id}',
+  replaceNotificationCaller: '/admin/v1/notification/callers/{id}',
+  deleteNotificationCaller: '/admin/v1/notification/callers/{id}',
+  listNotificationAccounts: '/admin/v1/notification/accounts',
+  createNotificationAccount: '/admin/v1/notification/accounts',
+  updateNotificationAccount: '/admin/v1/notification/accounts/{id}',
+  replaceNotificationAccount: '/admin/v1/notification/accounts/{id}',
+  deleteNotificationAccount: '/admin/v1/notification/accounts/{id}',
+  listNotificationTemplates: '/admin/v1/notification/templates',
+  createNotificationTemplate: '/admin/v1/notification/templates',
+  updateNotificationTemplate: '/admin/v1/notification/templates/{id}',
+  replaceNotificationTemplate: '/admin/v1/notification/templates/{id}',
+  deleteNotificationTemplate: '/admin/v1/notification/templates/{id}',
+  publishNotificationTemplate: '/admin/v1/notification/templates/{id}/publish',
+  testNotificationTemplate: '/admin/v1/notification/templates/{id}/test',
+  listVerificationPolicies: '/admin/v1/notification/verification-policies',
+  updateVerificationPolicy: '/admin/v1/notification/verification-policies/{policy_key}',
+  replaceVerificationPolicy: '/admin/v1/notification/verification-policies/{policy_key}',
+  issueVerificationChallenge: '/admin/v1/notification/verification/challenges',
+  getVerificationChallenge: '/admin/v1/notification/verification/challenges/{id}',
+  verifyVerificationChallenge: '/admin/v1/notification/verification/challenges/{id}/verify',
+  listMediaLibrary: '/admin/v1/media/library',
+  uploadMediaResource: '/admin/v1/media/library',
+  updateMediaResource: '/admin/v1/media/library/{id}',
+  replaceMediaResource: '/admin/v1/media/library/{id}',
+  deleteMediaResource: '/admin/v1/media/library/{id}',
+  listMediaResourceUsage: '/admin/v1/media/library/{id}/usage',
+  listMediaCategories: '/admin/v1/media/categories',
+  createMediaCategory: '/admin/v1/media/categories',
+  updateMediaCategory: '/admin/v1/media/categories/{id}',
+  deleteMediaCategory: '/admin/v1/media/categories/{id}',
+  listMediaUsages: '/admin/v1/media/usages',
+  attachMediaUsage: '/admin/v1/media/usages/{id}',
+  detachMediaUsage: '/admin/v1/media/usages/{id}',
+  getMediaResource: '/admin/v1/media/resources/{id}',
+  openMediaResource: '/admin/v1/media/resources/{id}/open',
+  signMediaResourceURL: '/admin/v1/media/resources/{id}/signed-url',
+  createMediaResourceSignedURL: '/admin/v1/media/resources/{id}/signed-url',
   getDashboardSummary: '/admin/v1/dashboard/summary',
   getDashboardOverview: '/admin/v1/dashboard/overview',
   getMonitorOverview: '/admin/v1/ops/monitor',
@@ -151,6 +192,28 @@ export interface FileObject {
   sha256: string;
 }
 export interface FilePage { items: FileObject[]; total: number; limit: number; offset: number; }
+
+export type MediaURLPurpose = 'preview' | 'download';
+export interface MediaResource {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+  sha256: string;
+  categoryId?: string;
+  scopeType: 'system' | 'tenant' | 'org';
+  acl: 'private' | 'public-read';
+  status: 'pending' | 'ready' | 'failed' | 'deleting' | 'deleted';
+  selectable: boolean;
+  disabledReason?: string;
+  metadata?: Record<string, string>;
+  urlHints?: Record<string, boolean>;
+  reconcileKey?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface MediaPage { items: MediaResource[]; total: number; limit: number; offset: number; nextCursor?: string; hasMore: boolean; }
+export interface MediaSignedURL { url: string; expiresAt: string; }
 
 export interface SMTPAccount {
   id: string;

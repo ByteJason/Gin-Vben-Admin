@@ -209,6 +209,19 @@ func New(cfg config.Config) (*App, error) {
 			app.settings.SetEncryptor(encryptor)
 		}
 		app.audit = auditapp.NewService(auditplatform.NewGORMRepository(app.database))
+	} else if !cfg.Auth.Enabled && cfg.Tenant.Mode == "single" {
+		// The dependency-free single-node profile still needs a durable-in-process
+		// final-state store for branding and other operator settings. Keeping this
+		// branch limited to the explicitly unauthenticated fixture avoids sharing
+		// settings between authenticated tenants when no database is configured.
+		app.settingsRepository = settingsapp.NewMemoryRepository()
+		app.settings = settingsapp.NewService(app.settingsRepository, nil, nil, nil)
+	}
+	if app.settings != nil {
+		// Every mutable setting publishes an immutable local snapshot immediately;
+		// a database-backed deployment can later subscribe a Pub/Sub invalidator
+		// without changing the HTTP or application contracts.
+		app.settings.SetRuntimeSnapshotStore(settingsapp.NewRuntimeSnapshotStore())
 	}
 
 	// The 1.0 mail service is available in both database-backed and local

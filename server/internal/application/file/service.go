@@ -66,18 +66,6 @@ type Config struct {
 	Clock        func() time.Time
 }
 
-type UploadInput struct {
-	Name       string
-	MIME       string
-	Size       int64
-	OwnerID    string
-	TenantID   string
-	OrgID      string
-	ACL        ACL
-	Data       []byte
-	CategoryID string
-}
-
 type File struct {
 	ID         string
 	Key        string
@@ -108,13 +96,9 @@ type Category struct {
 	ParentID  string    `json:"parentId,omitempty"`
 	TenantID  string    `json:"tenantId,omitempty"`
 	OrgID     string    `json:"orgId,omitempty"`
+	Enabled   bool      `json:"enabled"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
-}
-
-type CategoryInput struct {
-	Name     string `json:"name"`
-	ParentID string `json:"parentId,omitempty"`
 }
 
 type Page struct {
@@ -134,13 +118,27 @@ type readableStore interface {
 	Get(context.Context, string) (Object, error)
 }
 
+// fileAccess is the application-internal authorization input. Legacy public
+// methods always construct a non-privileged value; CatalogAdapter derives the
+// platformAdmin bit only from a validated tenant context.
+type fileAccess struct {
+	subject       string
+	tenantID      string
+	orgID         string
+	platformAdmin bool
+}
+
 type Service struct {
-	store      Store
-	maxBytes   int64
-	allowed    map[string]struct{}
-	clock      func() time.Time
-	mu         sync.RWMutex
-	files      map[string]File
+	store    Store
+	maxBytes int64
+	allowed  map[string]struct{}
+	clock    func() time.Time
+	mu       sync.RWMutex
+	files    map[string]File
+	// deleted retains tombstones until the object-store cleanup worker removes
+	// the provider object. Legacy DeleteFile still hard-deletes immediately;
+	// CatalogAdapter uses SoftDeleteFile to preserve the public media lifecycle.
+	deleted    map[string]time.Time
 	categories map[string]Category
 }
 
@@ -153,7 +151,7 @@ func NewService(store Store, config Config) *Service {
 	if clock == nil {
 		clock = time.Now
 	}
-	return &Service{store: store, maxBytes: config.MaxBytes, allowed: allowed, clock: clock, files: make(map[string]File), categories: make(map[string]Category)}
+	return &Service{store: store, maxBytes: config.MaxBytes, allowed: allowed, clock: clock, files: make(map[string]File), deleted: make(map[string]time.Time), categories: make(map[string]Category)}
 }
 
 func (s *Service) Upload(ctx context.Context, input UploadInput) (File, error) {
@@ -230,6 +228,9 @@ func (s *Service) List(_ context.Context, filter ListFilter) (Page, error) {
 	s.mu.RLock()
 	items := make([]File, 0, len(s.files))
 	for _, item := range s.files {
+		if _, removed := s.deleted[item.ID]; removed {
+			continue
+		}
 		if filter.TenantID != "" && item.TenantID != filter.TenantID {
 			continue
 		}
@@ -282,7 +283,11 @@ func (s *Service) CreateCategory(_ context.Context, input CategoryInput, tenantI
 		return Category{}, err
 	}
 	now := s.clock().UTC()
-	c := Category{ID: id, Name: name, ParentID: parentID, TenantID: strings.TrimSpace(tenantID), OrgID: strings.TrimSpace(orgID), CreatedAt: now, UpdatedAt: now}
+	enabled := true
+	if input.Enabled != nil {
+		enabled = *input.Enabled
+	}
+	c := Category{ID: id, Name: name, ParentID: parentID, TenantID: strings.TrimSpace(tenantID), OrgID: strings.TrimSpace(orgID), Enabled: enabled, CreatedAt: now, UpdatedAt: now}
 	s.categories[id] = c
 	return c, nil
 }
@@ -303,6 +308,36 @@ func (s *Service) ListCategories(_ context.Context, tenantID, orgID string) []Ca
 		return out[i].ParentID < out[j].ParentID
 	})
 	return out
+}
+
+// ListAllCategories is reserved for an explicitly resolved platform
+// administrator.  The legacy ListCategories method keeps its exact-scope
+// semantics for tenant handlers, while the catalog adapter can still inspect
+// every scope when it is building an administrative picker or mutating a
+// cross-scope category.
+func (s *Service) ListAllCategories(_ context.Context) []Category {
+	s.mu.RLock()
+	out := make([]Category, 0, len(s.categories))
+	for _, category := range s.categories {
+		out = append(out, category)
+	}
+	s.mu.RUnlock()
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].ParentID == out[j].ParentID {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].ParentID < out[j].ParentID
+	})
+	return out
+}
+
+// GetCategory returns a detached category for catalog adapters that have
+// already passed a platform-admin authorization check.
+func (s *Service) GetCategory(_ context.Context, id string) (Category, bool) {
+	s.mu.RLock()
+	category, ok := s.categories[strings.TrimSpace(id)]
+	s.mu.RUnlock()
+	return category, ok
 }
 
 func (s *Service) UpdateCategory(_ context.Context, id string, input CategoryInput, tenantID, orgID string) (Category, error) {
@@ -338,6 +373,9 @@ func (s *Service) UpdateCategory(_ context.Context, id string, input CategoryInp
 		}
 		c.ParentID = p.ID
 	}
+	if input.Enabled != nil {
+		c.Enabled = *input.Enabled
+	}
 	c.UpdatedAt = s.clock().UTC()
 	s.categories[c.ID] = c
 	return c, nil
@@ -369,7 +407,11 @@ func (s *Service) DeleteCategory(_ context.Context, id, tenantID, orgID string) 
 }
 
 func (s *Service) Download(ctx context.Context, id, subject, tenantID, orgID string) (File, Object, error) {
-	file, err := s.authorize(id, subject, tenantID, orgID)
+	return s.downloadWithAccess(ctx, id, fileAccess{subject: subject, tenantID: tenantID, orgID: orgID})
+}
+
+func (s *Service) downloadWithAccess(ctx context.Context, id string, access fileAccess) (File, Object, error) {
+	file, err := s.authorizeAccess(id, access)
 	if err != nil {
 		return File{}, Object{}, err
 	}
@@ -398,8 +440,117 @@ func (s *Service) DeleteFile(ctx context.Context, id, subject, tenantID, orgID s
 	}
 	s.mu.Lock()
 	delete(s.files, id)
+	delete(s.deleted, id)
 	s.mu.Unlock()
 	return nil
+}
+
+// SoftDeleteFile marks a resource deleted while leaving its provider object
+// available for an asynchronous cleanup worker. Reads and listings treat the
+// tombstone as absent, and the operation remains scope/ACL checked.
+func (s *Service) SoftDeleteFile(ctx context.Context, id, subject, tenantID, orgID string, at time.Time) error {
+	return s.softDeleteFileWithAccess(ctx, id, fileAccess{subject: subject, tenantID: tenantID, orgID: orgID}, at)
+}
+
+func (s *Service) softDeleteFileWithAccess(_ context.Context, id string, access fileAccess, at time.Time) error {
+	if s == nil {
+		return ErrFileNotFound
+	}
+	file, err := s.authorizeAccess(id, access)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	if _, already := s.deleted[file.ID]; already {
+		s.mu.Unlock()
+		return nil
+	}
+	if s.deleted == nil {
+		s.deleted = make(map[string]time.Time)
+	}
+	s.deleted[file.ID] = at.UTC()
+	s.mu.Unlock()
+	return nil
+}
+
+// CleanupDeleted permanently removes tombstoned objects older than age and
+// returns the number of provider objects reclaimed. It is a narrow seam for a
+// jobs worker; callers keep authorization and scheduling outside this method.
+func (s *Service) CleanupDeleted(ctx context.Context, age time.Duration) (int, error) {
+	if s == nil || s.store == nil || age < 0 {
+		return 0, ErrInvalidUpload
+	}
+	cutoff := s.clock().UTC().Add(-age)
+	s.mu.RLock()
+	ids := make([]string, 0)
+	for id, deletedAt := range s.deleted {
+		if !deletedAt.After(cutoff) {
+			ids = append(ids, id)
+		}
+	}
+	s.mu.RUnlock()
+	removed := 0
+	for _, id := range ids {
+		s.mu.RLock()
+		file, exists := s.files[id]
+		s.mu.RUnlock()
+		if !exists {
+			continue
+		}
+		if err := s.store.Delete(ctx, file.Key); err != nil && !errors.Is(err, ErrFileNotFound) {
+			return removed, fmt.Errorf("delete file %s: %w", id, err)
+		}
+		s.mu.Lock()
+		delete(s.files, id)
+		delete(s.deleted, id)
+		s.mu.Unlock()
+		removed++
+	}
+	return removed, nil
+}
+
+// UpdateFile changes the mutable metadata owned by the application catalog.
+// Object bytes and provider keys stay immutable; callers can rename a file or
+// move it to another category after the same scope/ACL check used by reads.
+func (s *Service) UpdateFile(ctx context.Context, id, subject, tenantID, orgID string, patch ResourcePatch) (File, error) {
+	return s.updateFileWithAccess(ctx, id, fileAccess{subject: subject, tenantID: tenantID, orgID: orgID}, patch)
+}
+
+func (s *Service) updateFileWithAccess(_ context.Context, id string, access fileAccess, patch ResourcePatch) (File, error) {
+	if s == nil {
+		return File{}, ErrFileNotFound
+	}
+	file, err := s.authorizeAccess(id, access)
+	if err != nil {
+		return File{}, err
+	}
+	if strings.TrimSpace(file.TenantID) == "" && !access.platformAdmin && access.tenantID != "" {
+		return File{}, ErrAccessDenied
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if patch.Name != nil {
+		name := strings.TrimSpace(*patch.Name)
+		if name == "" || strings.ContainsAny(name, "\r\n") {
+			return File{}, ErrInvalidUpload
+		}
+		file.Name = name
+	}
+	if patch.CategoryID != nil {
+		categoryID := strings.TrimSpace(*patch.CategoryID)
+		if categoryID != "" {
+			category, exists := s.categories[categoryID]
+			if !exists {
+				return File{}, ErrCategoryNotFound
+			}
+			if category.TenantID != file.TenantID || category.OrgID != file.OrgID {
+				return File{}, ErrCategoryAccessDenied
+			}
+		}
+		file.CategoryID = categoryID
+	}
+	s.files[file.ID] = file
+	return file, nil
 }
 
 func (s *Service) CleanupDryRun(_ context.Context, age time.Duration, scopes ...string) (CleanupReport, error) {
@@ -433,19 +584,27 @@ func (s *Service) CleanupDryRun(_ context.Context, age time.Duration, scopes ...
 }
 
 func (s *Service) authorize(id, subject, tenantID, orgID string) (File, error) {
+	return s.authorizeAccess(id, fileAccess{subject: subject, tenantID: tenantID, orgID: orgID})
+}
+
+func (s *Service) authorizeAccess(id string, access fileAccess) (File, error) {
 	s.mu.RLock()
 	file, ok := s.files[strings.TrimSpace(id)]
+	_, removed := s.deleted[strings.TrimSpace(id)]
 	s.mu.RUnlock()
-	if !ok {
+	if !ok || removed {
 		return File{}, ErrFileNotFound
 	}
-	if tenantID != "" && file.TenantID != "" && file.TenantID != tenantID {
+	if access.platformAdmin {
+		return file, nil
+	}
+	if access.tenantID != "" && file.TenantID != "" && file.TenantID != access.tenantID {
 		return File{}, ErrAccessDenied
 	}
-	if orgID != "" && file.OrgID != "" && file.OrgID != orgID {
+	if access.orgID != "" && file.OrgID != "" && file.OrgID != access.orgID {
 		return File{}, ErrAccessDenied
 	}
-	if file.ACL != ACLPublicRead && file.OwnerID != "" && file.OwnerID != subject {
+	if file.ACL != ACLPublicRead && file.OwnerID != "" && file.OwnerID != access.subject {
 		return File{}, ErrAccessDenied
 	}
 	return file, nil
@@ -475,10 +634,14 @@ func (s *Service) SignedURL(ctx context.Context, id, subject string, ttl time.Du
 
 // SignedURLFor applies tenant and organization checks before provider signing.
 func (s *Service) SignedURLFor(ctx context.Context, id, subject, tenantID, orgID string, ttl time.Duration) (string, error) {
+	return s.signedURLWithAccess(ctx, id, fileAccess{subject: subject, tenantID: tenantID, orgID: orgID}, ttl)
+}
+
+func (s *Service) signedURLWithAccess(ctx context.Context, id string, access fileAccess, ttl time.Duration) (string, error) {
 	if ttl <= 0 {
 		return "", ErrInvalidUpload
 	}
-	file, err := s.authorize(id, subject, tenantID, orgID)
+	file, err := s.authorizeAccess(id, access)
 	if err != nil {
 		return "", err
 	}

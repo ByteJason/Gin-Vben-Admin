@@ -1,12 +1,13 @@
-# 公共能力开发使用文档（开发实施规划）
+# 公共能力开发使用文档（开发实施与接线）
 
-> **状态：** `accepted-pending-implementation`（仅完成需求与技术规划，尚未声称功能已实现）
+> **状态：** `in-progress`（首个实现切片已落地，生产化收口持续进行）
 > **批次：** `B1.7d-common-capabilities`
-> **更新时间：** 2026-09-02
+> **更新时间：** 2026-09-03
 > **适用范围：** Go 后端内部调用、管理端 SMTP/媒体库、三套管理端 UI 的统一接线。
-> **基线：** 当前工作区 `main`；本文建立时目标文件不存在，基线 SHA-256 记为 `N/A`。
+> **基线：** 当前工作区 `main`；实现切片与文档同步更新，验证记录位于 `.runtime/evidence/`。
 
-本文是开发者使用和实现公共能力的长期入口。本文件只保留已确认的目标契约、实现约束、示例和验收方式；代码接入前请先阅读“当前实现与目标差异”，规划接口在实现完成前仅作为契约参考。
+本文是开发者使用和实现公共能力的长期入口。本文件保留已确认契约、当前实现路径、实现约束、示例和验收方式；
+代码接入时请先阅读“当前实现与目标差异”，生产部署前按差异表完成收口项。
 
 ## 1. 目标与边界
 
@@ -33,13 +34,13 @@
 
 | 能力 | 当前代码事实 | 目标改造 |
 | --- | --- | --- |
-| SMTP | `server/internal/application/mail.Service` 已有租户账号、投递记录、重试和密文正文；账号选择是服务级策略，同步发送；caller、模板和验证码仍缺统一公共契约 | 增加 caller/模板/策略解析，统一 `MailSender`、`NotificationService`、`VerificationCodeService` 和 outbox worker |
-| 密码找回 | `bootstrap/app.go` 仍用独立的 `notification.Service`/静态 SMTP provider | 迁移到公共通知入口，保留一个真实调用方作为迁移验收 |
-| 媒体 | `server/internal/application/file.Service` 的元数据和分类在进程 map；`Upload`/provider 使用 `[]byte`；本地 provider 可用 | 引入持久化 repository、显式作用域、流式 provider port、生命周期状态和 `MediaCatalog` |
-| 文件模型 | `file_objects` 有 tenant、object key、name、MIME、size、hash、owner、ACL；没有 category/provider/status/metadata | 通过显式 admin migration 扩展字段并添加 `media_categories`、`media_usages` |
-| 设置 | `settings.Service` 已有版本化 repository、加密和审计接口；应用服务在启动时构造；部分 mail/file 定义标记 `RestartRequired` | 动态字段由 immutable snapshot + 隐藏 generation + 失效通知驱动；启动级拓扑仍受控重载 |
+| SMTP | `server/internal/application/mail.Service` 保留租户账号、投递记录、重试和密文正文；`server/internal/application/mail/ports.go`、`server/internal/application/notification/runtime.go` 已提供 caller/模板/策略解析、同步测试发送和验证码入口 | 持久化 outbox/relay、真实 provider 健康回退和审计落库继续收口 |
+| 密码找回 | `server/internal/bootstrap/http.go` 构造并注入公共 notification runtime；预置 caller/template/policy 可通过管理端热更新 | 迁移一个真实密码找回或通知调用方，完成端到端回归 |
+| 媒体 | `server/internal/application/file/catalog.go` 提供 `CatalogAdapter`/`MediaCatalog`，支持流式上传、作用域、分类、签名 URL、引用保护和预置 reconcile | 持久化 catalog repository、对象存储清理 worker 和配额对账继续收口 |
+| 文件模型 | `file_objects` 已扩展 category/provider/status/metadata/reconcile 字段；新增 `media_categories`、`media_usages` 模型 | 双库兼容迁移、旧数据回填和生产回滚演练 |
+| 设置 | `server/internal/application/settings/runtime_snapshot.go` 提供 immutable snapshot、generation 和订阅失效；应用服务可即时读取最终态 | 集群广播与持久化审计接线继续收口 |
+| UI/API | 三套 `system/mail`、`system/files` 页面已接入共享引导 schema、侧边抽屉、媒体图片筛选基础能力；`admin/packages/api-client/src/generated/admin-v1.ts` 已由 OpenAPI 生成并包含 challenge/media endpoint 常量 | 模板管理交互、Logo 业务引用和 E2E/axe 一致性验收 |
 | 任务 | 已有 `jobs.Queue`/worker 和持久化任务相关能力 | outbox relay、provider 清理、补偿和 reconcile 复用具名 jobs port |
-| UI/API | 三套 UI 共享 `admin/packages/api-client/src/generated/admin-v1.ts` 类型和 endpoint；已有 `/system/files` 页面及兼容路由 | 先更新共享类型，再由三套 UI adapter 实现等价媒体选择器、说明抽屉和管理界面 |
 
 当前实现的内存 map 在服务重启后缺少完整的文件元数据恢复链。若现场存在旧数据，正式切换前建立 manifest/双写回填并完成 owner、分类和 ACL 对账；对象目录扫描仅作为补充线索。
 
@@ -66,9 +67,13 @@ audit.Publisher + jobs.Dispatcher + dictionary.Reader/LocaleResolver
 - 所有 mutation 产生统一 audit envelope（request ID、actor、scope、resource、result、脱敏字段）。
 - List 默认返回 metadata，不返回正文/验证码/对象字节；二进制和受控正文必须显式调用读取接口。
 
-## 4. 目标 Go 公共契约（规划 API）
+本地无认证单节点 profile（`auth.enabled=false` 且有效 tenant mode 为 `single`）可由服务端注入
+`system.admin` actor 以便立即保存 branding；auth 关闭但 tenant 为 `multi` 时不会注入该 actor，
+设置写入仍要求已验证的管理身份。
 
-下列代码是目标形状的示意，名称和包路径在实现切片中冻结；未完成前请使用适配器，避免出现第二份业务实现。
+## 4. 已冻结 Go 公共契约（实现 API）
+
+下列代码是当前实现形状，名称和包路径已冻结；业务模块直接依赖这些窄接口，避免出现第二份业务实现。
 本节未限定的 `SendResult`、`Recipient`、`SendMode`、`DeliveryStatus` 由
 `notification/ports.go` 作为 provider-neutral DTO 统一定义，`mail/ports.go` 以类型别名暴露；
 `NotificationRequest`、`IssueRequest`、`VerifyRequest` 属于 `notification` 包，媒体 DTO 与
@@ -214,6 +219,7 @@ type MediaFilter struct {
     ScopeType             ScopeType
     IncludeDescendants    bool
     OwnerID, Cursor        string
+    Offset                int // 旧客户端兼容；同时提供 cursor 时 cursor 优先
     Limit                 int
     Status                MediaStatus
 }
@@ -251,7 +257,7 @@ type DetachRequest struct {
 }
 ```
 
-目标 `UploadInput` 使用 `io.Reader`、声明大小、文件名、ACL、category、metadata 和幂等键；兼容阶段可由 `[]byte` adapter 包装，但 HTTP 层不得无限制 `ReadAll`。provider 目标 port 至少包含 `Put`、`Stat`、`Open`、`Delete`、`SignURL`；远端 provider 不应把对象内容塞回 metadata。
+当前 `UploadInput` 使用 `io.Reader`、声明大小、文件名、ACL、category、metadata 和幂等键；兼容适配器可包装 `[]byte`，但 HTTP 层不得无限制 `ReadAll`。当前 `file.Store` 契约包含 `Put`、`Delete`、`SignURL`，支持读取的 provider 可额外实现 `Get` seam 供 `Open` 使用；持久化远端 provider 在后续切片扩展 `Stat`/流式 `Open` 时仍不得把对象内容塞回 metadata。
 
 `ResourceRef` 只包含 opaque ID、名称、canonical MIME、大小、SHA-256、category、scope、ACL、status、created/updated 时间、provider-neutral URL hints，以及供 Logo 选择器使用的 `Selectable`/`DisabledReason`。`List` 使用 `created_at DESC, id DESC` 稳定 cursor；`offset` 仅为旧路由兼容。过滤器首期支持：
 
@@ -262,23 +268,23 @@ type DetachRequest struct {
 | `CategoryID` + `IncludeDescendants` | 明确是否包含整棵子树 |
 | `OwnerID`、名称前缀/包含 | 受授权范围约束 |
 | 大小/创建时间 | 有上下界，避免无界扫描 |
-| ACL、status、cursor、limit、sort | 默认仅 `ready` 且 limit 有上限 |
+| ACL、status、cursor、offset、limit、sort | 默认仅 `ready` 且 limit 有上限；同时提供 cursor/offset 时 cursor 优先 |
 
 “获取整个资源库”应理解为受限分页迭代；大批量导出另走 jobs/artifact，不返回无限内存切片。
 
 ### 4.5 作用域与引用
 
-目标使用显式 `scope_type=system|tenant|org`。可见性查找顺序为 **org → tenant → system**（组织覆盖租户，租户覆盖系统；当前层未命中再回退）。系统资源只读；租户/组织可复制后覆盖。全局资源使用显式 system scope 表示；实现需要扩展当前 `tenant.Context.CheckResource` 或采用受控 sentinel，并补充迁移/授权测试。
+当前实现使用显式 `scope_type=system|tenant|org`。可见性查找顺序为 **org → tenant → system**（组织覆盖租户，租户覆盖系统；当前层未命中再回退）。非公开资源还必须匹配当前 principal；platform-admin 仅在内部 catalog 授权 seam 显式放宽跨作用域检查，系统资源始终只读。租户/组织可复制后覆盖。生产化仍需补齐双库迁移、回填和授权回归。
 
-`media_usages` 记录 `resource_id、scope、caller/module、entity_type、entity_id、field`，并以唯一键防重复；`Attach`/`Detach` 的 `UsageInput`/`DetachRequest` 带业务幂等键。Logo、导入工件等引用资源时先写 usage，再更新业务设置；被引用资源只能软删除/停用，物理清理由后台任务执行。
+`media_usages` 记录 `resource_id、scope、caller/module、entity_type、entity_id、field`，并以唯一键防重复；`Attach`/`Detach` 的 `UsageInput`/`DetachRequest` 带业务幂等键。当前 Logo adapter 读取旧值后先更新 branding 设置，再绑定新 usage、解绑旧 usage；任一步失败时补偿设置和新旧 usage，页面保留旧 Logo。后续持久化实现将设置与 usage 纳入服务端事务。被引用资源只能软删除/停用，物理清理由后台任务执行。
 
-## 5. 数据模型与迁移规划
+## 5. 数据模型与迁移（实现切片与收口项）
 
 迁移必须遵守仓库约定：显式 `server/migrations/versions/admin/v002_*.go`，Up/Down、锁和校验齐全；启动流程不使用 AutoMigrate；模型只保留标量 `*_id`，不声明 GORM 关系或数据库外键。`model/registry.go`、`comments.go`、`relations.go` 及硬编码契约测试要同步更新。
 
 ### 5.1 媒体表
 
-**`file_objects` 扩展（规划）**：
+**`file_objects` 扩展（已落地切片）**：
 
 ```text
 scope_type, category_id, provider_id, lifecycle_status,
@@ -317,7 +323,11 @@ module, entity_type, entity_id, field, created_at, updated_at, deleted_at
 
 ### 5.3 预置图片 manifest
 
-预置图使用稳定 `asset_key`（例如 `system.logo.default`，实际名称由实现常量冻结）与 SHA-256 manifest；manifest/reconcile 可重复执行，资源 ID 与 provider object key 分离。系统资源只读，租户通过复制后覆盖；复制出的资源计入租户配额，系统预置资源从租户配额统计中排除。若实际图片尚未提供，使用 `PRESET_IMAGE_1` typed slot，并在实现门禁中补齐真实路径、hash、MIME 和尺寸。
+预置图使用稳定 `asset_key=system.logo.default` 与 SHA-256 manifest；当前内置文件为
+`server/internal/application/file/assets/system-logo-default.svg`，MIME 为 `image/svg+xml`，
+SHA-256 为 `641cdc62fb9093ed5715f0792b611a70c0dc7a8f65246b409cdbcb30822b36e1`。
+`CatalogAdapter.ReconcilePreset` 可重复执行并返回同一 opaque resource ID；系统资源只读，租户通过复制后覆盖。
+持久化 manifest、配额对账和双库回填仍属于生产化收口项。
 
 ## 6. 运行时流程与状态机
 
@@ -337,6 +347,9 @@ module, entity_type, entity_id, field, created_at, updated_at, deleted_at
 
 ### 6.2 生产邮件、测试邮件与验证码
 
+当前实现切片使用进程内 runtime map 和已有 mail service 适配器完成状态、模板、限流、幂等与同步发送验证；
+下列流程图是生产持久化 outbox/relay 的冻结接线目标，迁移与 relay 收口前不要把内存状态当作跨重启权威数据。
+
 ```text
 Issue
   └─ DB transaction: verification_challenge(pending_send)
@@ -350,7 +363,7 @@ Issue
 - DB challenge + email outbox 在同一数据库事务；Redis 限流/热点摘要和队列发布采用 relay 的最终一致语义。
 - worker 发送前检查 challenge 是否仍是最新、未取消、未过期；重发会使旧记录 `superseded`。
 - SMTP 已接受但 worker 在更新 DB 前崩溃的窗口，使用 provider message ID、attempt 记录和 reconcile 任务去重/补偿；网络发送按幂等键与补偿任务管理。
-- 管理端连接测试只做 DNS/TCP/TLS/EHLO/AUTH，不产生生产消息；模板测试可注入固定测试变量，`is_test=true`，独立于可校验 challenge，并受收件人 allowlist/审计约束。
+- 管理端连接测试只做 DNS/TCP/TLS/EHLO/AUTH，不产生生产消息；模板测试可注入固定测试变量，`is_test=true`，独立于可校验 challenge，并写入审计。收件人 allowlist 的配置/策略存储在 P2/P7 收口接入前，不将当前切片当作生产 allowlist 约束。
 - Redis 清空或不可用时，验证码按 fail-closed 处理；DB challenge 是权威状态，Redis 仅限流/热点摘要。
 
 状态枚举：
@@ -370,18 +383,18 @@ pending (metadata + provider intent)
 ready → deleting (soft delete) → deleted (physical cleanup job)
 ```
 
-每个对象固定所属 provider；切换默认 provider 只影响新上传，历史对象迁移走独立任务。hash 冲突按既有 DEC-091 进入提示分支，上传同时校验扩展名、canonical MIME、内容探测、大小、配额和预留的病毒扫描 hook。`Open` 支持取消/限流，HTTP 层按 Range/Content-Length 需要实现流式响应。
+每个对象固定所属 provider；切换默认 provider 只影响新上传，历史对象迁移走独立任务。hash 冲突按既有 DEC-091 进入提示分支，上传同时校验扩展名、canonical MIME、内容探测、大小、配额和预留的病毒扫描 hook。`Open` 支持取消/限流，当前 HTTP adapter 支持单一 `Range` 并返回 206/Content-Range；多段 Range 与真实远端流式 provider 仍在生产化收口。
 
 ### 6.4 语言回退
 
 模板 locale 解析顺序：显式调用 locale → `users.locale` → 租户默认 → 系统默认（当前核心为 `zh-CN`、`en-US`）。邮件记录保存实际 locale、template key/generation；缺译时回退并写审计提示。正式开发需给 `users` 增加 locale 字段和 migration。
 
-## 7. 管理 API 与 UI 规划
+## 7. 管理 API 与 UI（实现与收口）
 
 ### 7.1 管理 API（HTTP）
 
-HTTP 仅供管理端和受控测试，不是业务模块公共调用入口。具体目标端点、当前 `/mail/*` 与 `/files/*`
-兼容端点及方法/operationId 见 [精简 API 对接参考](../integration/common-capabilities-api.md#7-管理端-http)。目标资源：
+HTTP 仅供管理端和受控测试，不是业务模块公共调用入口。已实现端点、当前 `/mail/*` 与 `/files/*`
+兼容端点及方法/operationId 见 [精简 API 对接参考](../integration/common-capabilities-api.md)。资源清单：
 
 ```text
 /api/admin/v1/notification/callers
@@ -391,11 +404,13 @@ HTTP 仅供管理端和受控测试，不是业务模块公共调用入口。具
 /api/admin/v1/mail/accounts
 /api/admin/v1/mail/messages
 /api/admin/v1/media/library
-/api/admin/v1/media/library/{id}
+/api/admin/v1/media/library/{id}   # PATCH/PUT/DELETE
 /api/admin/v1/media/categories
 /api/admin/v1/media/resources/{id}
 /api/admin/v1/media/resources/{id}/open|signed-url
-/api/admin/v1/branding/logo
+/api/admin/v1/media/usages[/{id}]
+/api/admin/v1/media/library/{id}/usage
+/api/admin/v1/settings/branding   # 复用设置中心保存 logoResourceId
 ```
 
 现有后端 `/api/admin/v1/files` 与前端 UI 路由 `/system/files` 保留兼容窗口，由 adapter 转发到 `MediaCatalog`；新媒体端点统一使用 cursor、scope、MIME/category filters 和 `selectable`/`disabledReason` 元数据。所有 ID 路径参数 URL 编码，TTL 有上限（推荐默认 15 分钟、最大 24 小时）。
@@ -412,10 +427,10 @@ notification:templates:read/manage/publish/test
 notification:verification:read/manage
 system:mail:read/manage/test
 media:library:read/manage
-branding:logo:read/manage
+system:settings:read/manage     # Logo 设置沿用设置中心权限
 ```
 
-每项 mutation 和测试动作写审计：`caller.created/updated/disabled`、`template.published/tested/rolled_back`、`verification.policy.updated`、`mail.account.tested`、`mail.message.queued/sent/failed`、`media.uploaded/moved/soft_deleted/restored`、`branding.logo.changed`。审计只保留脱敏 recipient、摘要、ID、scope、policy/template generation；不记录密码、验证码、正文或对象密钥。
+每项 mutation 和测试动作写审计：`caller.created/updated/disabled`、`template.published/tested/rolled_back`、`verification.policy.updated`、`mail.account.tested`、`mail.message.queued/sent/failed`、`media.uploaded/moved/soft_deleted/restored`、`settings.branding.updated`。审计只保留脱敏 recipient、摘要、ID、scope、policy/template generation；不记录密码、验证码、正文或对象密钥。
 
 ### 7.3 使用说明引导
 
@@ -424,7 +439,7 @@ SMTP 和媒体库页面都提供“使用说明”入口，打开侧边抽屉并
 1. **普通使用流程：** 页面用途、权限、常见操作、失败提示和恢复动作。
 2. **开发者对接流程：** Go 接口、请求字段、错误处理、幂等、scope 要求和示例。
 
-三套 UI 共用 guide schema（步骤 ID、locale、标题、正文、代码块、权限、错误 key、外链），前端本地化静态 JSON 优先；引导可关闭、可再次打开，已读状态按用户保存并支持租户重置。后台编辑需求进入独立 guide 资源与权限设计，静态引导继续与邮件模板分离。
+当前三套 UI 共用轻量 guide schema（标题、受众、普通步骤、开发者步骤和 locale 文案），前端本地化静态 JSON 优先；抽屉支持 Esc/遮罩关闭、再次打开及焦点返回。步骤 ID、代码块、权限、错误 key、外链、已读状态和租户重置属于后续 P5 扩展。后台编辑需求进入独立 guide 资源与权限设计，静态引导继续与邮件模板分离。
 
 **SMTP 普通使用步骤：**
 
@@ -464,13 +479,13 @@ SMTP 和媒体库页面都提供“使用说明”入口，打开侧边抽屉并
 - 查询所有当前主体可见的 system/tenant/org 分类和子分类，合并顺序 org→tenant→system、去重并稳定排序。
 - 所有资源仍显示；`image/*` 可选，非图片保留条目并显示置灰、`aria-disabled` 和 `disabledReason`，键盘操作跳过选择。
 - 直接上传必须先通过 image MIME/内容检测；上传成功后自动选中，失败不修改旧 Logo。
-- 保存的是 `resource_id`（而非最终 URL），同时写 `media_usages(module=branding, field=logo)`；被引用资源软删除前提示/保护。
+- 保存的是 `resource_id`（而非最终 URL），同时写 `media_usages(module=branding, field=logo)`；切换时按“设置 → 新 usage → 旧 usage”执行，失败则反向补偿并保留旧 Logo；被引用资源软删除前提示/保护。
 - 预置图使用 manifest asset key；更换 provider 或签名 URL 不需要改前端配置。
 - 管理端 Logo 选择器验收前先执行预置图片 1 的 seed/reconcile，确保 `system.logo.default` 已出现在可见资源页。
 
 ## 8. 开发者接入示例
 
-> 示例仅展示目标契约；`catalog`、`notify`、`verify` 由依赖注入提供，`ctx` 必须已经安装可信 tenant/principal scope。
+> 示例展示当前契约；`catalog`、`notify`、`verify` 由依赖注入提供，`ctx` 必须已经安装可信 tenant/principal scope。
 > 示例中的 `mail`、`notification`、`file` 分别对应 `server/internal/application/mail`、
 > `server/internal/application/notification`、`server/internal/application/file` 包；import 行按项目模块路径补齐。
 
@@ -576,17 +591,26 @@ for _, resource := range page.Items {
 - 媒体：分类树/移动环路校验、上传/预览/下载/签名 URL/软删、MIME/category 过滤、预置图和 Logo 选择器。
 - 引导：普通/开发者两个分段、关闭后重开、多语言缺译回退、错误 key 与示例代码可复制。
 
-### 10.3 建议命令（实现切片完成后执行）
+### 10.3 验证命令（当前切片已执行）
 
 ```bash
-go -C server test ./...
-go -C server vet ./...
-pnpm --dir admin run check:type
-pnpm --dir admin run build
-pnpm --dir admin run test:smoke
+cd server
+GOCACHE=/tmp/autochatgpt-go-cache GOTMPDIR=/tmp go test ./internal/bootstrap ./internal/application/settings ./internal/application/file ./internal/transport/http/commoncapabilities ./internal/application/notification ./internal/application/mail -count=1
+GOCACHE=/tmp/autochatgpt-go-cache GOTMPDIR=/tmp go test -race ./internal/application/file ./internal/application/mail ./internal/application/notification ./internal/application/settings ./internal/transport/http/commoncapabilities -count=1
+GOCACHE=/tmp/autochatgpt-go-cache GOTMPDIR=/tmp go vet ./...
+cd ..
+node scripts/generate-openapi.mjs --check
+python3 scripts/check-sql-allowlist.py
+python3 scripts/sql-allowlist.test.py
+node --test tests/contract/v100_admin_shell_contract.test.mjs
 ```
 
-真实 DB/Redis/SMTP/MinIO 仅使用运行时 fixture；凭据采用运行时注入，测试后执行精确清理。当前文档生成阶段未执行上述命令，规划状态保持待实现。
+真实 DB/Redis/SMTP/MinIO 仅使用运行时 fixture；凭据采用运行时注入，测试后执行精确清理。
+三套前端 `vue-tsc --noEmit --skipLibCheck`、changed-file ESLint 和本地 Vite production build 均已通过；
+OpenAPI 生成/检查、SQL allowlist、契约测试和 `git diff --check` 均已通过。完整 `go test ./... -count=1`
+除现有 `internal/platform/observability/runtime_test.go:34` 的 sandbox IPv6 listener 权限错误外其余包通过；
+该字面量失败与实现无关，需在具备回环监听权限的 CI 环境复跑。逐字输出及退出状态位于
+`.runtime/evidence/2026-09-02-common-capabilities-implementation/`。
 
 ## 11. 回滚与发布门禁
 
@@ -608,12 +632,12 @@ pnpm --dir admin run test:smoke
 
 回滚前保留原文件 hash、数据库 schema 状态、provider manifest、outbox/challenge 未完成项和审计记录。新 provider 默认切换不迁移历史对象；历史迁移是单独可暂停任务。正式开发完成且以下门禁全部通过后，才删除私有临时需求正文：接口、迁移、三 UI、调用方、测试、文档、证据、patch、manifest、rollback 和 UAT。
 
-## 12. 仍需在实现中冻结的技术占位符
+## 12. 生产化收口占位符
 
-产品决策 Q24–Q39 已按推荐答案确认；下列值是实现前必须写入 manifest/契约但不应凭空假设的占位符：
+产品决策 Q24–Q39 已按推荐答案确认；下列值是生产化收口前需要写入 manifest/部署契约的占位符：
 
 ```text
-PRESET_IMAGE_1_PATH / SHA256 / MIME / WIDTH / HEIGHT
+PRESET_IMAGE_1_PATH / SHA256 / MIME / WIDTH / HEIGHT  # 路径/hash 已在 5.3 冻结，尺寸待验收
 SYSTEM_SCOPE_REPRESENTATION       # nullable columns 或受控 sentinel，二选一并测透
 DEFAULT_CALLER_KEYS               # 代码常量与 reconcile seed
 SUPPORTED_LOCALES                 # 当前 zh-CN、en-US，可扩展
@@ -632,4 +656,5 @@ PROVIDER_MIGRATION_OWNER          # 历史对象迁移负责人和到期日
 - [公开文档索引](../README.md)
 - [数据库迁移约定](../database-migration.md)
 
-本文件只描述规划和使用契约。实现完成后应补充真实 API/OpenAPI 链接、migration 版本、错误码清单、验证记录和回滚脚本路径，并更新“状态”字段。
+本文件同时描述当前实现与使用契约。每个后续切片完成后补充真实 API/OpenAPI 链接、migration 版本、错误码清单、
+验证记录和回滚脚本路径，并更新“状态”字段；生产化门禁全部通过后再清理私有临时任务正文。
