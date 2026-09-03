@@ -9,6 +9,11 @@ const themeOverridesProviderProps = computed(() => ({
   themeOverrides: preferences.theme.mode === 'light' ? lightTheme : darkTheme,
 }));
 
+const notificationProviderProps = computed(() => ({
+  placement: 'top-right' as const,
+  themeOverrides: preferences.theme.mode === 'light' ? lightTheme : darkTheme,
+}));
+
 const themeProviderProps = computed(() => ({
   theme: preferences.theme.mode === 'light' ? lightTheme : darkTheme,
 }));
@@ -20,6 +25,6 @@ export const { dialog, loadingBar, message, modal, notification } =
       configProviderProps: themeProviderProps,
       loadingBarProviderProps: themeOverridesProviderProps,
       messageProviderProps: themeOverridesProviderProps,
-      notificationProviderProps: themeOverridesProviderProps,
+      notificationProviderProps,
     },
   );

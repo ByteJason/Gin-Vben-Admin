@@ -7,8 +7,23 @@ interface ComponentsState {
   [key: string]: any;
 }
 
+export type NotificationType = 'error' | 'info' | 'success' | 'warning';
+
+export interface NotificationOptions {
+  title: string;
+  description?: string;
+  /** Display duration in milliseconds. The adapter converts it if needed. */
+  duration?: number;
+}
+
+export type NotificationHandler = (
+  type: NotificationType,
+  options: NotificationOptions,
+) => void;
+
 interface MessageState {
   copyPreferencesSuccess?: (title: string, content?: string) => void;
+  notify?: NotificationHandler;
 }
 
 export interface IGlobalSharedState {
@@ -23,10 +38,25 @@ class GlobalShareState {
   /**
    * 定义框架内部各个场景的消息提示
    */
-  public defineMessage({ copyPreferencesSuccess }: MessageState) {
+  public defineMessage({ copyPreferencesSuccess, notify }: MessageState) {
     this.#message = {
       copyPreferencesSuccess,
+      notify,
     };
+  }
+
+  /**
+   * Emit a framework-neutral notification. UI adapters register the concrete
+   * implementation during bootstrap, so feature views never import a UI
+   * library just to show a transient result.
+   */
+  public notify(
+    type: NotificationType,
+    title: string,
+    description?: string,
+    duration?: number,
+  ) {
+    this.#message.notify?.(type, { title, description, duration });
   }
 
   public getComponents(): ComponentsState {
@@ -43,3 +73,12 @@ class GlobalShareState {
 }
 
 export const globalShareState = new GlobalShareState();
+
+export function notify(
+  type: NotificationType,
+  title: string,
+  description?: string,
+  duration?: number,
+) {
+  globalShareState.notify(type, title, description, duration);
+}

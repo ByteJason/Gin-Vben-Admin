@@ -9,7 +9,7 @@ import type {
 import { computed, nextTick, onMounted, reactive, ref } from 'vue';
 
 import { useAccess } from '@vben/access';
-import { ManagementPage } from '@vben/common-ui';
+import { ManagementPage, notify } from '@vben/common-ui';
 
 import {
   createIAMMenuApi,
@@ -40,9 +40,6 @@ const components = ref<IAMComponent[]>([]);
 const loading = ref(false);
 const componentsLoading = ref(false);
 const error = ref('');
-const feedback = ref('');
-const errorSummary = ref<HTMLElement | null>(null);
-const feedbackSummary = ref<HTMLElement | null>(null);
 const formErrorSummary = ref<HTMLElement | null>(null);
 const formOpen = ref(false);
 const saving = ref(false);
@@ -149,7 +146,7 @@ const menuRows = computed<MenuRow[]>(() => {
 
 const isEditing = computed(() => Boolean(editingId.value));
 
-async function focus(target: typeof errorSummary) {
+async function focus(target: typeof formErrorSummary) {
   await nextTick();
   target.value?.focus();
 }
@@ -179,7 +176,7 @@ async function loadMenus() {
   } catch {
     menus.value = [];
     error.value = String($t('page.iam.menusLoadError'));
-    await focus(errorSummary);
+    notify('error', error.value);
   } finally {
     loading.value = false;
   }
@@ -193,7 +190,7 @@ async function loadComponents() {
   } catch {
     components.value = [];
     error.value = String($t('page.iam.menuComponentsLoadError'));
-    await focus(errorSummary);
+    notify('error', error.value);
   } finally {
     componentsLoading.value = false;
   }
@@ -227,7 +224,6 @@ function openCreateMenu(parentId = '') {
   if (!canEditMenus.value) return;
   resetForm();
   menuForm.parentId = parentId;
-  feedback.value = '';
   formOpen.value = true;
 }
 
@@ -240,7 +236,6 @@ function openEditMenu(menu: IAMMenu) {
     ...normalizeMenu(menu),
     id: menu.id,
   });
-  feedback.value = '';
   formOpen.value = true;
 }
 
@@ -306,8 +301,7 @@ async function saveMenu() {
       menus.value.push(normalizeMenu(created));
     }
     formOpen.value = false;
-    feedback.value = String($t('page.iam.menuSaved'));
-    await focus(feedbackSummary);
+    notify('success', String($t('page.iam.menuSaved')));
   } catch {
     formError.value = String($t('page.iam.menuSaveError'));
     await focus(formErrorSummary);
@@ -325,11 +319,10 @@ async function deleteMenu(menu: IAMMenu) {
   try {
     await deleteIAMMenuApi(menu.id);
     menus.value = menus.value.filter((candidate) => candidate.id !== menu.id);
-    feedback.value = String($t('page.iam.menuDeleted'));
-    await focus(feedbackSummary);
+    notify('success', String($t('page.iam.menuDeleted')));
   } catch {
     error.value = String($t('page.iam.menuDeleteError'));
-    await focus(errorSummary);
+    notify('error', error.value);
   } finally {
     deletingId.value = '';
   }
@@ -353,11 +346,10 @@ async function saveReorder() {
         sort: menu.sort ?? 0,
       })),
     });
-    feedback.value = String($t('page.iam.menuReorderSaved'));
-    await focus(feedbackSummary);
+    notify('success', String($t('page.iam.menuReorderSaved')));
   } catch {
     error.value = String($t('page.iam.menuReorderError'));
-    await focus(errorSummary);
+    notify('error', error.value);
   } finally {
     reordering.value = false;
   }
@@ -396,24 +388,6 @@ onMounted(async () => {
       </div>
     </header>
 
-    <p
-      v-if="error"
-      ref="errorSummary"
-      class="feedback feedback-error"
-      role="alert"
-      tabindex="-1"
-    >
-      {{ error }}
-    </p>
-    <p
-      v-if="feedback"
-      ref="feedbackSummary"
-      class="feedback feedback-success"
-      role="status"
-      tabindex="-1"
-    >
-      {{ feedback }}
-    </p>
     <p class="sr-status" aria-live="polite">
       {{ loading ? $t('page.iam.menusLoading') : '' }}
     </p>

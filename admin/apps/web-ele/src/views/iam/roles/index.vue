@@ -10,7 +10,7 @@ import type {
 import { computed, nextTick, onMounted, reactive, ref } from 'vue';
 
 import { useAccess } from '@vben/access';
-import { ManagementPage } from '@vben/common-ui';
+import { ManagementPage, notify } from '@vben/common-ui';
 
 import {
   createIAMRoleApi,
@@ -42,9 +42,6 @@ const canEditDataScopes = computed(
 const roles = ref<IAMRole[]>([]);
 const loading = ref(false);
 const error = ref('');
-const errorSummary = ref<HTMLElement | null>(null);
-const feedback = ref('');
-const feedbackSummary = ref<HTMLElement | null>(null);
 const roleFormOpen = ref(false);
 const roleLoading = ref(false);
 const roleError = ref('');
@@ -79,7 +76,7 @@ const roleForm = reactive<{
 
 const roleCount = computed(() => roles.value.length);
 
-async function focus(target: typeof errorSummary) {
+async function focus(target: typeof roleErrorSummary) {
   await nextTick();
   target.value?.focus();
 }
@@ -95,7 +92,6 @@ function clearRoleForm() {
 function openCreateRole() {
   if (!canManage.value) return;
   clearRoleForm();
-  feedback.value = '';
   roleFormOpen.value = true;
 }
 
@@ -133,7 +129,6 @@ async function openPermissionEditor(role: IAMRole) {
     ),
   );
   permissionError.value = '';
-  feedback.value = '';
   permissionEditorOpen.value = true;
   await loadPermissions();
 }
@@ -174,8 +169,7 @@ async function submitPermissions() {
     }
     permissionEditorOpen.value = false;
     permissionRole.value = null;
-    feedback.value = String($t('page.iam.rolePermissionDone'));
-    await focus(feedbackSummary);
+    notify('success', String($t('page.iam.rolePermissionDone')));
   } catch {
     permissionError.value = String($t('page.iam.rolePermissionSaveError'));
     await focus(permissionErrorSummary);
@@ -233,7 +227,6 @@ async function openDataScopeEditor(role: IAMRole) {
   dataScopeRole.value = role;
   dataScopeBindings.value = [];
   dataScopeError.value = '';
-  feedback.value = '';
   dataScopeEditorOpen.value = true;
   await loadRoleDataScopes();
 }
@@ -300,8 +293,7 @@ async function submitDataScopes() {
     dataScopeEditorOpen.value = false;
     dataScopeRole.value = null;
     dataScopeBindings.value = [];
-    feedback.value = String($t('page.iam.roleDataScopeDone'));
-    await focus(feedbackSummary);
+    notify('success', String($t('page.iam.roleDataScopeDone')));
   } catch {
     dataScopeError.value = String($t('page.iam.roleDataScopeSaveError'));
     await focus(dataScopeErrorSummary);
@@ -328,7 +320,7 @@ async function loadRoles() {
   } catch {
     roles.value = [];
     error.value = String($t('page.iam.rolesLoadError'));
-    await focus(errorSummary);
+    notify('error', error.value);
   } finally {
     loading.value = false;
   }
@@ -353,9 +345,8 @@ async function submitRole() {
     };
     await createIAMRoleApi(input);
     roleFormOpen.value = false;
-    feedback.value = String($t('page.iam.roleCreated'));
+    notify('success', String($t('page.iam.roleCreated')));
     await loadRoles();
-    await focus(feedbackSummary);
   } catch {
     roleError.value = String($t('page.iam.roleSaveError'));
     await focus(roleErrorSummary);
@@ -407,28 +398,9 @@ onMounted(loadRoles);
       </div>
     </header>
 
-    <p
-      v-if="error"
-      ref="errorSummary"
-      class="feedback feedback-error"
-      role="alert"
-      tabindex="-1"
-    >
-      {{ error }}
-    </p>
     <p class="sr-status" aria-live="polite">
       {{ loading ? $t('page.iam.rolesLoading') : '' }}
     </p>
-    <p
-      v-if="feedback"
-      ref="feedbackSummary"
-      class="feedback feedback-success"
-      role="status"
-      tabindex="-1"
-    >
-      {{ feedback }}
-    </p>
-
     <section class="table-card" aria-labelledby="iam-roles-table-title">
       <div class="table-heading">
         <h2 id="iam-roles-table-title">{{ $t('page.iam.roles') }}</h2>
@@ -682,8 +654,10 @@ onMounted(loadRoles);
             />
             <span>
               <strong>{{ permission.name }}</strong>
-              <small>{{ permission.id }} · {{ permission.method }}
-                {{ permission.path }}</small>
+              <small
+                >{{ permission.id }} · {{ permission.method }}
+                {{ permission.path }}</small
+              >
             </span>
           </label>
         </fieldset>

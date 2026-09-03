@@ -61,12 +61,13 @@ import {
   IconPicker,
   VCropper,
 } from '@vben/common-ui';
+import type { NotificationOptions, NotificationType } from '@vben/common-ui';
 import { useSortable } from '@vben/hooks';
 import { IconifyIcon } from '@vben/icons';
 import { $t } from '@vben/locales';
 import { isEmpty } from '@vben/utils';
 
-import { message, Modal, notification } from 'ant-design-vue';
+import { Modal, notification } from 'ant-design-vue';
 
 type AdapterUploadProps = UploadProps & {
   aspectRatio?: string;
@@ -244,7 +245,10 @@ async function previewImage(
     if (url) {
       window.open(url, '_blank');
     } else {
-      message.error($t('ui.formRules.previewWarning'));
+      notification.error({
+        message: $t('ui.formRules.previewWarning'),
+        placement: 'topRight',
+      });
     }
     return;
   }
@@ -436,7 +440,10 @@ const withPreviewUpload = () => {
       ) => {
         // 文件大小限制
         if (maxSize.value && (file.size || 0) / 1024 / 1024 > maxSize.value) {
-          message.error($t('ui.formRules.sizeLimit', [maxSize.value]));
+          notification.error({
+            message: $t('ui.formRules.sizeLimit', [maxSize.value]),
+            placement: 'topRight',
+          });
           file.status = 'removed';
           return false;
         }
@@ -730,12 +737,25 @@ async function initComponentAdapter() {
 
   // 定义全局共享状态中的消息提示
   globalShareState.defineMessage({
+    notify: (type: NotificationType, options: NotificationOptions) => {
+      const config = {
+        description: options.description,
+        duration:
+          options.duration === undefined ? undefined : options.duration / 1000,
+        message: options.title,
+        placement: 'topRight' as const,
+      };
+      if (type === 'error') notification.error(config);
+      else if (type === 'warning') notification.warning(config);
+      else if (type === 'info') notification.info(config);
+      else notification.success(config);
+    },
     // 复制成功消息提示
     copyPreferencesSuccess: (title, content) => {
       notification.success({
         description: content,
         message: title,
-        placement: 'bottomRight',
+        placement: 'topRight',
       });
     },
   });

@@ -3,10 +3,8 @@ import type { VbenFormSchema } from '#/adapter/form';
 
 import { computed } from 'vue';
 
-import { ProfilePasswordSetting, z } from '@vben/common-ui';
+import { ProfilePasswordSetting, notify, z } from '@vben/common-ui';
 import { $t } from '@vben/locales';
-
-import { message } from '#/adapter/naive';
 
 const formSchema = computed((): VbenFormSchema[] => {
   return [
@@ -52,7 +50,7 @@ const formSchema = computed((): VbenFormSchema[] => {
 });
 
 function handleSubmit() {
-  message.success($t('profile.passwordUpdated'));
+  notify('success', String($t('profile.passwordUpdated')));
 }
 </script>
 <template>

@@ -67,18 +67,18 @@ type Config struct {
 }
 
 type File struct {
-	ID         string
-	Key        string
-	Name       string
-	MIME       string
-	Size       int64
-	OwnerID    string
-	TenantID   string
-	OrgID      string
-	ACL        ACL
-	CreatedAt  time.Time
-	SHA256     string
-	CategoryID string `json:"categoryId,omitempty"`
+	ID         string    `json:"id"`
+	Key        string    `json:"key"`
+	Name       string    `json:"name"`
+	MIME       string    `json:"mime"`
+	Size       int64     `json:"size"`
+	OwnerID    string    `json:"ownerId"`
+	TenantID   string    `json:"tenantId"`
+	OrgID      string    `json:"orgId"`
+	ACL        ACL       `json:"acl"`
+	CreatedAt  time.Time `json:"createdAt"`
+	SHA256     string    `json:"sha256"`
+	CategoryID string    `json:"categoryId,omitempty"`
 }
 
 type ListFilter struct {

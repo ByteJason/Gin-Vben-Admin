@@ -11,7 +11,7 @@ import type {
 import { computed, nextTick, onMounted, reactive, ref } from 'vue';
 
 import { useAccess } from '@vben/access';
-import { ManagementPage } from '@vben/common-ui';
+import { ManagementPage, notify } from '@vben/common-ui';
 import { preferences } from '@vben/preferences';
 import { commonCapabilitiesGuide } from '@vben/types';
 
@@ -58,7 +58,6 @@ const editingId = ref<string>();
 const loading = ref(false);
 const saving = ref(false);
 const testingId = ref('');
-const error = ref('');
 const guideOpen = ref(false);
 const guideSection = ref<'operator' | 'developer' | 'examples'>('operator');
 const guideDrawer = ref<HTMLElement | null>(null);
@@ -85,7 +84,6 @@ function closeGuide() {
   guideReturnFocus = null;
   void nextTick(() => target?.focus());
 }
-const notice = ref('');
 const testResult = ref('');
 type TestFeedbackTone = 'error' | 'info' | 'success';
 type TestFeedback = { message: string; tone: TestFeedbackTone };
@@ -525,7 +523,6 @@ async function saveCaller() {
   if (!canManage.value || !callerForm.key.trim() || !callerForm.name.trim())
     return;
   callerSaving.value = true;
-  error.value = '';
   try {
     await saveNotificationCallerApi(
       {
@@ -541,11 +538,11 @@ async function saveCaller() {
       },
       callerEditingId.value,
     );
-    notice.value = String($t('page.mail.callerSaved'));
+    notify('success', String($t('page.mail.callerSaved')));
     resetCallerForm();
     await load();
   } catch {
-    error.value = String($t('page.mail.callerSaveError'));
+    notify('error', String($t('page.mail.callerSaveError')));
   } finally {
     callerSaving.value = false;
   }
@@ -561,11 +558,11 @@ async function removeCaller(value: NotificationCaller) {
     return;
   try {
     await deleteNotificationCallerApi(value.id);
-    notice.value = String($t('page.mail.callerDeleted'));
+    notify('success', String($t('page.mail.callerDeleted')));
     if (callerEditingId.value === value.id) resetCallerForm();
     await load();
   } catch {
-    error.value = String($t('page.mail.callerDeleteError'));
+    notify('error', String($t('page.mail.callerDeleteError')));
   }
 }
 
@@ -637,17 +634,16 @@ function templatePayload() {
 async function saveTemplate() {
   if (!canManage.value || !templateForm.key.trim()) return;
   templateSaving.value = true;
-  error.value = '';
   try {
     await saveNotificationTemplateApi(
       templatePayload(),
       templateEditingId.value,
     );
-    notice.value = String($t('page.mail.templateSaved'));
+    notify('success', String($t('page.mail.templateSaved')));
     resetTemplateForm();
     await load();
   } catch {
-    error.value = String($t('page.mail.templateSaveError'));
+    notify('error', String($t('page.mail.templateSaveError')));
   } finally {
     templateSaving.value = false;
   }
@@ -657,10 +653,10 @@ async function publishTemplate(value: NotificationTemplate) {
   if (!canManage.value) return;
   try {
     await publishNotificationTemplateApi(templateKey(value));
-    notice.value = String($t('page.mail.templatePublished'));
+    notify('success', String($t('page.mail.templatePublished')));
     await load();
   } catch {
-    error.value = String($t('page.mail.templatePublishError'));
+    notify('error', String($t('page.mail.templatePublishError')));
   }
 }
 
@@ -676,11 +672,11 @@ async function removeTemplate(value: NotificationTemplate) {
     return;
   try {
     await deleteNotificationTemplateApi(templateKey(value));
-    notice.value = String($t('page.mail.templateDeleted'));
+    notify('success', String($t('page.mail.templateDeleted')));
     if (templateEditingId.value === value.id) resetTemplateForm();
     await load();
   } catch {
-    error.value = String($t('page.mail.templateDeleteError'));
+    notify('error', String($t('page.mail.templateDeleteError')));
   }
 }
 
@@ -797,6 +793,7 @@ function setTestFeedback(
   target[id] = feedback;
   testResult.value = message;
   testResultTone.value = tone;
+  notify(tone, message);
 }
 
 function feedbackMessage(target: Record<string, TestFeedback>, id: string) {
@@ -821,6 +818,7 @@ function validateTemplateRecipient(templateId?: string, focusOnError = false) {
     testResultTone.value = 'error';
     if (templateId)
       templateTestFeedback[templateId] = { message, tone: 'error' };
+    notify('error', message);
     if (focusOnError)
       void nextTick(() => templateRecipientInput.value?.focus());
     return false;
@@ -835,7 +833,6 @@ function clearTemplateRecipientError() {
 async function testTemplate(value: NotificationTemplate) {
   if (!canManage.value || !validateTemplateRecipient(value.id, true)) return;
   templateTesting.value = value.id;
-  error.value = '';
   testResult.value = '';
   try {
     const variables = completeTemplateVariables(
@@ -905,7 +902,6 @@ async function savePolicy(value: VerificationPolicy) {
   const draft = policyDrafts[key];
   if (!canManage.value || !draft || !key) return;
   policySaving.value = key;
-  error.value = '';
   try {
     await updateVerificationPolicyApi(key, {
       callerKey: draft.callerKey.trim() || undefined,
@@ -917,10 +913,10 @@ async function savePolicy(value: VerificationPolicy) {
       resendIntervalSeconds: draft.resendIntervalSeconds,
       hourlyLimit: draft.hourlyLimit,
     });
-    notice.value = String($t('page.mail.policySaved'));
+    notify('success', String($t('page.mail.policySaved')));
     await load();
   } catch {
-    error.value = String($t('page.mail.policySaveError'));
+    notify('error', String($t('page.mail.policySaveError')));
   } finally {
     policySaving.value = '';
   }
@@ -941,13 +937,11 @@ function edit(account: SMTPAccount) {
     fromName: account.fromName ?? '',
     implicitTls: account.implicitTls,
   });
-  notice.value = '';
   testResult.value = '';
 }
 
 async function load() {
   loading.value = true;
-  error.value = '';
   try {
     const [accountResult, messageResult] = await Promise.all([
       listSMTPAccountsApi(),
@@ -972,7 +966,7 @@ async function load() {
       policyResult.status === 'fulfilled' ? policyResult.value : [];
     syncPolicyDrafts(policies.value);
   } catch {
-    error.value = String($t('page.mail.loadError'));
+    notify('error', String($t('page.mail.loadError')));
   } finally {
     loading.value = false;
   }
@@ -996,7 +990,7 @@ async function loadRecords() {
     lastSyncedAt.value = new Date().toISOString();
     recordPage.value = 1;
   } catch {
-    error.value = String($t('page.mail.recordsLoadError'));
+    notify('error', String($t('page.mail.recordsLoadError')));
   } finally {
     recordsLoading.value = false;
   }
@@ -1042,21 +1036,20 @@ function closeMessageDetail() {
 async function save() {
   if (!canManage.value) return;
   if (!form.name.trim() || !form.host.trim() || !form.fromEmail.trim()) {
-    error.value = String($t('page.mail.saveErrorRequired'));
+    notify('error', String($t('page.mail.saveErrorRequired')));
     return;
   }
   saving.value = true;
-  error.value = '';
-  notice.value = '';
   try {
     await saveSMTPAccountApi({ ...form }, editingId.value);
-    notice.value = String(
-      $t(editingId.value ? 'page.mail.updated' : 'page.mail.created'),
+    notify(
+      'success',
+      String($t(editingId.value ? 'page.mail.updated' : 'page.mail.created')),
     );
     resetForm();
     await load();
   } catch {
-    error.value = String($t('page.mail.saveError'));
+    notify('error', String($t('page.mail.saveError')));
   } finally {
     saving.value = false;
   }
@@ -1065,7 +1058,6 @@ async function save() {
 async function test(account: SMTPAccount) {
   if (!canManage.value) return;
   testingId.value = account.id;
-  error.value = '';
   testResult.value = '';
   try {
     const result = await testSMTPAccountApi(account.id);
@@ -1117,11 +1109,11 @@ async function remove(account: SMTPAccount) {
   testingId.value = account.id;
   try {
     await deleteSMTPAccountApi(account.id);
-    notice.value = String($t('page.mail.deleted'));
+    notify('success', String($t('page.mail.deleted')));
     if (editingId.value === account.id) resetForm();
     await load();
   } catch {
-    error.value = String($t('page.mail.deleteError'));
+    notify('error', String($t('page.mail.deleteError')));
   } finally {
     testingId.value = '';
   }
@@ -1236,18 +1228,6 @@ onMounted(load);
         </section>
       </div>
     </aside>
-
-    <p v-if="error" class="feedback error" role="alert">{{ error }}</p>
-    <p v-if="notice" class="feedback success" role="status">{{ notice }}</p>
-    <p
-      v-if="testResult"
-      class="feedback"
-      :class="testResultTone"
-      role="status"
-      aria-live="polite"
-    >
-      {{ testResult }}
-    </p>
 
     <nav
       class="mail-tabs"
@@ -2599,6 +2579,10 @@ small,
   align-items: center;
 }
 
+.actions {
+  min-width: 0;
+}
+
 .heading-actions,
 .toolbar-actions {
   justify-content: flex-end;
@@ -2936,9 +2920,17 @@ button:focus-visible {
 }
 
 .test-feedback {
+  display: block;
+  flex: 1 0 100%;
+  width: 100%;
   flex-basis: 100%;
+  min-width: 0;
+  max-width: 100%;
   font-size: 0.78rem;
   line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .test-feedback.success {
@@ -3075,6 +3067,7 @@ button:focus-visible {
 .test-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
   gap: 10px;
   align-items: end;
   margin-top: 14px;
@@ -3085,9 +3078,14 @@ button:focus-visible {
 }
 
 .field-error {
+  display: block;
+  max-width: 100%;
   color: #b42318;
   font-size: 0.74rem;
   font-weight: 600;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .template-list {
@@ -3101,10 +3099,16 @@ button:focus-visible {
   gap: 12px;
   align-items: center;
   justify-content: space-between;
+  min-width: 0;
   padding: 12px;
   background: var(--surface-soft);
   border: 1px solid var(--line);
   border-radius: 9px;
+}
+
+.template-row > .actions {
+  flex: 0 1 22rem;
+  justify-content: flex-end;
 }
 
 .template-row-copy {

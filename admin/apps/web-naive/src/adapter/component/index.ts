@@ -31,9 +31,10 @@ import type { Recordable } from '@vben/types';
 import { defineAsyncComponent, defineComponent, h, ref } from 'vue';
 
 import { ApiComponent, globalShareState, IconPicker } from '@vben/common-ui';
+import type { NotificationOptions, NotificationType } from '@vben/common-ui';
 import { $t } from '@vben/locales';
 
-import { message } from '#/adapter/naive';
+import { notification } from '#/adapter/naive';
 
 const NButton = defineAsyncComponent(() =>
   import('naive-ui/es/button').then((res) => res.NButton),
@@ -261,10 +262,18 @@ async function initComponentAdapter() {
 
   // 定义全局共享状态中的消息提示
   globalShareState.defineMessage({
+    notify: (type: NotificationType, options: NotificationOptions) => {
+      notification[type]({
+        content: options.description ?? options.title,
+        duration: options.duration ?? 4500,
+        title: options.description ? options.title : undefined,
+      });
+    },
     // 复制成功消息提示
     copyPreferencesSuccess: (title, content) => {
-      message.success(content || title, {
-        duration: 0,
+      notification.success({
+        content: content || title,
+        duration: 4500,
       });
     },
   });

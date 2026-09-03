@@ -9,7 +9,7 @@ import type {
 import { computed, onMounted, reactive, ref } from 'vue';
 
 import { useAccess } from '@vben/access';
-import { ManagementPage } from '@vben/common-ui';
+import { ManagementPage, notify } from '@vben/common-ui';
 
 import {
   deleteDictionaryApi,
@@ -131,6 +131,7 @@ async function loadItems() {
     });
   } catch {
     error.value = String($t('page.dictionary.itemsLoadError'));
+    notify('error', error.value);
   }
 }
 async function loadLocalePolicy() {
@@ -163,6 +164,7 @@ async function loadTypes() {
     await loadItems();
   } catch {
     error.value = String($t('page.dictionary.loadError'));
+    notify('error', error.value);
   } finally {
     loading.value = false;
   }
@@ -174,6 +176,7 @@ async function saveType() {
     (!typeForm.nameZhCN?.trim() && !typeForm.nameEnUS?.trim())
   ) {
     error.value = String($t('page.dictionary.typeRequired'));
+    notify('error', error.value);
     return;
   }
   saving.value = true;
@@ -182,11 +185,13 @@ async function saveType() {
   try {
     await saveDictionaryApi({ ...typeForm }, editingType.value || undefined);
     notice.value = String($t('page.dictionary.typeSaved'));
+    notify('success', notice.value);
     selectedCode.value = typeForm.code;
     resetTypeForm();
     await loadTypes();
   } catch {
     error.value = String($t('page.dictionary.saveError'));
+    notify('error', error.value);
   } finally {
     saving.value = false;
   }
@@ -199,6 +204,7 @@ async function saveItem() {
     (!itemForm.labelZhCN?.trim() && !itemForm.labelEnUS?.trim())
   ) {
     error.value = String($t('page.dictionary.itemRequired'));
+    notify('error', error.value);
     return;
   }
   saving.value = true;
@@ -211,11 +217,13 @@ async function saveItem() {
       editingItem.value || undefined,
     );
     notice.value = String($t('page.dictionary.itemSaved'));
+    notify('success', notice.value);
     resetItemForm();
     await loadItems();
     await loadTypes();
   } catch {
     error.value = String($t('page.dictionary.saveError'));
+    notify('error', error.value);
   } finally {
     saving.value = false;
   }
@@ -231,10 +239,12 @@ async function removeType(type: DictionaryType) {
   try {
     await deleteDictionaryApi(type.code);
     notice.value = String($t('page.dictionary.typeDeleted'));
+    notify('success', notice.value);
     resetTypeForm();
     await loadTypes();
   } catch {
     error.value = String($t('page.dictionary.deleteError'));
+    notify('error', error.value);
   } finally {
     deleting.value = '';
   }
@@ -250,9 +260,11 @@ async function removeItem(item: DictionaryItem) {
   try {
     await deleteDictionaryItemApi(item.typeCode, item.id);
     notice.value = String($t('page.dictionary.itemDeleted'));
+    notify('success', notice.value);
     await loadItems();
   } catch {
     error.value = String($t('page.dictionary.deleteError'));
+    notify('error', error.value);
   } finally {
     deleting.value = '';
   }
@@ -265,6 +277,7 @@ async function importItems() {
     parsed = JSON.parse(importText.value);
   } catch {
     error.value = String($t('page.dictionary.importInvalid'));
+    notify('error', error.value);
     return;
   }
   const input = Array.isArray(parsed)
@@ -272,6 +285,7 @@ async function importItems() {
     : (parsed as { items?: unknown })?.items;
   if (!Array.isArray(input)) {
     error.value = String($t('page.dictionary.importInvalid'));
+    notify('error', error.value);
     return;
   }
   importing.value = true;
@@ -282,10 +296,12 @@ async function importItems() {
       input as DictionaryItemInput[],
     );
     notice.value = String($t('page.dictionary.imported'));
+    notify('success', notice.value);
     importText.value = '';
     await loadItems();
   } catch {
     error.value = String($t('page.dictionary.importError'));
+    notify('error', error.value);
   } finally {
     importing.value = false;
   }
@@ -327,10 +343,6 @@ onMounted(async () => {
       </div>
     </header>
 
-    <p v-if="error" class="feedback error" role="alert" tabindex="-1">
-      {{ error }}
-    </p>
-    <p v-if="notice" class="feedback success" role="status">{{ notice }}</p>
     <p class="sr-status" aria-live="polite">
       {{ loading ? $t('page.dictionary.loading') : '' }}
     </p>
@@ -354,15 +366,29 @@ onMounted(async () => {
           </button>
         </div>
         <form v-if="canManage" class="type-form" @submit.prevent="saveType">
-          <label><span>{{ $t('page.dictionary.code') }}</span><input
+          <label
+            ><span>{{ $t('page.dictionary.code') }}</span
+            ><input
               v-model="typeForm.code"
               :disabled="Boolean(editingType)"
               required
           /></label>
-          <label><span>{{ $t('page.dictionary.nameZhCN') }}</span><input v-model="typeForm.nameZhCN" /></label>
-          <label><span>{{ $t('page.dictionary.nameEnUS') }}</span><input v-model="typeForm.nameEnUS" /></label>
-          <label><span>{{ $t('page.dictionary.sortOrder') }}</span><input v-model.number="typeForm.sortOrder" min="0" type="number" /></label>
-          <label class="wide"><span>{{ $t('page.dictionary.descriptionField') }}</span><input v-model="typeForm.description" /></label>
+          <label
+            ><span>{{ $t('page.dictionary.nameZhCN') }}</span
+            ><input v-model="typeForm.nameZhCN"
+          /></label>
+          <label
+            ><span>{{ $t('page.dictionary.nameEnUS') }}</span
+            ><input v-model="typeForm.nameEnUS"
+          /></label>
+          <label
+            ><span>{{ $t('page.dictionary.sortOrder') }}</span
+            ><input v-model.number="typeForm.sortOrder" min="0" type="number"
+          /></label>
+          <label class="wide"
+            ><span>{{ $t('page.dictionary.descriptionField') }}</span
+            ><input v-model="typeForm.description"
+          /></label>
           <div class="form-actions">
             <button
               v-if="canEditType || !editingType"
@@ -418,25 +444,27 @@ onMounted(async () => {
                     type="button"
                     @click="selectType(type)"
                   >
-                    {{ type.code }}
-</button><small>{{
+                    {{ type.code }}</button
+                  ><small
+                    >{{
                       selectedLocale === 'en-US'
                         ? type.nameEnUS
                         : type.nameZhCN
                     }}<span v-if="type.systemOwned" class="system-badge">{{
                       $t('page.dictionary.system')
-                    }}</span></small>
+                    }}</span></small
+                  >
                 </th>
                 <td>
                   <span
-                    class="status-pill" :class="[
-                      type.status === 'active' ? 'ok' : 'off',
-                    ]"
+                    class="status-pill"
+                    :class="[type.status === 'active' ? 'ok' : 'off']"
                     >{{
                       type.status === 'active'
                         ? $t('page.dictionary.active')
                         : $t('page.dictionary.disabled')
-                    }}</span>
+                    }}</span
+                  >
                 </td>
                 <td>{{ type.sortOrder }}</td>
                 <td class="actions">
@@ -449,8 +477,8 @@ onMounted(async () => {
                       type.systemOwned
                         ? $t('page.dictionary.view')
                         : $t('page.dictionary.edit')
-                    }}
-</button><button
+                    }}</button
+                  ><button
                     v-if="canManage && !type.systemOwned"
                     class="danger"
                     type="button"
@@ -474,29 +502,47 @@ onMounted(async () => {
               {{ selectedCode || $t('page.dictionary.itemsTitle') }}
             </h2>
           </div>
-          <label class="toggle"><input
+          <label class="toggle"
+            ><input
               v-model="includeDisabled"
               type="checkbox"
               @change="loadTypes"
-            /><span>{{ $t('page.dictionary.includeDisabled') }}</span></label>
+            /><span>{{ $t('page.dictionary.includeDisabled') }}</span></label
+          >
         </div>
         <p v-if="!hasSelectedType" class="empty-state">
           {{ $t('page.dictionary.selectType') }}
         </p>
         <template v-else>
           <form v-if="canManage" class="item-form" @submit.prevent="saveItem">
-            <label><span>{{ $t('page.dictionary.value') }}</span><input
+            <label
+              ><span>{{ $t('page.dictionary.value') }}</span
+              ><input
                 v-model="itemForm.value"
                 :disabled="Boolean(editingItem && !canEditItem)"
                 required
             /></label>
-            <label><span>{{ $t('page.dictionary.labelZhCN') }}</span><input v-model="itemForm.labelZhCN" /></label>
-            <label><span>{{ $t('page.dictionary.labelEnUS') }}</span><input v-model="itemForm.labelEnUS" /></label>
-            <label><span>{{ $t('page.dictionary.tag') }}</span><input v-model="itemForm.tag" /></label>
-            <label><span>{{ $t('page.dictionary.sortOrder') }}</span><input v-model.number="itemForm.sortOrder" min="0" type="number" /></label>
-            <label class="toggle"><input v-model="itemForm.enabled" type="checkbox" /><span>{{
+            <label
+              ><span>{{ $t('page.dictionary.labelZhCN') }}</span
+              ><input v-model="itemForm.labelZhCN"
+            /></label>
+            <label
+              ><span>{{ $t('page.dictionary.labelEnUS') }}</span
+              ><input v-model="itemForm.labelEnUS"
+            /></label>
+            <label
+              ><span>{{ $t('page.dictionary.tag') }}</span
+              ><input v-model="itemForm.tag"
+            /></label>
+            <label
+              ><span>{{ $t('page.dictionary.sortOrder') }}</span
+              ><input v-model.number="itemForm.sortOrder" min="0" type="number"
+            /></label>
+            <label class="toggle"
+              ><input v-model="itemForm.enabled" type="checkbox" /><span>{{
                 $t('page.dictionary.enabled')
-              }}</span></label>
+              }}</span></label
+            >
             <div class="form-actions">
               <button
                 class="primary"
@@ -507,8 +553,8 @@ onMounted(async () => {
                   saving
                     ? $t('page.dictionary.saving')
                     : $t('page.dictionary.saveItem')
-                }}
-</button><button
+                }}</button
+              ><button
                 v-if="editingItem"
                 class="secondary"
                 type="button"
@@ -544,7 +590,8 @@ onMounted(async () => {
                 </tr>
                 <tr v-for="item in items" :key="item.id">
                   <th scope="row">
-                    <span class="primary-text">{{ item.value }}</span><small>{{
+                    <span class="primary-text">{{ item.value }}</span
+                    ><small>{{
                       item.systemOwned
                         ? $t('page.dictionary.system')
                         : $t('page.dictionary.tenantOverride')
@@ -553,14 +600,14 @@ onMounted(async () => {
                   <td>{{ item.label }}</td>
                   <td>
                     <span
-                      class="status-pill" :class="[
-                        item.status === 'active' ? 'ok' : 'off',
-                      ]"
+                      class="status-pill"
+                      :class="[item.status === 'active' ? 'ok' : 'off']"
                       >{{
                         item.status === 'active'
                           ? $t('page.dictionary.active')
                           : $t('page.dictionary.disabled')
-                      }}</span>
+                      }}</span
+                    >
                   </td>
                   <td>{{ item.sortOrder }}</td>
                   <td class="actions">
@@ -574,8 +621,8 @@ onMounted(async () => {
                         item.systemOwned
                           ? $t('page.dictionary.view')
                           : $t('page.dictionary.edit')
-                      }}
-</button><button
+                      }}</button
+                    ><button
                       v-if="canManage && !item.systemOwned"
                       class="danger"
                       type="button"
@@ -591,7 +638,9 @@ onMounted(async () => {
           </div>
           <details v-if="canManage" class="import-card">
             <summary>{{ $t('page.dictionary.importTitle') }}</summary>
-            <label><span>{{ $t('page.dictionary.importHelp') }}</span><textarea
+            <label
+              ><span>{{ $t('page.dictionary.importHelp') }}</span
+              ><textarea
                 v-model="importText"
                 rows="5"
                 :placeholder="$t('page.dictionary.importPlaceholder')"

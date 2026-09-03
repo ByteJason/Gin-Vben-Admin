@@ -48,4 +48,9 @@ export type {
   FlattenedItem,
   TableActionProps,
 } from '@vben-core/shadcn-ui';
-export { globalShareState } from '@vben-core/shared/global-state';
+export { globalShareState, notify } from '@vben-core/shared/global-state';
+export type {
+  NotificationHandler,
+  NotificationOptions,
+  NotificationType,
+} from '@vben-core/shared/global-state';

@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import type { IAMDataScope, IAMDataScopeType } from '#/api/core/iam';
 
-import { nextTick, onMounted, ref } from 'vue';
+import { onMounted, ref } from 'vue';
 
-import { ManagementPage } from '@vben/common-ui';
+import { ManagementPage, notify } from '@vben/common-ui';
 
 import { listIAMDataScopesApi } from '#/api/core/iam';
 import { $t } from '#/locales';
@@ -11,12 +11,6 @@ import { $t } from '#/locales';
 const dataScopes = ref<IAMDataScope[]>([]);
 const dataScopesLoading = ref(false);
 const dataScopesLoadError = ref('');
-const dataScopesErrorSummary = ref<HTMLElement | null>(null);
-
-async function focusError() {
-  await nextTick();
-  dataScopesErrorSummary.value?.focus();
-}
 
 async function loadDataScopes() {
   dataScopesLoading.value = true;
@@ -26,7 +20,7 @@ async function loadDataScopes() {
   } catch {
     dataScopes.value = [];
     dataScopesLoadError.value = String($t('page.iam.dataScopesLoadError'));
-    await focusError();
+    notify('error', dataScopesLoadError.value);
   } finally {
     dataScopesLoading.value = false;
   }
@@ -62,15 +56,6 @@ onMounted(loadDataScopes);
       <span class="scope-chip">{{ $t('page.iam.readOnly') }}</span>
     </header>
 
-    <p
-      v-if="dataScopesLoadError"
-      ref="dataScopesErrorSummary"
-      class="feedback feedback-error"
-      role="alert"
-      tabindex="-1"
-    >
-      {{ dataScopesLoadError }}
-    </p>
     <p class="sr-status" aria-live="polite">
       {{ dataScopesLoading ? $t('page.iam.dataScopesLoading') : '' }}
     </p>

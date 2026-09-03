@@ -9,7 +9,7 @@ import type {
 
 import { computed, reactive, ref } from 'vue';
 
-import { ManagementPage } from '@vben/common-ui';
+import { ManagementPage, notify } from '@vben/common-ui';
 import { useVisibilityPolling } from '@vben/hooks';
 
 import {
@@ -52,6 +52,13 @@ const timezone = ref(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
 let refreshSequence = 0;
 let requestInFlight = false;
 let refreshQueued = false;
+let lastNotifiedError = '';
+
+function notifyError(message: string) {
+  if (!message || message === lastNotifiedError) return;
+  lastNotifiedError = message;
+  notify('error', message);
+}
 
 const cardDefinitions: Array<{
   key: CardKey;
@@ -218,11 +225,13 @@ function queryParams(): DashboardOverviewQuery | undefined {
   }
   if (!state.from || !state.to) {
     error.value = label('customRangeRequired');
+    notifyError(error.value);
     return;
   }
   const from = new Date(`${state.from}T00:00:00`);
   if (Number.isNaN(from.getTime())) {
     error.value = label('customRangeInvalid');
+    notifyError(error.value);
     return;
   }
   return {
@@ -283,6 +292,10 @@ async function refresh() {
     if (sequence === refreshSequence) {
       if (!overviewLoaded && !summaryLoaded && !overview.value) {
         error.value = label('loadError');
+        notifyError(error.value);
+      } else {
+        error.value = '';
+        lastNotifiedError = '';
       }
       loading.value = false;
     }
@@ -376,7 +389,6 @@ useVisibilityPolling(refresh, 30_000);
       </label>
     </section>
 
-    <p v-if="error" class="feedback error" role="alert">{{ error }}</p>
     <p
       v-if="loading && !overview && !summary"
       class="loading-state"

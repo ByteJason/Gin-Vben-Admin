@@ -4,9 +4,8 @@ import type {
 } from '@vben/types';
 
 import { generateAccessible } from '@vben/access';
+import { notify } from '@vben/common-ui';
 import { preferences } from '@vben/preferences';
-
-import { ElMessage } from 'element-plus';
 
 import { getAllMenusApi } from '#/api';
 import { BasicLayout, IFrameView } from '#/layouts';
@@ -25,10 +24,7 @@ async function generateAccess(options: GenerateMenuAndRoutesOptions) {
   return await generateAccessible(preferences.app.accessMode, {
     ...options,
     fetchMenuListAsync: async () => {
-      ElMessage({
-        duration: 1500,
-        message: `${$t('common.loadingMenu')}...`,
-      });
+      notify('info', `${$t('common.loadingMenu')}...`, undefined, 1500);
       return await getAllMenusApi();
     },
     // 可以指定没有权限跳转403页面

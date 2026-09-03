@@ -8,7 +8,7 @@ import type {
 
 import { computed, ref } from 'vue';
 
-import { ManagementPage } from '@vben/common-ui';
+import { ManagementPage, notify } from '@vben/common-ui';
 import { useVisibilityPolling } from '@vben/hooks';
 
 import { listSessionsApi } from '#/api/core/auth';
@@ -153,15 +153,19 @@ async function refresh() {
     overview.value = monitorResult.value;
     monitorError.value = '';
   } else {
-    monitorError.value = overview.value
+    const nextError = overview.value
       ? String($t('page.monitor.loadErrorCached'))
       : String($t('page.monitor.loadError'));
+    if (nextError !== monitorError.value) notify('error', nextError);
+    monitorError.value = nextError;
   }
   if (sessionsResult.status === 'fulfilled') {
     sessions.value = sessionsResult.value;
     sessionsError.value = '';
   } else {
-    sessionsError.value = String($t('page.monitor.sessionsError'));
+    const nextError = String($t('page.monitor.sessionsError'));
+    if (nextError !== sessionsError.value) notify('warning', nextError);
+    sessionsError.value = nextError;
   }
   loading.value = false;
 }
@@ -208,12 +212,6 @@ useVisibilityPolling(refresh, 15_000);
       </div>
     </header>
 
-    <p v-if="monitorError" class="feedback error" role="alert">
-      {{ monitorError }}
-    </p>
-    <p v-if="sessionsError" class="feedback warning" role="status">
-      {{ sessionsError }}
-    </p>
     <p v-if="loading && !overview" class="loading-state" role="status">
       {{ $t('page.monitor.loading') }}
     </p>

@@ -8,7 +8,7 @@ import type {
 
 import { computed, nextTick, onMounted, reactive, ref } from 'vue';
 
-import { ManagementPage } from '@vben/common-ui';
+import { ManagementPage, notify } from '@vben/common-ui';
 
 import {
   exportAuditEventsApi,
@@ -86,6 +86,7 @@ async function load() {
     page.value = await queryAuditEventsApi(toQuery());
   } catch {
     error.value = String($t('page.audit.loadError'));
+    notify('error', error.value);
     await focusError();
   } finally {
     loading.value = false;
@@ -151,8 +152,10 @@ async function exportEvents(format: 'csv' | 'json') {
     const blob = await exportAuditEventsApi(toQuery(), format);
     downloadBlob(blob, format);
     message.value = String($t('page.audit.exported'));
+    notify('success', message.value);
   } catch {
     error.value = String($t('page.audit.exportError'));
+    notify('error', error.value);
     await focusError();
   } finally {
     exporting.value = '';
@@ -165,8 +168,10 @@ async function runRetentionDryRun() {
   try {
     retentionReport.value = await retentionDryRunApi(retentionDays.value);
     message.value = String($t('page.audit.retentionDone'));
+    notify('success', message.value);
   } catch {
     error.value = String($t('page.audit.retentionError'));
+    notify('error', error.value);
     await focusError();
   } finally {
     retentionLoading.value = false;
@@ -191,20 +196,17 @@ onMounted(load);
       <span class="retention-chip">{{ $t('page.audit.retentionPolicy') }}</span>
     </header>
 
+    <p class="sr-status" aria-live="polite">
+      {{ loading ? $t('page.audit.loading') : '' }}
+    </p>
     <p
       v-if="error"
       ref="errorSummary"
-      class="feedback feedback-error"
+      class="sr-only"
       role="alert"
       tabindex="-1"
     >
       {{ error }}
-    </p>
-    <p v-if="message" class="feedback feedback-success" aria-live="polite">
-      {{ message }}
-    </p>
-    <p class="sr-status" aria-live="polite">
-      {{ loading ? $t('page.audit.loading') : '' }}
     </p>
 
     <section class="filter-card" aria-labelledby="audit-filter-title">

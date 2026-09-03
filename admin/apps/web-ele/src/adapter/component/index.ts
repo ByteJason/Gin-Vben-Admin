@@ -31,6 +31,7 @@ import type { Recordable } from '@vben/types';
 import { defineAsyncComponent, defineComponent, h, ref } from 'vue';
 
 import { ApiComponent, globalShareState, IconPicker } from '@vben/common-ui';
+import type { NotificationOptions, NotificationType } from '@vben/common-ui';
 import { $t } from '@vben/locales';
 
 import { ElNotification } from 'element-plus';
@@ -360,12 +361,21 @@ async function initComponentAdapter() {
 
   // 定义全局共享状态中的消息提示
   globalShareState.defineMessage({
+    notify: (type: NotificationType, options: NotificationOptions) => {
+      ElNotification({
+        duration: options.duration ?? 4500,
+        message: options.description ?? options.title,
+        position: 'top-right',
+        title: options.description ? options.title : undefined,
+        type,
+      });
+    },
     // 复制成功消息提示
     copyPreferencesSuccess: (title, content) => {
       ElNotification({
         title,
         message: content,
-        position: 'bottom-right',
+        position: 'top-right',
         duration: 0,
         type: 'success',
       });

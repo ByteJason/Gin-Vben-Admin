@@ -96,6 +96,7 @@ export const useAuthStore = defineStore('auth', () => {
               description: `${$t('authentication.loginSuccessDesc')}:${authenticatedUser.realName}`,
               duration: 3,
               message: $t('authentication.loginSuccess'),
+              placement: 'topRight',
             });
           }
         },

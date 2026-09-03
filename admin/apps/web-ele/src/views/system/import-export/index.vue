@@ -4,7 +4,7 @@ import type { ImportExportJob, ImportPreview } from '#/api/core/import-export';
 import { computed, onMounted, ref } from 'vue';
 
 import { useAccess } from '@vben/access';
-import { ManagementPage } from '@vben/common-ui';
+import { ManagementPage, notify } from '@vben/common-ui';
 
 import {
   cancelImportExportJobApi,
@@ -38,6 +38,7 @@ async function loadJobs() {
     jobs.value = result.items;
   } catch {
     error.value = String($t('page.importExport.loadError'));
+    notify('error', error.value);
   } finally {
     loading.value = false;
   }
@@ -59,8 +60,10 @@ async function chooseFile(event: Event) {
   try {
     preview.value = await previewImportApi(form);
     notice.value = String($t('page.importExport.previewReady'));
+    notify('success', notice.value);
   } catch {
     error.value = String($t('page.importExport.previewError'));
+    notify('error', error.value);
   } finally {
     busy.value = '';
   }
@@ -77,9 +80,11 @@ async function commitImport() {
       idempotencyKey: `ui-${preview.value.id}`,
     });
     notice.value = String($t('page.importExport.commitQueued'));
+    notify('success', notice.value);
     await loadJobs();
   } catch {
     error.value = String($t('page.importExport.commitError'));
+    notify('error', error.value);
   } finally {
     busy.value = '';
   }
@@ -99,9 +104,11 @@ async function exportPreview() {
       idempotencyKey: `export-${preview.value.id}`,
     });
     notice.value = String($t('page.importExport.exportQueued'));
+    notify('success', notice.value);
     await loadJobs();
   } catch {
     error.value = String($t('page.importExport.exportError'));
+    notify('error', error.value);
   } finally {
     busy.value = '';
   }
@@ -115,6 +122,7 @@ async function cancelJob(job: ImportExportJob) {
     await loadJobs();
   } catch {
     error.value = String($t('page.importExport.cancelError'));
+    notify('error', error.value);
   } finally {
     busy.value = '';
   }
@@ -128,6 +136,7 @@ async function retryJob(job: ImportExportJob) {
     await loadJobs();
   } catch {
     error.value = String($t('page.importExport.retryError'));
+    notify('error', error.value);
   } finally {
     busy.value = '';
   }
@@ -191,9 +200,6 @@ onMounted(() => void loadJobs());
         </button>
       </div>
     </header>
-
-    <div v-if="error" class="feedback error" role="alert">{{ error }}</div>
-    <div v-if="notice" class="feedback success" role="status">{{ notice }}</div>
 
     <section v-if="canManage" class="panel" aria-labelledby="import-title">
       <div class="section-heading">

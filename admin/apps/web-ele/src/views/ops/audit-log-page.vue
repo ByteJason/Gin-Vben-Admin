@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import type { AuditCategory, AuditEvent, AuditPage } from '#/api/core/audit';
 
-import { computed, nextTick, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 
-import { ManagementPage } from '@vben/common-ui';
+import { ManagementPage, notify } from '@vben/common-ui';
 
 import { queryLoginLogsApi, queryOperationHistoryApi } from '#/api/core/audit';
 import { $t } from '#/locales';
@@ -22,7 +22,6 @@ const state = reactive({
 const page = ref<AuditPage>({ items: [], limit: 20, offset: 0, total: 0 });
 const loading = ref(false);
 const error = ref('');
-const errorSummary = ref<HTMLElement | null>(null);
 
 const namespace = computed(() =>
   props.mode === 'login' ? 'page.loginLogs' : 'page.operationHistory',
@@ -105,11 +104,6 @@ function category(): AuditCategory {
   return props.mode;
 }
 
-async function focusError() {
-  await nextTick();
-  errorSummary.value?.focus();
-}
-
 async function load() {
   loading.value = true;
   error.value = '';
@@ -130,7 +124,7 @@ async function load() {
         : await queryOperationHistoryApi(query);
   } catch {
     error.value = label('loadError');
-    await focusError();
+    notify('error', error.value);
   } finally {
     loading.value = false;
   }
@@ -178,15 +172,6 @@ onMounted(load);
       </button>
     </header>
 
-    <p
-      v-if="error"
-      ref="errorSummary"
-      class="feedback error"
-      role="alert"
-      tabindex="-1"
-    >
-      {{ error }}
-    </p>
     <p class="sr-status" aria-live="polite">
       {{ loading ? label('loading') : '' }}
     </p>

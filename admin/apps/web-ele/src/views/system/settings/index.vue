@@ -5,10 +5,10 @@ import type {
   SettingDefinition,
 } from '#/api/core/settings';
 
-import { computed, nextTick, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 
 import { useAccess } from '@vben/access';
-import { ManagementPage } from '@vben/common-ui';
+import { ManagementPage, notify } from '@vben/common-ui';
 
 import {
   getSettingApi,
@@ -45,7 +45,6 @@ const savingKey = ref('');
 const testingKey = ref('');
 const error = ref('');
 const message = ref('');
-const errorSummary = ref<HTMLElement | null>(null);
 const historyKey = ref('');
 const history = ref<SettingData[]>([]);
 const historyLoading = ref(false);
@@ -153,11 +152,6 @@ function saveDisabled(definition: SettingDefinition) {
   );
 }
 
-async function focusError() {
-  await nextTick();
-  errorSummary.value?.focus();
-}
-
 async function load() {
   loading.value = true;
   error.value = '';
@@ -173,7 +167,7 @@ async function load() {
     for (const [key, setting] of entries) values[key] = setting;
   } catch {
     error.value = String($t('page.settings.loadError'));
-    await focusError();
+    notify('error', error.value);
   } finally {
     loading.value = false;
   }
@@ -191,7 +185,7 @@ async function save(definition: SettingDefinition) {
     value = parseDraft(definition);
   } catch (caught) {
     error.value = caught instanceof Error ? caught.message : String(caught);
-    await focusError();
+    notify('error', error.value);
     return;
   }
   if (value === undefined) return;
@@ -203,9 +197,10 @@ async function save(definition: SettingDefinition) {
     });
     delete drafts[definition.key];
     message.value = String($t('page.settings.saved'));
+    notify('success', message.value);
   } catch {
     error.value = String($t('page.settings.saveError'));
-    await focusError();
+    notify('error', error.value);
   } finally {
     savingKey.value = '';
   }
@@ -220,9 +215,10 @@ async function testConnection(definition: SettingDefinition) {
     const value = hasDraft(definition) ? parseDraft(definition) : undefined;
     const result = await testSettingConnectionApi(definition.key, value);
     message.value = `${String($t('page.settings.connectionSuccess'))} (${result.requestId})`;
+    notify('success', message.value);
   } catch {
     error.value = String($t('page.settings.connectionError'));
-    await focusError();
+    notify('error', error.value);
   } finally {
     testingKey.value = '';
   }
@@ -237,6 +233,7 @@ async function openHistory(definition: SettingDefinition) {
   } catch {
     history.value = [];
     historyError.value = String($t('page.settings.historyError'));
+    notify('error', historyError.value);
   } finally {
     historyLoading.value = false;
   }
@@ -253,13 +250,14 @@ async function rollback(item: SettingData) {
     });
     delete drafts[historyKey.value];
     message.value = String($t('page.settings.rollbackSuccess'));
+    notify('success', message.value);
     const definition = definitions.value.find(
       (candidate) => candidate.key === historyKey.value,
     );
     if (definition) await openHistory(definition);
   } catch {
     error.value = String($t('page.settings.rollbackError'));
-    await focusError();
+    notify('error', error.value);
   }
 }
 
@@ -281,20 +279,11 @@ onMounted(load);
       <span class="scope-chip">{{ $t('page.settings.restartRequired') }}</span>
     </header>
 
-    <p
-      v-if="error"
-      ref="errorSummary"
-      class="feedback feedback-error"
-      role="alert"
-      tabindex="-1"
-    >
-      {{ error }}
-    </p>
-    <p v-if="message" class="feedback feedback-success" aria-live="polite">
-      {{ message }}
-    </p>
     <p class="sr-status" aria-live="polite">
       {{ loading ? $t('page.settings.loading') : '' }}
+    </p>
+    <p v-if="error" class="sr-status" role="alert" tabindex="-1">
+      {{ error }}
     </p>
 
     <nav class="category-tabs" :aria-label="$t('page.settings.categoryLabel')">
@@ -530,10 +519,7 @@ onMounted(load);
           {{ $t('page.settings.close') }}
         </button>
       </div>
-      <p v-if="historyError" class="feedback feedback-error">
-        {{ historyError }}
-      </p>
-      <p v-else-if="historyLoading" class="history-state" aria-live="polite">
+      <p v-if="historyLoading" class="history-state" aria-live="polite">
         {{ $t('page.settings.historyLoading') }}
       </p>
       <ul v-else class="history-list">

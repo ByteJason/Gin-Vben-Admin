@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, reactive, ref } from 'vue';
 
 import { useAccess } from '@vben/access';
-import { ManagementPage } from '@vben/common-ui';
+import { ManagementPage, notify } from '@vben/common-ui';
 
 import {
   getObservabilitySettingApi,
@@ -105,6 +105,7 @@ async function load() {
     state.sampleRate = parseValue(values[settingKeys.sampleRate].value, 0);
   } catch {
     error.value = String($t('page.observability.loadError'));
+    notify('error', error.value);
   } finally {
     loading.value = false;
   }
@@ -129,6 +130,7 @@ async function save() {
     error.value = String($t('page.observability.tracingEndpointError'));
   }
   if (error.value) {
+    notify('error', error.value);
     await nextTick();
     errorSummary.value?.focus();
     return;
@@ -148,8 +150,10 @@ async function save() {
       state.otlpApiKey = '';
     }
     message.value = String($t('page.observability.saved'));
+    notify('success', message.value);
   } catch {
     error.value = String($t('page.observability.saveError'));
+    notify('error', error.value);
     await nextTick();
     errorSummary.value?.focus();
   } finally {
@@ -175,19 +179,7 @@ onMounted(load);
       <span class="status-chip">{{ $t('page.observability.external') }}</span>
     </header>
 
-    <p
-      v-if="error"
-      ref="errorSummary"
-      class="feedback feedback-error"
-      role="alert"
-      tabindex="-1"
-    >
-      {{ error }}
-    </p>
-    <p v-if="message" class="feedback feedback-success" aria-live="polite">
-      {{ message }}
-    </p>
-    <p v-else class="sr-status" aria-live="polite">
+    <p class="sr-status" aria-live="polite">
       {{ loading ? $t('page.observability.loading') : '' }}
     </p>
 

@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import type { IAMPermission } from '#/api/core/iam';
 
-import { nextTick, onMounted, ref } from 'vue';
+import { onMounted, ref } from 'vue';
 
-import { ManagementPage } from '@vben/common-ui';
+import { ManagementPage, notify } from '@vben/common-ui';
 
 import { listIAMPermissionsApi } from '#/api/core/iam';
 import { $t } from '#/locales';
@@ -11,12 +11,6 @@ import { $t } from '#/locales';
 const permissions = ref<IAMPermission[]>([]);
 const loading = ref(false);
 const error = ref('');
-const errorSummary = ref<HTMLElement | null>(null);
-
-async function focusError() {
-  await nextTick();
-  errorSummary.value?.focus();
-}
 
 async function loadPermissions() {
   loading.value = true;
@@ -26,7 +20,7 @@ async function loadPermissions() {
   } catch {
     permissions.value = [];
     error.value = String($t('page.iam.permissionsLoadError'));
-    await focusError();
+    notify('error', error.value);
   } finally {
     loading.value = false;
   }
@@ -52,15 +46,6 @@ onMounted(loadPermissions);
       <span class="scope-chip">{{ $t('page.iam.readOnly') }}</span>
     </header>
 
-    <p
-      v-if="error"
-      ref="errorSummary"
-      class="feedback feedback-error"
-      role="alert"
-      tabindex="-1"
-    >
-      {{ error }}
-    </p>
     <p class="sr-status" aria-live="polite">
       {{ loading ? $t('page.iam.permissionsLoading') : '' }}
     </p>

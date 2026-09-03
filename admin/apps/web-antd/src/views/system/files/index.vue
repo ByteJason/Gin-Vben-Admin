@@ -9,33 +9,27 @@ import type {
   MediaUsage,
 } from '#/api/core/files';
 
-import {
-  computed,
-  nextTick,
-  onBeforeUnmount,
-  onMounted,
-  ref,
-} from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 
 import { useAccess } from '@vben/access';
-import { ManagementPage } from '@vben/common-ui';
+import { ManagementPage, notify } from '@vben/common-ui';
 import { preferences } from '@vben/preferences';
 import { commonCapabilitiesGuide } from '@vben/types';
 
 import {
-	attachMediaUsageApi,
-	cleanupDryRunApi,
+  attachMediaUsageApi,
+  cleanupDryRunApi,
   createFileCategoryApi,
-	deleteFileApi,
-	deleteFileCategoryApi,
-	deleteMediaResourceApi,
-	detachMediaUsageApi,
-	downloadFileApi,
-	getBrandingSettingsApi,
-	getMediaResourceApi,
+  deleteFileApi,
+  deleteFileCategoryApi,
+  deleteMediaResourceApi,
+  detachMediaUsageApi,
+  downloadFileApi,
+  getBrandingSettingsApi,
+  getMediaResourceApi,
   listFileCategoriesApi,
   listFilesApi,
-	listMediaResourcesApi,
+  listMediaResourcesApi,
   listMediaUsagesApi,
   openMediaResourceApi,
   signedFileUrlApi,
@@ -57,7 +51,6 @@ const selectedCategoryId = ref('');
 const categoryName = ref('');
 const categoryParentId = ref('');
 const categoryBusy = ref(false);
-const categoryError = ref('');
 const page = ref<FilePage>({ items: [], limit: 50, offset: 0, total: 0 });
 const selectedFile = ref<File | null>(null);
 const selectedAsset = ref<FileObject | null>(null);
@@ -73,9 +66,9 @@ const previewURLs = ref<Record<string, string>>({});
 const previewLoading = new Set<string>();
 const acl = ref<FileACL>('private');
 const loading = ref(false);
+const error = ref('');
 const uploading = ref(false);
 const actionId = ref('');
-const error = ref('');
 const guideOpen = ref(false);
 const guideDrawer = ref<HTMLElement | null>(null);
 let guideReturnFocus: HTMLElement | null = null;
@@ -86,7 +79,10 @@ const guide = computed(
     ] ?? commonCapabilitiesGuide.files,
 );
 async function openGuide() {
-  guideReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  guideReturnFocus =
+    document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
   guideOpen.value = true;
   await nextTick();
   guideDrawer.value?.focus();
@@ -97,8 +93,6 @@ function closeGuide() {
   guideReturnFocus = null;
   void nextTick(() => target?.focus());
 }
-const message = ref('');
-const errorSummary = ref<HTMLElement | null>(null);
 const cleanupAge = ref(180 * 24 * 60 * 60);
 const cleanupLoading = ref(false);
 const cleanupReport = ref<{
@@ -149,24 +143,29 @@ const hasFiles = computed(() => page.value.items.length > 0);
 const accept =
   '.jpg,.jpeg,.png,.gif,.webp,.svg,.mp3,.wav,.ogg,.mp4,.avi,.mov,.xlsx,.xls,.csv,.zip,.rar,.7z,.md,.txt,.pdf';
 
-async function focusError() {
-  await nextTick();
-  errorSummary.value?.focus();
+function notifyError(message: string) {
+  error.value = message;
+  notify('error', message);
+}
+
+function notifySuccess(message: string) {
+  error.value = '';
+  notify('success', message);
 }
 
 async function loadCategories() {
   if (!canManage.value) return;
-  categoryError.value = '';
+  error.value = '';
   try {
     categories.value = await listFileCategoriesApi();
   } catch {
-    categoryError.value = String($t('page.files.categoryLoadError'));
+    notifyError(String($t('page.files.categoryLoadError')));
   }
 }
 
 async function load() {
-  loading.value = true;
   error.value = '';
+  loading.value = true;
   try {
     page.value = await listFilesApi({
       categoryId: selectedCategoryId.value || undefined,
@@ -174,8 +173,7 @@ async function load() {
       offset: 0,
     });
   } catch {
-    error.value = String($t('page.files.loadError'));
-    await focusError();
+    notifyError(String($t('page.files.loadError')));
   } finally {
     loading.value = false;
   }
@@ -189,7 +187,6 @@ function selectCategory(id: string) {
 async function createCategory() {
   if (!canManage.value || !categoryName.value.trim()) return;
   categoryBusy.value = true;
-  categoryError.value = '';
   try {
     const input: FileCategoryInput = {
       name: categoryName.value.trim(),
@@ -201,9 +198,9 @@ async function createCategory() {
     await loadCategories();
     selectedCategoryId.value = created.id;
     await load();
-    message.value = String($t('page.files.categoryCreated'));
+    notifySuccess(String($t('page.files.categoryCreated')));
   } catch {
-    categoryError.value = String($t('page.files.categorySaveError'));
+    notifyError(String($t('page.files.categorySaveError')));
   } finally {
     categoryBusy.value = false;
   }
@@ -216,16 +213,15 @@ async function editCategory(category: FileCategory) {
     ?.trim();
   if (!name || name === category.name) return;
   categoryBusy.value = true;
-  categoryError.value = '';
   try {
     await updateFileCategoryApi(category.id, {
       name,
       parentId: category.parentId || undefined,
     });
     await loadCategories();
-    message.value = String($t('page.files.categoryUpdated'));
+    notifySuccess(String($t('page.files.categoryUpdated')));
   } catch {
-    categoryError.value = String($t('page.files.categorySaveError'));
+    notifyError(String($t('page.files.categorySaveError')));
   } finally {
     categoryBusy.value = false;
   }
@@ -238,15 +234,14 @@ async function removeCategory(category: FileCategory) {
   )
     return;
   categoryBusy.value = true;
-  categoryError.value = '';
   try {
     await deleteFileCategoryApi(category.id);
     if (selectedCategoryId.value === category.id) selectedCategoryId.value = '';
     await loadCategories();
     await load();
-    message.value = String($t('page.files.categoryDeleted'));
+    notifySuccess(String($t('page.files.categoryDeleted')));
   } catch {
-    categoryError.value = String($t('page.files.categoryDeleteError'));
+    notifyError(String($t('page.files.categoryDeleteError')));
   } finally {
     categoryBusy.value = false;
   }
@@ -269,7 +264,8 @@ function previewURL(item: { id: string }) {
  * so opening the picker repeatedly does not leak blob handles.
  */
 async function ensurePreviewURL(item: { id: string }) {
-  if (!item.id || previewURLs.value[item.id] || previewLoading.has(item.id)) return;
+  if (!item.id || previewURLs.value[item.id] || previewLoading.has(item.id))
+    return;
   previewLoading.add(item.id);
   try {
     const blob = await openMediaResourceApi(item.id);
@@ -300,9 +296,12 @@ function selectAsset(item: FileObject) {
 }
 
 async function openLogoPicker() {
-	if (!canManage.value) return;
-	logoReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-	logoPickerOpen.value = true;
+  if (!canManage.value) return;
+  logoReturnFocus =
+    document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+  logoPickerOpen.value = true;
   await nextTick();
   logoDialog.value?.focus();
   try {
@@ -313,7 +312,10 @@ async function openLogoPicker() {
     const result = await listMediaResourcesApi({ limit: 200 });
     logoAssets.value = result.items;
     void Promise.all(
-      result.items.filter(isImage).slice(0, 48).map((item) => ensurePreviewURL(item)),
+      result.items
+        .filter(isImage)
+        .slice(0, 48)
+        .map((item) => ensurePreviewURL(item)),
     );
     let storedId = window.localStorage.getItem(logoStorageKey);
     try {
@@ -324,10 +326,11 @@ async function openLogoPicker() {
       // picker usable while the server-side setting is unavailable.
     }
     if (storedId) {
-      logoAsset.value = result.items.find((item) => item.id === storedId) ?? logoAsset.value;
+      logoAsset.value =
+        result.items.find((item) => item.id === storedId) ?? logoAsset.value;
     }
   } catch {
-    error.value = String($t('page.files.loadError'));
+    notifyError(String($t('page.files.loadError')));
   }
 }
 function closeLogoPicker() {
@@ -337,7 +340,12 @@ function closeLogoPicker() {
   void nextTick(() => target?.focus());
 }
 function isBrandingLogoUsage(usage: MediaUsage) {
-  return usage.module === 'branding' && usage.entityType === 'setting' && usage.entityId === 'admin' && usage.field === 'logo';
+  return (
+    usage.module === 'branding' &&
+    usage.entityType === 'setting' &&
+    usage.entityId === 'admin' &&
+    usage.field === 'logo'
+  );
 }
 
 async function listBrandingLogoUsages(resourceId: string) {
@@ -355,22 +363,26 @@ async function removeLogoUsage(resourceId: string, detached: MediaUsage[]) {
 
 async function restoreLogoUsages(usages: MediaUsage[]) {
   for (const usage of usages) {
-    await attachMediaUsageApi(usage.resourceId, {
-      module: usage.module,
-      entityType: usage.entityType,
-      entityId: usage.entityId,
-      field: usage.field,
-    }, `branding:logo:rollback:${usage.id}`);
+    await attachMediaUsageApi(
+      usage.resourceId,
+      {
+        module: usage.module,
+        entityType: usage.entityType,
+        entityId: usage.entityId,
+        field: usage.field,
+      },
+      `branding:logo:rollback:${usage.id}`,
+    );
   }
 }
 
 async function chooseLogo(item: MediaResource): Promise<boolean> {
   if (!canManage.value || !isImage(item)) return false;
   logoBusy.value = true;
-  error.value = '';
-  message.value = '';
   const previousAsset = logoAsset.value;
-  let previousSettings: Awaited<ReturnType<typeof getBrandingSettingsApi>> | null = null;
+  let previousSettings: Awaited<
+    ReturnType<typeof getBrandingSettingsApi>
+  > | null = null;
   let updatedVersion: number | undefined;
   let attachedUsage: MediaUsage | null = null;
   let attachedUsageWasNew = false;
@@ -380,21 +392,30 @@ async function chooseLogo(item: MediaResource): Promise<boolean> {
     // intentionally not used for a save, otherwise a failed mutation could
     // make the UI claim a Logo that the server never committed.
     previousSettings = await getBrandingSettingsApi();
-    const previousID = previousSettings.value.logoResourceId || previousAsset?.id;
+    const previousID =
+      previousSettings.value.logoResourceId || previousAsset?.id;
     const existingUsages = await listBrandingLogoUsages(item.id);
     attachedUsageWasNew = existingUsages.length === 0;
-    const updated = await updateBrandingSettingsApi({
-      ...previousSettings.value,
-      logoResourceId: item.id,
-    }, previousSettings.version ?? 0);
-    updatedVersion = updated.version ?? ((previousSettings.version ?? 0) + 1);
-    attachedUsage = await attachMediaUsageApi(item.id, {
-      module: 'branding',
-      entityType: 'setting',
-      entityId: 'admin',
-      field: 'logo',
-    }, `branding:logo:${item.id}`);
-    if (previousID && previousID !== item.id) await removeLogoUsage(previousID, detachedPreviousUsages);
+    const updated = await updateBrandingSettingsApi(
+      {
+        ...previousSettings.value,
+        logoResourceId: item.id,
+      },
+      previousSettings.version ?? 0,
+    );
+    updatedVersion = updated.version ?? (previousSettings.version ?? 0) + 1;
+    attachedUsage = await attachMediaUsageApi(
+      item.id,
+      {
+        module: 'branding',
+        entityType: 'setting',
+        entityId: 'admin',
+        field: 'logo',
+      },
+      `branding:logo:${item.id}`,
+    );
+    if (previousID && previousID !== item.id)
+      await removeLogoUsage(previousID, detachedPreviousUsages);
     logoAsset.value = item;
     void ensurePreviewURL(item);
     window.localStorage.setItem(logoStorageKey, item.id);
@@ -414,25 +435,37 @@ async function chooseLogo(item: MediaResource): Promise<boolean> {
     // failed save never changes the visible Logo; reconciliation can repair a
     // rare provider outage without exposing a broken reference.
     if (detachedPreviousUsages.length > 0) {
-      try { await restoreLogoUsages(detachedPreviousUsages); } catch { /* retain the primary error */ }
+      try {
+        await restoreLogoUsages(detachedPreviousUsages);
+      } catch {
+        /* retain the primary error */
+      }
     }
     if (rolledBack && attachedUsageWasNew && attachedUsage) {
-      try { await detachMediaUsageApi(attachedUsage.id, `branding:logo:rollback:${attachedUsage.id}`); } catch { /* retain the primary error */ }
+      try {
+        await detachMediaUsageApi(
+          attachedUsage.id,
+          `branding:logo:rollback:${attachedUsage.id}`,
+        );
+      } catch {
+        /* retain the primary error */
+      }
     }
-    error.value = String($t('page.files.logoSaveError'));
-    await focusError();
+    notifyError(String($t('page.files.logoSaveError')));
     return false;
   } finally {
     logoBusy.value = false;
   }
 }
-function triggerLogoUpload() { logoUploadInput.value?.click(); }
+function triggerLogoUpload() {
+  logoUploadInput.value?.click();
+}
 async function uploadLogo(event: Event) {
   const input = event.target as HTMLInputElement;
   const file = input.files?.[0];
   input.value = '';
   if (!file || !file.type.startsWith('image/')) return;
-  uploading.value = true; error.value = '';
+  uploading.value = true;
   try {
     const uploaded = await uploadMediaResourceApi(file, 'public-read');
     if (uploaded && isImage(uploaded) && !(await chooseLogo(uploaded))) {
@@ -445,27 +478,27 @@ async function uploadLogo(event: Event) {
           `branding:logo:upload-cleanup:${uploaded.id}`,
         );
       } catch {
-        // The primary save error is already visible. A cleanup worker may
+        // The primary notification is already visible. A cleanup worker may
         // reconcile a provider outage without replacing that actionable error.
       }
       return;
     }
-    message.value = String($t('page.files.logoUploaded'));
+    notifySuccess(String($t('page.files.logoUploaded')));
     await load();
-  } catch { error.value = String($t('page.files.uploadError')); await focusError(); }
-  finally { uploading.value = false; }
+  } catch {
+    notifyError(String($t('page.files.uploadError')));
+  } finally {
+    uploading.value = false;
+  }
 }
 
 async function upload() {
   if (!canManage.value) return;
   if (!selectedFile.value) {
-    error.value = String($t('page.files.fileRequired'));
-    await focusError();
+    notifyError(String($t('page.files.fileRequired')));
     return;
   }
   uploading.value = true;
-  error.value = '';
-  message.value = '';
   try {
     const uploaded = await uploadFileApi(
       selectedFile.value,
@@ -474,17 +507,17 @@ async function upload() {
     );
     if (uploaded && isImage(uploaded)) selectedAsset.value = uploaded;
     selectedFile.value = null;
-    message.value = String($t('page.files.uploaded'));
+    notifySuccess(String($t('page.files.uploaded')));
     await load();
   } catch {
-    error.value = String($t('page.files.uploadError'));
-    await focusError();
+    notifyError(String($t('page.files.uploadError')));
   } finally {
     uploading.value = false;
   }
 }
 
 function formatSize(value: number) {
+  if (!Number.isFinite(value) || value < 0) return '—';
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
   if (value < 1024 * 1024 * 1024)
@@ -507,21 +540,37 @@ function categoryLabel(id?: string) {
 
 async function download(item: FileObject, preview = false) {
   actionId.value = item.id;
-  error.value = '';
+  // Open the preview tab while the click still has user activation. Opening
+  // it only after the authenticated blob request resolves is blocked by many
+  // browsers, which made preview appear to do nothing.
+  const previewWindow = preview ? window.open('', '_blank') : null;
+  if (preview && !previewWindow) {
+    notifyError(String($t('page.files.downloadError')));
+    actionId.value = '';
+    return;
+  }
+  if (previewWindow) previewWindow.opener = null;
   try {
     const blob = await downloadFileApi(item.id, preview);
     const url = URL.createObjectURL(blob);
-    if (preview) window.open(url, '_blank', 'noopener,noreferrer');
-    else {
+    if (preview) {
+      previewWindow!.location.href = url;
+      // Keep the object URL alive while the new tab loads. It is revoked on
+      // the next page interaction window rather than racing the navigation.
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } else {
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = item.name;
+      anchor.download = item.name || item.id;
+      anchor.style.display = 'none';
+      document.body.append(anchor);
       anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   } catch {
-    error.value = String($t('page.files.downloadError'));
-    await focusError();
+    previewWindow?.close();
+    notifyError(String($t('page.files.downloadError')));
   } finally {
     actionId.value = '';
   }
@@ -531,14 +580,12 @@ async function deleteItem(item: FileObject) {
   if (!canManage.value) return;
   if (!window.confirm(String($t('page.files.confirmDelete')))) return;
   actionId.value = item.id;
-  error.value = '';
   try {
     await deleteFileApi(item.id);
-    message.value = String($t('page.files.deleted'));
+    notifySuccess(String($t('page.files.deleted')));
     await load();
   } catch {
-    error.value = String($t('page.files.deleteError'));
-    await focusError();
+    notifyError(String($t('page.files.deleteError')));
   } finally {
     actionId.value = '';
   }
@@ -547,14 +594,12 @@ async function deleteItem(item: FileObject) {
 async function createSignedURL(item: FileObject) {
   if (!canManage.value) return;
   actionId.value = item.id;
-  error.value = '';
   try {
     const result = await signedFileUrlApi(item.id);
     await navigator.clipboard?.writeText(result.url);
-    message.value = String($t('page.files.signedURLCopied'));
+    notifySuccess(String($t('page.files.signedURLCopied')));
   } catch {
-    error.value = String($t('page.files.signedURLError'));
-    await focusError();
+    notifyError(String($t('page.files.signedURLError')));
   } finally {
     actionId.value = '';
   }
@@ -563,13 +608,11 @@ async function createSignedURL(item: FileObject) {
 async function cleanupDryRun() {
   if (!canManage.value) return;
   cleanupLoading.value = true;
-  error.value = '';
   try {
     cleanupReport.value = await cleanupDryRunApi(cleanupAge.value);
-    message.value = String($t('page.files.cleanupDone'));
+    notifySuccess(String($t('page.files.cleanupDone')));
   } catch {
-    error.value = String($t('page.files.cleanupError'));
-    await focusError();
+    notifyError(String($t('page.files.cleanupError')));
   } finally {
     cleanupLoading.value = false;
   }
@@ -605,31 +648,50 @@ onMounted(async () => {
         <p class="description">{{ $t('page.files.description') }}</p>
       </div>
       <div class="provider-meta">
-        <button class="secondary" type="button" @click="openGuide">{{ $t('page.files.guideButton') }}</button>
+        <button class="secondary" type="button" @click="openGuide">
+          {{ $t('page.files.guideButton') }}
+        </button>
         <span class="provider-chip">{{ $t('page.files.localProvider') }}</span>
         <a href="/system/settings">{{ $t('page.files.providerSettings') }}</a>
       </div>
     </header>
 
-    <aside v-if="guideOpen" ref="guideDrawer" class="guide-drawer" role="dialog" aria-modal="true" aria-labelledby="files-guide-title" @click.self="closeGuide" @keydown.esc="closeGuide" tabindex="-1">
-      <div class="guide-panel"><div class="section-heading"><div><p class="eyebrow">{{ $t('page.files.guideButton') }}</p><h2 id="files-guide-title">{{ guide.title }}</h2></div><button class="secondary" type="button" @click="closeGuide">{{ $t('page.files.guideClose') }}</button></div><p class="description">{{ $t('page.files.guideAudience') }}</p><h3>{{ $t('page.files.guideNormal') }}</h3><ol><li v-for="step in guide.steps" :key="step">{{ step }}</li></ol><h3>{{ $t('page.files.guideDeveloper') }}</h3><ul><li v-for="step in guide.developer" :key="step">{{ step }}</li></ul></div>
-    </aside>
-
-    <p
-      v-if="error"
-      ref="errorSummary"
-      class="feedback feedback-error"
-      role="alert"
-      tabindex="-1"
-    >
+    <p v-if="error" class="sr-only" role="alert" tabindex="-1">
       {{ error }}
     </p>
-    <p v-if="categoryError" class="feedback feedback-error" role="alert">
-      {{ categoryError }}
-    </p>
-    <p v-if="message" class="feedback feedback-success" aria-live="polite">
-      {{ message }}
-    </p>
+
+    <aside
+      v-if="guideOpen"
+      ref="guideDrawer"
+      class="guide-drawer"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="files-guide-title"
+      @click.self="closeGuide"
+      @keydown.esc="closeGuide"
+      tabindex="-1"
+    >
+      <div class="guide-panel">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">{{ $t('page.files.guideButton') }}</p>
+            <h2 id="files-guide-title">{{ guide.title }}</h2>
+          </div>
+          <button class="secondary" type="button" @click="closeGuide">
+            {{ $t('page.files.guideClose') }}
+          </button>
+        </div>
+        <p class="description">{{ $t('page.files.guideAudience') }}</p>
+        <h3>{{ $t('page.files.guideNormal') }}</h3>
+        <ol>
+          <li v-for="step in guide.steps" :key="step">{{ step }}</li>
+        </ol>
+        <h3>{{ $t('page.files.guideDeveloper') }}</h3>
+        <ul>
+          <li v-for="step in guide.developer" :key="step">{{ step }}</li>
+        </ul>
+      </div>
+    </aside>
 
     <div class="media-layout">
       <aside class="category-panel" aria-labelledby="category-title">
@@ -660,20 +722,23 @@ onMounted(async () => {
             >
               <span aria-hidden="true">◈</span>{{ category.name }}
             </button>
-            <span v-if="canManage" class="category-actions"><button
+            <span v-if="canManage" class="category-actions"
+              ><button
                 type="button"
                 :disabled="categoryBusy"
                 :aria-label="$t('page.files.editCategory')"
                 @click="editCategory(category)"
               >
-                ✎</button><button
+                ✎</button
+              ><button
                 type="button"
                 :disabled="categoryBusy"
                 :aria-label="$t('page.files.deleteCategory')"
                 @click="removeCategory(category)"
               >
                 ×
-              </button></span>
+              </button></span
+            >
           </div>
           <p v-if="!categoryRows.length" class="empty-state">
             {{ $t('page.files.noCategories') }}
@@ -719,12 +784,34 @@ onMounted(async () => {
           <div>
             <p class="eyebrow">{{ $t('page.files.logoEyebrow') }}</p>
             <h2 id="logo-title">{{ $t('page.files.logoTitle') }}</h2>
-            <p class="description">{{ logoAsset?.name || $t('page.files.logoEmpty') }}</p>
+            <p class="description">
+              {{ logoAsset?.name || $t('page.files.logoEmpty') }}
+            </p>
           </div>
           <div class="logo-actions">
-            <button type="button" class="secondary" :disabled="logoBusy" @click="openLogoPicker">{{ $t('page.files.logoChoose') }}</button>
-            <button type="button" class="primary" :disabled="uploading || logoBusy || !canManage" @click="triggerLogoUpload">{{ $t('page.files.logoUpload') }}</button>
-            <input ref="logoUploadInput" class="sr-only" type="file" accept="image/*" @change="uploadLogo" />
+            <button
+              type="button"
+              class="secondary"
+              :disabled="logoBusy"
+              @click="openLogoPicker"
+            >
+              {{ $t('page.files.logoChoose') }}
+            </button>
+            <button
+              type="button"
+              class="primary"
+              :disabled="uploading || logoBusy || !canManage"
+              @click="triggerLogoUpload"
+            >
+              {{ $t('page.files.logoUpload') }}
+            </button>
+            <input
+              ref="logoUploadInput"
+              class="sr-only"
+              type="file"
+              accept="image/*"
+              @change="uploadLogo"
+            />
           </div>
           <img
             v-if="logoAsset && previewURL(logoAsset)"
@@ -734,14 +821,43 @@ onMounted(async () => {
           />
         </section>
 
-        <aside v-if="logoPickerOpen" ref="logoDialog" class="logo-drawer" role="dialog" aria-modal="true" aria-labelledby="logo-picker-title" tabindex="-1" @keydown.esc="closeLogoPicker">
+        <aside
+          v-if="logoPickerOpen"
+          ref="logoDialog"
+          class="logo-drawer"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="logo-picker-title"
+          tabindex="-1"
+          @keydown.esc="closeLogoPicker"
+        >
           <div class="logo-panel">
-            <div class="section-heading"><h2 id="logo-picker-title">{{ $t('page.files.logoChoose') }}</h2><button type="button" class="secondary" @click="closeLogoPicker">{{ $t('page.files.guideClose') }}</button></div>
+            <div class="section-heading">
+              <h2 id="logo-picker-title">{{ $t('page.files.logoChoose') }}</h2>
+              <button type="button" class="secondary" @click="closeLogoPicker">
+                {{ $t('page.files.guideClose') }}
+              </button>
+            </div>
             <p class="description">{{ $t('page.files.logoPickerHelp') }}</p>
             <div class="logo-grid">
-              <button v-for="item in logoAssets" :key="item.id" type="button" class="logo-item" :disabled="!isImage(item) || logoBusy" :aria-pressed="logoAsset?.id === item.id" @mouseenter="ensurePreviewURL(item)" @focus="ensurePreviewURL(item)" @click="chooseLogo(item)">
-                <img v-if="isImage(item) && previewURL(item)" :src="previewURL(item)" :alt="item.name" />
-                <span>{{ item.name }}</span><small>{{ categoryLabel(item.categoryId) }}</small>
+              <button
+                v-for="item in logoAssets"
+                :key="item.id"
+                type="button"
+                class="logo-item"
+                :disabled="!isImage(item) || logoBusy"
+                :aria-pressed="logoAsset?.id === item.id"
+                @mouseenter="ensurePreviewURL(item)"
+                @focus="ensurePreviewURL(item)"
+                @click="chooseLogo(item)"
+              >
+                <img
+                  v-if="isImage(item) && previewURL(item)"
+                  :src="previewURL(item)"
+                  :alt="item.name"
+                />
+                <span>{{ item.name }}</span
+                ><small>{{ categoryLabel(item.categoryId) }}</small>
               </button>
             </div>
           </div>
@@ -760,18 +876,23 @@ onMounted(async () => {
             <span class="selected-category">{{ selectedCategoryName }}</span>
           </div>
           <div class="upload-controls">
-            <label class="file-picker"><span>{{ $t('page.files.chooseFile') }}</span><input
+            <label class="file-picker"
+              ><span>{{ $t('page.files.chooseFile') }}</span
+              ><input
                 type="file"
                 :accept="accept"
                 :disabled="uploading"
                 @change="onFileChange"
             /></label>
-            <label class="field"><span>{{ $t('page.files.acl') }}</span><select v-model="acl" :disabled="uploading">
+            <label class="field"
+              ><span>{{ $t('page.files.acl') }}</span
+              ><select v-model="acl" :disabled="uploading">
                 <option value="private">{{ $t('page.files.private') }}</option>
                 <option value="public-read">
                   {{ $t('page.files.publicRead') }}
                 </option>
-              </select></label>
+              </select></label
+            >
             <button
               class="primary"
               type="button"
@@ -800,7 +921,9 @@ onMounted(async () => {
               {{ $t('page.files.refresh') }}
             </button>
           </div>
-          <p v-if="selectedAsset" class="selected-file" role="status">{{ $t('page.files.selectedAsset', { name: selectedAsset.name }) }}</p>
+          <p v-if="selectedAsset" class="selected-file" role="status">
+            {{ $t('page.files.selectedAsset', { name: selectedAsset.name }) }}
+          </p>
           <p v-if="!loading && !hasFiles" class="empty-state">
             {{ $t('page.files.empty') }}
           </p>
@@ -849,21 +972,21 @@ onMounted(async () => {
                       :disabled="actionId === item.id"
                       @click="download(item, true)"
                     >
-                      {{ $t('page.files.preview') }}
-</button><button
+                      {{ $t('page.files.preview') }}</button
+                    ><button
                       type="button"
                       :disabled="actionId === item.id"
                       @click="download(item)"
                     >
-                      {{ $t('page.files.download') }}
-</button><button
+                      {{ $t('page.files.download') }}</button
+                    ><button
                       v-if="canManage"
                       type="button"
                       :disabled="actionId === item.id"
                       @click="createSignedURL(item)"
                     >
-                      {{ $t('page.files.signedURL') }}
-</button><button
+                      {{ $t('page.files.signedURL') }}</button
+                    ><button
                       v-if="canManage"
                       class="danger"
                       type="button"
@@ -887,11 +1010,13 @@ onMounted(async () => {
           <h2 id="cleanup-title">{{ $t('page.files.cleanupTitle') }}</h2>
           <p>{{ $t('page.files.cleanupDescription') }}</p>
           <div class="cleanup-controls">
-            <label class="field"><span>{{ $t('page.files.cleanupAge') }}</span><input
+            <label class="field"
+              ><span>{{ $t('page.files.cleanupAge') }}</span
+              ><input
                 v-model.number="cleanupAge"
                 min="1"
-                type="number"
-/></label><button
+                type="number" /></label
+            ><button
               type="button"
               :disabled="cleanupLoading"
               @click="cleanupDryRun"
@@ -1350,23 +1475,107 @@ td {
   }
 }
 
+.logo-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+}
+.logo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.logo-preview {
+  inline-size: 3.5rem;
+  block-size: 3.5rem;
+  object-fit: contain;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+}
+.logo-drawer {
+  position: fixed;
+  inset: 0;
+  z-index: 1001;
+  display: flex;
+  justify-content: flex-end;
+  background: rgb(15 23 42 / 38%);
+}
+.logo-panel {
+  width: min(42rem, 100%);
+  height: 100%;
+  overflow: auto;
+  padding: 24px;
+  background: white;
+  box-shadow: -12px 0 32px rgb(15 23 42 / 18%);
+}
+.logo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+.logo-item {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.65rem;
+  text-align: start;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: transparent;
+}
+.logo-item img {
+  width: 100%;
+  height: 6rem;
+  object-fit: contain;
+  background: #f8fafc;
+}
+.logo-item small {
+  color: var(--muted);
+}
+.logo-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+@media (width <= 560px) {
+  .logo-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
 
-.logo-card { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:1rem; }
-.logo-actions { display:flex; flex-wrap:wrap; gap:.5rem; }
-.logo-preview { inline-size:3.5rem; block-size:3.5rem; object-fit:contain; border:1px solid var(--line); border-radius:.5rem; }
-.logo-drawer { position:fixed; inset:0; z-index:1001; display:flex; justify-content:flex-end; background:rgb(15 23 42 / 38%); }
-.logo-panel { width:min(42rem,100%); height:100%; overflow:auto; padding:24px; background:white; box-shadow:-12px 0 32px rgb(15 23 42 / 18%); }
-.logo-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(10rem,1fr)); gap:.75rem; margin-top:1rem; }
-.logo-item { display:grid; gap:.35rem; padding:.65rem; text-align:start; border:1px solid var(--line); border-radius:.5rem; background:transparent; }
-.logo-item img { width:100%; height:6rem; object-fit:contain; background:#f8fafc; }
-.logo-item small { color:var(--muted); }
-.logo-item:disabled { opacity:.45; cursor:not-allowed; }
-@media (width <= 560px) { .logo-card { align-items:stretch; flex-direction:column; } }
-
-.guide-drawer { position: fixed; inset: 0; z-index: 1000; display: flex; justify-content: flex-end; background: rgb(15 23 42 / 38%); }
-.guide-panel { width: min(34rem, 100%); height: 100%; overflow: auto; padding: 24px; background: white; box-shadow: -12px 0 32px rgb(15 23 42 / 18%); }
-.guide-panel h3 { margin-top: 24px; }
-.guide-panel li { margin: 8px 0; line-height: 1.5; }
-.heading-actions { display:flex; gap: 8px; flex-wrap: wrap; }
-@media (prefers-reduced-motion: reduce) { .guide-drawer * { transition: none !important; } }
+.guide-drawer {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  justify-content: flex-end;
+  background: rgb(15 23 42 / 38%);
+}
+.guide-panel {
+  width: min(34rem, 100%);
+  height: 100%;
+  overflow: auto;
+  padding: 24px;
+  background: white;
+  box-shadow: -12px 0 32px rgb(15 23 42 / 18%);
+}
+.guide-panel h3 {
+  margin-top: 24px;
+}
+.guide-panel li {
+  margin: 8px 0;
+  line-height: 1.5;
+}
+.heading-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+@media (prefers-reduced-motion: reduce) {
+  .guide-drawer * {
+    transition: none !important;
+  }
+}
 </style>

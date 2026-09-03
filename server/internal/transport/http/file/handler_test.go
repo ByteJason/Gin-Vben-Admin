@@ -77,6 +77,32 @@ func TestFileHTTPUploadListDownloadDeleteAndCleanupDryRun(t *testing.T) {
 	}
 }
 
+func TestFileHTTPUsesGeneratedClientFieldNames(t *testing.T) {
+	item := fileapp.File{
+		ID: "file-1", Key: "key-1", Name: "logo.png", MIME: "image/png",
+		Size: 42, OwnerID: "u1", TenantID: "tenant-a", OrgID: "org-a",
+		ACL: fileapp.ACLPublicRead,
+	}
+	payload, err := json.Marshal(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]any
+	if err = json.Unmarshal(payload, &fields); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"id", "key", "name", "mime", "size", "ownerId", "tenantId", "orgId", "acl"} {
+		if _, ok := fields[key]; !ok {
+			t.Fatalf("serialized file is missing %q: %s", key, payload)
+		}
+	}
+	for _, key := range []string{"ID", "Key", "Name", "MIME", "Size", "OwnerID", "TenantID", "OrgID", "ACL"} {
+		if _, ok := fields[key]; ok {
+			t.Fatalf("serialized file leaked Go field %q: %s", key, payload)
+		}
+	}
+}
+
 func TestFileHTTPRequiresTenantContext(t *testing.T) {
 	svc := fileapp.NewService(fileapp.NewMemoryStore(""), fileapp.Config{})
 	r := gin.New()

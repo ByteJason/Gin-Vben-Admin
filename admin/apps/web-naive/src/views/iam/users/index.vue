@@ -15,7 +15,7 @@ import type {
 import { computed, nextTick, onMounted, reactive, ref } from 'vue';
 
 import { useAccess } from '@vben/access';
-import { ManagementPage } from '@vben/common-ui';
+import { ManagementPage, notify } from '@vben/common-ui';
 
 import {
   batchUpdateIAMUserStatusApi,
@@ -64,16 +64,10 @@ const roleAssignmentErrorSummary = ref<HTMLElement | null>(null);
 const rolesLoading = ref(false);
 const rolesError = ref('');
 const error = ref('');
-const errorSummary = ref<HTMLElement | null>(null);
 const formError = ref('');
 const formErrorSummary = ref<HTMLElement | null>(null);
-const formMessage = ref('');
 const selectedIds = ref<string[]>([]);
 const actionLoading = ref(false);
-const actionError = ref('');
-const actionErrorSummary = ref<HTMLElement | null>(null);
-const actionMessage = ref('');
-const actionFeedback = ref<HTMLElement | null>(null);
 const formOpen = ref(false);
 const formLoading = ref(false);
 const formMode = ref<'create' | 'edit'>('create');
@@ -147,24 +141,9 @@ function formatDate(value?: string) {
   }).format(date);
 }
 
-async function focusError() {
-  await nextTick();
-  errorSummary.value?.focus();
-}
-
 async function focusFormError() {
   await nextTick();
   formErrorSummary.value?.focus();
-}
-
-async function focusActionError() {
-  await nextTick();
-  actionErrorSummary.value?.focus();
-}
-
-async function focusActionFeedback() {
-  await nextTick();
-  actionFeedback.value?.focus();
 }
 
 async function focusResetError() {
@@ -218,7 +197,6 @@ function openCreate() {
   if (!canManage.value) return;
   formMode.value = 'create';
   clearUserForm();
-  formMessage.value = '';
   formOpen.value = true;
 }
 
@@ -233,7 +211,6 @@ async function openEdit(user: IAMUser) {
   userForm.phone = user.phone ?? '';
   userForm.orgId = user.orgId ?? '';
   userForm.active = user.active;
-  formMessage.value = '';
   formOpen.value = true;
   formLoading.value = true;
   try {
@@ -310,8 +287,13 @@ async function submitUserForm() {
       await updateIAMUserApi(editingId.value, input);
     }
     formOpen.value = false;
-    formMessage.value = String(
-      $t(formMode.value === 'create' ? 'page.iam.created' : 'page.iam.updated'),
+    notify(
+      'success',
+      String(
+        $t(
+          formMode.value === 'create' ? 'page.iam.created' : 'page.iam.updated',
+        ),
+      ),
     );
     await loadUsers();
   } catch {
@@ -328,8 +310,6 @@ function openResetPassword(user: IAMUser) {
   resetUsername.value = user.username;
   resetPassword.value = '';
   resetError.value = '';
-  actionError.value = '';
-  actionMessage.value = '';
   resetOpen.value = true;
 }
 
@@ -351,8 +331,6 @@ function validateResetPassword() {
 async function submitResetPassword() {
   if (!canManage.value) return;
   resetError.value = '';
-  actionError.value = '';
-  actionMessage.value = '';
   const validationError = validateResetPassword();
   if (validationError) {
     resetError.value = validationError;
@@ -368,9 +346,8 @@ async function submitResetPassword() {
     await resetIAMUserPasswordApi(resetUserId.value, input);
     resetPassword.value = '';
     resetOpen.value = false;
-    actionMessage.value = String($t('page.iam.resetDone'));
+    notify('success', String($t('page.iam.resetDone')));
     await loadUsers();
-    await focusActionFeedback();
   } catch {
     resetError.value = String($t('page.iam.resetError'));
     await focusResetError();
@@ -443,8 +420,6 @@ function openLoginEvents(user: IAMUser) {
   loginEventsOffset.value = 0;
   loginEventsError.value = '';
   clearLoginEvents();
-  actionError.value = '';
-  actionMessage.value = '';
   loginEventsOpen.value = true;
   void loadLoginEvents();
 }
@@ -498,8 +473,6 @@ function openRoleAssignment(user: IAMUser) {
   roleAssignmentInitialRoleIds.value = [...currentRoleIds];
   roleAssignmentSelectedRoleIds.value = [...currentRoleIds];
   roleAssignmentError.value = rolesError.value;
-  actionError.value = '';
-  actionMessage.value = '';
   roleAssignmentOpen.value = true;
 }
 
@@ -537,9 +510,8 @@ async function submitRoleAssignment() {
   }
   const changes = roleAssignmentChanges();
   if (changes.length === 0) {
-    actionMessage.value = String($t('page.iam.roleAssignmentNoChanges'));
+    notify('info', String($t('page.iam.roleAssignmentNoChanges')));
     roleAssignmentOpen.value = false;
-    await focusActionFeedback();
     return;
   }
   const overLimit = changes.find(
@@ -552,8 +524,6 @@ async function submitRoleAssignment() {
   }
   if (!window.confirm(String($t('page.iam.roleAssignmentConfirm')))) return;
   roleAssignmentLoading.value = true;
-  actionError.value = '';
-  actionMessage.value = '';
   try {
     for (const change of changes) {
       const input: IAMRoleUsersReplaceInput = { userIds: change.userIds };
@@ -564,10 +534,9 @@ async function submitRoleAssignment() {
       }
     }
     roleAssignmentOpen.value = false;
-    actionMessage.value = String($t('page.iam.roleAssignmentDone'));
+    notify('success', String($t('page.iam.roleAssignmentDone')));
     await loadUsers();
     await loadRoles();
-    await focusActionFeedback();
   } catch {
     roleAssignmentError.value = String($t('page.iam.roleAssignmentError'));
     await focusRoleAssignmentError();
@@ -589,16 +558,12 @@ async function deleteUser(user: IAMUser) {
   }
   if (!window.confirm(String($t('page.iam.confirmDelete')))) return;
   actionLoading.value = true;
-  actionError.value = '';
-  actionMessage.value = '';
   try {
     await deleteIAMUserApi(user.id);
-    actionMessage.value = String($t('page.iam.deleted'));
+    notify('success', String($t('page.iam.deleted')));
     await loadUsers();
-    await focusActionFeedback();
   } catch {
-    actionError.value = String($t('page.iam.deleteError'));
-    await focusActionError();
+    notify('error', String($t('page.iam.deleteError')));
   } finally {
     actionLoading.value = false;
   }
@@ -619,8 +584,6 @@ async function batchUpdate(active: boolean) {
     return;
   }
   actionLoading.value = true;
-  actionError.value = '';
-  actionMessage.value = '';
   const input: IAMUserBatchStatusInput = {
     items: selectedIds.value.map((id) => ({ id, active })),
   };
@@ -629,14 +592,15 @@ async function batchUpdate(active: boolean) {
     const hasFailures = result.results.some(
       (item) => item.status !== (active ? 'active' : 'disabled'),
     );
-    actionMessage.value = String(
-      $t(hasFailures ? 'page.iam.batchPartial' : 'page.iam.batchUpdated'),
+    notify(
+      hasFailures ? 'warning' : 'success',
+      String(
+        $t(hasFailures ? 'page.iam.batchPartial' : 'page.iam.batchUpdated'),
+      ),
     );
     await loadUsers();
-    await focusActionFeedback();
   } catch {
-    actionError.value = String($t('page.iam.batchError'));
-    await focusActionError();
+    notify('error', String($t('page.iam.batchError')));
   } finally {
     actionLoading.value = false;
   }
@@ -658,7 +622,7 @@ async function loadUsers() {
     clearSelection();
   } catch {
     error.value = String($t('page.iam.loadError'));
-    await focusError();
+    notify('error', error.value);
   } finally {
     loading.value = false;
   }
@@ -674,6 +638,7 @@ async function loadRoles() {
     // A role filter is optional; the user list remains useful when roles are unavailable.
     roles.value = [];
     rolesError.value = String($t('page.iam.roleAssignmentLoadError'));
+    notify('warning', rolesError.value);
   } finally {
     rolesLoading.value = false;
   }
@@ -737,40 +702,9 @@ onMounted(async () => {
       </div>
     </header>
 
-    <p
-      v-if="error"
-      ref="errorSummary"
-      class="feedback feedback-error"
-      role="alert"
-      tabindex="-1"
-    >
-      {{ error }}
-    </p>
     <p class="sr-status" aria-live="polite">
       {{ loading ? $t('page.iam.loading') : '' }}
     </p>
-    <p v-if="formMessage" class="feedback feedback-success" aria-live="polite">
-      {{ formMessage }}
-    </p>
-    <p
-      v-if="actionError"
-      ref="actionErrorSummary"
-      class="feedback feedback-error"
-      role="alert"
-      tabindex="-1"
-    >
-      {{ actionError }}
-    </p>
-    <p
-      v-if="actionMessage"
-      ref="actionFeedback"
-      class="feedback feedback-success"
-      aria-live="polite"
-      tabindex="-1"
-    >
-      {{ actionMessage }}
-    </p>
-
     <form class="filters" role="search" @submit.prevent="search">
       <label class="field field-keyword" for="iam-users-keyword">
         <span>{{ $t('page.iam.keyword') }}</span>
@@ -819,7 +753,9 @@ onMounted(async () => {
     <section class="table-card" aria-labelledby="iam-users-table-title">
       <div class="table-heading">
         <h2 id="iam-users-table-title">{{ $t('page.iam.users') }}</h2>
-        <span class="result-count">{{ page.total }} {{ $t('page.iam.rows') }}</span>
+        <span class="result-count"
+          >{{ page.total }} {{ $t('page.iam.rows') }}</span
+        >
       </div>
       <div
         v-if="canManage"

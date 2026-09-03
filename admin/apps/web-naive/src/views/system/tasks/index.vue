@@ -9,7 +9,7 @@ import type {
 import { computed, onMounted, reactive, ref } from 'vue';
 
 import { useAccess } from '@vben/access';
-import { ManagementPage } from '@vben/common-ui';
+import { ManagementPage, notify } from '@vben/common-ui';
 
 import {
   cancelTaskRunApi,
@@ -169,6 +169,7 @@ async function loadTasks() {
     if (selected.value) await loadRuns(selected.value.id);
   } catch {
     error.value = String($t('page.tasks.loadError'));
+    notify('error', error.value);
   } finally {
     loading.value = false;
   }
@@ -179,6 +180,7 @@ async function loadRuns(id: string) {
   } catch {
     runs.value = [];
     error.value = String($t('page.tasks.runsLoadError'));
+    notify('error', error.value);
   }
 }
 async function loadRunLogs(taskId: string, runId: string) {
@@ -187,6 +189,7 @@ async function loadRunLogs(taskId: string, runId: string) {
   } catch {
     logs.value[runId] = [];
     error.value = String($t('page.tasks.logsLoadError'));
+    notify('error', error.value);
   }
 }
 async function saveTask() {
@@ -200,10 +203,12 @@ async function saveTask() {
     >;
   } catch {
     error.value = String($t('page.tasks.payloadInvalid'));
+    notify('error', error.value);
     return;
   }
   if (!form.name.trim()) {
     error.value = String($t('page.tasks.nameRequired'));
+    notify('error', error.value);
     return;
   }
   saving.value = true;
@@ -211,10 +216,12 @@ async function saveTask() {
     if (editingId.value) await updateTaskApi(editingId.value, input());
     else await createTaskApi(input());
     notice.value = String($t('page.tasks.saved'));
+    notify('success', notice.value);
     resetForm();
     await loadTasks();
   } catch {
     error.value = String($t('page.tasks.saveError'));
+    notify('error', error.value);
   } finally {
     saving.value = false;
   }
@@ -226,6 +233,7 @@ async function removeTask(item: TaskDefinition) {
   try {
     await deleteTaskApi(item.id);
     notice.value = String($t('page.tasks.deleted'));
+    notify('success', notice.value);
     if (selectedId.value === item.id) {
       selectedId.value = '';
       runs.value = [];
@@ -233,6 +241,7 @@ async function removeTask(item: TaskDefinition) {
     await loadTasks();
   } catch {
     error.value = String($t('page.tasks.deleteError'));
+    notify('error', error.value);
   } finally {
     deleting.value = '';
   }
@@ -248,9 +257,11 @@ async function runTask(item: TaskDefinition) {
       idempotencyKey: item.idempotencyKey,
     });
     notice.value = String($t('page.tasks.runAccepted'));
+    notify('success', notice.value);
     await loadRuns(item.id);
   } catch {
     error.value = String($t('page.tasks.runError'));
+    notify('error', error.value);
   } finally {
     running.value = '';
   }
@@ -267,9 +278,11 @@ async function cancelRun(item: TaskRun) {
   try {
     await cancelTaskRunApi(selected.value.id, item.id);
     notice.value = String($t('page.tasks.runCancelled'));
+    notify('success', notice.value);
     await loadRuns(selected.value.id);
   } catch {
     error.value = String($t('page.tasks.cancelRunError'));
+    notify('error', error.value);
   } finally {
     runAction.value = '';
   }
@@ -286,9 +299,11 @@ async function retryRun(item: TaskRun) {
   try {
     await retryTaskRunApi(selected.value.id, item.id);
     notice.value = String($t('page.tasks.retryAccepted'));
+    notify('success', notice.value);
     await loadRuns(selected.value.id);
   } catch {
     error.value = String($t('page.tasks.retryError'));
+    notify('error', error.value);
   } finally {
     runAction.value = '';
   }
@@ -329,10 +344,6 @@ onMounted(() => void loadTasks());
       </div>
     </header>
 
-    <p v-if="error" class="feedback error" role="alert" tabindex="-1">
-      {{ error }}
-    </p>
-    <p v-if="notice" class="feedback success" role="status">{{ notice }}</p>
     <p class="sr-status" aria-live="polite">
       {{ loading ? $t('page.tasks.loading') : '' }}
     </p>
