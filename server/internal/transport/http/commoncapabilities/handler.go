@@ -560,6 +560,21 @@ func (h *Handler) testTemplate(c *gin.Context) {
 	if strings.TrimSpace(in.Recipient) != "" && len(in.Recipients) == 0 {
 		in.Recipients = []notification.Recipient{{Address: in.Recipient, Kind: "to"}}
 	}
+	// Admin test sends are designed to be one-click from the management UI.
+	// Fill omitted declared variables with deterministic, locale-aware sample
+	// values while retaining every value supplied by the operator. Production
+	// NotificationService calls remain strict and still require their declared
+	// variables explicitly.
+	templateValue, e := h.Runtime.TemplateFor(c.Request.Context(), c.Param("id"))
+	if e != nil {
+		writeNotificationError(c, e)
+		return
+	}
+	if strings.TrimSpace(in.Locale) == "" {
+		metadata := notification.ContextMetadataFromContext(c.Request.Context())
+		in.Locale = requestLocale(firstNonEmpty(metadata.Locale, c.GetHeader("Accept-Language"), templateValue.DefaultLocale))
+	}
+	in.Variables = fillTemplateTestVariables(templateValue, in.Locale, in.Variables)
 	// The path identifies the template under test and the management caller is
 	// installed by the trusted adapter; body caller/purpose fields cannot switch
 	// the capability or redirect the send.
@@ -570,6 +585,56 @@ func (h *Handler) testTemplate(c *gin.Context) {
 		return
 	}
 	response.OK(c, out)
+}
+
+func requestLocale(value string) string {
+	return strings.TrimSpace(strings.Split(value, ",")[0])
+}
+
+func fillTemplateTestVariables(value notification.Template, locale string, provided map[string]string) map[string]string {
+	result := make(map[string]string, len(value.Variables)+len(provided))
+	for key, item := range provided {
+		result[key] = item
+	}
+	for _, name := range value.Variables {
+		if _, exists := result[name]; exists {
+			continue
+		}
+		result[name] = sampleTemplateVariable(name, locale)
+	}
+	return result
+}
+
+func sampleTemplateVariable(name, locale string) string {
+	key := strings.ToLower(strings.TrimSpace(name))
+	if strings.Contains(key, "code") || strings.Contains(key, "otp") || strings.Contains(key, "token") {
+		return "123456"
+	}
+	if strings.Contains(key, "expire") || strings.Contains(key, "ttl") {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(locale)), "en") {
+			return "10 minutes"
+		}
+		return "10 分钟"
+	}
+	if strings.Contains(key, "email") {
+		return "user@example.test"
+	}
+	if strings.Contains(key, "location") || strings.Contains(key, "ip") {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(locale)), "en") {
+			return "Sample location"
+		}
+		return "示例地点"
+	}
+	if strings.Contains(key, "name") {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(locale)), "en") {
+			return "Sample User"
+		}
+		return "示例用户"
+	}
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(locale)), "en") {
+		return "Sample value"
+	}
+	return "示例值"
 }
 
 type policyDTO struct {
@@ -1360,7 +1425,8 @@ func writeNotificationError(c *gin.Context, e error) {
 	case errors.Is(e, notification.ErrIdempotencyConflict):
 		response.Error(c, 409, 10000, "idempotency conflict")
 	case errors.Is(e, notification.ErrInvalidRecipient), errors.Is(e, notification.ErrTemplateVariableMissing), errors.Is(e, notification.ErrTemplateVariableInvalid), errors.Is(e, notification.ErrInvalidMessage):
-		response.Error(c, 400, 10000, "invalid notification request")
+		messageKey, params := notificationValidationError(e)
+		response.ErrorWithMessageKey(c, 400, 10000, "invalid notification request", messageKey, params)
 	case errors.Is(e, notification.ErrVerificationRateLimited):
 		response.Error(c, 429, 40002, "verification rate limited")
 	case errors.Is(e, notification.ErrVerificationExpired), errors.Is(e, notification.ErrVerificationLocked), errors.Is(e, notification.ErrVerificationConsumed), errors.Is(e, notification.ErrVerificationCodeIncorrect), errors.Is(e, notification.ErrVerificationNotActive), errors.Is(e, notification.ErrVerificationNotFound):
@@ -1368,6 +1434,30 @@ func writeNotificationError(c *gin.Context, e error) {
 	default:
 		response.Error(c, 503, 40001, "dependency unavailable")
 	}
+}
+
+func notificationValidationError(err error) (string, map[string]any) {
+	switch {
+	case errors.Is(err, notification.ErrTemplateVariableMissing):
+		return "notification.template.variableMissing", map[string]any{"variable": notificationErrorSuffix(err)}
+	case errors.Is(err, notification.ErrTemplateVariableInvalid):
+		return "notification.template.variableInvalid", map[string]any{"variable": notificationErrorSuffix(err)}
+	case errors.Is(err, notification.ErrInvalidRecipient):
+		return "notification.recipient.invalid", nil
+	default:
+		return "notification.request.invalid", nil
+	}
+}
+
+func notificationErrorSuffix(err error) string {
+	if err == nil {
+		return ""
+	}
+	message := err.Error()
+	if index := strings.LastIndex(message, ": "); index >= 0 {
+		return strings.TrimSpace(message[index+2:])
+	}
+	return ""
 }
 
 func writeMailError(c *gin.Context, e error) {
@@ -1443,7 +1533,7 @@ func (h *Handler) managementContext(c *gin.Context) context.Context {
 	metadata.CallerKey = "system.admin"
 	if metadata.Locale == "" {
 		if locale := strings.TrimSpace(c.GetHeader("Accept-Language")); locale != "" {
-			metadata.Locale = strings.TrimSpace(strings.Split(locale, ",")[0])
+			metadata.Locale = requestLocale(locale)
 		}
 	}
 	return notification.WithContextMetadata(ctx, metadata)

@@ -412,9 +412,10 @@ for _, resource := range page.Items {
 Branding 更新请求的 `value` 必须是结构化 JSON，例如
 `{"value":{"logoResourceId":"RESOURCE_ID"},"expectedVersion":3}`，不要预先 `JSON.stringify`。
 
-模板测试请求体为 `{recipient, locale, variables}`；服务端固定 `is_test=true`，校验固定测试变量，
-不创建验证码 challenge，响应为 `{message_id, status, is_test}`。收件人 allowlist 的配置/策略存储仍在 P2/P7
-收口，当前切片不会把任意测试地址误报为已通过生产 allowlist。
+模板测试请求体为 `{recipient, locale?, variables?}`；服务端固定 `is_test=true`，不创建验证码 challenge，
+未提供的已声明变量会按语言填充确定性的示例值（例如 `code=123456`、`expires_in=10 分钟`），调用方提供的值优先。
+响应为 `{message_id, status, is_test}`。收件人 allowlist 的配置/策略存储仍在 P2/P7 收口，当前切片不会把任意测试地址
+误报为已通过生产 allowlist。变量名或收件人不合法时，错误 `errors[0]` 会返回稳定 `messageKey` 与 `params.variable`。
 HTTP mutation 使用 `Idempotency-Key`；管理端 AdminTest 未提供时可由服务端生成。
 
 ```bash

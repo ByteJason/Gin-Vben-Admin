@@ -34,7 +34,7 @@
 
 | 能力 | 当前代码事实 | 目标改造 |
 | --- | --- | --- |
-| SMTP | `server/internal/application/mail.Service` 保留租户账号、投递记录、重试和密文正文；`server/internal/application/mail/ports.go`、`server/internal/application/notification/runtime.go` 已提供 caller/模板/策略解析、同步测试发送和验证码入口 | 持久化 outbox/relay、真实 provider 健康回退和审计落库继续收口 |
+| SMTP | `server/internal/application/mail.Service` 保留租户账号、投递记录、重试和密文正文；`server/internal/application/mail/ports.go`、`server/internal/application/notification/runtime.go` 已提供 caller/模板/策略解析、同步测试发送和验证码入口；管理端模板测试缺省变量自动填充本地化示例值并返回可定位错误 key | 持久化 outbox/relay、真实 provider 健康回退和审计落库继续收口 |
 | 密码找回 | `server/internal/bootstrap/http.go` 构造并注入公共 notification runtime；预置 caller/template/policy 可通过管理端热更新 | 迁移一个真实密码找回或通知调用方，完成端到端回归 |
 | 媒体 | `server/internal/application/file/catalog.go` 提供 `CatalogAdapter`/`MediaCatalog`，支持流式上传、作用域、分类、签名 URL、引用保护和预置 reconcile | 持久化 catalog repository、对象存储清理 worker 和配额对账继续收口 |
 | 文件模型 | `file_objects` 已扩展 category/provider/status/metadata/reconcile 字段；新增 `media_categories`、`media_usages` 模型 | 双库兼容迁移、旧数据回填和生产回滚演练 |

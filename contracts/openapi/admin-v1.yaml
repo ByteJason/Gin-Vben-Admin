@@ -2677,11 +2677,11 @@ components:
         published: { type: boolean }
     NotificationTemplateTestInput:
       type: object
-      required: [recipient, locale, variables]
+      required: [recipient]
       properties:
         recipient: { type: string, format: email }
         locale: { type: string, enum: [zh-CN, en-US] }
-        variables: { type: object, additionalProperties: { type: string } }
+        variables: { type: object, description: 未提供的已声明变量会在 AdminTest 中使用本地化示例值, additionalProperties: { type: string } }
     NotificationTemplateTestResult:
       type: object
       required: [messageId, status, isTest]

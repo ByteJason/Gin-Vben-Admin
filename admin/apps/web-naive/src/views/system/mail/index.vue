@@ -81,6 +81,11 @@ function closeGuide() {
 }
 const notice = ref('');
 const testResult = ref('');
+type TestFeedbackTone = 'error' | 'info' | 'success';
+type TestFeedback = { message: string; tone: TestFeedbackTone };
+const testResultTone = ref<TestFeedbackTone>('info');
+const accountTestFeedback = reactive<Record<string, TestFeedback>>({});
+const templateTestFeedback = reactive<Record<string, TestFeedback>>({});
 
 type RoutingPolicy = 'round_robin' | 'weighted_random';
 type CallerDraft = {
@@ -298,6 +303,11 @@ function editTemplate(value: NotificationTemplate) {
   const zh = locales['zh-CN'];
   const en = locales['en-US'];
   templateEditingId.value = value.id;
+  const testVariables = completeTemplateVariables(
+    value,
+    parseVariables(templateForm.testVariables),
+    templateForm.testLocale,
+  );
   Object.assign(templateForm, {
     key: templateKey(value),
     purpose: value.purpose ?? templateKey(value),
@@ -309,6 +319,7 @@ function editTemplate(value: NotificationTemplate) {
     enBody: en?.body ?? (value.defaultLocale === 'en-US' ? value.body ?? '' : ''),
     enabled: value.enabled !== false,
     published: value.published === true,
+    testVariables: serializeVariables(testVariables),
   });
 }
 
@@ -371,8 +382,8 @@ async function removeTemplate(value: NotificationTemplate) {
   }
 }
 
-function parseVariables(value: string) {
-  const result: Record<string, unknown> = {};
+function parseVariables(value: string): Record<string, string> {
+  const result: Record<string, string> = {};
   for (const item of splitCSV(value)) {
     const [key, ...rest] = item.split('=');
     if (key?.trim()) result[key.trim()] = rest.join('=').trim();
@@ -380,19 +391,129 @@ function parseVariables(value: string) {
   return result;
 }
 
+function sampleVariableValue(name: string, locale: string) {
+  const key = name.trim().toLowerCase();
+  const english = locale.trim().toLowerCase().startsWith('en');
+  if (key.includes('code') || key.includes('otp') || key.includes('token')) return '123456';
+  if (key.includes('expire') || key.includes('ttl')) return english ? '10 minutes' : '10 分钟';
+  if (key.includes('email')) return 'user@example.test';
+  if (key.includes('location') || key.includes('ip')) return english ? 'Sample location' : '示例地点';
+  if (key.includes('name')) return english ? 'Sample User' : '示例用户';
+  return english ? 'Sample value' : '示例值';
+}
+
+function completeTemplateVariables(
+  value: NotificationTemplate,
+  provided: Record<string, string>,
+  locale: string,
+) {
+  const result: Record<string, string> = {};
+  for (const name of value.variables ?? []) {
+    if (Object.prototype.hasOwnProperty.call(provided, name)) {
+      result[name] = provided[name] ?? '';
+    } else {
+      result[name] = sampleVariableValue(name, locale);
+    }
+  }
+  return result;
+}
+
+function serializeVariables(values: Record<string, string>) {
+  return Object.entries(values)
+    .map(([key, value]) => `${key}=${value}`)
+    .join(', ');
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined;
+}
+
+function responseData(value: unknown) {
+  const record = asRecord(value);
+  const nested = asRecord(record?.data);
+  return nested && ('status' in nested || 'messageId' in nested) ? nested : (record ?? {});
+}
+
+function errorData(value: unknown) {
+  const record = asRecord(value);
+  const response = asRecord(record?.response);
+  const responseBody = asRecord(response?.data);
+  if (responseBody) return responseBody;
+  const nested = asRecord(record?.data);
+  return nested && ('message' in nested || 'errors' in nested || 'code' in nested)
+    ? nested
+    : (record ?? {});
+}
+
+function formatTestError(value: unknown, fallbackKey: string, codeKey: string) {
+  const payload = errorData(value);
+  const first = Array.isArray(payload.errors) ? asRecord(payload.errors[0]) : undefined;
+  const messageKey = typeof first?.messageKey === 'string' ? first.messageKey : '';
+  const params = asRecord(first?.params);
+  if (messageKey === 'notification.template.variableMissing') {
+    return String($t('page.mail.templateMissingVariable', { variable: String(params?.variable ?? '') }));
+  }
+  if (messageKey === 'notification.template.variableInvalid') {
+    return String($t('page.mail.templateInvalidVariable', { variable: String(params?.variable ?? '') }));
+  }
+  if (messageKey === 'notification.recipient.invalid') {
+    return String($t('page.mail.recipientInvalid'));
+  }
+  const code = payload.code;
+  if (code !== undefined && code !== null && String(code) !== '10000') {
+    return String($t(codeKey, { code: String(code) }));
+  }
+  return String($t(fallbackKey));
+}
+
+function setTestFeedback(target: Record<string, TestFeedback>, id: string, message: string, tone: TestFeedbackTone) {
+  const feedback = { message, tone };
+  target[id] = feedback;
+  testResult.value = message;
+  testResultTone.value = tone;
+}
+
+function feedbackMessage(target: Record<string, TestFeedback>, id: string) {
+  return target[id]?.message ?? '';
+}
+
+function feedbackTone(target: Record<string, TestFeedback>, id: string) {
+  return target[id]?.tone ?? 'info';
+}
+
 async function testTemplate(value: NotificationTemplate) {
   if (!canManage.value || !templateForm.testRecipient.trim()) return;
   templateTesting.value = value.id;
   error.value = '';
+  testResult.value = '';
   try {
+    const variables = completeTemplateVariables(
+      value,
+      parseVariables(templateForm.testVariables),
+      templateForm.testLocale,
+    );
+    templateForm.testVariables = serializeVariables(variables);
     const result = await testNotificationTemplateApi(templateKey(value), {
       recipient: templateForm.testRecipient.trim(),
       locale: templateForm.testLocale,
-      variables: parseVariables(templateForm.testVariables),
+      variables,
     });
-    testResult.value = String($t('page.mail.templateTestResult', { status: result.status ?? 'queued' }));
-  } catch {
-    error.value = String($t('page.mail.templateTestError'));
+    const data = responseData(result);
+    const status = String(data.status ?? 'queued');
+    const tone: TestFeedbackTone = status === 'failed' ? 'error' : status === 'queued' ? 'info' : 'success';
+    setTestFeedback(
+      templateTestFeedback,
+      value.id,
+      String($t('page.mail.templateTestResult', { status })),
+      tone,
+    );
+  } catch (caught) {
+    setTestFeedback(
+      templateTestFeedback,
+      value.id,
+      formatTestError(caught, 'page.mail.templateTestError', 'page.mail.templateTestErrorWithCode'),
+      'error',
+    );
   } finally {
     templateTesting.value = '';
   }
@@ -525,18 +646,30 @@ async function test(account: SMTPAccount) {
   testResult.value = '';
   try {
     const result = await testSMTPAccountApi(account.id);
-    testResult.value =
-      result.status === 'ok'
+    const data = responseData(result);
+    const status = String(data.status ?? '').toLowerCase();
+    const success = status === 'ok';
+    setTestFeedback(
+      accountTestFeedback,
+      account.id,
+      success
         ? String($t('page.mail.testSuccess', { name: account.name }))
         : String(
             $t('page.mail.testFailure', {
-              code: result.code ?? 'provider_unavailable',
+              code: String(data.code ?? 'provider_unavailable'),
               name: account.name,
-              stage: result.stage ?? 'unknown',
+              stage: String(data.stage ?? 'unknown'),
             }),
-          );
-  } catch {
-    error.value = String($t('page.mail.testError'));
+          ),
+      success ? 'success' : 'error',
+    );
+  } catch (caught) {
+    setTestFeedback(
+      accountTestFeedback,
+      account.id,
+      formatTestError(caught, 'page.mail.testError', 'page.mail.testErrorWithCode'),
+      'error',
+    );
   } finally {
     testingId.value = '';
   }
@@ -605,7 +738,7 @@ onMounted(load);
 
     <p v-if="error" class="feedback error" role="alert">{{ error }}</p>
     <p v-if="notice" class="feedback success" role="status">{{ notice }}</p>
-    <p v-if="testResult" class="feedback info" role="status">
+    <p v-if="testResult" class="feedback" :class="testResultTone" role="status" aria-live="polite">
       {{ testResult }}
     </p>
 
@@ -738,12 +871,13 @@ onMounted(load);
             <label><span>{{ $t('page.mail.testRecipient') }}</span><input v-model="templateForm.testRecipient" type="email" autocomplete="email" /></label>
             <label><span>{{ $t('page.mail.testLocale') }}</span><select v-model="templateForm.testLocale"><option value="zh-CN">zh-CN</option><option value="en-US">en-US</option></select></label>
             <label class="wide"><span>{{ $t('page.mail.testVariables') }}</span><input v-model="templateForm.testVariables" :placeholder="$t('page.mail.testVariablesPlaceholder')" autocomplete="off" /></label>
+            <p class="helper wide">{{ $t('page.mail.testVariablesHint') }}</p>
           </div>
         </div>
         <div v-if="templates.length" class="capability-list">
           <div v-for="template in templates" :key="template.id" class="capability-row template-row">
             <div><strong><code>{{ templateKey(template) }}</code></strong><small>{{ template.purpose || templateKey(template) }} · {{ template.published ? $t('page.mail.templatePublishedState') : $t('page.mail.templateDraftState') }}</small></div>
-            <div class="actions"><button type="button" @click="editTemplate(template)">{{ $t('page.mail.edit') }}</button><button type="button" :disabled="templateTesting === template.id || !templateForm.testRecipient.trim()" @click="testTemplate(template)">{{ templateTesting === template.id ? $t('page.mail.testing') : $t('page.mail.testTemplate') }}</button><button v-if="!template.published" type="button" @click="publishTemplate(template)">{{ $t('page.mail.publishTemplate') }}</button><button class="danger" type="button" @click="removeTemplate(template)">{{ $t('page.mail.delete') }}</button></div>
+            <div class="actions"><button type="button" @click="editTemplate(template)">{{ $t('page.mail.edit') }}</button><button type="button" :disabled="templateTesting === template.id || !templateForm.testRecipient.trim()" @click="testTemplate(template)">{{ templateTesting === template.id ? $t('page.mail.testing') : $t('page.mail.testTemplate') }}</button><button v-if="!template.published" type="button" @click="publishTemplate(template)">{{ $t('page.mail.publishTemplate') }}</button><button class="danger" type="button" @click="removeTemplate(template)">{{ $t('page.mail.delete') }}</button><span v-if="templateTestFeedback[template.id]" class="test-feedback" :class="feedbackTone(templateTestFeedback, template.id)" role="status">{{ feedbackMessage(templateTestFeedback, template.id) }}</span></div>
           </div>
         </div>
       </article>
@@ -851,6 +985,14 @@ onMounted(load);
                 >
                   {{ $t('page.mail.delete') }}
                 </button>
+                <span
+                  v-if="accountTestFeedback[account.id]"
+                  class="test-feedback"
+                  :class="feedbackTone(accountTestFeedback, account.id)"
+                  role="status"
+                >
+                  {{ feedbackMessage(accountTestFeedback, account.id) }}
+                </span>
               </td>
             </tr>
           </tbody>
@@ -1210,6 +1352,24 @@ button:focus-visible {
 .info {
   color: #1e40af;
   background: #eff6ff;
+}
+
+.test-feedback {
+  flex-basis: 100%;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.test-feedback.success {
+  color: var(--ok);
+}
+
+.test-feedback.error {
+  color: var(--danger);
+}
+
+.test-feedback.info {
+  color: #1e40af;
 }
 
 .table-scroll {

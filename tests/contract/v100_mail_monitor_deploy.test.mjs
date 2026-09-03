@@ -52,10 +52,10 @@ for (const app of apps) {
     for (const path of [mailApi, mailView, monitorApi, monitorView, routes]) {
       assert.equal(existsSync(new URL(path, root)), true, path);
     }
-    for (const token of ['listSMTPAccountsApi', 'saveSMTPAccountApi', 'testSMTPAccountApi', 'deleteSMTPAccountApi']) {
+    for (const token of ['listSMTPAccountsApi', 'saveSMTPAccountApi', 'testSMTPAccountApi', 'testNotificationTemplateApi', 'deleteSMTPAccountApi']) {
       assert.match(read(mailApi), new RegExp(token), `${app}/${token}`);
     }
-    for (const token of ['load', 'save', 'test', 'weight', 'implicit', 'TLS', 'password']) {
+    for (const token of ['load', 'save', 'test', 'test-feedback', 'completeTemplateVariables', 'weight', 'implicit', 'TLS', 'password']) {
       assert.match(read(mailView), new RegExp(token, 'i'), `${app}/${token}`);
     }
     for (const token of ['getMonitorOverviewApi', 'refresh']) {

@@ -2,6 +2,7 @@ package commoncapabilities
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +13,15 @@ import (
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
 	"github.com/gin-gonic/gin"
 )
+
+type recordingNotificationMailer struct {
+	messages []notification.Message
+}
+
+func (m *recordingNotificationMailer) Send(_ context.Context, message notification.Message) error {
+	m.messages = append(m.messages, message)
+	return nil
+}
 
 func TestRoutesRegisterAndDisabledDependencyIs503(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -65,6 +75,65 @@ func TestTemplateWriteAndTestUsesIdempotency(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected provider 503, got %d", w.Code)
+	}
+}
+
+func TestTemplateTestFillsBuiltInVerificationVariables(t *testing.T) {
+	mailer := &recordingNotificationMailer{}
+	rt := notification.NewMemoryRuntime(mailer)
+	if err := rt.SeedBuiltInDefaults(); err != nil {
+		t.Fatal(err)
+	}
+	r := gin.New()
+	RegisterRoutes(r, NewHandler(rt, nil))
+	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a", Organization: "org-a"})
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/v1/notification/templates/auth.email-change/test", strings.NewReader(`{"recipient":"u@example.test","locale":"zh-CN","variables":{}}`)).WithContext(ctx)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	var envelope struct {
+		Data notification.SendResult `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if !envelope.Data.IsTest || envelope.Data.Status != notification.DeliverySent || len(mailer.messages) != 1 {
+		t.Fatalf("result=%+v messages=%d", envelope.Data, len(mailer.messages))
+	}
+	if !strings.Contains(mailer.messages[0].Body, "123456") || !strings.Contains(mailer.messages[0].Body, "10 分钟") {
+		t.Fatalf("sample variables were not rendered: %q", mailer.messages[0].Body)
+	}
+}
+
+func TestTemplateTestReturnsVariableDiagnostic(t *testing.T) {
+	rt := notification.NewMemoryRuntime(&recordingNotificationMailer{})
+	if err := rt.SeedBuiltInDefaults(); err != nil {
+		t.Fatal(err)
+	}
+	r := gin.New()
+	RegisterRoutes(r, NewHandler(rt, nil))
+	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a", Organization: "org-a"})
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/v1/notification/templates/auth.email-change/test", strings.NewReader(`{"recipient":"u@example.test","locale":"zh-CN","variables":{"unexpected":"value"}}`)).WithContext(ctx)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	var envelope struct {
+		Errors []struct {
+			MessageKey string         `json:"messageKey"`
+			Params     map[string]any `json:"params"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if len(envelope.Errors) != 1 || envelope.Errors[0].MessageKey != "notification.template.variableInvalid" || envelope.Errors[0].Params["variable"] != "unexpected" {
+		t.Fatalf("diagnostic=%#v", envelope.Errors)
 	}
 }
 
