@@ -202,10 +202,14 @@ func New(cfg config.Config) (*App, error) {
 	if app.database != nil {
 		settingsRepository := settingsplatform.NewGORMRepository(app.database)
 		app.settingsRepository = settingsRepository
+		var settingsCache settingsapp.CacheInvalidator
+		if app.redis != nil {
+			settingsCache = settingsCacheAdapter{client: app.redis}
+		}
 		app.settings = settingsapp.NewService(
 			settingsRepository,
 			settingsplatform.NewGORMAuditSink(app.database),
-			nil,
+			settingsCache,
 			nil,
 		)
 		if runtimeKey := strings.TrimSpace(cfg.Auth.JWTSecret); runtimeKey != "" {
@@ -229,6 +233,11 @@ func New(cfg config.Config) (*App, error) {
 		// a database-backed deployment can later subscribe a Pub/Sub invalidator
 		// without changing the HTTP or application contracts.
 		app.settings.SetRuntimeSnapshotStore(settingsapp.NewRuntimeSnapshotStore())
+		// Process environment is the highest-precedence deployment source. Attach
+		// the resolver at the composition root so both database-backed and local
+		// settings services report environment-owned values as read-only and reject
+		// ineffective database overrides before they are persisted.
+		app.settings.SetSourceResolver(settingsapp.NewProcessEnvironmentResolver(settingsapp.DefaultDefinitions()))
 	}
 
 	// The 1.0 mail service is available in both database-backed and local
@@ -270,6 +279,11 @@ func New(cfg config.Config) (*App, error) {
 		monitorConfig.IsSynthetic = true
 	}
 	app.monitor = monitorapp.NewService(monitorConfig)
+	if app.settings != nil {
+		// Runtime is a read-only System Settings module. Keep its bounded
+		// diagnostic values separate from mutable database-backed settings.
+		app.settings.SetRuntimeModuleProvider(runtimeSettingsProvider(cfg, app.monitor))
+	}
 	var dictionaryRepository dictionaryapp.Repository = dictionaryapp.NewMemoryRepository()
 	var dictionaryAudit dictionaryapp.AuditSink = &dictionaryapp.MemoryAuditSink{}
 	if app.database != nil {
@@ -540,6 +554,14 @@ func (a *App) ReloadPersistedObservability(ctx context.Context) error {
 	return a.reloadPersistedObservability(ctx)
 }
 
+// ReloadPersistedSettings rebuilds the process-local immutable settings
+// snapshot from the authoritative database (or the configured in-process
+// repository). It is exposed for cache-reconciliation workers and controlled
+// operations; Redis is advisory and is never used as a value source.
+func (a *App) ReloadPersistedSettings(ctx context.Context) error {
+	return a.preparePersistedSettings(ctx)
+}
+
 // Installation returns the credential-free installation status service.
 func (a *App) Installation() *installer.StatusService {
 	if a == nil {
@@ -584,6 +606,9 @@ func (a *App) Run(ctx context.Context) error {
 	if err := a.preparePersistedObservability(ctx); err != nil {
 		return errors.Join(fmt.Errorf("load persisted observability configuration: %w", err), a.Close())
 	}
+	if err := a.preparePersistedSettings(ctx); err != nil {
+		return errors.Join(fmt.Errorf("load persisted settings snapshot: %w", err), a.Close())
+	}
 	// The worker and scheduler are independent seams. Handlers must be
 	// explicitly registered by the composition root; scheduler payloads are
 	// always JSON objects and never shell/code fragments.
@@ -597,6 +622,12 @@ func (a *App) Run(ctx context.Context) error {
 		if scopeErr == nil {
 			go func() { _ = a.taskScheduler.Run(tenant.WithContext(workerCtx, scope), time.Minute) }()
 		}
+	}
+	// Redis carries invalidation/revision hints only. A bounded periodic
+	// reconciliation reads the authoritative database so a missed Pub/Sub
+	// message or cache flush cannot make this process fall back to defaults.
+	if a.settings != nil && a.redis != nil {
+		go runSettingsReconciliation(workerCtx, a.settings, a.config.Tenant.DefaultID)
 	}
 	// File lifecycle maintenance is deliberately a lightweight ticker rather
 	// than a new broker/framework: it retries deleting objects and expires
@@ -647,6 +678,30 @@ func runFileMaintenance(ctx context.Context, files *fileapp.Service) {
 	}
 }
 
+func runSettingsReconciliation(ctx context.Context, service *settingsapp.Service, tenantID string) {
+	if service == nil {
+		return
+	}
+	scope, err := tenant.NewContext(tenantID, "", true)
+	if err != nil {
+		return
+	}
+	settingsContext := tenant.WithContext(ctx, scope)
+	// Keep the interval intentionally coarse: normal saves publish the local
+	// snapshot immediately and Redis notifications accelerate other nodes; this
+	// ticker is the durable reconciliation safety net, not the request path.
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			_, _ = service.ReconcileRuntimeSnapshot(settingsContext)
+		}
+	}
+}
+
 // preparePersistedObservability reloads settings only after the database is
 // reachable. An unavailable dependency must still allow the health server to
 // start and report readiness=down; a reachable database with malformed
@@ -668,6 +723,41 @@ func (a *App) preparePersistedObservability(ctx context.Context) error {
 		}
 	}
 	return a.reloadPersistedObservability(ctx)
+}
+
+// preparePersistedSettings hydrates the immutable local snapshot after the
+// database is reachable. A dependency outage leaves the process snapshot
+// empty (business services continue to use compiled/configured defaults and
+// readiness reports the outage); malformed data from a reachable database is
+// returned so startup fails closed rather than activating a partial module.
+func (a *App) preparePersistedSettings(ctx context.Context) error {
+	if a == nil || a.settings == nil || a.settingsRepository == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if a.database != nil {
+		probeCtx := ctx
+		cancel := func() {}
+		if timeout := a.config.Database.PingTimeout; timeout > 0 {
+			probeCtx, cancel = context.WithTimeout(ctx, timeout)
+		}
+		err := a.database.Ping(probeCtx)
+		cancel()
+		if err != nil {
+			return nil
+		}
+	}
+	scope, err := tenant.NewContext(a.config.Tenant.DefaultID, "", true)
+	if err != nil {
+		return fmt.Errorf("configure settings tenant scope: %w", err)
+	}
+	settingsContext := tenant.WithContext(ctx, scope)
+	if _, err := a.settings.LoadRuntimeSnapshot(settingsContext); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (a *App) reloadPersistedObservability(ctx context.Context) error {

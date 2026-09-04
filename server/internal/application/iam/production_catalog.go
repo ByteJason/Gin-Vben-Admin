@@ -31,12 +31,14 @@ func ProductionMenuCatalog() []domain.Menu {
 		{ID: "menu-identity-permissions", ParentID: "menu-identity", Name: "权限管理", Path: "/iam/permissions", Type: domain.MenuTypeMenu, Component: "/iam/permissions/index.vue", Icon: "lucide:key-round", Permission: "iam:permissions:read", Sort: 20, Visible: true, Active: true},
 		{ID: "menu-identity-users", ParentID: "menu-identity", Name: "用户管理", Path: "/iam/users", Type: domain.MenuTypeMenu, Component: "/iam/users/index.vue", Icon: "lucide:user-round-search", Permission: "iam:users:read", Sort: 30, Visible: true, Active: true},
 
-		{ID: "menu-system-config", Name: "系统管理", Path: "/system", Type: domain.MenuTypeDirectory, Redirect: "/system/dictionary", Icon: "lucide:settings", Sort: 30, Visible: true, Active: true},
+		{ID: "menu-system-config", Name: "系统管理", Path: "/system", Type: domain.MenuTypeDirectory, Redirect: "/system/settings", Icon: "lucide:settings", Sort: 30, Visible: true, Active: true},
 		{ID: "menu-system-dictionary", ParentID: "menu-system-config", Name: "字典管理", Path: "/system/dictionary", Type: domain.MenuTypeMenu, Component: "/system/dictionary/index.vue", Icon: "lucide:book-open", Permission: "system:dictionary:read", Sort: 0, Visible: true, Active: true},
-		{ID: "menu-system-parameters", ParentID: "menu-system-config", Name: "参数管理", Path: "/system/parameters", Type: domain.MenuTypeMenu, Component: "/system/settings/index.vue", Icon: "lucide:sliders-horizontal", Permission: "system:parameters:read", Sort: 10, Visible: true, Active: true},
+		// Retain the installer IDs as inactive records so existing grants and
+		// audit references remain addressable without exposing the retired page.
+		{ID: "menu-system-parameters", ParentID: "menu-system-config", Name: "参数管理", Path: "/system/parameters", Type: domain.MenuTypeMenu, Component: "/system/settings/index.vue", Icon: "lucide:sliders-horizontal", Permission: "system:parameters:read", Sort: 10, Visible: false, Active: false},
 		{ID: "menu-system-settings", ParentID: "menu-system-config", Name: "系统配置", Path: "/system/settings", Type: domain.MenuTypeMenu, Component: "/system/settings/index.vue", Icon: "lucide:settings", Permission: "system:settings:read", Sort: 20, Visible: true, Active: true},
 		{ID: "menu-system-mail", ParentID: "menu-system-config", Name: "邮件服务", Path: "/system/mail", Type: domain.MenuTypeMenu, Component: "/system/mail/index.vue", Icon: "lucide:mail", Permission: "system:mail:read", Sort: 30, Visible: true, Active: true},
-		{ID: "menu-system-observability", ParentID: "menu-system-config", Name: "可观测设置", Path: "/system/observability", Type: domain.MenuTypeMenu, Component: "/system/observability/index.vue", Icon: "lucide:gauge", Permission: "system:observability:read", Sort: 40, Visible: true, Active: true},
+		{ID: "menu-system-observability", ParentID: "menu-system-config", Name: "可观测设置", Path: "/system/observability", Type: domain.MenuTypeMenu, Component: "/system/observability/index.vue", Icon: "lucide:gauge", Permission: "system:observability:read", Sort: 40, Visible: false, Active: false},
 
 		{ID: "menu-media", Name: "媒体管理", Path: "/media", Type: domain.MenuTypeDirectory, Redirect: "/media/library", Icon: "lucide:images", Sort: 40, Visible: true, Active: true},
 		{ID: "menu-media-library", ParentID: "menu-media", Name: "媒体库", Path: "/media/library", Type: domain.MenuTypeMenu, Component: "/system/files/index.vue", Icon: "lucide:folder-open", Permission: "media:library:read", Sort: 0, Visible: true, Active: true},

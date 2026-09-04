@@ -2374,6 +2374,12 @@ func canonicalizeProductionMenus(menus []domain.Menu) []domain.Menu {
 			if menu.Name == "权限元数据" {
 				menu.Name = "权限管理"
 			}
+		case "menu-system-parameters", "menu-system-observability":
+			// These installer-owned IDs remain in persistent stores for grant and
+			// audit compatibility, but their pages moved into the unified settings
+			// module and must never be projected as visible navigation nodes.
+			menu.Visible = false
+			menu.Active = false
 		}
 		canonical = append(canonical, menu)
 	}

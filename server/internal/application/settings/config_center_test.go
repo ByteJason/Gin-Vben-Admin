@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestDefaultDefinitionsExposeV010ConfigurationCategories(t *testing.T) {
+func TestDefaultDefinitionsExposeActiveConfigurationCategories(t *testing.T) {
 	definitions := DefaultDefinitions()
 	if _, ok := definitions["file.root"]; ok {
 		t.Fatal("file.root must remain infrastructure-only")
@@ -15,7 +15,6 @@ func TestDefaultDefinitionsExposeV010ConfigurationCategories(t *testing.T) {
 	for key, category := range map[string]Category{
 		"basic.site_name":        CategoryBasic,
 		"security.jwt_secret":    CategorySecurity,
-		"mail.enabled":           CategoryMail,
 		"file.max_size":          CategoryFile,
 		"captcha.enabled":        CategoryCaptcha,
 		"i18n.mode":              CategoryI18n,
@@ -25,6 +24,11 @@ func TestDefaultDefinitionsExposeV010ConfigurationCategories(t *testing.T) {
 		definition, ok := definitions[key]
 		if !ok || definition.Category != category {
 			t.Fatalf("definition %q = %#v, want category %q", key, definition, category)
+		}
+	}
+	for key := range definitions {
+		if IsRetiredSettingKey(key) {
+			t.Fatalf("retired mail definition remains in active defaults: %q", key)
 		}
 	}
 }
@@ -78,7 +82,10 @@ func TestServiceEncryptsSensitiveValuesAtRestAndKeepsResponseMasked(t *testing.T
 
 func TestServiceReturnsEffectiveSourceAndConnectionRequestID(t *testing.T) {
 	repo := NewMemoryRepository()
-	svc := NewService(repo, nil, nil, DefaultDefinitions())
+	// The legacy adapter is exercised explicitly; active defaults do not carry
+	// mail transport definitions.
+	legacy := legacyMailDefinitions()
+	svc := NewService(repo, nil, nil, legacy)
 	svc.SetSourceResolver(NewMapSourceResolver(map[string]map[Source][]byte{
 		"mail.port": {SourceDotEnv: []byte(`1026`)},
 	}))

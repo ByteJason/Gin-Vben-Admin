@@ -67,9 +67,14 @@ export interface FileObject {
   tenantId: string;
   orgId: string;
   acl: 'private' | 'public-read';
+  status?: 'pending' | 'ready' | 'failed' | 'deleting' | 'deleted' | 'damaged';
   categoryId?: string;
   createdAt: string;
   sha256: string;
+  extension?: string;
+  etag?: string;
+  scanStatus?: string;
+  failureReason?: string;
 }
 export interface FilePage { items: FileObject[]; total: number; limit: number; offset: number; }
 
@@ -83,7 +88,11 @@ export interface MediaResource {
   categoryId?: string;
   scopeType: 'system' | 'tenant' | 'org';
   acl: 'private' | 'public-read';
-  status: 'pending' | 'ready' | 'failed' | 'deleting' | 'deleted';
+  status: 'pending' | 'ready' | 'failed' | 'deleting' | 'deleted' | 'damaged';
+  extension?: string;
+  etag?: string;
+  scanStatus?: string;
+  failureReason?: string;
   selectable: boolean;
   disabledReason?: string;
   metadata?: Record<string, string>;

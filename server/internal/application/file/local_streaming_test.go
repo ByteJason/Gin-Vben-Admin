@@ -86,6 +86,45 @@ func TestLocalStoreOpaqueSignedURLUsesDefaultFileRoute(t *testing.T) {
 	if err := s.VerifyIDURL(u, id, key); err != nil {
 		t.Fatalf("default-route verification: %v", err)
 	}
+	// The provider-only verifier resolves an opaque ID from disk. It must keep
+	// finding objects written with the historical v1 shard layout.
+	if err := s.VerifySignedURL(u); err != nil {
+		t.Fatalf("legacy opaque verification: %v", err)
+	}
+}
+
+func TestLocalStoreOpaqueLookupSupportsDatePartitionAndLegacyFallback(t *testing.T) {
+	root := t.TempDir()
+	s, err := NewLocalStore(root, "", []byte("secret"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := "fedcba9876543210fedcba9876543210"
+	dateKey := "2026/0904/" + id + ".txt"
+	if err := s.PutReader(context.Background(), dateKey, strings.NewReader("date"), 4); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := s.keyForOpaqueID(id)
+	if err != nil || resolved != dateKey {
+		t.Fatalf("date lookup = %q, err=%v", resolved, err)
+	}
+	dateURL, err := s.SignURLForID(context.Background(), id, dateKey, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.VerifySignedURL(dateURL); err != nil {
+		t.Fatalf("date opaque verification: %v", err)
+	}
+
+	legacyID := "0123456789abcdef0123456789abcdef"
+	legacyKey := "v1/01/23/" + legacyID + ".txt"
+	if err := s.PutReader(context.Background(), legacyKey, strings.NewReader("old"), 3); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err = s.keyForOpaqueID(legacyID)
+	if err != nil || resolved != legacyKey {
+		t.Fatalf("legacy lookup = %q, err=%v", resolved, err)
+	}
 }
 
 type durableFileRepoFixture struct {

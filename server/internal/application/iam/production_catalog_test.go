@@ -113,4 +113,33 @@ func TestProductionMenuCatalogUsesDashboardAsDirectFirstLevelPage(t *testing.T) 
 	if byID["menu-identity-menus"].Name != "菜单管理" || byID["menu-identity-permissions"].Name != "权限管理" {
 		t.Fatalf("renamed IAM menus=%q/%q", byID["menu-identity-menus"].Name, byID["menu-identity-permissions"].Name)
 	}
+	for _, id := range []string{"menu-system-parameters", "menu-system-observability"} {
+		menu, exists := byID[id]
+		if !exists {
+			t.Fatalf("retired menu %q is missing from the compatibility catalog", id)
+		}
+		if menu.Visible || menu.Active {
+			t.Fatalf("retired menu %q remains visible/active: %+v", id, menu)
+		}
+	}
+}
+
+func TestCanonicalizeProductionMenusHidesRetiredSettingsEntries(t *testing.T) {
+	menus := canonicalizeProductionMenus([]domain.Menu{
+		{ID: "menu-system-parameters", Name: "参数管理", Path: "/system/parameters", Type: domain.MenuTypeMenu, Visible: true, Active: true},
+		{ID: "menu-system-observability", Name: "可观测设置", Path: "/system/observability", Type: domain.MenuTypeMenu, Visible: true, Active: true},
+		{ID: "tenant-custom", Name: "自定义", Path: "/custom", Type: domain.MenuTypeMenu, Visible: true, Active: true},
+	})
+	byID := make(map[string]domain.Menu, len(menus))
+	for _, menu := range menus {
+		byID[menu.ID] = menu
+	}
+	for _, id := range []string{"menu-system-parameters", "menu-system-observability"} {
+		if menu := byID[id]; menu.Visible || menu.Active {
+			t.Fatalf("canonicalized retired menu %q = %+v", id, menu)
+		}
+	}
+	if menu := byID["tenant-custom"]; !menu.Visible || !menu.Active {
+		t.Fatalf("tenant menu was changed while canonicalizing: %+v", menu)
+	}
 }

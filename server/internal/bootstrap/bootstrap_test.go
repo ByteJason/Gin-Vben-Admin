@@ -757,6 +757,31 @@ func TestReloadPersistedObservabilityUsesDefaultTenantSettings(t *testing.T) {
 	}
 }
 
+func TestReloadPersistedSettingsHydratesImmutableSnapshot(t *testing.T) {
+	repository := settingsapp.NewMemoryRepository()
+	if _, err := repository.Append(context.Background(), settingsapp.StoredSetting{Key: "basic.site_name", RawValue: []byte(`"persisted"`), Source: settingsapp.SourceDatabase}); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+	store := settingsapp.NewRuntimeSnapshotStore()
+	service := settingsapp.NewService(repository, nil, nil, nil)
+	service.SetRuntimeSnapshotStore(store)
+	cfg := config.Default()
+	app := &App{config: cfg, settings: service, settingsRepository: repository}
+	if err := app.ReloadPersistedSettings(context.Background()); err != nil {
+		t.Fatalf("ReloadPersistedSettings() error = %v", err)
+	}
+	// Bootstrap hydrates the default tenant partition; request-scoped reads must
+	// use the same partition rather than the legacy process-wide slot.
+	scopeKey := cfg.Tenant.DefaultID + "\x00"
+	value, ok := store.ValueFor(scopeKey, "basic.site_name")
+	if !ok || string(value) != `"persisted"` {
+		t.Fatalf("snapshot value = %s, present=%v", value, ok)
+	}
+	if source := store.SourceFor(scopeKey, "basic.site_name"); source != settingsapp.SourceDatabase {
+		t.Fatalf("snapshot source = %q, want database", source)
+	}
+}
+
 type closeFunc func() error
 
 func (f closeFunc) Close() error { return f() }

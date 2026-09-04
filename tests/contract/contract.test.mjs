@@ -43,7 +43,7 @@ test('repository exposes the required code boundaries', () => {
   }
   const allowed = new Set([
     '.dev-docs', '.git', '.github', '.idea', '.pnpm-store', '.runtime', 'LICENSES', 'admin', 'contracts', 'deploy', 'docs',
-    'scripts', 'server', 'tests',
+    'scripts', 'server', 'storage', 'tests',
   ]);
   const unexpected = readdirSync(root, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && !allowed.has(entry.name))
@@ -445,7 +445,7 @@ test('all management UIs expose versioned settings and audit clients', () => {
   for (const ui of ['web-antd', 'web-ele', 'web-naive']) {
     const settings = readFileSync(join(root, `admin/apps/${ui}/src/api/core/settings.ts`), 'utf8');
     const audit = readFileSync(join(root, `admin/apps/${ui}/src/api/core/audit.ts`), 'utf8');
-    for (const fn of ['listSettingDefinitionsApi', 'getSettingApi', 'updateSettingApi', 'listSettingHistoryApi', 'rollbackSettingApi']) {
+    for (const fn of ['listSettingDefinitionsApi', 'getSettingApi', 'updateSettingApi', 'listSettingModulesApi', 'getSettingModuleApi', 'updateSettingModuleApi']) {
       assert.match(settings, new RegExp(`export async function ${fn}`), `${ui} ${fn}`);
     }
     assert.match(audit, /export async function queryAuditEventsApi/);

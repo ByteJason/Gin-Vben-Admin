@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
+	"strings"
 	"time"
 
 	settingsapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/settings"
@@ -32,7 +33,19 @@ func (s *GORMAuditSink) Record(ctx context.Context, event settingsapp.AuditEvent
 	if parsed, err := strconv.ParseUint(event.ActorID, 10, 64); err == nil && parsed > 0 {
 		userID = &parsed
 	}
-	metadata := map[string]string{"key": event.Key, "version": strconv.FormatInt(event.Version, 10)}
+	changedKeys := append([]string(nil), event.Keys...)
+	if len(changedKeys) == 0 && event.Key != "" {
+		changedKeys = []string{event.Key}
+	}
+	metadata := map[string]any{
+		"module":      event.Module,
+		"key":         event.Key,
+		"changedKeys": changedKeys,
+		"version":     strconv.FormatInt(event.Version, 10),
+		"revision":    strconv.FormatInt(event.Revision, 10),
+		"saveResult":  event.SaveResult,
+		"applyResult": event.ApplyResult,
+	}
 	encoded, err := json.Marshal(metadata)
 	if err != nil {
 		return errors.New("settings audit sink unavailable")
@@ -43,7 +56,11 @@ func (s *GORMAuditSink) Record(ctx context.Context, event settingsapp.AuditEvent
 	if orgID != "" {
 		orgPtr = &orgID
 	}
-	record := settingsAuditRecord{UserID: userID, EventType: "settings." + event.Action, Category: "operation", Outcome: "success", Metadata: &metadataValue, CreatedAt: time.Now().UTC(), TenantID: scope.TenantID, OrgID: orgPtr}
+	outcome := "success"
+	if strings.HasSuffix(strings.ToLower(event.ApplyResult), "failed") || strings.EqualFold(event.SaveResult, "failed") {
+		outcome = "failure"
+	}
+	record := settingsAuditRecord{UserID: userID, EventType: "settings." + event.Action, Category: "operation", Outcome: outcome, RequestID: event.RequestID, Metadata: &metadataValue, CreatedAt: time.Now().UTC(), TenantID: scope.TenantID, OrgID: orgPtr}
 	if err := gorm.G[settingsAuditRecord](s.db.Write(ctx)).Create(ctx, &record); err != nil {
 		return errors.New("settings audit sink unavailable")
 	}

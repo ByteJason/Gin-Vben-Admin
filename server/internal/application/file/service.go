@@ -290,10 +290,12 @@ func (s *Service) Upload(ctx context.Context, input UploadInput) (File, error) {
 	if reader == nil {
 		reader = bytes.NewReader(input.Data)
 	}
-	// A stable, versioned key with two shard levels keeps directory fan-out
-	// bounded while preserving the real extension inferred from MIME.
+	// Date partitioning keeps the media tree operator-friendly: the first
+	// component is the UTC year and the second is the UTC month/day. The
+	// opaque ID remains the collision-resistant object name; no hash/version
+	// prefix is exposed in the storage layout.
 	ext := inferredExtension(strings.TrimSpace(input.MIME), name)
-	key := fmt.Sprintf("v1/%s/%s/%s%s", id[:2], id[2:4], id, ext)
+	key := dateObjectKey(now, id, ext)
 	file := File{ID: id, Key: id, ObjectKey: key, Name: name, MIME: strings.TrimSpace(input.MIME), Size: input.Size, OwnerID: strings.TrimSpace(input.OwnerID), TenantID: strings.TrimSpace(input.TenantID), OrgID: strings.TrimSpace(input.OrgID), ACL: acl, CreatedAt: now, UpdatedAt: now, SHA256: "", CategoryID: categoryID, Metadata: cloneStringMap(input.Metadata), Extension: strings.TrimPrefix(ext, "."), Status: MediaPending}
 	if s.repo != nil {
 		if err := s.repo.Create(ctx, file); err != nil {
@@ -320,7 +322,7 @@ func (s *Service) Upload(ctx context.Context, input UploadInput) (File, error) {
 				s.markFailed(ctx, file, err)
 				return File{}, err
 			}
-			file.ObjectKey = fmt.Sprintf("v1/%s/%s/%s%s", id[:2], id[2:4], id, extensionSuffix(file.Extension))
+			file.ObjectKey = dateObjectKey(now, id, extensionSuffix(file.Extension))
 			key = file.ObjectKey
 			// Publish the final key while the row is still pending. If the
 			// subsequent ready update fails, reconciliation can still locate the
@@ -360,7 +362,7 @@ func (s *Service) Upload(ctx context.Context, input UploadInput) (File, error) {
 				s.markFailed(ctx, file, err)
 				return File{}, err
 			}
-			file.ObjectKey = fmt.Sprintf("v1/%s/%s/%s%s", id[:2], id[2:4], id, extensionSuffix(file.Extension))
+			file.ObjectKey = dateObjectKey(now, id, extensionSuffix(file.Extension))
 			key = file.ObjectKey
 			// Persist the final key and observed metadata while the row remains
 			// pending. If the provider write succeeds but the ready transition
@@ -418,7 +420,7 @@ func (s *Service) Upload(ctx context.Context, input UploadInput) (File, error) {
 				writeErr = s.validateObserved(input, file)
 			}
 			if writeErr == nil {
-				file.ObjectKey = fmt.Sprintf("v1/%s/%s/%s%s", id[:2], id[2:4], id, extensionSuffix(file.Extension))
+				file.ObjectKey = dateObjectKey(now, id, extensionSuffix(file.Extension))
 				key = file.ObjectKey
 				if s.repo != nil {
 					file.Status = MediaPending
@@ -654,6 +656,17 @@ func extensionSuffix(ext string) string {
 	}
 	return "." + ext
 }
+
+// dateObjectKey returns the canonical media-library layout. Keep the date in
+// UTC so a multi-instance deployment cannot place the same upload in
+// different partitions because of local timezone settings. The month/day
+// component is intentionally compact (MMDD) to make the two-level layout
+// predictable for operators and object-storage lifecycle rules.
+func dateObjectKey(at time.Time, id, suffix string) string {
+	at = at.UTC()
+	return fmt.Sprintf("%04d/%02d%02d/%s%s", at.Year(), int(at.Month()), at.Day(), id, extensionSuffix(suffix))
+}
+
 func (s *Service) validateObserved(input UploadInput, file File) error {
 	if s.maxBytes > 0 && file.Size > s.maxBytes {
 		return ErrFileTooLarge

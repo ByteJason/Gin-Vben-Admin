@@ -4,15 +4,18 @@ package rediscache
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 
 	monitorapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/monitor"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -264,6 +267,198 @@ func (c *Client) Delete(ctx context.Context, key string) error {
 		return ErrInvalidKey
 	}
 	return c.client.Del(ctx, key).Err()
+}
+
+const settingsRevisionTTL = 24 * time.Hour
+
+// setRevisionIfGreaterScript makes the advisory revision monotonic even when
+// two application nodes finish their database commits out of order. It uses a
+// single Redis key so the operation also remains valid on Redis Cluster (the
+// module-value deletion is intentionally kept as a separate command).
+const setRevisionIfGreaterScript = `
+local current = redis.call("GET", KEYS[1])
+local incoming = tonumber(ARGV[1])
+if not incoming then
+  return redis.error_reply("invalid settings revision")
+end
+if (not current) or (not tonumber(current)) or tonumber(current) < incoming then
+  redis.call("SET", KEYS[1], ARGV[1], "PX", ARGV[2])
+  return 1
+end
+return 0
+`
+
+var setRevisionIfGreater = redis.NewScript(setRevisionIfGreaterScript)
+
+// settingsScopeSegment returns a stable, non-sensitive Redis key segment for
+// the tenant/organization carried by ctx.  Settings revisions are advisory
+// metadata, but they still have to obey the same isolation boundary as the
+// database rows they describe.  A digest avoids putting tenant identifiers in
+// Redis key names and remains valid even when an identifier contains a key
+// separator (tenant.Context validates whitespace/control characters, not every
+// punctuation character).
+//
+// Calls made by process-level jobs without a tenant context use a dedicated
+// "global" segment.  They never share a key with a tenant-scoped request, so a
+// missing context cannot accidentally publish a value into a tenant bucket.
+func settingsScopeSegment(ctx context.Context) string {
+	scope, ok := tenant.FromContext(ctx)
+	if !ok {
+		return "global"
+	}
+	payload := strings.TrimSpace(scope.TenantID) + "\x00" + strings.TrimSpace(scope.Organization)
+	digest := sha256.Sum256([]byte(payload))
+	return "tenant-" + hex.EncodeToString(digest[:])
+}
+
+// settingsModuleKey and settingsRevisionKey centralize the physical key
+// layout. Keeping the scope segment in both paths prevents a module cache
+// invalidation from updating one tenant's revision while deleting another
+// tenant's value cache.
+func (c *Client) settingsModuleKey(ctx context.Context, module string) (string, error) {
+	return c.Key("settings", "module", settingsScopeSegment(ctx), module)
+}
+
+func (c *Client) settingsRevisionKey(ctx context.Context, module string) (string, error) {
+	return c.Key("settings", "revision", settingsScopeSegment(ctx), module)
+}
+
+// SettingsValueKey returns the physical key for a redacted per-key settings
+// cache entry.  Although the current settings service primarily uses module
+// revisions, keeping this legacy value path scoped prevents a future cache
+// reader from reintroducing cross-tenant leakage.
+func (c *Client) SettingsValueKey(ctx context.Context, key string) (string, error) {
+	return c.Key("settings", "value", settingsScopeSegment(ctx), key)
+}
+
+// InvalidateModule removes the optional redacted module cache and records only
+// its monotonically increasing revision. No setting values (and especially no
+// sensitive values) are sent through Redis; instances that observe a newer
+// revision reload the complete current state from the database.
+func (c *Client) InvalidateModule(ctx context.Context, module string, revision int64) error {
+	if c == nil || c.client == nil {
+		return errors.New("redis cache is not initialized")
+	}
+	module = strings.ToLower(strings.TrimSpace(module))
+	if !isSafeSegment(module) || revision < 0 {
+		return ErrInvalidKey
+	}
+	moduleKey, err := c.settingsModuleKey(ctx, module)
+	if err != nil {
+		return err
+	}
+	if err := c.Delete(ctx, moduleKey); err != nil {
+		return err
+	}
+	revisionKey, err := c.settingsRevisionKey(ctx, module)
+	if err != nil {
+		return err
+	}
+	// Store the revision as a JSON number rather than a JSON object. This keeps
+	// the Lua compare-and-set script numeric and remains valid JSON for the
+	// generic cache helpers. ModuleRevision accepts the historical object form
+	// as a rolling-upgrade compatibility fallback.
+	_, err = setRevisionIfGreater.Run(ctx, c.client, []string{revisionKey}, strconv.FormatInt(revision, 10), settingsRevisionTTL.Milliseconds()).Int64()
+	return err
+}
+
+// ModuleRevision reads the advisory Redis revision used by reconciliation
+// workers. A cache miss is returned as ErrCacheMiss; callers must then load
+// current values from the database rather than falling back to defaults.
+func (c *Client) ModuleRevision(ctx context.Context, module string) (int64, error) {
+	if c == nil || c.client == nil {
+		return 0, errors.New("redis cache is not initialized")
+	}
+	module = strings.ToLower(strings.TrimSpace(module))
+	if !isSafeSegment(module) {
+		return 0, ErrInvalidKey
+	}
+	key, err := c.settingsRevisionKey(ctx, module)
+	if err != nil {
+		return 0, err
+	}
+	var raw json.RawMessage
+	if err := c.GetJSON(ctx, key, &raw); err != nil {
+		return 0, err
+	}
+	var revision int64
+	if err := json.Unmarshal(raw, &revision); err != nil {
+		// Older instances stored {"revision":N}; accept that shape while the
+		// fleet rolls forward, but never treat malformed data as revision zero.
+		var payload struct {
+			Revision int64 `json:"revision"`
+		}
+		if objectErr := json.Unmarshal(raw, &payload); objectErr != nil {
+			return 0, ErrInvalidKey
+		}
+		revision = payload.Revision
+	}
+	if revision < 0 {
+		return 0, ErrInvalidKey
+	}
+	return revision, nil
+}
+
+// DeleteLegacyMailSettings removes cache entries created by the retired
+// configuration-centre mail surface. Patterns are deliberately constrained to
+// the configured namespace and settings/config prefixes; independent mail
+// module keys (smtp accounts, outbox messages and templates) are not touched.
+// The operation is idempotent and safe to retry after a transient Redis error.
+func (c *Client) DeleteLegacyMailSettings(ctx context.Context) error {
+	if c == nil || c.client == nil {
+		return errors.New("redis cache is not initialized")
+	}
+	patterns := legacyMailSettingPatterns(c.namespace)
+	for _, pattern := range patterns {
+		var batch []string
+		iterator := c.client.Scan(ctx, 0, pattern, 256).Iterator()
+		for iterator.Next(ctx) {
+			key := iterator.Val()
+			// Scan is namespaced by pattern, but retain this guard so a future
+			// client implementation cannot delete an externally supplied key.
+			if !c.isPhysicalKey(key) {
+				continue
+			}
+			batch = append(batch, key)
+			if len(batch) == 256 {
+				if err := c.client.Del(ctx, batch...).Err(); err != nil {
+					return err
+				}
+				batch = batch[:0]
+			}
+		}
+		if err := iterator.Err(); err != nil {
+			return err
+		}
+		if len(batch) > 0 {
+			if err := c.client.Del(ctx, batch...).Err(); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// legacyMailSettingPatterns returns only the historical configuration-centre
+// namespaces and dot-delimited setting keys.  In particular, a key such as
+// `mail:accounts:*` or `settings:mail:account` belongs to an independent mail
+// capability and must survive this cleanup.
+func legacyMailSettingPatterns(namespace string) []string {
+	patterns := make([]string, 0, 18)
+	for _, bucket := range []string{"settings", "setting", "config"} {
+		for _, key := range []string{"mail", "email", "smtp"} {
+			prefix := namespace + ":" + bucket + ":"
+			patterns = append(patterns, prefix+key, prefix+key+".*")
+			// A few pre-module builds nested values under `value` or `module`;
+			// retain those exact buckets (including the module aggregate key)
+			// without matching arbitrary mail keys.
+			patterns = append(patterns,
+				prefix+"value:"+key, prefix+"value:"+key+".*",
+				prefix+"module:"+key, prefix+"module:"+key+".*",
+			)
+		}
+	}
+	return patterns
 }
 
 const incrementWithTTLScript = `

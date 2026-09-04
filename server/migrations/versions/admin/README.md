@@ -26,3 +26,25 @@ fresh schema 请保留最终列形态并通过备份/恢复回滚。
 `media_categories.path` 保留 1024 字符容量但不建立 MySQL 全值索引；按 utf8mb4
 计算会超过 InnoDB 3072 字节键上限。树查询使用 scope/parent 索引，路径检索如需
 索引应按数据库方言另行采用前缀或摘要列。
+
+`v003_settings_mail_cleanup.go` 是配置中心邮件残留清理迁移。它只删除
+`setting_versions` 中 `mail.*`、`email.*`、`smtp.*` 键及旧配置中心审计事件，
+不会访问或删除 `smtp_accounts`、`email_messages`、通知模板等独立邮件模块表。
+迁移按数据库事务执行且可重复运行；可选的 `LegacyMailCacheCleaner` 在事务提交后
+清除命名空间内旧设置缓存。缓存清理失败会返回错误以便重试，数据库清理不会回滚。
+该数据删除不可逆，`Down` 保持幂等空操作，回滚请使用迁移前备份恢复。
+
+## 执行入口
+
+该版本不会在服务启动或普通 `migrate up` 时隐式删除数据。升级窗口内可通过显式
+命令执行（配置文件必须指向写库，不能是只读副本）：
+
+```bash
+go run ./cmd/migrate settings-mail-cleanup --config ./config/server.yaml
+```
+
+`v003`、`up-v003` 和 `v003-settings-mail-cleanup` 是同一命令的兼容别名。命令会
+先在数据库事务中清理旧设置记录、审计记录及与已退休权限路由对应的 IAM 策略；当
+配置中的 Redis 已启用时，还会使用该命名空间的客户端删除旧设置缓存。输出包含
+各类删除计数和 `MIGRATION_CLEANUP_CACHE_CLEANED`，便于审计与重试。Redis 不可用
+时数据库事务不会回滚，修复连接后可安全再次执行清理命令。

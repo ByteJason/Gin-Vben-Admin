@@ -15,6 +15,8 @@ func TestParseCommandAcceptsEachMigrationAction(t *testing.T) {
 		{name: "status before flags", args: []string{"status", "--config=test.yaml"}, want: command{action: actionStatus, configPath: "test.yaml", steps: 1}},
 		{name: "down defaults to one", args: []string{"down"}, want: command{action: actionDown, steps: 1}},
 		{name: "down uses requested steps", args: []string{"down", "--steps", "2"}, want: command{action: actionDown, steps: 2}},
+		{name: "settings cleanup canonical action", args: []string{"settings-mail-cleanup"}, want: command{action: actionSettingsMailCleanup, steps: 1}},
+		{name: "settings cleanup v003 alias", args: []string{"v003", "--config", "test.yaml"}, want: command{action: actionSettingsMailCleanup, configPath: "test.yaml", steps: 1}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			got, err := parseCommand(test.args)
@@ -31,7 +33,7 @@ func TestParseCommandAcceptsEachMigrationAction(t *testing.T) {
 func TestParseCommandRejectsInvalidMigrationAction(t *testing.T) {
 	t.Parallel()
 
-	for _, args := range [][]string{{}, {"reset"}, {"down", "--steps", "0"}, {"up", "--steps", "2"}} {
+	for _, args := range [][]string{{}, {"reset"}, {"down", "--steps", "0"}, {"up", "--steps", "2"}, {"settings-mail-cleanup", "--steps", "2"}} {
 		if _, err := parseCommand(args); err == nil {
 			t.Fatalf("parseCommand(%q) error = nil, want validation error", args)
 		}

@@ -16,6 +16,7 @@ import (
 
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/persistence/gormdb"
 	"github.com/ByteJason/Gin-Vben-Admin/server/migrations"
+	adminmigrations "github.com/ByteJason/Gin-Vben-Admin/server/migrations/versions/admin"
 	"gorm.io/gorm"
 )
 
@@ -92,6 +93,26 @@ func (r *Runner) Up() error {
 		return fmt.Errorf("apply schema: %w", err)
 	}
 	return nil
+}
+
+// ApplySettingsMailCleanup runs the explicit v003 data migration against the
+// same primary connection used by the schema runner. It is deliberately a
+// separate operation from Up: creating the fresh schema must never silently
+// delete data, while an operator can invoke this idempotent cleanup during a
+// reviewed upgrade window. The optional cache adapter receives only the
+// narrowly scoped settings-cache cleanup hook; independent mail tables and
+// caches remain outside this migration boundary.
+func (r *Runner) ApplySettingsMailCleanup(ctx context.Context, cache adminmigrations.LegacyMailCacheCleaner) (adminmigrations.CleanupReport, error) {
+	if err := r.validate(); err != nil {
+		return adminmigrations.CleanupReport{}, err
+	}
+	return adminmigrations.UpV003WithCache(ctx, r.db, cache)
+}
+
+// UpSettingsMailCleanup is a descriptive alias for callers that name data
+// migrations by their upward direction.
+func (r *Runner) UpSettingsMailCleanup(ctx context.Context, cache adminmigrations.LegacyMailCacheCleaner) (adminmigrations.CleanupReport, error) {
+	return r.ApplySettingsMailCleanup(ctx, cache)
 }
 
 // Down removes the one schema as a reversible local-install operation. There

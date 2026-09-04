@@ -84,6 +84,7 @@ const allowedRootDirectories = new Set([
   'docs',
   'scripts',
   'server',
+  'storage',
   'tests',
 ]);
 const rootEntries = await readdir(root, { withFileTypes: true });

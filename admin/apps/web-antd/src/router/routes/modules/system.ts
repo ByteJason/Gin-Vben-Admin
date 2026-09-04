@@ -28,14 +28,12 @@ const routes: RouteRecordRaw[] = [
   {
     name: 'menu-system-config',
     path: '/system',
-    redirect: '/system/dictionary',
+    redirect: '/system/settings',
     meta: {
       authority: [
         'system:dictionary:read',
         'system:settings:read',
-        'system:parameters:read',
         'system:mail:read',
-        'system:observability:read',
       ],
       icon: 'lucide:settings',
       order: 30,
@@ -50,14 +48,6 @@ const routes: RouteRecordRaw[] = [
         'page.dictionary.title',
         'lucide:book-open',
       ),
-      page(
-        'menu-system-parameters',
-        'parameters',
-        () => import('#/views/system/settings/index.vue'),
-        ['system:settings:read', 'system:parameters:read'],
-        'page.navigation.parameters',
-        'lucide:sliders-horizontal',
-      ),
       {
         component: () => import('#/views/system/settings/index.vue'),
         meta: {
@@ -68,6 +58,12 @@ const routes: RouteRecordRaw[] = [
         name: 'menu-system-settings',
         path: '/system/settings',
       },
+      {
+        path: '/system/parameters',
+        redirect: '/system/settings',
+        name: 'LegacySystemParameters',
+        meta: { hideInMenu: true, hideInTab: true, title: $t('page.navigation.settings') },
+      },
       page(
         'menu-system-mail',
         'mail',
@@ -76,14 +72,12 @@ const routes: RouteRecordRaw[] = [
         'page.navigation.mail',
         'lucide:mail',
       ),
-      page(
-        'menu-system-observability',
-        'observability',
-        () => import('#/views/system/observability/index.vue'),
-        'system:observability:read',
-        'page.observability.title',
-        'lucide:gauge',
-      ),
+      {
+        path: '/system/observability',
+        redirect: '/system/settings',
+        name: 'LegacySystemObservability',
+        meta: { hideInMenu: true, hideInTab: true, title: $t('page.navigation.settings') },
+      },
     ],
   },
   {
@@ -165,6 +159,9 @@ const routes: RouteRecordRaw[] = [
       hideInTab: true,
       title: $t('page.audit.title'),
     },
+    // legacy audit route keeps bookmarked URLs while the production menu lives under /ops.
+    // name: 'menu-operations-audit'
+    // authority: ['ops:audit:read']
     name: 'LegacySystemAudit',
     path: '/system/audit',
   },

@@ -294,6 +294,8 @@ pending_at, ready_at, deleted_at
 
 保留现有 object key 唯一性保护，但 object key 只由 provider adapter 解释。建议索引：`(scope, category_id, created_at)`、`(scope, mime, created_at)`、`(scope, owner_id, created_at)`、`(status, created_at)`。
 
+本地 provider 的新上传采用可读的日期分区：`YYYY/MMDD/<opaque-resource-id>[.ext]`（第一层为四位年份，第二层为月日，不再使用 `v1` 或哈希分片前缀）。已有记录中的旧 object key 继续按原值读取，迁移期间不会改写对象。
+
 **`media_categories`（新增）**：
 
 ```text

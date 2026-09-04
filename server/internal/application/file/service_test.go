@@ -3,12 +3,37 @@ package file
 import (
 	"context"
 	"errors"
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 )
 
 type fakeStore struct {
 	objects map[string]Object
+}
+
+func TestUploadUsesUTCDatePartitionedObjectKey(t *testing.T) {
+	store := &fakeStore{}
+	svc := NewService(store, Config{
+		AllowedMIMEs: []string{"text/plain"},
+		Clock:        func() time.Time { return time.Date(2026, 9, 5, 1, 0, 0, 0, time.FixedZone("fixture", 8*60*60)) },
+	})
+	item, err := svc.Upload(context.Background(), UploadInput{Name: "note.txt", MIME: "text/plain", Size: 4, Data: []byte("test")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The configured clock is converted to UTC before partitioning: 01:00 at
+	// UTC+08 is still the previous UTC day.
+	if !regexp.MustCompile(`^2026/0904/[A-Za-z0-9_-]+\.txt$`).MatchString(item.ObjectKey) {
+		t.Fatalf("object key = %q", item.ObjectKey)
+	}
+	if strings.HasPrefix(item.ObjectKey, "v1/") {
+		t.Fatalf("legacy version prefix remains in new key %q", item.ObjectKey)
+	}
+	if _, ok := store.objects[item.ObjectKey]; !ok {
+		t.Fatalf("stored object missing key %q", item.ObjectKey)
+	}
 }
 
 func (f *fakeStore) Put(_ context.Context, object Object) error {

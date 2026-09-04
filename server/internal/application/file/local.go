@@ -649,8 +649,8 @@ func (s *LocalStore) SignURL(_ context.Context, key string, ttl time.Duration) (
 	}
 	basePath := strings.TrimRight(u.Path, "/")
 	// Path is kept decoded while RawPath carries one (not double) escaping of
-	// the sharded key. This makes the URL usable by ordinary HTTP servers while
-	// preserving slash boundaries for verification.
+	// the date-partitioned key. This makes the URL usable by ordinary HTTP
+	// servers while preserving slash boundaries for verification.
 	u.Path = basePath + "/" + key
 	u.RawPath = basePath + "/" + url.PathEscape(key)
 	expires := time.Now().Add(ttl).Unix()
@@ -833,9 +833,29 @@ func (s *LocalStore) keyForOpaqueID(id string) (string, error) {
 	if !validOpaqueID(id) || len(id) < 4 {
 		return "", ErrAccessDenied
 	}
-	pattern := filepath.Join(s.root, "v1", id[:2], id[2:4], id+"*")
-	matches, err := filepath.Glob(pattern)
-	if err != nil || len(matches) != 1 {
+	// New uploads use a human-readable UTC date partition (YYYY/MMDD). Keep
+	// the historical v1 shard lookup as a read-only compatibility path so
+	// existing rows and signed links continue to work during migration.
+	patterns := []string{
+		filepath.Join(s.root, "[0-9][0-9][0-9][0-9]", "[0-9][0-9][0-9][0-9]", id+"*"),
+		filepath.Join(s.root, "v1", id[:2], id[2:4], id+"*"),
+	}
+	matches := make([]string, 0, 2)
+	seen := make(map[string]struct{}, 2)
+	for _, pattern := range patterns {
+		found, err := filepath.Glob(pattern)
+		if err != nil {
+			return "", ErrAccessDenied
+		}
+		for _, match := range found {
+			if _, ok := seen[match]; ok {
+				continue
+			}
+			seen[match] = struct{}{}
+			matches = append(matches, match)
+		}
+	}
+	if len(matches) != 1 {
 		return "", ErrAccessDenied
 	}
 	match := matches[0]

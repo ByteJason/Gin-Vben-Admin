@@ -6,84 +6,125 @@ const root = new URL('../../', import.meta.url);
 const read = (path) => readFileSync(new URL(path, root), 'utf8');
 const apps = ['web-antd', 'web-ele', 'web-naive'];
 
-test('B10.4 settings service exposes classified schema, precedence, encryption and connection tests', () => {
+test('system settings exposes the module contract and keeps active defaults mail-free', () => {
   const servicePath = 'server/internal/application/settings/service.go';
-  const envelopePath = 'server/internal/application/settings/envelope.go';
+  const modulePath = 'server/internal/application/settings/module.go';
+  const snapshotPath = 'server/internal/application/settings/runtime_snapshot.go';
   const handlerPath = 'server/internal/transport/http/settings/handler.go';
-  const schemaPath = 'server/migrations/schema.go';
-  const modelPath = 'server/internal/platform/persistence/model/admin_settings_models.go';
-  for (const path of [servicePath, envelopePath, handlerPath, schemaPath, modelPath]) {
+  const migrationPath = 'server/migrations/versions/admin/v003_settings_mail_cleanup.go';
+  const openapi = read('contracts/openapi/admin-v1.yaml');
+  for (const path of [servicePath, modulePath, snapshotPath, handlerPath, migrationPath]) {
     assert.equal(existsSync(new URL(path, root)), true, path);
   }
+
   const service = read(servicePath);
-  const envelope = read(envelopePath);
+  const module = read(modulePath);
   const handler = read(handlerPath);
-  for (const category of ['basic', 'security', 'mail', 'file', 'captcha', 'i18n']) {
-    assert.match(service, new RegExp(`Category:\\s*(?:Category${category[0].toUpperCase()}${category.slice(1)}|"?${category})`), `${category} category`);
-  }
-  for (const key of [
-    'basic.site_name',
-    'security.jwt_secret',
-    'mail.enabled',
-    'file.max_size',
-    'captcha.enabled',
-    'i18n.mode',
-    'i18n.default_locale',
-    'i18n.supported_locales',
+  const defaultSection = service.slice(
+    service.indexOf('func DefaultDefinitions()'),
+    service.indexOf('// legacyMailDefinitions'),
+  );
+  assert.doesNotMatch(defaultSection, /mail\.|email\.|smtp\./i);
+  assert.match(service, /func legacyMailDefinitions\(\)/);
+  for (const token of [
+    'DisplayName',
+    'Description',
+    'ValueKind',
+    'AllowedValues',
+    'SourcePolicy',
+    'ScopePolicy',
+    'ApplyMode',
+    'Sensitive',
   ]) {
-    assert.match(service, new RegExp(key.replace('.', '\\.'), 'g'), key);
+    assert.match(service, new RegExp(token), token);
   }
-  assert.match(service, /SourceEnv|SourceDotEnv|SourceYAML|SourceDatabase|SourceDefault/);
-  assert.match(service, /SourceResolver|ResolveSource|EffectiveSource/);
-  assert.match(service, /EnvelopeEncryptor|Encryptor/);
-  assert.match(envelope, /aes|GCM|envelope/i);
-  assert.match(envelope, /Encrypt/);
-  assert.match(envelope, /Decrypt/);
-  assert.match(handler, /testConnection|connectionTest|TestConnection/);
-  assert.match(handler, /history/);
-  assert.match(handler, /rollback/);
-  assert.match(read(modelPath), /Encrypted|encrypted|ciphertext/i);
+  for (const token of [
+    'ValidateModule',
+    'SaveModule',
+    'ResetModule',
+    'ClearCredentials',
+    'StatusSavedAndApplied',
+    'StatusSavedApplyFailed',
+    'ReplaceWithSourcesFor',
+  ]) {
+    assert.match(module, new RegExp(token), token);
+  }
+  assert.match(read(snapshotPath), /SnapshotFor/);
+
+  // The production registration seam is module-only. Legacy handlers remain
+  // isolated for rolling-upgrade consumers and are not mounted by the app.
+  const productionRoutes = handler.slice(
+    handler.indexOf('func registerSystemRoutes'),
+    handler.indexOf('func registerRoutes(', handler.indexOf('func registerSystemRoutes')),
+  );
+  assert.match(productionRoutes, /clear-credentials/);
+  assert.doesNotMatch(productionRoutes, /history|rollback|testConnection/i);
+
+  assert.match(openapi, /\/api\/admin\/v1\/settings\/modules:\s*\n/);
+  assert.match(openapi, /operationId: updateSettingModule/);
+  assert.match(openapi, /\/api\/admin\/v1\/settings\/modules\/\{module\}\/clear-credentials:/);
+  assert.match(openapi, /operationId: clearSettingModuleCredentials/);
+  const settingSchema = openapi.slice(
+    openapi.indexOf('    SettingDefinition:'),
+    openapi.indexOf('    SettingUpdateRequest:', openapi.indexOf('    SettingDefinition:')),
+  );
+  assert.doesNotMatch(settingSchema, /mail|smtp|email/i);
 });
 
 for (const app of apps) {
-  test(`B10.4 ${app} exposes the classified settings center`, () => {
+  test(`system settings ${app} uses business modules and one save boundary`, () => {
     const apiPath = `admin/apps/${app}/src/api/core/settings.ts`;
     const viewPath = `admin/apps/${app}/src/views/system/settings/index.vue`;
     const routePath = `admin/apps/${app}/src/router/routes/modules/system.ts`;
-    assert.equal(existsSync(new URL(apiPath, root)), true, `${app} settings api`);
-    assert.equal(existsSync(new URL(viewPath, root)), true, `${app} settings view`);
     const api = read(apiPath);
     const view = read(viewPath);
     const route = read(routePath);
-    assert.match(api, /SettingCategory|category/);
-    assert.match(api, /source/);
-    assert.match(api, /listSettingHistoryApi/);
-    assert.match(api, /rollbackSettingApi/);
-    assert.match(api, /test.*Connection|connection.*Test/i);
-    for (const token of ['listSettingDefinitionsApi', 'getSettingApi', 'updateSettingApi', 'listSettingHistoryApi', 'rollbackSettingApi']) {
+
+    for (const token of [
+      'listSettingModulesApi',
+      'getSettingModuleApi',
+      'updateSettingModuleApi',
+      'validateSettingModuleApi',
+      'resetSettingModuleApi',
+      'clearSettingModuleCredentialsApi',
+    ]) {
+      assert.match(api, new RegExp(token), `${app}/${token}`);
       assert.match(view, new RegExp(token), `${app}/${token}`);
     }
-    for (const token of ['basic', 'security', 'mail', 'file', 'captcha', 'i18n', 'source', 'history', 'rollback', 'connection']) {
-      assert.match(view, new RegExp(token, 'i'), `${app}/${token}`);
+    assert.doesNotMatch(view, /listSettingHistoryApi|rollbackSettingApi|testConnection/i);
+    assert.doesNotMatch(view, /#\{\{\s*activeView\.revision/);
+    for (const token of ['displayName', 'description', 'applyMode', 'source', 'saveApply', 'clearCredential']) {
+      assert.match(view, new RegExp(token), `${app}/${token}`);
     }
     assert.match(route, /views\/system\/settings\/index\.vue/);
     assert.match(route, /name:\s*'menu-system-settings'/);
     assert.match(route, /authority:\s*\['system:settings:read'\]/);
     assert.match(route, /path:\s*'\/system\/settings'/);
   });
-}
 
-for (const app of apps) {
   for (const locale of ['zh-CN', 'en-US']) {
-    test(`B10.4 ${app}/${locale} has bilingual settings-center copy`, () => {
-      const text = read(`admin/apps/${app}/src/locales/langs/${locale}/page.json`);
+    test(`system settings ${app}/${locale} has module-state copy without retired actions`, () => {
+      const parsed = JSON.parse(read(`admin/apps/${app}/src/locales/langs/${locale}/page.json`));
+      const settings = parsed.settings;
+      assert.ok(settings, `${app}/${locale}/settings`);
       for (const key of [
-        'settings', 'settingsDescription', 'settingsLoading', 'settingsLoadError',
-        'settingsCategory', 'settingsSource', 'settingsDatabase', 'settingsEnvironment',
-        'settingsHistory', 'settingsRollback', 'settingsConnectionTest',
-        'settingsConnectionSuccess', 'settingsConnectionError', 'settingsRestartRequired',
+        'title',
+        'description',
+        'searchPlaceholder',
+        'unsaved',
+        'discard',
+        'validate',
+        'restoreDefaults',
+        'saveApply',
+        'source',
+        'applyMode',
+        'status',
+        'clearCredential',
       ]) {
-        assert.match(text, new RegExp(`"${key}"\\s*:`), `${app}/${locale}/${key}`);
+        assert.ok(Object.hasOwn(settings, key), `${app}/${locale}/${key}`);
+      }
+      for (const retired of ['history', 'rollback', 'connectionTest', 'smtp', 'mail']) {
+        assert.equal(Object.hasOwn(settings, retired), false, `${app}/${locale}/${retired}`);
       }
     });
   }

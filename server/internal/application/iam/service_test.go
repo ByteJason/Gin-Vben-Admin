@@ -265,8 +265,15 @@ func TestLegacyPartialPermissionCatalogStillUnlocksProductionMenuFallback(t *tes
 	for _, root := range routes {
 		leafCount += len(root.Children)
 	}
-	if len(routes) != 5 || leafCount != 15 {
+	if len(routes) != 5 || leafCount != 13 {
 		t.Fatalf("legacy partial catalog routes=%d leaves=%d routes=%+v", len(routes), leafCount, routes)
+	}
+	for _, root := range routes {
+		for _, child := range root.Children {
+			if child.Name == "menu-system-parameters" || child.Name == "menu-system-observability" {
+				t.Fatalf("retired settings route leaked into fallback: %+v", child)
+			}
+		}
 	}
 }
 

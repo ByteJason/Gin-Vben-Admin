@@ -21,17 +21,15 @@
 | 后台权限 | 角色管理 | `/iam/roles` | `iam:roles:read` | 角色列表与创建；权限和数据范围关系维护；成员分配仍在用户管理页完成，未闭环的详情编辑/删除明确标记为待完成 |
 | 后台权限 | 菜单管理 | `/iam/menus` | `iam:menus:read` | 目录/菜单/按钮树、组件白名单、访问码、排序、启停及动态路由发布数据 |
 | 后台权限 | 权限管理 | `/iam/permissions` | `iam:permissions:read` | API/按钮权限与状态；策略、数据范围改由角色详情承载 |
-| 系统管理 | 系统设置 | `/system/settings` | `system:settings:read` | 基础、安全、语言、第三方等配置分类、校验和版本信息 |
-| 系统管理 | 参数管理 | `/system/parameters` | `system:parameters:read` | 系统参数分区与生效来源；沿用系统设置页的版本与校验能力 |
+| 系统管理 | 系统设置 | `/system/settings` | `system:settings:read` | 基础、安全、文件、验证码、语言、第三方、可观测性等业务模块；按模块校验并原子保存 |
 | 系统管理 | 字典管理 | `/system/dictionary` | `system:dictionary:read` | 字典类型、条目、双语文本、排序与状态 |
-| 系统管理 | 邮件服务 | `/system/mail` | `system:mail:read` | SMTP 账号池、连接测试和投递记录；普通管理页暂不展示邮件正文详情 |
-| 系统管理 | 可观测设置 | `/system/observability` | `system:observability:read` | metrics、trace、日志导出开关与目标配置；不与实时资源监控混用 |
+| 系统管理 | 邮件服务（独立模块） | `/system/mail` | `system:mail:read` | SMTP 账号池、连接测试和投递记录；普通管理页暂不展示邮件正文详情；不属于系统设置模块 |
 | 运维监控 | 服务器状态 | `/ops/server-status` | `ops:server-status:read` | 实例/build/runtime；CPU、内存、文件系统；数据库与 Redis 健康、延迟、连接池及非敏感计数；实时会话趋势和局部降级 |
 | 运维监控 | 操作历史 | `/ops/operation-history` | `ops:operation-history:read` | 登录、授权、配置和数据操作审计的筛选、详情与导出 |
 | 运维监控 | 登录日志 | `/ops/login-logs` | `ops:login-logs:read` | 登录事件、设备、IP、时间和撤销状态查询 |
 | 运维监控 | 定时任务 | `/ops/tasks` | `ops:tasks:read` | 调度、手动运行、取消、重试、日志、并发和失败状态 |
 | 运维监控 | 数据作业 | `/ops/data-jobs` | `ops:data-jobs:read` | 模板、导入预检、异步导入导出、进度、错误行与下载状态 |
-| 媒体管理 | 媒体库 | `/media/library` | `media:library:read` | 当前本地 provider 的对象元数据、上传下载、签名 URL、访问控制、删除和清理预检；远程对象存储尚未交付 |
+| 媒体管理 | 媒体库 | `/media/library` | `media:library:read` | 当前本地 provider 的对象元数据、上传下载、签名 URL、访问控制、删除和清理预检；新对象按 `YYYY/MMDD/<id>[.ext]` 分区，远程对象存储尚未交付 |
 
 一级分组的稳定标识与路径分别为：`menu-overview`/`/dashboard`、`menu-identity`/`/iam`、`menu-system-config`/`/system`、`menu-operations`/`/ops`、`menu-media`/`/media`。二级项保留已有业务 URL，旧地址通过隐藏重定向兼容。
 
@@ -46,11 +44,10 @@
 | 角色管理 | `iam:roles:read` | `iam:roles:manage` | `iam:permissions:read`、`iam:data-scopes:read` |
 | 菜单管理 | `iam:menus:read` | `iam:menus:manage` | `iam:components:read`（组件白名单） |
 | 权限管理 | `iam:permissions:read` | — | — |
-| 系统设置 | `system:settings:read` | `system:settings:manage` | — |
+| 系统设置（含可观测性模块） | `system:settings:read` | `system:settings:manage` | — |
 | 字典管理 | `system:dictionary:read` | `system:dictionary:manage` | `system:settings:read`（可选读取 i18n 策略；无权时不请求并采用编译默认） |
-| 邮件服务 | `system:mail:read` | `system:mail:manage` | — |
+| 邮件服务（独立模块） | `system:mail:read` | `system:mail:manage` | — |
 | 媒体库 | `media:library:read` | `media:library:manage` | `system:files:read`（旧文件中心访问码，仅作为迁移兼容） |
-| 可观测设置 | `system:observability:read` | `system:observability:manage` | — |
 | 资源监控 | `ops:monitor:read` | — | — |
 | 审计日志 | `ops:audit:read` | —（导出与保留预检均为只读 GET） | — |
 | 任务管理 | `ops:tasks:read` | `ops:tasks:manage` | — |
@@ -81,6 +78,8 @@
 | `/workspace`、`/dashboard/workspace` | 重定向到 `/dashboard` | 合并两套演示首页 |
 | `/iam/policies` | 保留兼容访问，不进生产菜单 | 策略关系转入角色详情 |
 | `/iam/data-scopes` | 保留兼容访问，不进生产菜单 | 数据范围关系转入角色详情 |
+| `/system/parameters` | 重定向到 `/system/settings`，不进生产菜单 | 参数分区已并入模块化系统设置；旧访问码和接口仅作兼容 |
+| `/system/observability` | 重定向到 `/system/settings`，不进生产菜单 | 可观测性改为系统设置内的 `observability` 模块；旧页面组件保留用于兼容构建 |
 | `/profile` 及模板注册/找回/扫码入口 | `/profile` 仅开发模式注册；其余功能闭环前不进生产菜单 | 避免生产构建暴露模拟交互 |
 | Vben demo/example 路由 | 仅开发模式 | 不写入安装菜单种子，也不计入业务验收 |
 
@@ -90,7 +89,9 @@
 
 `GET /api/admin/v1/iam/me` 返回用户资料、规范化首页和 `accessCodes`。兼容接口 `GET /api/admin/v1/auth/codes` 从同一个 IAM 权限源返回访问码，不维护第二份权限规则。权限决策缓存按租户、组织和平台管理员上下文隔离，并把一次读取绑定到当时的缓存代次；只缓存明确拒绝，allow 始终回到权威授权源复核，因此撤权提交后不会继续复用旧 allow。
 
-可观测设置使用独立的 `GET/PUT /api/admin/v1/observability/settings/{key}` 入口，并只接受文档化的 `observability.*` 键。`system:observability:read/manage` 不匹配通用 `/settings/{key}`，因此不会隐式获得安全、文件或邮件配置的读写权限。
+系统设置的 canonical 契约是 `GET /api/admin/v1/settings/modules`、`GET/PUT /api/admin/v1/settings/modules/{module}`，并由 `POST .../validate` 与 `POST .../reset` 提供模块级校验和重置。可观测性属于 `observability` 模块，和基础、安全、文件、验证码、语言等模块共享 `system:settings:read/manage` 的原子保存边界；邮件账号和投递记录仍走独立的 `/api/admin/v1/mail/*` 能力。
+
+旧的逐项 `/api/admin/v1/settings`、`/api/admin/v1/settings/{key}`、历史/回滚/连接测试操作，以及 `/api/admin/v1/observability/settings/{key}` 别名继续保留给迁移期集成，但在 OpenAPI 中标记为 deprecated，新的系统设置页面不调用这些入口。旧访问码 `system:parameters:read`、`system:parameters:manage`、`system:observability:read`、`system:observability:manage` 仍保留用于权限和审计兼容，不再驱动可见菜单。
 
 前端按原子事务处理登录：token、用户资料和访问码全部建立后才完成跳转；新版 `/iam/me` 已包含 `accessCodes` 时不再发起兼容请求。只在旧服务端完全缺少该字段时调用 `/auth/codes`，且仅该兼容接口的 404 可降级为空数组；其他错误回滚本次认证状态并展示真实错误。
 
@@ -126,11 +127,11 @@ Ant Design Vue、Element Plus 与 Naive UI 必须共享相同的路由、权限�
 | 3 | 后台权限 | 权限管理 | `/iam/permissions` | 原路径 |
 | 3 | 后台权限 | 用户管理 | `/iam/users` | 原路径 |
 | 4 | 系统管理 | 字典管理 | `/system/dictionary` | 原路径 |
-| 4 | 系统管理 | 参数管理 | `/system/parameters` | `/system/settings` 参数分区 |
-| 4 | 系统管理 | 系统配置 | `/system/settings` | 原路径 |
+| 4 | 系统管理 | 系统设置（含可观测性模块） | `/system/settings` | `/system/parameters`、`/system/observability` 重定向 |
+| 4 | 系统管理 | 邮件服务（独立模块） | `/system/mail` | 原路径 |
 | 5 | 媒体管理 | 媒体库 | `/media/library` | `/system/files` |
 
-邮件服务、可观测设置进入系统管理；数据作业进入运维监控；策略/数据范围只保留受权限保护的深链。演示和上游 Vben 入口不进入生产菜单或安装种子，开发模式可隔离保留。
+系统设置页面承载可观测性配置模块，邮件服务保持独立入口；数据作业进入运维监控；策略/数据范围只保留受权限保护的深链。演示和上游 Vben 入口不进入生产菜单或安装种子，开发模式可隔离保留。
 
 ### 8.2 目标页面契约摘要
 

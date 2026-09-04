@@ -45,6 +45,21 @@ func TestCommonCapabilitiesVersionAndModels(t *testing.T) {
 	}
 }
 
+func TestRetiredSettingsPermissionAllowListDoesNotTouchIndependentMailAccess(t *testing.T) {
+	for _, id := range retiredSettingsPermissionIDs {
+		if id == "system:mail:read" || id == "system:mail:manage" || strings.HasPrefix(id, "notification:") {
+			t.Fatalf("cleanup allow-list crosses independent mail boundary: %q", id)
+		}
+	}
+	for _, retained := range []string{"system:mail:read", "system:mail:manage", "system:mail:test", "notification:accounts:manage"} {
+		for _, id := range retiredSettingsPermissionIDs {
+			if id == retained {
+				t.Fatalf("independent permission %q is scheduled for cleanup", retained)
+			}
+		}
+	}
+}
+
 func TestCommonCapabilitiesMigrationRejectsNilDatabase(t *testing.T) {
 	if err := Up(nil); err == nil {
 		t.Fatal("Up(nil) returned nil")

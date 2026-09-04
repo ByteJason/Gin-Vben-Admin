@@ -1,0 +1,80 @@
+SYSTEM_SETTINGS_REFACTOR_VERIFICATION
+BASELINE=e62fe9b
+DATE=2026-09-05
+
+[1] PATCH_INTEGRITY
+COMMAND: git diff --check
+OUTPUT: (empty)
+EXIT_STATUS: 0
+
+[2] BACKEND_TARGETED
+COMMAND: cd server && GOCACHE=/tmp/gin-vben-settings-cache GOTMPDIR=/tmp go test ./internal/application/settings ./internal/platform/settingsplatform ./internal/transport/http/settings ./internal/platform/migration ./internal/bootstrap ./internal/application/file ./migrations/versions/admin ./cmd/migrate -count=1 -timeout=240s
+OUTPUT:
+ok   github.com/ByteJason/Gin-Vben-Admin/server/internal/application/settings 0.176s
+ok   github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/settingsplatform 0.232s
+ok   github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/settings 0.256s
+ok   github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/migration 0.443s
+ok   github.com/ByteJason/Gin-Vben-Admin/server/internal/bootstrap 1.182s
+ok   github.com/ByteJason/Gin-Vben-Admin/server/internal/application/file 0.623s
+ok   github.com/ByteJason/Gin-Vben-Admin/server/migrations/versions/admin 0.347s
+ok   github.com/ByteJason/Gin-Vben-Admin/server/cmd/migrate 0.161s
+EXIT_STATUS: 0
+
+[3] REDIS_AND_VET
+COMMAND: cd server && GOCACHE=/tmp/gin-vben-settings-cache GOTMPDIR=/tmp go test ./internal/platform/cache/redis -count=1 -timeout=120s
+OUTPUT:
+ok   github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/cache/redis 0.211s
+EXIT_STATUS: 0
+COMMAND: cd server && GOCACHE=/tmp/gin-vben-settings-cache GOTMPDIR=/tmp go vet ./internal/application/settings ./internal/platform/settingsplatform ./internal/transport/http/settings ./internal/platform/cache/redis ./internal/bootstrap ./internal/application/file ./internal/platform/migration ./migrations/versions/admin ./cmd/migrate
+OUTPUT: (empty)
+EXIT_STATUS: 0
+
+[4] FRONTEND_TYPECHECK
+COMMAND: cd admin && pnpm --filter @vben/web-antd typecheck && pnpm --filter @vben/web-ele typecheck && pnpm --filter @vben/web-naive typecheck
+OUTPUT:
+$ vue-tsc --noEmit --skipLibCheck
+$ vue-tsc --noEmit --skipLibCheck
+$ vue-tsc --noEmit --skipLibCheck
+EXIT_STATUS: 0
+
+[5] FRONTEND_BUILD
+COMMAND: cd admin && for app in @vben/web-antd @vben/web-ele @vben/web-naive; do pnpm --filter "$app" build; done
+OUTPUT:
+BUILD_STATUS[@vben/web-antd]=0
+✓ built in 2.01s
+BUILD_STATUS[@vben/web-ele]=0
+✓ built in 1.85s
+BUILD_STATUS[@vben/web-naive]=0
+✓ built in 1.79s
+EXIT_STATUS: 0
+
+[6] OPENAPI
+COMMAND: node scripts/generate-openapi.mjs
+OUTPUT:
+OPENAPI_CLIENT_GENERATE_OK=admin/packages/api-client/src/generated/admin-v1.ts
+OPENAPI_SOURCES_OK=3
+OPENAPI_GENERATION_MODE=standard
+OPENAPI_GENERATE_OK
+EXIT_STATUS: 0
+
+[7] NODE_CONTRACT
+COMMAND: node --test tests/contract/*.test.mjs
+OUTPUT: 184 pass, 1 fail; the only failure is the repository-wide verify substep invoking Go observability test that attempts httptest.NewServer on IPv6 [::1]:0 and receives bind: operation not permitted in the sandbox. The settings/media contract tests pass.
+LOG: /tmp/gin-vben-node-contract-final.log
+EXIT_STATUS: 1 (environment restriction)
+
+[8] FULL_GO_SUITE
+COMMAND: cd server && GOCACHE=/tmp/gin-vben-settings-cache GOTMPDIR=/tmp go test ./... -count=1 -timeout=240s
+OUTPUT: all packages passed except internal/platform/observability/TestRuntimeExportsSampledOTLPSpanAndDoesNotBlockRequest; httptest.NewServer listen tcp6 [::1]:0: bind: operation not permitted.
+EXIT_STATUS: 1 (environment restriction)
+
+[9] EVIDENCE_ROLES
+COMMAND: sha256 hash table in modified-artifacts.tsv
+OUTPUT: 59 lines including header; baseline and modified hashes recorded for every tracked/untracked implementation artifact.
+EXIT_STATUS: 0
+COMMAND: patch line count
+OUTPUT: 14942 docs/verification/system-settings-refactor-2026-09-05/patch.diff
+EXIT_STATUS: 0
+COMMAND: bash -n docs/verification/system-settings-refactor-2026-09-05/rollback.sh
+OUTPUT: (empty)
+EXIT_STATUS: 0

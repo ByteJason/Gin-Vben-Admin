@@ -866,18 +866,131 @@ paths:
     get:
       tags: [Settings]
       operationId: listSettingDefinitions
-      summary: 查询系统设置定义
+      summary: 查询系统设置定义（兼容接口）
+      deprecated: true
+      description: 新的管理端使用模块接口；该接口仅返回代码维护的定义元数据。
       security: [{BearerAuth: []}]
       responses:
         '200': { $ref: '#/components/responses/SettingDefinitionsResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
+  /api/admin/v1/settings/modules:
+    get:
+      tags: [Settings]
+      operationId: listSettingModules
+      summary: 查询系统设置业务模块
+      description: 返回可按模块原子编辑的系统设置边界，不包含独立邮件配置。
+      security: [{BearerAuth: []}]
+      responses:
+        '200': { $ref: '#/components/responses/SettingModulesResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
+  /api/admin/v1/settings/modules/{module}:
+    get:
+      tags: [Settings]
+      operationId: getSettingModule
+      summary: 查询系统设置模块当前态
+      security: [{BearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/SettingModule'
+      responses:
+        '200': { $ref: '#/components/responses/SettingModuleResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Settings]
+      operationId: updateSettingModule
+      summary: 原子保存并应用系统设置模块
+      description: 服务端将当前有效配置与修改合并，完成完整校验后在一个事务中提交。
+      security: [{BearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/SettingModule'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SettingModuleUpdateRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/SettingModuleSaveResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/SettingConflict' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
+  /api/admin/v1/settings/modules/{module}/validate:
+    post:
+      tags: [Settings]
+      operationId: validateSettingModule
+      summary: 校验系统设置模块候选配置
+      security: [{BearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/SettingModule'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SettingModuleValidationRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/SettingModuleValidationResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
+  /api/admin/v1/settings/modules/{module}/reset:
+    post:
+      tags: [Settings]
+      operationId: resetSettingModule
+      summary: 移除系统设置模块的数据库覆盖
+      description: 恢复默认会删除数据库覆盖值，而不是把默认值再次写入数据库。
+      security: [{BearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/SettingModule'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SettingModuleResetRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/SettingModuleSaveResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/SettingConflict' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
+  /api/admin/v1/settings/modules/{module}/clear-credentials:
+    post:
+      tags: [Settings]
+      operationId: clearSettingModuleCredentials
+      summary: 显式清除系统设置模块中的敏感凭证
+      description: 仅清除请求明确列出的敏感数据库覆盖值；留空的敏感输入不会触发清除。
+      security: [{BearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/SettingModule'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SettingModuleClearCredentialsRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/SettingModuleSaveResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/SettingConflict' }
+        '503': { $ref: '#/components/responses/AuthServiceUnavailable' }
   /api/admin/v1/settings/{key}:
     get:
       tags: [Settings]
       operationId: getSetting
-      summary: 查询单项系统设置
+      summary: 查询单项系统设置（兼容接口）
+      deprecated: true
+      description: 兼容旧客户端的只读读取入口；新的管理端应读取系统设置模块。
       security: [{BearerAuth: []}]
       parameters:
         - $ref: '#/components/parameters/SettingKey'
@@ -890,7 +1003,9 @@ paths:
     put:
       tags: [Settings]
       operationId: updateSetting
-      summary: 以乐观版本号更新系统设置
+      summary: 以乐观版本号更新系统设置（兼容接口）
+      deprecated: true
+      description: 仅为迁移期间的既有消费者保留；新的修改必须使用模块级原子保存接口。
       security: [{BearerAuth: []}]
       parameters:
         - $ref: '#/components/parameters/SettingKey'
@@ -910,7 +1025,9 @@ paths:
     get:
       tags: [Settings]
       operationId: listSettingHistory
-      summary: 查询设置历史版本
+      summary: 查询设置历史版本（已废弃）
+      deprecated: true
+      description: 旧版本兼容入口；系统设置不再维护或展示逐字段历史。
       security: [{BearerAuth: []}]
       parameters:
         - $ref: '#/components/parameters/SettingKey'
@@ -923,7 +1040,9 @@ paths:
     post:
       tags: [Settings]
       operationId: rollbackSetting
-      summary: 回滚设置到指定历史版本
+      summary: 回滚设置到指定历史版本（已废弃）
+      deprecated: true
+      description: 旧版本兼容入口；请使用模块级恢复默认操作，不再按字段回滚历史版本。
       security: [{BearerAuth: []}]
       parameters:
         - $ref: '#/components/parameters/SettingKey'
@@ -943,7 +1062,9 @@ paths:
     post:
       tags: [Settings]
       operationId: testSettingConnection
-      summary: 对设置执行结构化连接测试
+      summary: 对设置执行结构化连接测试（已废弃）
+      deprecated: true
+      description: 配置中心不再提供逐字段测试；独立能力模块自行提供真实业务验证。
       security: [{BearerAuth: []}]
       parameters:
         - $ref: '#/components/parameters/SettingKey'
@@ -964,8 +1085,9 @@ paths:
     get:
       tags: [Settings]
       operationId: getObservabilitySetting
-      summary: 查询单项可观测设置
-      description: 仅接受固定的 observability 设置键；独立静态路由用于隔离通用系统设置权限。
+      summary: 查询单项可观测设置（已废弃）
+      deprecated: true
+      description: 兼容旧客户端的只读入口；可观测性现在属于系统设置 observability 模块。
       security: [{BearerAuth: []}]
       parameters:
         - $ref: '#/components/parameters/ObservabilitySettingKey'
@@ -978,8 +1100,9 @@ paths:
     put:
       tags: [Settings]
       operationId: updateObservabilitySetting
-      summary: 以乐观版本号更新单项可观测设置
-      description: 仅接受固定的 observability 设置键，不授予其他系统设置写权限。
+      summary: 以乐观版本号更新单项可观测设置（已废弃）
+      deprecated: true
+      description: 迁移期间兼容入口；新的修改必须提交完整 observability 模块。
       security: [{BearerAuth: []}]
       parameters:
         - $ref: '#/components/parameters/ObservabilitySettingKey'
@@ -2569,6 +2692,13 @@ components:
         type: string
         minLength: 1
         maxLength: 128
+    SettingModule:
+      name: module
+      in: path
+      required: true
+      schema:
+        type: string
+        enum: [basic, security, file, captcha, i18n, observability, other, runtime]
     ObservabilitySettingKey:
       name: key
       in: path
@@ -4069,57 +4199,196 @@ components:
     IAMDataScopeRequest:
       allOf:
         - $ref: '#/components/schemas/IAMDataScope'
+    SettingModule:
+      type: object
+      required: [id, name, displayName, category, group, keys, applyMode, scope, editable]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        displayName: { type: string }
+        description: { type: string }
+        category: { type: string, enum: [basic, security, file, captcha, i18n, observability, other, runtime] }
+        group: { type: string }
+        keys: { type: array, items: { type: string } }
+        applyMode: { type: string, enum: [immediate, component_reload, restart, deployment, migration] }
+        scope: { type: string, enum: [system, tenant, organization] }
+        scopePolicy:
+          type: array
+          minItems: 1
+          items: { type: string, enum: [system, tenant, organization] }
+        editable: { type: boolean }
+    SettingModuleUpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [values, expectedRevision]
+      properties:
+        values: { type: object, additionalProperties: true }
+        expectedRevision: { type: integer, minimum: 0 }
+        requestId: { type: string, maxLength: 128 }
+    SettingModuleValidationRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        values: { type: object, additionalProperties: true }
+        expectedRevision: { type: integer, minimum: 0 }
+        requestId: { type: string, maxLength: 128 }
+    SettingModuleResetRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedRevision]
+      properties:
+        expectedRevision: { type: integer, minimum: 0 }
+        requestId: { type: string, maxLength: 128 }
+    SettingModuleClearCredentialsRequest:
+      type: object
+      additionalProperties: false
+      required: [keys, expectedRevision]
+      properties:
+        keys:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { type: string, minLength: 1, maxLength: 128 }
+        expectedRevision: { type: integer, minimum: 0 }
+        requestId: { type: string, maxLength: 128 }
+    SettingModuleView:
+      type: object
+      required: [id, module, displayName, category, group, definitions, settings, revision, status, applyMode, otherNodesPending, requiresRestart]
+      properties:
+        id: { type: string }
+        module: { type: string }
+        name: { type: string }
+        displayName: { type: string }
+        description: { type: string }
+        category: { type: string, enum: [basic, security, file, captcha, i18n, observability, other, runtime] }
+        group: { type: string }
+        definitions: { type: array, items: { $ref: '#/components/schemas/SettingDefinition' } }
+        settings: { type: array, items: { $ref: '#/components/schemas/SettingData' } }
+        revision: { type: integer, minimum: 0 }
+        status: { type: string, enum: [saved_and_applied, saved_apply_failed, saved_pending_reload, saved_pending_restart, saved_pending_migration, save_failed, unchanged] }
+        applyMode: { type: string, enum: [immediate, component_reload, restart, deployment, migration] }
+        source: { type: string, enum: [env, dotenv, yaml, database, default] }
+        updatedAt: { type: string, format: date-time }
+        updatedBy: { type: string }
+        applyError: { type: string }
+        otherNodesPending: { type: boolean }
+        requiresRestart: { type: boolean }
+    SettingModuleSaveResult:
+      type: object
+      required: [module, revision, previousRevision, changedKeys, persisted, applied, status, applyMode, auditRecorded, cacheSynced, otherNodesPending, requiresRestart, updatedAt, settings]
+      properties:
+        module: { type: string }
+        id: { type: string }
+        revision: { type: integer, minimum: 0 }
+        previousRevision: { type: integer, minimum: 0 }
+        changedKeys: { type: array, items: { type: string } }
+        persisted: { type: boolean }
+        applied: { type: boolean }
+        status: { type: string, enum: [saved_and_applied, saved_apply_failed, saved_pending_reload, saved_pending_restart, saved_pending_migration, save_failed, unchanged] }
+        applyMode: { type: string, enum: [immediate, component_reload, restart, deployment, migration] }
+        applyError: { type: string }
+        auditRecorded: { type: boolean }
+        cacheSynced: { type: boolean }
+        otherNodesPending: { type: boolean }
+        requiresRestart: { type: boolean }
+        requestId: { type: string }
+        updatedAt: { type: string, format: date-time }
+        settings: { type: array, items: { $ref: '#/components/schemas/SettingData' } }
+    SettingModuleValidationResult:
+      type: object
+      required: [module, valid, applyMode, values, checkedAt]
+      properties:
+        module: { type: string }
+        valid: { type: boolean }
+        applyMode: { type: string, enum: [immediate, component_reload, restart, deployment, migration] }
+        values: { type: object, additionalProperties: true }
+        errors: { type: object, additionalProperties: { type: string } }
+        checkedAt: { type: string, format: date-time }
     SettingDefinition:
       type: object
-      required: [key, category, kind, sensitive, restartRequired]
+      required: [key, label, displayName, category, group, kind, valueKind, sensitive, editable, applyMode, sourcePolicy, scopePolicy]
       properties:
         key: { type: string }
-        category: { type: string, enum: [basic, security, mail, file, captcha, i18n, other] }
+        label: { type: string }
+        displayName: { type: string }
+        category: { type: string, enum: [basic, security, file, captcha, i18n, observability, other, runtime] }
+        group: { type: string }
         kind: { type: string, enum: [string, bool, number, json, secret] }
+        valueKind: { type: string, enum: [string, bool, number, json, secret] }
         sensitive: { type: boolean }
         default: { type: string }
         allowed:
           type: array
           items: { type: string }
+        allowedValues:
+          type: array
+          items: { type: string }
         description: { type: string }
+        editable: { type: boolean }
+        sourcePolicy:
+          type: array
+          items: { type: string, enum: [env, dotenv, yaml, database, default] }
+        scope: { type: string, enum: [system, tenant, organization] }
+        scopePolicy:
+          type: array
+          items: { type: string, enum: [system, tenant, organization] }
+        applyMode: { type: string, enum: [immediate, component_reload, restart, deployment, migration] }
+        unit: { type: string }
+        inputHint: { type: string }
+        placeholder: { type: string }
+        deprecated: { type: boolean }
         restartRequired: { type: boolean }
         envKey: { type: string }
         yamlPath: { type: string }
     SettingData:
       type: object
-      required: [key, category, value, version, sensitive, source, restartRequired]
+      required: [key, displayName, category, group, value, sensitive, source, editable, applyMode]
       properties:
         key: { type: string }
-        category: { type: string, enum: [basic, security, mail, file, captcha, i18n, other] }
+        displayName: { type: string }
+        category: { type: string, enum: [basic, security, file, captcha, i18n, observability, other, runtime] }
+        group: { type: string }
         value: { type: string }
         version: { type: integer, minimum: 0 }
         sensitive: { type: boolean }
         source: { type: string, enum: [env, dotenv, yaml, database, default] }
+        editable: { type: boolean }
+        scope: { type: string, enum: [system, tenant, organization] }
+        applyMode: { type: string, enum: [immediate, component_reload, restart, deployment, migration] }
         restartRequired: { type: boolean }
         updatedBy: { type: string }
         updatedAt: { type: string, format: date-time }
     SettingUpdateRequest:
       type: object
+      deprecated: true
+      description: 旧版逐字段更新请求；新的管理端必须提交完整模块。
       required: [value, expectedVersion]
       properties:
         value: {}
         expectedVersion: { type: integer, minimum: 0 }
+        requestId: { type: string, maxLength: 128 }
     SettingRollbackRequest:
       type: object
+      deprecated: true
+      description: 旧版逐字段历史回滚请求；系统设置不再提供历史回滚。
       required: [version, expectedVersion]
       properties:
         version: { type: integer, minimum: 1 }
         expectedVersion: { type: integer, minimum: 1 }
+        requestId: { type: string, maxLength: 128 }
     SettingConnectionTestRequest:
       type: object
+      deprecated: true
+      description: 旧版逐字段测试请求；真实业务验证由独立能力模块负责。
       properties:
         value: {}
     SettingConnectionTest:
       type: object
+      deprecated: true
       required: [key, category, status, source, requestId, checkedAt]
       properties:
         key: { type: string }
-        category: { type: string, enum: [basic, security, mail, file, captcha, i18n, other] }
+        category: { type: string, enum: [basic, security, file, captcha, i18n, observability, other, runtime] }
         status: { type: string, enum: [ok, failed] }
         source: { type: string, enum: [env, dotenv, yaml, database, default] }
         requestId: { type: string }
@@ -4219,6 +4488,48 @@ components:
                   data:
                     type: array
                     items: { $ref: '#/components/schemas/SettingDefinition' }
+    SettingModulesResponse:
+      description: 系统设置模块查询成功
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/SuccessEnvelope'
+              - type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/SettingModule' }
+    SettingModuleResponse:
+      description: 系统设置模块当前态查询成功
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/SuccessEnvelope'
+              - type: object
+                properties:
+                  data: { $ref: '#/components/schemas/SettingModuleView' }
+    SettingModuleSaveResponse:
+      description: 系统设置模块保存结果
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/SuccessEnvelope'
+              - type: object
+                properties:
+                  data: { $ref: '#/components/schemas/SettingModuleSaveResult' }
+    SettingModuleValidationResponse:
+      description: 系统设置模块校验结果
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/SuccessEnvelope'
+              - type: object
+                properties:
+                  data: { $ref: '#/components/schemas/SettingModuleValidationResult' }
     SettingResponse:
       description: 设置读取或写入成功
       content:

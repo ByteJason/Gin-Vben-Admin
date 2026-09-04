@@ -11,9 +11,10 @@ import (
 type action string
 
 const (
-	actionUp     action = "up"
-	actionDown   action = "down"
-	actionStatus action = "status"
+	actionUp                  action = "up"
+	actionDown                action = "down"
+	actionStatus              action = "status"
+	actionSettingsMailCleanup action = "settings-mail-cleanup"
 )
 
 type command struct {
@@ -58,18 +59,35 @@ func splitAction(args []string) (action, []string, error) {
 		if strings.HasPrefix(value, "--config=") || strings.HasPrefix(value, "--steps=") {
 			continue
 		}
-		switch action(value) {
-		case actionUp, actionDown, actionStatus:
+		if parsed, ok := parseAction(value); ok {
 			remaining := make([]string, 0, len(args)-1)
 			remaining = append(remaining, args[:index]...)
 			remaining = append(remaining, args[index+1:]...)
-			return action(value), remaining, nil
+			return parsed, remaining, nil
 		}
 	}
 	if len(args) == 0 {
-		return "", nil, errors.New("migration action is required: up, down, or status")
+		return "", nil, errors.New("migration action is required: up, down, status, or settings-mail-cleanup")
 	}
-	return "", nil, fmt.Errorf("invalid migration action %q: use up, down, or status", args[0])
+	return "", nil, fmt.Errorf("invalid migration action %q: use up, down, status, or settings-mail-cleanup", args[0])
+}
+
+// parseAction accepts the canonical cleanup command plus short aliases used by
+// deployment scripts. Returning one canonical action keeps output and dispatch
+// stable while still exposing the immutable v003 migration name.
+func parseAction(value string) (action, bool) {
+	switch action(strings.ToLower(strings.TrimSpace(value))) {
+	case actionUp:
+		return actionUp, true
+	case actionDown:
+		return actionDown, true
+	case actionStatus:
+		return actionStatus, true
+	case actionSettingsMailCleanup, "cleanup-settings-mail", "v003", "up-v003", "v003-settings-mail-cleanup":
+		return actionSettingsMailCleanup, true
+	default:
+		return "", false
+	}
 }
 
 func containsStepsFlag(args []string) bool {

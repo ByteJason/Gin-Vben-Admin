@@ -29,15 +29,8 @@ test('public information architecture freezes the five production groups', () =>
     ['后台权限', '菜单管理', '/iam/menus', 'iam:menus:read'],
     ['后台权限', '权限管理', '/iam/permissions', 'iam:permissions:read'],
     ['系统管理', '系统设置', '/system/settings', 'system:settings:read'],
-    ['系统管理', '参数管理', '/system/parameters', 'system:parameters:read'],
     ['系统管理', '字典管理', '/system/dictionary', 'system:dictionary:read'],
-    ['系统管理', '邮件服务', '/system/mail', 'system:mail:read'],
-    [
-      '系统管理',
-      '可观测设置',
-      '/system/observability',
-      'system:observability:read',
-    ],
+    ['系统管理', '邮件服务（独立模块）', '/system/mail', 'system:mail:read'],
     ['运维监控', '服务器状态', '/ops/server-status', 'ops:server-status:read'],
     [
       '运维监控',
