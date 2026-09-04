@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -34,9 +35,10 @@ func NewLocalStore(root, baseURL string, signingKey ...[]byte) (*LocalStore, err
 	if root == "" {
 		return nil, fmt.Errorf("%w: local root is required", ErrInvalidUpload)
 	}
-	// Reject Windows drive/UNC syntax even when running on Unix, where it
-	// would otherwise be treated as an ordinary filename.
-	if strings.Contains(root, "\\") || strings.HasPrefix(root, "//") || (len(root) >= 2 && root[1] == ':') {
+	// A configured root follows the host filesystem syntax. Windows drive and
+	// relative paths are valid on Windows, while foreign Windows syntax remains
+	// invalid on Unix. UNC/device paths stay outside this local-only provider.
+	if invalidConfiguredRootSyntax(root, runtime.GOOS) {
 		return nil, fmt.Errorf("%w: windows-style local root is not allowed", ErrInvalidUpload)
 	}
 	abs, err := filepath.Abs(root)
@@ -90,8 +92,31 @@ func NewLocalStore(root, baseURL string, signingKey ...[]byte) (*LocalStore, err
 	return &LocalStore{root: abs, baseURL: strings.TrimRight(strings.TrimSpace(baseURL), "/"), signingKey: key}, nil
 }
 
+func invalidConfiguredRootSyntax(root, goos string) bool {
+	if strings.ContainsRune(root, '\x00') || strings.ContainsAny(root, "\r\n") {
+		return true
+	}
+	unc := strings.HasPrefix(root, `\\`) || strings.HasPrefix(root, "//")
+	drivePrefix := len(root) >= 2 && ((root[0] >= 'A' && root[0] <= 'Z') || (root[0] >= 'a' && root[0] <= 'z')) && root[1] == ':'
+	if goos == "windows" {
+		if unc {
+			return true
+		}
+		if drivePrefix {
+			// Reject drive-relative forms such as C:storage. A configured drive
+			// root must be fully qualified before filepath.Abs inspects it.
+			return len(root) < 3 || (root[2] != '\\' && root[2] != '/')
+		}
+		return strings.Contains(root, ":")
+	}
+	return unc || strings.Contains(root, "\\") || drivePrefix
+}
+
 func unsafeStorageRoot(root string) bool {
 	root = filepath.Clean(root)
+	if runtime.GOOS == "windows" {
+		return windowsSensitiveStorageRoot(root)
+	}
 	// macOS exposes per-process temporary directories below /var/folders;
 	// those are safe test/runtime roots even though /var itself is protected.
 	if strings.HasPrefix(root, "/private/var/folders/") {
@@ -110,8 +135,30 @@ func unsafeStorageRoot(root string) bool {
 // In particular, constructing a provider must never chmod /tmp or /var.
 func isSensitiveStorageRoot(root string) bool {
 	clean := filepath.Clean(root)
+	if runtime.GOOS == "windows" {
+		return windowsSensitiveStorageRoot(clean)
+	}
 	for _, sensitive := range []string{"/", "/tmp", "/private/tmp", "/var", "/private/var", "/etc", "/usr", "/bin", "/sbin", "/System", "/Library", "/private/etc"} {
 		if clean == sensitive {
+			return true
+		}
+	}
+	return false
+}
+
+func windowsSensitiveStorageRoot(root string) bool {
+	clean := filepath.Clean(root)
+	volume := filepath.VolumeName(clean)
+	if volume != "" && strings.EqualFold(clean, filepath.Clean(volume+string(filepath.Separator))) {
+		return true
+	}
+	for _, environment := range []string{"SystemRoot", "WINDIR", "ProgramFiles", "ProgramFiles(x86)", "ProgramData"} {
+		forbidden := strings.TrimSpace(os.Getenv(environment))
+		if forbidden == "" {
+			continue
+		}
+		forbidden = filepath.Clean(forbidden)
+		if strings.EqualFold(clean, forbidden) || strings.HasPrefix(strings.ToLower(clean), strings.ToLower(forbidden+string(filepath.Separator))) {
 			return true
 		}
 	}

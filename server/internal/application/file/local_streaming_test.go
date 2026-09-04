@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -260,8 +261,10 @@ func TestLocalStoreContextCancellationCleansStaging(t *testing.T) {
 }
 
 func TestLocalStoreRejectsWindowsRootAndReservedStagingKeys(t *testing.T) {
-	if _, err := NewLocalStore(`C:\\storage`, ""); !errors.Is(err, ErrInvalidUpload) {
-		t.Fatalf("windows root accepted: %v", err)
+	if runtime.GOOS != "windows" {
+		if _, err := NewLocalStore(`C:\\storage`, ""); !errors.Is(err, ErrInvalidUpload) {
+			t.Fatalf("foreign windows root accepted: %v", err)
+		}
 	}
 	s, err := NewLocalStore(t.TempDir(), "")
 	if err != nil {
@@ -272,6 +275,19 @@ func TestLocalStoreRejectsWindowsRootAndReservedStagingKeys(t *testing.T) {
 	}
 	if err := s.PutStaging(context.Background(), "escape", strings.NewReader("x"), Object{Key: "escape", Size: 1}); !errors.Is(err, ErrInvalidUpload) {
 		t.Fatalf("unscoped staging write accepted: %v", err)
+	}
+}
+
+func TestConfiguredRootSyntaxAcceptsNativeWindowsPaths(t *testing.T) {
+	for _, root := range []string{`.\storage`, `D:\web\www\Gin-Vben-Admin\server\storage`} {
+		if invalidConfiguredRootSyntax(root, "windows") {
+			t.Errorf("native Windows root rejected: %q", root)
+		}
+	}
+	for _, root := range []string{`C:storage`, `\\server\share\storage`} {
+		if !invalidConfiguredRootSyntax(root, "windows") {
+			t.Errorf("unsafe Windows root accepted: %q", root)
+		}
 	}
 }
 
