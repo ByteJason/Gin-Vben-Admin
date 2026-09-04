@@ -70,7 +70,7 @@ func TestServiceCleanupDryRunDoesNotDelete(t *testing.T) {
 	clock := func() time.Time { return time.Unix(1000, 0) }
 	store := NewMemoryStore("")
 	svc := NewService(store, Config{MaxBytes: 100, Clock: clock})
-	item, err := svc.Upload(context.Background(), UploadInput{Name: "old.txt", MIME: "text/plain", Size: 3, TenantID: "tenant-a", Data: []byte("old")})
+	item, err := svc.Upload(context.Background(), UploadInput{Name: "old.txt", MIME: "text/plain", Size: 3, TenantID: "tenant-a", ACL: ACLPublicRead, Data: []byte("old")})
 	if err != nil {
 		t.Fatal(err)
 	}

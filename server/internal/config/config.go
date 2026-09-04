@@ -141,10 +141,14 @@ type SMTPAccountConfig struct {
 // FileConfig controls the local 0.10 object provider. Remote providers remain
 // application-level interfaces and are intentionally not selected here.
 type FileConfig struct {
-	Enabled      bool     `mapstructure:"enabled" yaml:"enabled"`
-	Provider     string   `mapstructure:"provider" yaml:"provider"`
-	Root         string   `mapstructure:"root" yaml:"root"`
+	Enabled  bool   `mapstructure:"enabled" yaml:"enabled"`
+	Provider string `mapstructure:"provider" yaml:"provider"`
+	// Root is startup-only infrastructure configuration. It is intentionally
+	// absent from settings.DefaultDefinitions and can only come from YAML,
+	// .env, or the process environment.
+	Root         string   `mapstructure:"root" yaml:"root" json:"-"`
 	BaseURL      string   `mapstructure:"base_url" yaml:"base_url"`
+	SigningKey   string   `mapstructure:"signing_key" yaml:"signing_key" json:"-"`
 	MaxBytes     int64    `mapstructure:"max_bytes" yaml:"max_bytes"`
 	AllowedMIMEs []string `mapstructure:"allowed_mimes" yaml:"allowed_mimes"`
 }
@@ -326,7 +330,7 @@ func Default() Config {
 		File: FileConfig{
 			Enabled:  true,
 			Provider: "local",
-			Root:     filepath.FromSlash("../.runtime/files"),
+			Root:     filepath.FromSlash("./storage"),
 			MaxBytes: 100 << 20,
 		},
 		Install: InstallConfig{
@@ -879,6 +883,7 @@ func newViper() *viper.Viper {
 	v.SetDefault("file.provider", cfg.File.Provider)
 	v.SetDefault("file.root", cfg.File.Root)
 	v.SetDefault("file.base_url", cfg.File.BaseURL)
+	v.SetDefault("file.signing_key", cfg.File.SigningKey)
 	v.SetDefault("file.max_bytes", cfg.File.MaxBytes)
 	v.SetDefault("file.allowed_mimes", cfg.File.AllowedMIMEs)
 	v.SetDefault("install.state_dir", cfg.Install.StateDir)
@@ -970,6 +975,7 @@ var environmentBindings = map[string]string{
 	"file.provider":                  "FILE_PROVIDER",
 	"file.root":                      "FILE_ROOT",
 	"file.base_url":                  "FILE_BASE_URL",
+	"file.signing_key":               "FILE_SIGNING_KEY",
 	"file.max_bytes":                 "FILE_MAX_BYTES",
 	"file.allowed_mimes":             "FILE_ALLOWED_MIMES",
 	"install.state_dir":              "INSTALL_STATE_DIR",

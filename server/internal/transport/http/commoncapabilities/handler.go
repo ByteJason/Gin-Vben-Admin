@@ -23,6 +23,8 @@ import (
 )
 
 const basePath = "/api/admin/v1/common"
+const maxMediaMultipartBytes int64 = 100 << 20
+const maxMediaMultipartMemoryBytes int64 = 1 << 20
 
 type Handler struct {
 	Runtime *notification.Runtime
@@ -1001,6 +1003,21 @@ func (h *Handler) uploadMedia(c *gin.Context) {
 	if !ok {
 		return
 	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxMediaMultipartBytes+maxMediaMultipartMemoryBytes)
+	defer func() {
+		if c.Request.MultipartForm != nil {
+			_ = c.Request.MultipartForm.RemoveAll()
+		}
+	}()
+	if err := c.Request.ParseMultipartForm(maxMediaMultipartMemoryBytes); err != nil {
+		status := http.StatusBadRequest
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			status = http.StatusRequestEntityTooLarge
+		}
+		response.Error(c, status, 10000, "invalid multipart upload")
+		return
+	}
 	f, e := c.FormFile("file")
 	if e != nil {
 		response.Error(c, 400, 10000, "file is required")
@@ -1118,10 +1135,7 @@ func (h *Handler) openMedia(c *gin.Context) {
 		return
 	}
 	defer obj.Close()
-	contentType := strings.TrimSpace(ref.MIME)
-	if contentType == "" {
-		contentType = "application/octet-stream"
-	}
+	contentType := safeContentType(ref.MIME)
 	c.Header("Accept-Ranges", "bytes")
 	status, length := http.StatusOK, ref.Size
 	if ranged {
@@ -1131,6 +1145,18 @@ func (h *Handler) openMedia(c *gin.Context) {
 		c.Header("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, ref.Size))
 	}
 	c.DataFromReader(status, length, contentType, obj, nil)
+}
+
+func safeContentType(value string) string {
+	value = strings.TrimSpace(value)
+	if strings.ContainsAny(value, "\r\n\x00") {
+		return "application/octet-stream"
+	}
+	parsed, _, err := mimepkg.ParseMediaType(value)
+	if err != nil || parsed == "" {
+		return "application/octet-stream"
+	}
+	return parsed
 }
 
 // parseMediaRange supports one RFC 9110 byte range. Multiple ranges are
@@ -1251,7 +1277,8 @@ func (h *Handler) deleteMedia(c *gin.Context) {
 	if _, ok := scope(c); !ok {
 		return
 	}
-	if e := h.Catalog.Delete(c.Request.Context(), c.Param("id"), fileapp.DeleteOptions{IdempotencyKey: idem(c)}); e != nil {
+	options := fileapp.DeleteOptions{IdempotencyKey: idem(c), Force: strings.EqualFold(strings.TrimSpace(c.Query("force")), "true"), Confirmation: strings.TrimSpace(c.Query("confirmation"))}
+	if e := h.Catalog.Delete(c.Request.Context(), c.Param("id"), options); e != nil {
 		writeFileError(c, e)
 		return
 	}
@@ -1485,7 +1512,7 @@ func writeFileError(c *gin.Context, e error) {
 		response.Error(c, 404, 10001, "resource not found")
 	case errors.Is(e, fileapp.ErrAccessDenied), errors.Is(e, fileapp.ErrCategoryAccessDenied):
 		response.Error(c, 403, 30000, "forbidden")
-	case errors.Is(e, fileapp.ErrMediaConflict):
+	case errors.Is(e, fileapp.ErrMediaConflict), errors.Is(e, fileapp.ErrObjectExists):
 		response.Error(c, 409, 10000, "idempotency conflict")
 	case errors.Is(e, fileapp.ErrMediaInUse):
 		response.Error(c, 409, 10002, "media resource is in use")
@@ -1493,7 +1520,13 @@ func writeFileError(c *gin.Context, e error) {
 		response.Error(c, 409, 10003, "media resource unavailable")
 	case errors.Is(e, fileapp.ErrInvalidMediaCursor), errors.Is(e, fileapp.ErrInvalidUsage), errors.Is(e, fileapp.ErrInvalidCategory):
 		response.Error(c, 400, 10000, "invalid request")
-	case errors.Is(e, fileapp.ErrInvalidUpload), errors.Is(e, fileapp.ErrFileTooLarge), errors.Is(e, fileapp.ErrMIMETypeNotAllowed):
+	case errors.Is(e, fileapp.ErrFileTooLarge):
+		response.Error(c, http.StatusRequestEntityTooLarge, 10000, "media upload is too large")
+	case errors.Is(e, fileapp.ErrMIMETypeNotAllowed):
+		response.Error(c, http.StatusUnsupportedMediaType, 10000, "media type is not allowed")
+	case errors.Is(e, fileapp.ErrSignedURLUnsupported), errors.Is(e, fileapp.ErrStorageRead):
+		response.Error(c, http.StatusNotImplemented, 40001, "file preview unavailable")
+	case errors.Is(e, fileapp.ErrInvalidUpload):
 		response.Error(c, 400, 10000, "invalid media upload")
 	case errors.Is(e, fileapp.ErrCategoryNotEmpty):
 		response.Error(c, 409, 10002, "category is not empty")

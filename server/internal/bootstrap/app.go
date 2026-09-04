@@ -33,6 +33,7 @@ import (
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/authplatform"
 	rediscache "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/cache/redis"
 	dictionaryplatform "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/dictionary"
+	fileplatform "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/fileplatform"
 	platformhealth "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/health"
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/iamplatform"
 	importsplatform "github.com/ByteJason/Gin-Vben-Admin/server/internal/platform/imports"
@@ -108,7 +109,7 @@ func New(cfg config.Config) (*App, error) {
 		return nil, cause
 	}
 	if cfg.File.Enabled {
-		store, fileErr := fileapp.NewLocalStore(cfg.File.Root, cfg.File.BaseURL)
+		store, fileErr := fileapp.NewLocalStore(cfg.File.Root, cfg.File.BaseURL, []byte(cfg.File.SigningKey))
 		if fileErr != nil {
 			return cleanupOnError(fmt.Errorf("configure local file provider: %w", fileErr))
 		}
@@ -131,6 +132,12 @@ func New(cfg config.Config) (*App, error) {
 			return cleanupOnError(errors.New("initialize database dependency"))
 		}
 		app.database = store
+		if app.files != nil {
+			repository := fileplatform.NewGORMRepository(store)
+			app.files.SetRepository(repository)
+			app.files.SetUsageRepository(repository)
+			app.files.SetUsageService(fileplatform.NewGORMUsageService(store, repository))
+		}
 		app.closers = append(app.closers, store)
 		dependencies = append(dependencies, timedDependency{dependency: store, timeout: cfg.Database.PingTimeout})
 	}
@@ -591,6 +598,12 @@ func (a *App) Run(ctx context.Context) error {
 			go func() { _ = a.taskScheduler.Run(tenant.WithContext(workerCtx, scope), time.Minute) }()
 		}
 	}
+	// File lifecycle maintenance is deliberately a lightweight ticker rather
+	// than a new broker/framework: it retries deleting objects and expires
+	// abandoned pending uploads, while file_objects remains the authority.
+	if a.files != nil {
+		go runFileMaintenance(workerCtx, a.files)
+	}
 
 	listener, err := net.Listen("tcp", a.HTTPServer().Addr)
 	if err != nil {
@@ -612,6 +625,25 @@ func (a *App) Run(ctx context.Context) error {
 		return a.Shutdown(shutdownCtx)
 	case err := <-errCh:
 		return errors.Join(err, a.Close())
+	}
+}
+
+func runFileMaintenance(ctx context.Context, files *fileapp.Service) {
+	if files == nil {
+		return
+	}
+	interval := time.Minute
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		_, _ = files.ReconcilePending(ctx, 100)
+		_, _ = files.ProcessDeleting(ctx, 100)
+		_, _ = files.CleanupPending(ctx, time.Hour, 100)
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
 	}
 }
 

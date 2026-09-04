@@ -23,7 +23,17 @@ const (
 	MediaFailed        MediaStatus = "failed"
 	MediaDeleting      MediaStatus = "deleting"
 	MediaDeleted       MediaStatus = "deleted"
+	MediaDamaged       MediaStatus = "damaged"
 )
+
+func ValidMediaStatus(status MediaStatus) bool {
+	switch status {
+	case MediaPending, MediaReady, MediaFailed, MediaDeleting, MediaDeleted, MediaDamaged:
+		return true
+	default:
+		return false
+	}
+}
 
 type UploadInput struct {
 	// Reader is the port form. Data and scope fields remain for compatibility
@@ -50,7 +60,16 @@ type URLRef struct {
 	URL       string    `json:"url"`
 	ExpiresAt time.Time `json:"expiresAt"`
 }
-type DeleteOptions struct{ Reason, IdempotencyKey string }
+type DeleteOptions struct {
+	Reason, IdempotencyKey string
+	// Force is accepted only with the exact confirmation phrase below. This
+	// keeps the safe default (409 when media_usages still reference a file)
+	// while making an intentional destructive action explicit.
+	Force        bool
+	Confirmation string
+}
+
+const ForceDeleteConfirmation = "I confirm force delete"
 
 // ResourcePatch changes metadata that is safe to edit after upload. A nil
 // pointer leaves the field unchanged; system-scoped resources remain read-only
@@ -92,6 +111,11 @@ type ResourceRef struct {
 	Selectable     bool              `json:"selectable"`
 	DisabledReason string            `json:"disabledReason,omitempty"`
 	ReconcileKey   string            `json:"reconcileKey,omitempty"`
+	ObjectKey      string            `json:"-"`
+	Extension      string            `json:"extension,omitempty"`
+	ETag           string            `json:"etag,omitempty"`
+	FailureReason  string            `json:"failureReason,omitempty"`
+	ScanStatus     string            `json:"scanStatus,omitempty"`
 }
 type MediaPage struct {
 	Items      []ResourceRef `json:"items"`

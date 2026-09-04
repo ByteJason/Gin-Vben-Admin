@@ -80,7 +80,14 @@ dist.war
 /server/dist/
 /server/vendor/
 /server/uploads/
-/server/storage/
+# Keep the storage root visible in source checkouts, but never commit object
+# subdirectories or payloads.
+/server/storage/*
+!/server/storage/.gitkeep
+/storage/*
+!/storage/.gitkeep
+/server/internal/bootstrap/storage/
+/server/server/
 /server/data/
 /server/sessions/
 /server/generated-docs/

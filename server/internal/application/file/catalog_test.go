@@ -17,18 +17,26 @@ func catalogContext() context.Context {
 	return auth.WithCapabilityMetadata(ctx, "media.logo", "zh-CN", "trace-media", "owner-a")
 }
 
+// catalogPNGFixture is the smallest payload that net/http's content sniffer
+// recognizes as image/png.  Production validation intentionally ignores the
+// client MIME header, so image fixtures must carry a real signature.
+func catalogPNGFixture() []byte {
+	return []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}
+}
+
 func TestCatalogAdapterSupportsReaderCursorAndControlledURLs(t *testing.T) {
 	legacy := NewService(NewMemoryStore("http://memory.invalid/objects"), Config{AllowedMIMEs: []string{"image/png", "text/plain"}})
 	catalog := NewCatalog(legacy)
 	ctx := catalogContext()
-	first, err := catalog.Upload(ctx, UploadInput{Reader: strings.NewReader("png-data"), Size: 8, Name: "logo.png", MIME: "image/png", ACL: ACLPrivate, IdempotencyKey: "logo-1"})
+	png := catalogPNGFixture()
+	first, err := catalog.Upload(ctx, UploadInput{Reader: strings.NewReader(string(png)), Size: int64(len(png)), Name: "logo.png", MIME: "image/png", ACL: ACLPrivate, IdempotencyKey: "logo-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first.Status != MediaReady || first.ScopeType != ScopeOrg || !first.Selectable || first.URLHints["preview"] == false {
 		t.Fatalf("resource=%+v", first)
 	}
-	duplicate, err := catalog.Upload(ctx, UploadInput{Data: []byte("png-data"), Size: 8, Name: "logo.png", MIME: "image/png", ACL: ACLPrivate, IdempotencyKey: "logo-1"})
+	duplicate, err := catalog.Upload(ctx, UploadInput{Data: png, Size: int64(len(png)), Name: "logo.png", MIME: "image/png", ACL: ACLPrivate, IdempotencyKey: "logo-1"})
 	if err != nil || duplicate.ID != first.ID {
 		t.Fatalf("duplicate=%+v err=%v", duplicate, err)
 	}
@@ -42,7 +50,7 @@ func TestCatalogAdapterSupportsReaderCursorAndControlledURLs(t *testing.T) {
 	}
 	data, err := io.ReadAll(reader)
 	_ = reader.Close()
-	if err != nil || string(data) != "png-data" {
+	if err != nil || string(data) != string(png) {
 		t.Fatalf("data=%q err=%v", data, err)
 	}
 	urlRef, err := catalog.SignedURL(ctx, first.ID, URLRequest{Purpose: URLPurpose("preview"), TTL: 60})
@@ -54,6 +62,22 @@ func TestCatalogAdapterSupportsReaderCursorAndControlledURLs(t *testing.T) {
 	}
 	if _, err := catalog.SignedURL(ctx, first.ID, URLRequest{Purpose: URLPurposeDownload, TTL: maxMediaURLTTL + time.Second}); !errors.Is(err, ErrInvalidUpload) {
 		t.Fatalf("long TTL error=%v", err)
+	}
+}
+
+func TestCatalogStreamingIdempotencyBindsContentDigest(t *testing.T) {
+	catalog := NewCatalog(NewService(NewMemoryStore("http://memory.invalid/objects"), Config{AllowedMIMEs: []string{"text/plain"}}))
+	ctx := catalogContext()
+	first, err := catalog.Upload(ctx, UploadInput{Name: "note.txt", MIME: "text/plain", Size: 5, Data: []byte("hello"), IdempotencyKey: "same-body"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	retry, err := catalog.Upload(ctx, UploadInput{Name: "note.txt", MIME: "text/plain", Size: 5, Reader: strings.NewReader("hello"), IdempotencyKey: "same-body"})
+	if err != nil || retry.ID != first.ID {
+		t.Fatalf("streaming retry=%+v err=%v", retry, err)
+	}
+	if _, err := catalog.Upload(ctx, UploadInput{Name: "note.txt", MIME: "text/plain", Size: 5, Reader: strings.NewReader("world"), IdempotencyKey: "same-body"}); !errors.Is(err, ErrMediaConflict) {
+		t.Fatalf("different body conflict=%v", err)
 	}
 }
 
@@ -110,7 +134,7 @@ func TestCatalogUsageProtectsReferencedResourceAndSupportsIdempotentAttach(t *te
 	legacy := NewService(NewMemoryStore("http://memory.invalid/objects"), Config{AllowedMIMEs: []string{"image/png"}})
 	catalog := NewCatalog(legacy)
 	ctx := catalogContext()
-	resource, err := catalog.Upload(ctx, UploadInput{Data: []byte("x"), Size: 1, Name: "logo.png", MIME: "image/png"})
+	resource, err := catalog.Upload(ctx, UploadInput{Data: catalogPNGFixture(), Size: int64(len(catalogPNGFixture())), Name: "logo.png", MIME: "image/png"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +181,7 @@ func TestCatalogListHidesAnotherPrincipalsPrivateResource(t *testing.T) {
 		tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a", Organization: "org-a"}),
 		"media.logo", "zh-CN", "trace-owner", "owner-a",
 	)
-	private, err := catalog.Upload(ownerCtx, UploadInput{Data: []byte("private"), Size: 7, Name: "private.png", MIME: "image/png", ACL: ACLPrivate})
+	private, err := catalog.Upload(ownerCtx, UploadInput{Data: catalogPNGFixture(), Size: int64(len(catalogPNGFixture())), Name: "private.png", MIME: "image/png", ACL: ACLPrivate})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,17 +212,17 @@ func TestCatalogListInheritsOrgTenantSystemAndCategoryDescendants(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	orgFile, err := catalog.Upload(ctx, UploadInput{Data: []byte("org"), Size: 3, Name: "org.png", MIME: "image/png", CategoryID: child.ID})
+	orgFile, err := catalog.Upload(ctx, UploadInput{Data: catalogPNGFixture(), Size: int64(len(catalogPNGFixture())), Name: "org.png", MIME: "image/png", CategoryID: child.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Tenant and system resources are created by the provider-facing service in
 	// this fixture; the catalog must still expose them through inheritance.
-	tenantFile, err := legacy.Upload(ctx, UploadInput{Data: []byte("tenant"), Size: 6, Name: "tenant.png", MIME: "image/png", TenantID: "tenant-a"})
+	tenantFile, err := legacy.Upload(ctx, UploadInput{Data: catalogPNGFixture(), Size: int64(len(catalogPNGFixture())), Name: "tenant.png", MIME: "image/png", TenantID: "tenant-a"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	systemFile, err := legacy.Upload(ctx, UploadInput{Data: []byte("system"), Size: 6, Name: "system.png", MIME: "image/png"})
+	systemFile, err := legacy.Upload(ctx, UploadInput{Data: catalogPNGFixture(), Size: int64(len(catalogPNGFixture())), Name: "system.png", MIME: "image/png"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +250,7 @@ func TestCatalogDeleteIdempotencyConflict(t *testing.T) {
 	legacy := NewService(NewMemoryStore("http://memory.invalid/objects"), Config{AllowedMIMEs: []string{"image/png"}})
 	catalog := NewCatalog(legacy)
 	ctx := catalogContext()
-	resource, err := catalog.Upload(ctx, UploadInput{Data: []byte("x"), Size: 1, Name: "x.png", MIME: "image/png"})
+	resource, err := catalog.Upload(ctx, UploadInput{Data: catalogPNGFixture(), Size: int64(len(catalogPNGFixture())), Name: "x.png", MIME: "image/png"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,7 +359,7 @@ func TestCatalogPlatformAdminCanInspectPrivateTenantResourceButCannotDeleteSyste
 		tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a", Organization: "org-a"}),
 		"media.logo", "zh-CN", "trace-owner", "owner-a",
 	)
-	privateResource, err := catalog.Upload(ownerCtx, UploadInput{Data: []byte("private"), Size: 7, Name: "private.png", MIME: "image/png", ACL: ACLPrivate})
+	privateResource, err := catalog.Upload(ownerCtx, UploadInput{Data: catalogPNGFixture(), Size: int64(len(catalogPNGFixture())), Name: "private.png", MIME: "image/png", ACL: ACLPrivate})
 	if err != nil {
 		t.Fatal(err)
 	}

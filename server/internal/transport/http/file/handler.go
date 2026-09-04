@@ -19,6 +19,7 @@ import (
 
 const basePath = "/api/admin/v1/files"
 const maxMultipartBytes int64 = 100 << 20
+const multipartMemoryBytes int64 = 1 << 20
 
 type Handler struct{ service *fileapp.Service }
 
@@ -73,6 +74,17 @@ func (h *Handler) list(c *gin.Context) {
 		writeError(c, err)
 		return
 	}
+	if !scope.PlatformAdmin {
+		principal := actorID(c)
+		visible := page.Items[:0]
+		for _, item := range page.Items {
+			if item.ACL == fileapp.ACLPublicRead || (principal != "" && (item.OwnerID == "" || item.OwnerID == principal)) {
+				visible = append(visible, item)
+			}
+		}
+		page.Items = visible
+		page.Total = len(visible)
+	}
 	response.OK(c, page)
 }
 
@@ -81,8 +93,19 @@ func (h *Handler) upload(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := c.Request.ParseMultipartForm(maxMultipartBytes); err != nil {
-		response.Error(c, http.StatusBadRequest, 10000, "invalid multipart upload")
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxMultipartBytes+multipartMemoryBytes)
+	defer func() {
+		if c.Request.MultipartForm != nil {
+			_ = c.Request.MultipartForm.RemoveAll()
+		}
+	}()
+	if err := c.Request.ParseMultipartForm(multipartMemoryBytes); err != nil {
+		status := http.StatusBadRequest
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			status = http.StatusRequestEntityTooLarge
+		}
+		response.Error(c, status, 10000, "invalid multipart upload")
 		return
 	}
 	header, err := c.FormFile("file")
@@ -100,26 +123,19 @@ func (h *Handler) upload(c *gin.Context) {
 		return
 	}
 	defer reader.Close()
-	data, err := io.ReadAll(io.LimitReader(reader, maxMultipartBytes+1))
-	if err != nil || int64(len(data)) > maxMultipartBytes {
-		response.Error(c, http.StatusRequestEntityTooLarge, 10000, "file is too large")
-		return
-	}
 	mime := strings.TrimSpace(header.Header.Get("Content-Type"))
 	if parsed, _, parseErr := mimepkg.ParseMediaType(mime); parseErr == nil {
 		mime = parsed
 	}
 	if mime == "" || mime == "application/octet-stream" {
-		detected := http.DetectContentType(data)
-		if detected != "" {
-			mime = detected
-		}
+		// The application provider detects MIME from the stream itself; this
+		// header remains only a hint for extension/policy selection.
 	}
 	if parsed, _, parseErr := mimepkg.ParseMediaType(mime); parseErr == nil {
 		mime = parsed
 	}
 	acl := fileapp.ACL(strings.TrimSpace(c.PostForm("acl")))
-	item, err := h.service.Upload(c.Request.Context(), fileapp.UploadInput{Name: header.Filename, MIME: mime, Size: int64(len(data)), OwnerID: actorID(c), TenantID: scope.TenantID, OrgID: scope.Organization, ACL: acl, Data: data, CategoryID: strings.TrimSpace(c.PostForm("categoryId"))})
+	item, err := h.service.Upload(c.Request.Context(), fileapp.UploadInput{Name: header.Filename, MIME: mime, Size: header.Size, Reader: reader, OwnerID: actorID(c), TenantID: scope.TenantID, OrgID: scope.Organization, ACL: acl, CategoryID: strings.TrimSpace(c.PostForm("categoryId"))})
 	if err != nil {
 		writeError(c, err)
 		return
@@ -185,7 +201,7 @@ func (h *Handler) metadata(c *gin.Context) {
 	if !ok {
 		return
 	}
-	item, _, err := h.service.Download(c.Request.Context(), c.Param("id"), actorID(c), scope.TenantID, scope.Organization)
+	item, err := h.service.Get(c.Request.Context(), c.Param("id"), actorID(c), scope.TenantID, scope.Organization)
 	if err != nil {
 		writeError(c, err)
 		return
@@ -198,22 +214,46 @@ func (h *Handler) download(c *gin.Context) { h.serveObject(c, false) }
 func (h *Handler) preview(c *gin.Context) { h.serveObject(c, true) }
 
 func (h *Handler) serveObject(c *gin.Context, inline bool) {
-	scope, ok := requestScope(c)
-	if !ok {
-		return
+	var (
+		item   fileapp.File
+		reader io.ReadCloser
+		err    error
+	)
+	// A signed download is an expiring capability. Verify it against the
+	// repository-resolved object key before opening bytes; ordinary requests
+	// continue through tenant and ACL authorization below.
+	if c.Query("sig") != "" || c.Query("expires") != "" {
+		item, reader, err = h.service.OpenSignedURL(c.Request.Context(), c.Param("id"), c.Request.URL.RequestURI())
+	} else {
+		scope, ok := requestScope(c)
+		if !ok {
+			return
+		}
+		item, reader, err = h.service.Open(c.Request.Context(), c.Param("id"), actorID(c), scope.TenantID, scope.Organization)
 	}
-	item, object, err := h.service.Download(c.Request.Context(), c.Param("id"), actorID(c), scope.TenantID, scope.Organization)
 	if err != nil {
 		writeError(c, err)
 		return
 	}
-	c.Header("Content-Type", item.MIME)
+	defer reader.Close()
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("Content-Type", safeContentType(item.MIME))
 	disposition := "attachment"
-	if inline {
+	// SVG is always downloaded. Rendering attacker-controlled active XML in
+	// the admin origin would otherwise expose script execution to a preview.
+	if inline && !strings.EqualFold(item.MIME, "image/svg+xml") {
 		disposition = "inline"
+		c.Header("Content-Security-Policy", "sandbox; default-src 'none'")
 	}
-	c.Header("Content-Disposition", disposition+`; filename="`+safeFilename(item.Name)+`"`)
-	c.Data(http.StatusOK, item.MIME, object.Data)
+	contentDisposition := mimepkg.FormatMediaType(disposition, map[string]string{"filename": safeFilename(item.Name)})
+	if contentDisposition == "" {
+		contentDisposition = disposition + `; filename="download"`
+	}
+	c.Header("Content-Disposition", contentDisposition)
+	c.Status(http.StatusOK)
+	if _, err := io.Copy(c.Writer, io.LimitReader(reader, item.Size)); err != nil {
+		return
+	}
 }
 
 func (h *Handler) signedURL(c *gin.Context) {
@@ -255,7 +295,14 @@ func (h *Handler) delete(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := h.service.DeleteFile(c.Request.Context(), c.Param("id"), actorID(c), scope.TenantID, scope.Organization); err != nil {
+	var err error
+	force := strings.EqualFold(strings.TrimSpace(c.Query("force")), "true") && strings.TrimSpace(c.Query("confirmation")) == fileapp.ForceDeleteConfirmation
+	if force {
+		err = h.service.ForceDeleteFile(c.Request.Context(), c.Param("id"), actorID(c), scope.TenantID, scope.Organization, time.Now().UTC())
+	} else {
+		err = h.service.DeleteFile(c.Request.Context(), c.Param("id"), actorID(c), scope.TenantID, scope.Organization)
+	}
+	if err != nil {
 		writeError(c, err)
 		return
 	}
@@ -314,10 +361,30 @@ func safeFilename(name string) string {
 	name = strings.ReplaceAll(name, "\"", "")
 	name = strings.ReplaceAll(name, "\r", "")
 	name = strings.ReplaceAll(name, "\n", "")
+	name = strings.ReplaceAll(name, "/", "_")
+	name = strings.ReplaceAll(name, "\\", "_")
+	name = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, name)
 	if name == "" {
 		return "download"
 	}
 	return name
+}
+
+func safeContentType(value string) string {
+	value = strings.TrimSpace(value)
+	if strings.ContainsAny(value, "\r\n\x00") {
+		return "application/octet-stream"
+	}
+	parsed, _, err := mimepkg.ParseMediaType(value)
+	if err != nil || parsed == "" {
+		return "application/octet-stream"
+	}
+	return parsed
 }
 
 func writeError(c *gin.Context, err error) {
@@ -336,11 +403,17 @@ func writeError(c *gin.Context, err error) {
 		response.Error(c, http.StatusBadRequest, 10000, "invalid category")
 	case errors.Is(err, fileapp.ErrFileTooLarge):
 		response.Error(c, http.StatusRequestEntityTooLarge, 10000, "file is too large")
+	case errors.Is(err, fileapp.ErrMediaInUse):
+		response.Error(c, http.StatusConflict, 10000, "file is still referenced by business data")
+	case errors.Is(err, fileapp.ErrMediaNotReady):
+		response.Error(c, http.StatusConflict, 10000, "file is not ready")
+	case errors.Is(err, fileapp.ErrObjectExists):
+		response.Error(c, http.StatusConflict, 10000, "file object already exists")
 	case errors.Is(err, fileapp.ErrMIMETypeNotAllowed):
 		response.Error(c, http.StatusUnsupportedMediaType, 10000, "file MIME type is not allowed")
 	case errors.Is(err, fileapp.ErrInvalidUpload):
 		response.Error(c, http.StatusBadRequest, 10000, "invalid file")
-	case errors.Is(err, fileapp.ErrStorageRead):
+	case errors.Is(err, fileapp.ErrStorageRead), errors.Is(err, fileapp.ErrSignedURLUnsupported):
 		response.Error(c, http.StatusNotImplemented, 40001, "file preview unavailable")
 	default:
 		response.Error(c, http.StatusServiceUnavailable, 40001, "dependency unavailable")

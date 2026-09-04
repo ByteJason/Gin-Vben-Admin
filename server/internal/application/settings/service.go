@@ -92,7 +92,6 @@ func DefaultDefinitions() map[string]Definition {
 		"mail.password":                     {Key: "mail.password", Category: CategoryMail, Kind: KindSecret, Sensitive: true, Default: `""`, RestartRequired: true, EnvKey: "MAIL_PASSWORD", YAMLPath: "mail.password"},
 		"mail.from":                         {Key: "mail.from", Category: CategoryMail, Kind: KindString, Default: `""`, RestartRequired: true, EnvKey: "MAIL_FROM", YAMLPath: "mail.from"},
 		"mail.start_tls":                    {Key: "mail.start_tls", Category: CategoryMail, Kind: KindBool, Default: `false`, RestartRequired: true, EnvKey: "MAIL_START_TLS", YAMLPath: "mail.start_tls"},
-		"file.root":                         {Key: "file.root", Category: CategoryFile, Kind: KindString, Default: `"./storage"`, RestartRequired: true, EnvKey: "FILE_ROOT", YAMLPath: "file.root"},
 		"file.provider":                     {Key: "file.provider", Category: CategoryFile, Kind: KindString, Default: `"local"`, Allowed: []string{"local", "s3", "oss", "cos"}, Description: "对象存储 provider；local 为默认本地存储", RestartRequired: true, EnvKey: "FILE_PROVIDER", YAMLPath: "file.provider"},
 		"file.max_size":                     {Key: "file.max_size", Category: CategoryFile, Kind: KindNumber, Default: `104857600`, Description: "单文件字节上限", EnvKey: "FILE_MAX_SIZE", YAMLPath: "file.max_size"},
 		"file.quota":                        {Key: "file.quota", Category: CategoryFile, Kind: KindNumber, Default: `1073741824`, EnvKey: "FILE_QUOTA", YAMLPath: "file.quota"},
@@ -299,6 +298,9 @@ func (s *Service) Definitions(ctx context.Context, actor Actor) ([]Definition, e
 	sort.Strings(keys)
 	items := make([]Definition, 0, len(keys))
 	for _, key := range keys {
+		if isInfrastructureSetting(key) {
+			continue
+		}
 		definition := s.definitions[key]
 		if definition.Sensitive {
 			definition.Default = maskedValue
@@ -310,6 +312,9 @@ func (s *Service) Definitions(ctx context.Context, actor Actor) ([]Definition, e
 }
 
 func (s *Service) Get(ctx context.Context, actor Actor, key string) (Setting, error) {
+	if isInfrastructureSetting(key) {
+		return Setting{}, ErrSettingNotFound
+	}
 	if err := s.authorize(ctx, actor, key, "read"); err != nil {
 		return Setting{}, err
 	}
@@ -327,6 +332,9 @@ func (s *Service) Get(ctx context.Context, actor Actor, key string) (Setting, er
 // History returns redacted versions in storage order so an operator can
 // inspect a diff source before choosing an explicit rollback target.
 func (s *Service) History(ctx context.Context, actor Actor, key string) ([]Setting, error) {
+	if isInfrastructureSetting(key) {
+		return nil, ErrSettingNotFound
+	}
 	if err := s.authorize(ctx, actor, key, "read"); err != nil {
 		return nil, err
 	}
@@ -352,6 +360,9 @@ func (s *Service) History(ctx context.Context, actor Actor, key string) ([]Setti
 }
 
 func (s *Service) Update(ctx context.Context, actor Actor, input UpdateInput) (Setting, error) {
+	if isInfrastructureSetting(input.Key) {
+		return Setting{}, ErrPermissionDenied
+	}
 	if err := s.authorize(ctx, actor, input.Key, "write"); err != nil {
 		return Setting{}, err
 	}
@@ -390,6 +401,9 @@ func (s *Service) Update(ctx context.Context, actor Actor, input UpdateInput) (S
 }
 
 func (s *Service) Rollback(ctx context.Context, actor Actor, input RollbackInput) (Setting, error) {
+	if isInfrastructureSetting(input.Key) {
+		return Setting{}, ErrPermissionDenied
+	}
 	if err := s.authorize(ctx, actor, input.Key, "rollback"); err != nil {
 		return Setting{}, err
 	}
@@ -666,6 +680,18 @@ func validateValue(definition Definition, raw json.RawMessage) error {
 		return fmt.Errorf("%w: %s value is not allowed", ErrInvalidSetting, definition.Key)
 	}
 	return nil
+}
+
+func isInfrastructureSetting(key string) bool {
+	key = strings.ToLower(strings.TrimSpace(key))
+	switch key {
+	case "file.root", "storage", "file.storage", "storage.path", "storage.root", "storage.dir", "file.path", "file.storage_path", "file.storage.root":
+		return true
+	}
+	if (strings.HasPrefix(key, "storage.") || strings.HasPrefix(key, "file.storage.")) && (strings.HasSuffix(key, ".path") || strings.HasSuffix(key, ".root") || strings.HasSuffix(key, ".dir")) {
+		return true
+	}
+	return false
 }
 
 // MemoryRepository is a deterministic adapter for tests and local bootstrap.

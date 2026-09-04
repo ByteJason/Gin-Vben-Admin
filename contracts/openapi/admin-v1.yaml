@@ -2796,7 +2796,11 @@ components:
         categoryId: { type: string }
         scopeType: { type: string, enum: [system, tenant, org] }
         acl: { type: string, enum: [private, public-read] }
-        status: { type: string, enum: [pending, ready, failed, deleting, deleted] }
+        status: { type: string, enum: [pending, ready, failed, deleting, deleted, damaged] }
+        extension: { type: string }
+        etag: { type: string }
+        scanStatus: { type: string }
+        failureReason: { type: string }
         selectable: { type: boolean }
         disabledReason: { type: string }
         metadata: { type: object, additionalProperties: { type: string } }
@@ -2819,7 +2823,7 @@ components:
       properties:
         name: { type: string }
         categoryId: { type: string }
-        status: { type: string, enum: [ready, deleting] }
+        # Lifecycle status is server-owned; deletion uses the DELETE workflow.
         metadata: { type: object, additionalProperties: { type: string } }
     MediaSignedURLRequest:
       type: object
@@ -3487,7 +3491,7 @@ components:
       required: [id, key, name, mime, size, ownerId, tenantId, orgId, acl, createdAt, sha256]
       properties:
         id: { type: string }
-        key: { type: string }
+        key: { type: string, description: "兼容字段，值为 opaque file id，不是本地 object_key" }
         name: { type: string }
         mime: { type: string }
         size: { type: integer, format: int64 }
@@ -3495,9 +3499,14 @@ components:
         tenantId: { type: string }
         orgId: { type: string }
         acl: { type: string, enum: [private, public-read] }
+        status: { type: string, enum: [pending, ready, failed, deleting, deleted, damaged] }
         categoryId: { type: string }
         createdAt: { type: string, format: date-time }
         sha256: { type: string }
+        extension: { type: string }
+        etag: { type: string }
+        scanStatus: { type: string }
+        failureReason: { type: string }
     FilePage:
       type: object
       required: [items, total, limit, offset]

@@ -212,12 +212,14 @@ func newHTTPServerWithPlanAndCaptchaAndFilesAndAuxAndTasksAndRunsAndImportExport
 	if !cfg.Tenant.Enabled {
 		tenantPolicy = httpmiddleware.TenantPolicy{Mode: "single", DefaultTenantID: "default", PlatformAdminSubjects: cfg.Tenant.PlatformAdminSubjects}
 	}
-	// The dependency-free single-node fixture can run without an auth service;
-	// in that explicitly local mode every request is already inside the process
-	// boundary, so the read-only monitor remains usable. Auth-enabled runs use
-	// the verified-subject allowlist above and never infer this from a header.
+	// The dependency-free monitor is a process-local diagnostic fixture. Grant
+	// its two read-only paths a server-owned platform scope without elevating
+	// unrelated routes such as private file reads or deletion.
 	if !cfg.Auth.Enabled && tenantPolicy.Mode == "single" {
-		tenantPolicy.IsPlatformAdmin = func(*gin.Context) bool { return true }
+		tenantPolicy.IsPlatformAdmin = func(c *gin.Context) bool {
+			path := c.Request.URL.Path
+			return path == "/api/admin/v1/ops/monitor" || path == "/api/admin/v1/ops/server-status"
+		}
 	}
 	auxiliary.TenantPolicy = &tenantPolicy
 	var staticAssets []fs.FS
@@ -244,7 +246,7 @@ func localFileService(cfg config.Config) *fileapp.Service {
 	if !cfg.File.Enabled {
 		return nil
 	}
-	store, err := fileapp.NewLocalStore(cfg.File.Root, cfg.File.BaseURL)
+	store, err := fileapp.NewLocalStore(cfg.File.Root, cfg.File.BaseURL, []byte(cfg.File.SigningKey))
 	if err != nil {
 		return nil
 	}

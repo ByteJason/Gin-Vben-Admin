@@ -9,6 +9,9 @@ import (
 
 func TestDefaultDefinitionsExposeV010ConfigurationCategories(t *testing.T) {
 	definitions := DefaultDefinitions()
+	if _, ok := definitions["file.root"]; ok {
+		t.Fatal("file.root must remain infrastructure-only")
+	}
 	for key, category := range map[string]Category{
 		"basic.site_name":        CategoryBasic,
 		"security.jwt_secret":    CategorySecurity,

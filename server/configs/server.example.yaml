@@ -119,7 +119,8 @@ mail:
 file:
   enabled: true
   provider: local
-  root: ../.runtime/files
+  # Startup-only infrastructure path; it is not editable in the settings center.
+  root: ./storage
   base_url: ""
   max_bytes: 104857600
   allowed_mimes: []

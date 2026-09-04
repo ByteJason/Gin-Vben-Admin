@@ -43,7 +43,7 @@ const maxMediaURLTTL = time.Hour
 // can replace this adapter without changing callers.
 type CatalogAdapter struct {
 	service *Service
-	usage   *MemoryUsageService
+	usage   MediaUsageService
 	clock   func() time.Time
 
 	mu           sync.RWMutex
@@ -58,8 +58,10 @@ type CatalogAdapter struct {
 }
 
 type catalogIdempotency struct {
-	payload string
-	ref     ResourceRef
+	payload     string
+	contentSHA  string
+	contentSize int64
+	ref         ResourceRef
 }
 
 type categoryIdempotency struct {
@@ -70,13 +72,23 @@ type categoryIdempotency struct {
 
 func NewCatalog(service *Service) *CatalogAdapter {
 	adapter := &CatalogAdapter{service: service, clock: time.Now, metadata: map[string]map[string]string{}, status: map[string]MediaStatus{}, updated: map[string]time.Time{}, presets: map[string]ResourceRef{}, idem: map[string]catalogIdempotency{}, categoryIdem: map[string]categoryIdempotency{}}
+	if service != nil && service.usageService != nil {
+		adapter.usage = service.usageService
+		return adapter
+	}
 	adapter.usage = NewMemoryUsageService(func(ctx context.Context, id string) error {
 		if adapter.service == nil {
 			return ErrFileNotFound
 		}
 		scope, _ := tenant.FromContext(ctx)
-		_, err := adapter.service.authorizeAccess(id, catalogFileAccess(ctx, scope))
-		return err
+		item, err := adapter.service.authorizeAccessWithContext(ctx, id, catalogFileAccess(ctx, scope))
+		if err != nil {
+			return err
+		}
+		if item.Status != "" && item.Status != MediaReady {
+			return ErrMediaNotReady
+		}
+		return nil
 	})
 	return adapter
 }
@@ -89,6 +101,12 @@ func (c *CatalogAdapter) UsageService() MediaUsageService {
 		return nil
 	}
 	return c.usage
+}
+
+func (c *CatalogAdapter) SetUsageService(usage MediaUsageService) {
+	if c != nil && usage != nil {
+		c.usage = usage
+	}
 }
 
 func (c *CatalogAdapter) Upload(ctx context.Context, input UploadInput) (ResourceRef, error) {
@@ -108,12 +126,16 @@ func (c *CatalogAdapter) Upload(ctx context.Context, input UploadInput) (Resourc
 	if input.OrgID != "" && input.OrgID != scope.Organization {
 		return ResourceRef{}, ErrAccessDenied
 	}
-	data, err := readUploadData(input.Reader, input.Data, input.Size)
-	if err != nil {
-		return ResourceRef{}, err
+	if input.Reader == nil {
+		data, readErr := readUploadData(nil, input.Data, input.Size)
+		if readErr != nil {
+			return ResourceRef{}, readErr
+		}
+		input.Data = data
+		input.Size = int64(len(data))
+	} else if input.Size < -1 {
+		return ResourceRef{}, ErrInvalidUpload
 	}
-	input.Data = data
-	input.Size = int64(len(data))
 	input.TenantID = scope.TenantID
 	input.OrgID = scope.Organization
 	if strings.TrimSpace(input.OwnerID) == "" {
@@ -138,6 +160,35 @@ func (c *CatalogAdapter) Upload(ctx context.Context, input UploadInput) (Resourc
 			if previous.payload != payload {
 				return ResourceRef{}, ErrMediaConflict
 			}
+			// A streaming reader is deliberately not included in the cheap
+			// metadata payload hash.  On a retry, consume it once into a digest
+			// (without buffering the body) before deciding whether it is the same
+			// idempotent request; otherwise two different streams with identical
+			// metadata could incorrectly return the first resource.
+			if input.Reader != nil {
+				contentSHA, contentSize, hashErr := c.hashReaderForIdempotency(ctx, input.Reader, input.Size)
+				if hashErr != nil {
+					return ResourceRef{}, hashErr
+				}
+				expectedSHA := previous.contentSHA
+				if expectedSHA == "" {
+					expectedSHA = previous.ref.SHA256
+				}
+				if expectedSHA == "" || contentSHA != expectedSHA || (previous.contentSize >= 0 && contentSize != previous.contentSize) {
+					return ResourceRef{}, ErrMediaConflict
+				}
+				return cloneResource(previous.ref), nil
+			}
+			expectedSHA := previous.contentSHA
+			if expectedSHA == "" {
+				expectedSHA = previous.ref.SHA256
+			}
+			if expectedSHA != "" {
+				sum := sha256.Sum256(input.Data)
+				if hex.EncodeToString(sum[:]) != expectedSHA || (previous.contentSize >= 0 && int64(len(input.Data)) != previous.contentSize) {
+					return ResourceRef{}, ErrMediaConflict
+				}
+			}
 			return cloneResource(previous.ref), nil
 		}
 	}
@@ -154,10 +205,56 @@ func (c *CatalogAdapter) Upload(ctx context.Context, input UploadInput) (Resourc
 	ref := c.toResource(created, scope)
 	if idemKey != "" {
 		c.mu.Lock()
-		c.idem[scope.TenantID+":"+scope.Organization+":"+idemKey] = catalogIdempotency{payload: payload, ref: cloneResource(ref)}
+		contentSHA := created.SHA256
+		contentSize := created.Size
+		c.idem[scope.TenantID+":"+scope.Organization+":"+idemKey] = catalogIdempotency{payload: payload, contentSHA: contentSHA, contentSize: contentSize, ref: cloneResource(ref)}
 		c.mu.Unlock()
 	}
 	return ref, nil
+}
+
+// hashReaderForIdempotency computes a retry digest in bounded chunks.  It is
+// only called after an idempotency key already exists, so consuming this
+// reader does not affect a subsequent upload attempt.
+func (c *CatalogAdapter) hashReaderForIdempotency(ctx context.Context, reader io.Reader, declared int64) (string, int64, error) {
+	if reader == nil {
+		return "", 0, ErrInvalidUpload
+	}
+	maxBytes := int64(100 << 20)
+	if c != nil && c.service != nil && c.service.maxBytes > 0 {
+		maxBytes = c.service.maxBytes
+	}
+	if declared >= 0 && declared > maxBytes {
+		return "", 0, ErrFileTooLarge
+	}
+	h := sha256.New()
+	buf := make([]byte, 32*1024)
+	var total int64
+	for {
+		select {
+		case <-ctx.Done():
+			return "", total, ctx.Err()
+		default:
+		}
+		n, readErr := reader.Read(buf)
+		if n > 0 {
+			total += int64(n)
+			if total > maxBytes {
+				return "", total, ErrFileTooLarge
+			}
+			_, _ = h.Write(buf[:n])
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return "", total, readErr
+		}
+	}
+	if declared >= 0 && total != declared {
+		return "", total, ErrInvalidUpload
+	}
+	return hex.EncodeToString(h.Sum(nil)), total, nil
 }
 
 func (c *CatalogAdapter) Get(ctx context.Context, id ResourceID) (ResourceRef, error) {
@@ -168,7 +265,7 @@ func (c *CatalogAdapter) Get(ctx context.Context, id ResourceID) (ResourceRef, e
 	if err != nil {
 		return ResourceRef{}, err
 	}
-	item, err := c.service.authorizeAccess(string(id), catalogFileAccess(ctx, scope))
+	item, err := c.service.authorizeAccessWithContext(ctx, string(id), catalogFileAccess(ctx, scope))
 	if err != nil {
 		return ResourceRef{}, err
 	}
@@ -187,16 +284,21 @@ func (c *CatalogAdapter) UpdateResource(ctx context.Context, id ResourceID, patc
 	if err != nil {
 		return ResourceRef{}, err
 	}
-	item, err := c.service.authorizeAccess(string(id), catalogFileAccess(ctx, scope))
+	item, err := c.service.authorizeAccessWithContext(ctx, string(id), catalogFileAccess(ctx, scope))
 	if err != nil {
 		return ResourceRef{}, err
 	}
 	if item.TenantID == "" { // system resources are immutable; copy before editing
 		return ResourceRef{}, ErrAccessDenied
 	}
-	// Validate the lifecycle transition before mutating legacy metadata. A
-	// rejected status must leave the name/category unchanged as well.
-	if patch.Status != nil && *patch.Status != MediaReady && *patch.Status != MediaDeleting {
+	// Lifecycle transitions are owned by upload/reconciliation/deletion jobs.
+	// Management PATCH may echo the current value, but cannot bypass usage
+	// checks or move a row directly between operational states.
+	currentStatus := item.Status
+	if currentStatus == "" {
+		currentStatus = MediaReady
+	}
+	if patch.Status != nil && *patch.Status != currentStatus {
 		return ResourceRef{}, ErrInvalidUpload
 	}
 	key := "update:" + scope.TenantID + ":" + scope.Organization + ":" + string(id) + ":" + strings.TrimSpace(patch.IdempotencyKey)
@@ -272,12 +374,12 @@ func (c *CatalogAdapter) List(ctx context.Context, filter MediaFilter) (MediaPag
 	// Visibility inherits org -> tenant -> system. The legacy list API cannot
 	// express an empty OrgID predicate, so fetch the tenant view and apply the
 	// inheritance predicate here, then merge the system view by ID.
-	queries := []ListFilter{{TenantID: scope.TenantID, OwnerID: strings.TrimSpace(filter.OwnerID)}}
+	queries := []ListFilter{{TenantID: scope.TenantID, OwnerID: strings.TrimSpace(filter.OwnerID), Status: filter.Status, MIME: filter.MIMEExact, MIMEFamily: filter.MIMEFamily}}
 	if scope.PlatformAdmin {
-		queries = []ListFilter{{OwnerID: strings.TrimSpace(filter.OwnerID)}}
+		queries = []ListFilter{{OwnerID: strings.TrimSpace(filter.OwnerID), Status: filter.Status, MIME: filter.MIMEExact, MIMEFamily: filter.MIMEFamily}}
 	}
 	if !scope.PlatformAdmin {
-		queries = append(queries, ListFilter{OwnerID: strings.TrimSpace(filter.OwnerID)})
+		queries = append(queries, ListFilter{OwnerID: strings.TrimSpace(filter.OwnerID), Status: filter.Status, MIME: filter.MIMEExact, MIMEFamily: filter.MIMEFamily})
 	}
 	seen := map[string]struct{}{}
 	allowedCategories := map[string]struct{}{}
@@ -319,8 +421,11 @@ func (c *CatalogAdapter) List(ctx context.Context, filter MediaFilter) (MediaPag
 				// offset list intentionally returns metadata only, so apply the
 				// catalog ACL here and never expose another principal's private
 				// resource merely because it shares a tenant or organization.
-				if item.ACL != ACLPublicRead && strings.TrimSpace(item.OwnerID) != "" && item.OwnerID != auth.PrincipalIDFromContext(ctx) {
-					continue
+				if item.ACL != ACLPublicRead {
+					principal := auth.PrincipalIDFromContext(ctx)
+					if principal == "" || (item.OwnerID != "" && item.OwnerID != principal) {
+						continue
+					}
 				}
 			}
 			if _, duplicate := seen[item.ID]; duplicate {
@@ -385,19 +490,47 @@ func (c *CatalogAdapter) Open(ctx context.Context, id ResourceID, options OpenOp
 	if err != nil {
 		return nil, err
 	}
-	item, object, err := c.service.downloadWithAccess(ctx, string(id), catalogFileAccess(ctx, scope))
+	item, reader, err := c.service.openWithAccess(ctx, string(id), catalogFileAccess(ctx, scope))
 	if err != nil {
 		return nil, err
 	}
-	if c.effectiveStatus(item.ID) != MediaReady {
+	if item.Status != "" && item.Status != MediaReady {
+		_ = reader.Close()
 		return nil, ErrMediaNotReady
 	}
-	data := append([]byte(nil), object.Data...)
-	start, end, err := normalizeRange(options, int64(len(data)))
+	start, end, err := normalizeRange(options, item.Size)
 	if err != nil {
+		_ = reader.Close()
 		return nil, err
 	}
-	return io.NopCloser(bytes.NewReader(data[start:end])), nil
+	if start == 0 && int64(end) == item.Size {
+		return reader, nil
+	}
+	return &rangeReadCloser{ReadCloser: reader, skip: int64(start), remain: int64(end - start)}, nil
+}
+
+type rangeReadCloser struct {
+	io.ReadCloser
+	skip, remain int64
+}
+
+func (r *rangeReadCloser) Read(p []byte) (int, error) {
+	for r.skip > 0 {
+		n, err := io.CopyN(io.Discard, r.ReadCloser, r.skip)
+		r.skip -= n
+		if err != nil {
+			return 0, err
+		}
+	}
+	if r.remain <= 0 {
+		return 0, io.EOF
+	}
+	if int64(len(p)) > r.remain {
+		p = p[:r.remain]
+	}
+	n, err := r.ReadCloser.Read(p)
+	r.remain -= int64(n)
+	return n, err
 }
 
 func (c *CatalogAdapter) SignedURL(ctx context.Context, id ResourceID, request URLRequest) (URLRef, error) {
@@ -413,11 +546,11 @@ func (c *CatalogAdapter) SignedURL(ctx context.Context, id ResourceID, request U
 	}
 	// Authorize first so an unknown or cross-scope ID never becomes a
 	// lifecycle oracle. The provider is only asked to sign a ready object.
-	item, err := c.service.authorizeAccess(string(id), catalogFileAccess(ctx, scope))
+	item, err := c.service.authorizeAccessWithContext(ctx, string(id), catalogFileAccess(ctx, scope))
 	if err != nil {
 		return URLRef{}, err
 	}
-	if c.effectiveStatus(item.ID) != MediaReady {
+	if item.Status != "" && item.Status != MediaReady {
 		return URLRef{}, ErrMediaNotReady
 	}
 	urlValue, err := c.service.signedURLWithAccess(ctx, item.ID, catalogFileAccess(ctx, scope), request.TTL)
@@ -440,7 +573,7 @@ func (c *CatalogAdapter) Delete(ctx context.Context, id ResourceID, options Dele
 	if idemKey != "" {
 		c.idemMu.Lock()
 		defer c.idemMu.Unlock()
-		payload := strings.TrimSpace(options.Reason)
+		payload := strings.TrimSpace(options.Reason) + "\x00" + fmt.Sprintf("%t", options.Force) + "\x00" + strings.TrimSpace(options.Confirmation)
 		c.mu.RLock()
 		previous, exists := c.idem[idem]
 		c.mu.RUnlock()
@@ -451,20 +584,35 @@ func (c *CatalogAdapter) Delete(ctx context.Context, id ResourceID, options Dele
 			return nil
 		}
 	}
-	item, err := c.service.authorizeAccess(string(id), catalogFileAccess(ctx, scope))
+	item, err := c.service.authorizeMutationWithContext(ctx, string(id), catalogFileAccess(ctx, scope))
 	if err != nil {
 		return err
 	}
 	if item.TenantID == "" {
 		return ErrAccessDenied
 	}
+	if item.Status == MediaDeleting {
+		return nil
+	}
 	if c.usage != nil {
 		refs, usageErr := c.usage.ListByResource(ctx, id)
 		if usageErr != nil && !errors.Is(usageErr, ErrUsageNotFound) {
 			return usageErr
 		}
-		if len(refs) > 0 {
+		forced := options.Force && strings.TrimSpace(options.Confirmation) == ForceDeleteConfirmation
+		if len(refs) > 0 && !forced {
 			return ErrMediaInUse
+		}
+		if forced {
+			deleteAt := c.now()
+			if err := c.service.ForceDeleteFile(ctx, string(id), auth.PrincipalIDFromContext(ctx), scope.TenantID, scope.Organization, deleteAt); err != nil {
+				return err
+			}
+			c.mu.Lock()
+			c.status[string(id)] = MediaDeleting
+			c.updated[string(id)] = deleteAt
+			c.mu.Unlock()
+			return nil
 		}
 	}
 	deleteAt := c.now()
@@ -472,10 +620,10 @@ func (c *CatalogAdapter) Delete(ctx context.Context, id ResourceID, options Dele
 		return err
 	}
 	c.mu.Lock()
-	c.status[string(id)] = MediaDeleted
+	c.status[string(id)] = MediaDeleting
 	c.updated[string(id)] = deleteAt
 	if idemKey != "" {
-		c.idem[idem] = catalogIdempotency{payload: strings.TrimSpace(options.Reason)}
+		c.idem[idem] = catalogIdempotency{payload: strings.TrimSpace(options.Reason) + "\x00" + fmt.Sprintf("%t", options.Force) + "\x00" + strings.TrimSpace(options.Confirmation)}
 	}
 	c.mu.Unlock()
 	return nil
@@ -901,18 +1049,34 @@ func usageScopeKey(ctx context.Context) string {
 }
 
 func (c *CatalogAdapter) toResource(item File, scope tenant.Context) ResourceRef {
-	status := c.effectiveStatus(item.ID)
+	status := item.Status
+	if status == "" {
+		// Only dependency-free fixtures use the sidecar. Durable catalog reads
+		// already carry lifecycle_status from file_objects in item.Status.
+		if c.service == nil || c.service.repo == nil {
+			status = c.statusFor(item.ID)
+		}
+		if status == "" {
+			status = MediaReady
+		}
+	}
 	updated := item.CreatedAt
+	if !item.UpdatedAt.IsZero() {
+		updated = item.UpdatedAt
+	}
 	c.mu.RLock()
 	if value, ok := c.updated[item.ID]; ok {
 		updated = value
 	}
-	metadata := cloneStringMap(c.metadata[item.ID])
+	metadata := cloneStringMap(item.Metadata)
+	if metadata == nil {
+		metadata = cloneStringMap(c.metadata[item.ID])
+	}
 	c.mu.RUnlock()
 	reconcileKey := strings.TrimSpace(metadata["reconcile_key"])
 	resourceScope := scopeTypeFor(item.TenantID, item.OrgID)
-	selectable := strings.HasPrefix(strings.ToLower(item.MIME), "image/") && status != MediaDeleted
-	ref := ResourceRef{ID: item.ID, Name: item.Name, MIME: item.MIME, Size: item.Size, SHA256: item.SHA256, CategoryID: item.CategoryID, ScopeType: resourceScope, ACL: item.ACL, Status: status, CreatedAt: item.CreatedAt, UpdatedAt: updated, URLHints: map[string]bool{"preview": selectable, "download": status != MediaDeleted}, Metadata: metadata, Selectable: selectable, ReconcileKey: reconcileKey}
+	selectable := strings.HasPrefix(strings.ToLower(item.MIME), "image/") && status == MediaReady
+	ref := ResourceRef{ID: item.ID, Name: item.Name, MIME: item.MIME, Size: item.Size, SHA256: item.SHA256, CategoryID: item.CategoryID, ScopeType: resourceScope, ACL: item.ACL, Status: status, CreatedAt: item.CreatedAt, UpdatedAt: updated, URLHints: map[string]bool{"preview": selectable, "download": status == MediaReady}, Metadata: metadata, Selectable: selectable, ReconcileKey: reconcileKey, ObjectKey: item.ObjectKey, Extension: item.Extension, ETag: item.ETag, FailureReason: item.FailureReason, ScanStatus: item.ScanStatus}
 	if !selectable {
 		ref.DisabledReason = "media_type_not_allowed"
 	}
@@ -924,15 +1088,6 @@ func (c *CatalogAdapter) statusFor(id string) MediaStatus {
 	status := c.status[id]
 	c.mu.RUnlock()
 	return status
-}
-
-func (c *CatalogAdapter) effectiveStatus(id string) MediaStatus {
-	if status := c.statusFor(id); status != "" {
-		return status
-	}
-	// Rows created by the legacy/provider path predate the catalog sidecar;
-	// they are considered ready until an explicit lifecycle state is recorded.
-	return MediaReady
 }
 
 func (c *CatalogAdapter) now() time.Time {
@@ -953,14 +1108,15 @@ func readUploadData(reader io.Reader, data []byte, declared int64) ([]byte, erro
 		return nil, ErrInvalidUpload
 	}
 	limited := io.LimitReader(reader, declared+1)
-	bytesValue, err := io.ReadAll(limited)
+	var buffer bytes.Buffer
+	_, err := io.Copy(&buffer, limited)
 	if err != nil {
 		return nil, fmt.Errorf("read media upload: %w", err)
 	}
-	if int64(len(bytesValue)) != declared {
+	if int64(buffer.Len()) != declared {
 		return nil, ErrInvalidUpload
 	}
-	return bytesValue, nil
+	return append([]byte(nil), buffer.Bytes()...), nil
 }
 
 func normalizeRange(options OpenOptions, size int64) (int, int, error) {
@@ -1110,6 +1266,9 @@ func catalogFileAccess(ctx context.Context, scope tenant.Context) fileAccess {
 }
 
 func uploadPayloadHash(input UploadInput) string {
+	// This is intentionally metadata-only; content identity is stored as the
+	// resulting SHA-256 so byte-backed and streaming retries share one key
+	// without buffering a reader just to construct the idempotency token.
 	h := sha256.New()
 	fmt.Fprintf(h, "%s\x00%s\x00%d\x00%s\x00%s\x00%s\x00%s\x00%s", input.Name, input.MIME, input.Size, input.ACL, input.CategoryID, input.OwnerID, input.TenantID, input.OrgID)
 	keys := make([]string, 0, len(input.Metadata))
@@ -1120,7 +1279,6 @@ func uploadPayloadHash(input UploadInput) string {
 	for _, key := range keys {
 		fmt.Fprintf(h, "\x00meta:%s=%s", key, input.Metadata[key])
 	}
-	_, _ = h.Write(input.Data)
 	return hex.EncodeToString(h.Sum(nil))
 }
 

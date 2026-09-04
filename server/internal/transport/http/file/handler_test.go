@@ -7,6 +7,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	fileapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/file"
@@ -16,7 +17,7 @@ import (
 
 func TestFileHTTPUploadListDownloadDeleteAndCleanupDryRun(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	svc := fileapp.NewService(fileapp.NewMemoryStore("http://files.local"), fileapp.Config{MaxBytes: 100, AllowedMIMEs: []string{"text/plain"}})
+	svc := fileapp.NewService(fileapp.NewMemoryStore("http://files.local/api/admin/v1/files"), fileapp.Config{MaxBytes: 100, AllowedMIMEs: []string{"text/plain"}})
 	r := gin.New()
 	r.Use(httpmiddleware.TenantContext(httpmiddleware.TenantPolicy{Mode: "single", DefaultTenantID: "tenant-a"}))
 	RegisterRoutes(r, NewHandler(svc))
@@ -49,7 +50,9 @@ func TestFileHTTPUploadListDownloadDeleteAndCleanupDryRun(t *testing.T) {
 	}
 
 	res = httptest.NewRecorder()
-	r.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/api/admin/v1/files", nil))
+	req = httptest.NewRequest(http.MethodGet, "/api/admin/v1/files", nil)
+	req.Header.Set("X-Actor-ID", "u1")
+	r.ServeHTTP(res, req)
 	if res.Code != http.StatusOK || !bytes.Contains(res.Body.Bytes(), []byte(envelope.Data.ID)) {
 		t.Fatalf("list status = %d, body = %s", res.Code, res.Body.String())
 	}
@@ -60,6 +63,40 @@ func TestFileHTTPUploadListDownloadDeleteAndCleanupDryRun(t *testing.T) {
 	r.ServeHTTP(res, req)
 	if res.Code != http.StatusOK || res.Body.String() != "hello" {
 		t.Fatalf("download status = %d, body = %q", res.Code, res.Body.String())
+	}
+
+	res = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/admin/v1/files/"+envelope.Data.ID+"/signed-url", bytes.NewBufferString(`{"ttlSeconds":60}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Actor-ID", "u1")
+	r.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("signed-url status = %d, body = %s", res.Code, res.Body.String())
+	}
+	var signedEnvelope struct {
+		Data struct {
+			URL string `json:"url"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &signedEnvelope); err != nil {
+		t.Fatal(err)
+	}
+	signed, err := url.Parse(signedEnvelope.Data.URL)
+	if err != nil || signed.Path != "/api/admin/v1/files/"+envelope.Data.ID+"/download" {
+		t.Fatalf("signed download URL = %q, err = %v", signedEnvelope.Data.URL, err)
+	}
+	res = httptest.NewRecorder()
+	r.ServeHTTP(res, httptest.NewRequest(http.MethodGet, signed.String(), nil))
+	if res.Code != http.StatusOK || res.Body.String() != "hello" {
+		t.Fatalf("verified signed download status = %d, body = %q", res.Code, res.Body.String())
+	}
+	query := signed.Query()
+	query.Set("sig", "00")
+	signed.RawQuery = query.Encode()
+	res = httptest.NewRecorder()
+	r.ServeHTTP(res, httptest.NewRequest(http.MethodGet, signed.String(), nil))
+	if res.Code != http.StatusForbidden {
+		t.Fatalf("tampered signed download status = %d, body = %q", res.Code, res.Body.String())
 	}
 
 	res = httptest.NewRecorder()

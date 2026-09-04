@@ -33,14 +33,14 @@ func TestServiceRejectsOversizedAndDisallowedMIME(t *testing.T) {
 	if _, err := svc.Upload(context.Background(), UploadInput{Name: "a.png", MIME: "image/png", Size: 11}); !errors.Is(err, ErrFileTooLarge) {
 		t.Fatalf("size error = %v", err)
 	}
-	if _, err := svc.Upload(context.Background(), UploadInput{Name: "a.exe", MIME: "application/octet-stream", Size: 1}); !errors.Is(err, ErrMIMETypeNotAllowed) {
+	if _, err := svc.Upload(context.Background(), UploadInput{Name: "a.exe", MIME: "application/octet-stream", Size: 1, Data: []byte("x")}); !errors.Is(err, ErrMIMETypeNotAllowed) {
 		t.Fatalf("mime error = %v", err)
 	}
 }
 
 func TestServiceSignsURLAndEnforcesACL(t *testing.T) {
-	svc := NewService(&fakeStore{}, Config{MaxBytes: 100, AllowedMIMEs: []string{"text/plain"}})
-	item, err := svc.Upload(context.Background(), UploadInput{Name: "note.txt", MIME: "text/plain", Size: 4, OwnerID: "u1", ACL: ACLPrivate})
+	svc := NewService(NewMemoryStore("https://objects.example/files"), Config{MaxBytes: 100, AllowedMIMEs: []string{"text/plain"}})
+	item, err := svc.Upload(context.Background(), UploadInput{Name: "note.txt", MIME: "text/plain", Size: 4, Data: []byte("test"), OwnerID: "u1", ACL: ACLPrivate})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,10 +53,63 @@ func TestServiceSignsURLAndEnforcesACL(t *testing.T) {
 	}
 }
 
+func TestServiceRejectsLegacyUnverifiableSignedURLProvider(t *testing.T) {
+	svc := NewService(&fakeStore{}, Config{MaxBytes: 100, AllowedMIMEs: []string{"text/plain"}})
+	item, err := svc.Upload(context.Background(), UploadInput{Name: "note.txt", MIME: "text/plain", Size: 4, Data: []byte("test"), ACL: ACLPublicRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.SignedURL(context.Background(), item.ID, "", time.Minute); !errors.Is(err, ErrSignedURLUnsupported) {
+		t.Fatalf("legacy signer error = %v", err)
+	}
+}
+
+func TestPublicReadDoesNotGrantMutationPermission(t *testing.T) {
+	store := NewMemoryStore("http://memory.invalid/files")
+	svc := NewService(store, Config{AllowedMIMEs: []string{"text/plain"}})
+	item, err := svc.Upload(context.Background(), UploadInput{Name: "public.txt", MIME: "text/plain", Size: 5, Data: []byte("hello"), OwnerID: "owner", TenantID: "tenant", ACL: ACLPublicRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.DeleteFile(context.Background(), item.ID, "", "tenant", ""); !errors.Is(err, ErrAccessDenied) {
+		t.Fatalf("anonymous public delete = %v", err)
+	}
+	if err := svc.DeleteFile(context.Background(), item.ID, "other", "tenant", ""); !errors.Is(err, ErrAccessDenied) {
+		t.Fatalf("non-owner public delete = %v", err)
+	}
+	if err := svc.DeleteFile(context.Background(), item.ID, "owner", "tenant", ""); err != nil {
+		t.Fatalf("owner public delete = %v", err)
+	}
+}
+
+func TestDeleteQueuesProviderRemovalAndRetainsTombstone(t *testing.T) {
+	store := NewMemoryStore("http://memory.invalid/files")
+	svc := NewService(store, Config{AllowedMIMEs: []string{"text/plain"}})
+	item, err := svc.Upload(context.Background(), UploadInput{Name: "queued.txt", MIME: "text/plain", Size: 5, Data: []byte("hello"), OwnerID: "owner", TenantID: "tenant"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.DeleteFile(context.Background(), item.ID, "owner", "tenant", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Get(context.Background(), item.ObjectKey); err != nil {
+		t.Fatalf("object removed before worker: %v", err)
+	}
+	if _, err := svc.Get(context.Background(), item.ID, "owner", "tenant", ""); !errors.Is(err, ErrFileNotFound) {
+		t.Fatalf("tombstone lookup = %v", err)
+	}
+	if removed, err := svc.ProcessDeleting(context.Background(), 10); err != nil || removed != 1 {
+		t.Fatalf("process deleting removed=%d err=%v", removed, err)
+	}
+	if _, err := store.Get(context.Background(), item.ObjectKey); !errors.Is(err, ErrFileNotFound) {
+		t.Fatalf("provider object after worker = %v", err)
+	}
+}
+
 func TestServiceCleanupDeletesExpiredObjects(t *testing.T) {
 	store := &fakeStore{}
 	svc := NewService(store, Config{MaxBytes: 100, AllowedMIMEs: []string{"text/plain"}, Clock: func() time.Time { return time.Unix(100, 0) }})
-	old, err := svc.Upload(context.Background(), UploadInput{Name: "old.txt", MIME: "text/plain", Size: 1})
+	old, err := svc.Upload(context.Background(), UploadInput{Name: "old.txt", MIME: "text/plain", Size: 1, Data: []byte("x")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +124,7 @@ func TestServiceCleanupDeletesExpiredObjects(t *testing.T) {
 
 func TestMemoryStoreProvidesLocalStoreContract(t *testing.T) {
 	store := NewMemoryStore("https://objects.example/files")
-	object := Object{Key: "k1", Name: "a.txt", MIME: "text/plain", Size: 1}
+	object := Object{Key: "k1", Name: "a.txt", MIME: "text/plain", Size: 1, Data: []byte("x")}
 	if err := store.Put(context.Background(), object); err != nil {
 		t.Fatal(err)
 	}

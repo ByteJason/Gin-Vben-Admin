@@ -18,6 +18,10 @@ type recordingNotificationMailer struct {
 	messages []notification.Message
 }
 
+func commonCapabilitiesPNGFixture() []byte {
+	return []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}
+}
+
 func (m *recordingNotificationMailer) Send(_ context.Context, message notification.Message) error {
 	m.messages = append(m.messages, message)
 	return nil
@@ -142,10 +146,11 @@ func TestListMediaAcceptsSharedClientMimeExactAlias(t *testing.T) {
 	legacy := fileapp.NewService(fileapp.NewMemoryStore("http://memory.invalid/objects"), fileapp.Config{AllowedMIMEs: []string{"image/png", "text/plain"}})
 	catalog := fileapp.NewCatalog(legacy)
 	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a", Organization: "org-a"})
-	if _, err := catalog.Upload(ctx, fileapp.UploadInput{Data: []byte("png"), Size: 3, Name: "logo.png", MIME: "image/png"}); err != nil {
+	png := commonCapabilitiesPNGFixture()
+	if _, err := catalog.Upload(ctx, fileapp.UploadInput{Data: png, Size: int64(len(png)), Name: "logo.png", MIME: "image/png", ACL: fileapp.ACLPublicRead}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := catalog.Upload(ctx, fileapp.UploadInput{Data: []byte("txt"), Size: 3, Name: "readme.txt", MIME: "text/plain"}); err != nil {
+	if _, err := catalog.Upload(ctx, fileapp.UploadInput{Data: []byte("txt"), Size: 3, Name: "readme.txt", MIME: "text/plain", ACL: fileapp.ACLPublicRead}); err != nil {
 		t.Fatal(err)
 	}
 	r := gin.New()
@@ -181,7 +186,7 @@ func TestOpenMediaSupportsSingleByteRangeAndRejectsMultipleRanges(t *testing.T) 
 	legacy := fileapp.NewService(fileapp.NewMemoryStore("http://memory.invalid/objects"), fileapp.Config{AllowedMIMEs: []string{"text/plain"}})
 	catalog := fileapp.NewCatalog(legacy)
 	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "tenant-a", Organization: "org-a"})
-	resource, err := catalog.Upload(ctx, fileapp.UploadInput{Data: []byte("abcdef"), Size: 6, Name: "note.txt", MIME: "text/plain"})
+	resource, err := catalog.Upload(ctx, fileapp.UploadInput{Data: []byte("abcdef"), Size: 6, Name: "note.txt", MIME: "text/plain", ACL: fileapp.ACLPublicRead})
 	if err != nil {
 		t.Fatal(err)
 	}

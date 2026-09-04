@@ -36,8 +36,8 @@ type additiveColumnSet struct {
 
 var fileObjectColumns = []additiveColumnSet{
 	{model: &persistencemodel.FileObject{}, columns: []string{
-		"scope_type", "category_id", "provider_id", "lifecycle_status", "metadata_json",
-		"original_extension", "detected_mime", "reconcile_key", "pending_at", "ready_at",
+		"scope_type", "category_id", "provider_id", "bucket", "lifecycle_status", "metadata_json",
+		"original_extension", "detected_mime", "etag", "scan_status", "failure_reason", "reconcile_key", "pending_at", "ready_at",
 	}},
 	{model: &persistencemodel.SMTPAccount{}, columns: []string{"scope_type"}},
 	{model: &persistencemodel.EmailMessage{}, columns: []string{
@@ -193,7 +193,7 @@ func Down(db *gorm.DB) error {
 		}{
 			{&persistencemodel.EmailMessage{}, []string{"scope_type", "caller_key", "template_key", "template_generation", "policy_generation", "locale", "is_test", "challenge_id", "relay_status", "idempotency_scope_hash"}},
 			{&persistencemodel.SMTPAccount{}, []string{"scope_type"}},
-			{&persistencemodel.FileObject{}, []string{"scope_type", "category_id", "provider_id", "lifecycle_status", "metadata_json", "original_extension", "detected_mime", "reconcile_key", "pending_at", "ready_at"}},
+			{&persistencemodel.FileObject{}, []string{"scope_type", "category_id", "provider_id", "bucket", "lifecycle_status", "metadata_json", "original_extension", "detected_mime", "etag", "scan_status", "failure_reason", "reconcile_key", "pending_at", "ready_at"}},
 		} {
 			model := item.model
 			if hasTable(existing, model) {
