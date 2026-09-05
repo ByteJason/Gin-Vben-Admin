@@ -54,20 +54,20 @@ func testTenantIsolation(t *testing.T, driver, dsn string) {
 	tenantB := "it-tenant-b-" + suffix
 	username := "same-user-" + suffix
 	for _, tenantID := range []string{tenantA, tenantB} {
-		if err := store.Write(ctx).Table("tenants").Create(map[string]any{"id": tenantID, "name": tenantID, "status": "active"}).Error; err != nil {
+		if err := store.Write(ctx).Table("gvba_sys_tenants").Create(map[string]any{"id": tenantID, "name": tenantID, "status": "active"}).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
 	var userA, userB uint64
 	for index, tenantID := range []string{tenantA, tenantB} {
-		result := store.Write(ctx).Table("users").Create(map[string]any{
+		result := store.Write(ctx).Table("gvba_iam_users").Create(map[string]any{
 			"tenant_id": tenantID, "username": username, "username_normalized": strings.ToLower(username), "password_hash": "test-hash", "status": "active",
 		})
 		if result.Error != nil {
 			t.Fatal(result.Error)
 		}
 		var userID uint64
-		if err := store.Read(ctx).Table("users").Where("tenant_id = ? AND username = ?", tenantID, username).Pluck("id", &userID).Error; err != nil {
+		if err := store.Read(ctx).Table("gvba_iam_users").Where("tenant_id = ? AND username = ?", tenantID, username).Pluck("id", &userID).Error; err != nil {
 			t.Fatal(err)
 		}
 		if index == 0 {
@@ -79,9 +79,9 @@ func testTenantIsolation(t *testing.T, driver, dsn string) {
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()
-		store.Write(cleanupCtx).Exec("DELETE FROM iam_policies WHERE tenant_id IN (?, ?)", tenantA, tenantB)
-		store.Write(cleanupCtx).Exec("DELETE FROM users WHERE id IN (?, ?)", userA, userB)
-		store.Write(cleanupCtx).Exec("DELETE FROM tenants WHERE id IN (?, ?)", tenantA, tenantB)
+		store.Write(cleanupCtx).Exec("DELETE FROM gvba_iam_policies WHERE tenant_id IN (?, ?)", tenantA, tenantB)
+		store.Write(cleanupCtx).Exec("DELETE FROM gvba_iam_users WHERE id IN (?, ?)", userA, userB)
+		store.Write(cleanupCtx).Exec("DELETE FROM gvba_sys_tenants WHERE id IN (?, ?)", tenantA, tenantB)
 	})
 
 	persistence := iamplatform.NewGORMStore(store)

@@ -71,7 +71,7 @@
 1. 资源作用域显式为 `system|tenant|org`，可见性按 `org → tenant → system` 合并，系统资源只读。
 2. 列表支持 MIME 精确值、文件类型族、分类/子分类、游标分页和作用域过滤；响应只返回资源 ID、
    元数据、状态和受控 URL；provider key/path 留在服务内部。
-3. `media_usages` 记录 Logo 等引用。软删除先检查引用，异步清理对象；业务配置只保存资源 ID。
+3. `gvba_storage_media_usages` 记录 Logo 等引用。软删除先检查引用，异步清理对象；业务配置只保存资源 ID。
 4. 预置图片 1 在管理端可用前由 seed/reconcile 提前写入媒体库，使用稳定资源键 `system.logo.default`、manifest 和 SHA-256，可重复 reconcile；
    系统预置资源不计入租户配额，复制后的资源计入配额。
 5. Logo 区域支持“从媒体库选择”和“直接上传”。选择器展示所有可见分类及子分类，图片可选，

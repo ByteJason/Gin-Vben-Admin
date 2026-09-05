@@ -90,7 +90,7 @@ server/migrations/versions/client/v002_*.go
 ```
 
 升级由 `migrate up/status/down` 或安装器显式触发，应用启动只读取状态。版本记录
-预留使用 `app_metadata` 的 `schema:*` 元数据键，并在升级事务中锁定对应记录。
+预留使用 `gvba_sys_app_metadata` 的 `schema:*` 元数据键，并在升级事务中锁定对应记录。
 基线文件保持不变，升级文件提供明确的 `Up`，可逆版本按需提供 `Down`。
 
 ### TODO（vNext）

@@ -85,17 +85,17 @@ func testRBACHTTP(t *testing.T, driver, dsn, redisAddr string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := app.Database().Write(ctx).Exec("INSERT INTO users (username, username_normalized, password_hash, status) VALUES (?, ?, ?, ?)", username, strings.ToLower(username), hash, "active").Error; err != nil {
+	if err := app.Database().Write(ctx).Exec("INSERT INTO gvba_iam_users (username, username_normalized, password_hash, status) VALUES (?, ?, ?, ?)", username, strings.ToLower(username), hash, "active").Error; err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()
-		app.Database().Write(cleanupCtx).Exec("DELETE FROM roles WHERE id = ?", roleID)
-		app.Database().Write(cleanupCtx).Exec("DELETE FROM users WHERE username = ?", username)
+		app.Database().Write(cleanupCtx).Exec("DELETE FROM gvba_iam_roles WHERE id = ?", roleID)
+		app.Database().Write(cleanupCtx).Exec("DELETE FROM gvba_iam_users WHERE username = ?", username)
 	})
 	var userID uint64
-	if err := app.Database().Read(ctx).Table("users").Where("username = ?", username).Pluck("id", &userID).Error; err != nil {
+	if err := app.Database().Read(ctx).Table("gvba_iam_users").Where("username = ?", username).Pluck("id", &userID).Error; err != nil {
 		t.Fatal(err)
 	}
 	persistence := iamplatform.NewGORMStore(app.Database())
@@ -123,7 +123,7 @@ func testRBACHTTP(t *testing.T, driver, dsn, redisAddr string) {
 			claims, parseErr := authplatform.NewJWTServiceWithOptions([]byte(cfg.Auth.JWTSecret), cfg.Auth.AccessTTL, cfg.Auth.RefreshTTL, cfg.Auth.Issuer, cfg.Auth.Audience).Parse(cookie.Value)
 			if parseErr == nil {
 				cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
-				_ = app.Database().Write(cleanupCtx).Exec("DELETE FROM auth_sessions WHERE id = ?", claims.SessionID).Error
+				_ = app.Database().Write(cleanupCtx).Exec("DELETE FROM gvba_auth_sessions WHERE id = ?", claims.SessionID).Error
 				cleanupCancel()
 				key, keyErr := app.Redis().Key("auth-session", claims.SessionID)
 				if keyErr == nil {

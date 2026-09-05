@@ -57,16 +57,16 @@ func testSettingsAuditTenantIsolation(t *testing.T, driver, dsn string) {
 	key := "site.name." + suffix
 	requestA, requestB, authRequestA := "audit-a-"+suffix, "audit-b-"+suffix, "auth-a-"+suffix
 	for _, id := range []string{tenantA, tenantB} {
-		if err := store.Write(ctx).Table("tenants").Create(map[string]any{"id": id, "name": id, "status": "active"}).Error; err != nil {
+		if err := store.Write(ctx).Table("gvba_sys_tenants").Create(map[string]any{"id": id, "name": id, "status": "active"}).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()
-		_ = store.Write(cleanupCtx).Exec("DELETE FROM setting_versions WHERE tenant_id IN (?, ?)", tenantA, tenantB).Error
-		_ = store.Write(cleanupCtx).Exec("DELETE FROM auth_audit_events WHERE tenant_id IN (?, ?)", tenantA, tenantB).Error
-		_ = store.Write(cleanupCtx).Exec("DELETE FROM tenants WHERE id IN (?, ?)", tenantA, tenantB).Error
+		_ = store.Write(cleanupCtx).Exec("DELETE FROM gvba_sys_setting_versions WHERE tenant_id IN (?, ?)", tenantA, tenantB).Error
+		_ = store.Write(cleanupCtx).Exec("DELETE FROM gvba_audit_auth_events WHERE tenant_id IN (?, ?)", tenantA, tenantB).Error
+		_ = store.Write(cleanupCtx).Exec("DELETE FROM gvba_sys_tenants WHERE id IN (?, ?)", tenantA, tenantB).Error
 	})
 
 	ctxA := tenant.WithContext(ctx, tenant.Context{TenantID: tenantA})
@@ -116,7 +116,7 @@ func testSettingsAuditTenantIsolation(t *testing.T, driver, dsn string) {
 		{ctx: ctxA, id: requestA}, {ctx: ctxB, id: requestB},
 	} {
 		scope, _ := tenant.RequireContext(item.ctx)
-		if err := store.Write(item.ctx).Table("auth_audit_events").Create(map[string]any{
+		if err := store.Write(item.ctx).Table("gvba_audit_auth_events").Create(map[string]any{
 			"tenant_id": scope.TenantID, "event_type": "settings.update", "outcome": "success", "request_id": item.id,
 			"metadata": `{}`, "created_at": time.Now().UTC(),
 		}).Error; err != nil {

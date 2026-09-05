@@ -100,20 +100,20 @@ func testAuthSessionTenantIsolation(t *testing.T, driver, dsn string) {
 	tenantA := "session-a-" + suffix
 	tenantB := "session-b-" + suffix
 	for _, id := range []string{tenantA, tenantB} {
-		if err := store.Write(ctx).Table("tenants").Create(map[string]any{"id": id, "name": id, "status": "active"}).Error; err != nil {
+		if err := store.Write(ctx).Table("gvba_sys_tenants").Create(map[string]any{"id": id, "name": id, "status": "active"}).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
 	var userID uint64
 	username := "session-user-" + suffix
-	if err := store.Write(ctx).Table("users").Create(map[string]any{"tenant_id": tenantA, "username": username, "username_normalized": strings.ToLower(username), "password_hash": "hash", "status": "active"}).Error; err != nil {
+	if err := store.Write(ctx).Table("gvba_iam_users").Create(map[string]any{"tenant_id": tenantA, "username": username, "username_normalized": strings.ToLower(username), "password_hash": "hash", "status": "active"}).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Read(ctx).Table("users").Where("tenant_id = ?", tenantA).Pluck("id", &userID).Error; err != nil {
+	if err := store.Read(ctx).Table("gvba_iam_users").Where("tenant_id = ?", tenantA).Pluck("id", &userID).Error; err != nil {
 		t.Fatal(err)
 	}
 	sessionID := "session-" + suffix
-	if err := store.Write(ctx).Table("auth_sessions").Create(map[string]any{
+	if err := store.Write(ctx).Table("gvba_auth_sessions").Create(map[string]any{
 		"id": sessionID, "tenant_id": tenantA, "user_id": userID,
 		"refresh_token_hash": authdomain.HashRefreshJTI("jti-a"), "family_id": sessionID,
 		"status": "active", "expires_at": time.Now().Add(time.Hour), "last_seen_at": time.Now(),
@@ -123,9 +123,9 @@ func testAuthSessionTenantIsolation(t *testing.T, driver, dsn string) {
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()
-		store.Write(cleanupCtx).Exec("DELETE FROM auth_sessions WHERE id = ?", sessionID)
-		store.Write(cleanupCtx).Exec("DELETE FROM users WHERE id = ?", userID)
-		store.Write(cleanupCtx).Exec("DELETE FROM tenants WHERE id IN (?, ?)", tenantA, tenantB)
+		store.Write(cleanupCtx).Exec("DELETE FROM gvba_auth_sessions WHERE id = ?", sessionID)
+		store.Write(cleanupCtx).Exec("DELETE FROM gvba_iam_users WHERE id = ?", userID)
+		store.Write(cleanupCtx).Exec("DELETE FROM gvba_sys_tenants WHERE id IN (?, ?)", tenantA, tenantB)
 	})
 
 	sessions := authplatform.NewGORMSessionStore(store)

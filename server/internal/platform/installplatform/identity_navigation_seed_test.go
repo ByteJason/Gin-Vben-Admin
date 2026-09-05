@@ -348,16 +348,16 @@ func navigationSeedSQLDialects() []navigationSeedSQLDialect {
 			dialector: func(database *sql.DB) gorm.Dialector {
 				return gormmysql.New(gormmysql.Config{Conn: database, SkipInitializeWithVersion: true})
 			},
-			menuLookup:       "SELECT * FROM `menus` WHERE id = ? OR (tenant_id = ? AND path = ?)",
-			permissionLookup: "SELECT * FROM `permissions` WHERE id = ? OR (method = ? AND path = ?)",
+			menuLookup:       "SELECT * FROM `gvba_iam_menus` WHERE id = ? OR (tenant_id = ? AND path = ?)",
+			permissionLookup: "SELECT * FROM `gvba_iam_permissions` WHERE id = ? OR (method = ? AND path = ?)",
 		},
 		{
 			name: "postgres",
 			dialector: func(database *sql.DB) gorm.Dialector {
 				return gormpostgres.New(gormpostgres.Config{Conn: database, PreferSimpleProtocol: true})
 			},
-			menuLookup:       `SELECT * FROM "menus" WHERE id = $1 OR (tenant_id = $2 AND path = $3)`,
-			permissionLookup: `SELECT * FROM "permissions" WHERE id = $1 OR (method = $2 AND path = $3)`,
+			menuLookup:       `SELECT * FROM "gvba_iam_menus" WHERE id = $1 OR (tenant_id = $2 AND path = $3)`,
+			permissionLookup: `SELECT * FROM "gvba_iam_permissions" WHERE id = $1 OR (method = $2 AND path = $3)`,
 		},
 	}
 }

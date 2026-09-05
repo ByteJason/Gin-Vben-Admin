@@ -65,7 +65,7 @@ func testPersistedObservabilityLoadsOnRestart(t *testing.T, ctx context.Context,
 		t.Fatalf("bootstrap.New(first) error = %v", err)
 	}
 	scopeCtx := tenant.WithContext(ctx, tenant.Context{TenantID: tenantID})
-	if err := first.Database().Write(scopeCtx).Exec("INSERT INTO tenants (id, name, status) VALUES (?, ?, ?)", tenantID, tenantID, "active").Error; err != nil {
+	if err := first.Database().Write(scopeCtx).Exec("INSERT INTO gvba_sys_tenants (id, name, status) VALUES (?, ?, ?)", tenantID, tenantID, "active").Error; err != nil {
 		_ = first.Close()
 		t.Fatalf("insert test tenant error = %v", err)
 	}
@@ -89,9 +89,9 @@ func testPersistedObservabilityLoadsOnRestart(t *testing.T, ctx context.Context,
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()
-		_ = second.Database().Write(cleanupCtx).Exec("DELETE FROM auth_audit_events WHERE tenant_id = ?", tenantID).Error
-		_ = second.Database().Write(cleanupCtx).Exec("DELETE FROM setting_versions WHERE tenant_id = ?", tenantID).Error
-		_ = second.Database().Write(cleanupCtx).Exec("DELETE FROM tenants WHERE id = ?", tenantID).Error
+		_ = second.Database().Write(cleanupCtx).Exec("DELETE FROM gvba_audit_auth_events WHERE tenant_id = ?", tenantID).Error
+		_ = second.Database().Write(cleanupCtx).Exec("DELETE FROM gvba_sys_setting_versions WHERE tenant_id = ?", tenantID).Error
+		_ = second.Database().Write(cleanupCtx).Exec("DELETE FROM gvba_sys_tenants WHERE id = ?", tenantID).Error
 		_ = second.Close()
 	})
 	if err := second.ReloadPersistedObservability(ctx); err != nil {

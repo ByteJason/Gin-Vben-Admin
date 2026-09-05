@@ -26,21 +26,21 @@
     {
       "id": "IAM_AUTHORIZATION_SCOPE_COMPAT",
       "path": "server/internal/platform/iamplatform/gorm_store.go",
-      "line_regex": "\\.Table\\(\\\"iam_data_scopes",
+      "line_regex": "\\.Table\\(\\\"gvba_iam_data_scopes",
       "reason": "授权决策的组织范围查询保留兼容适配器，供现有授权契约测试固定主库路由；业务写入使用 gorm.G[T]。",
       "test": "go -C server test ./internal/platform/iamplatform -run Test.*Authorization"
     },
     {
       "id": "IAM_ACTIVE_ROLE_JOIN_COMPAT",
       "path": "server/internal/platform/iamplatform/gorm_store.go",
-      "line_regex": "\\.(Table|Joins)\\(\\\"(user_roles AS ur|JOIN roles AS r)",
+      "line_regex": "\\.(Table|Joins)\\(\\\"(gvba_iam_user_roles AS ur|JOIN gvba_iam_roles AS r)",
       "reason": "旧 sqlmock 契约的查询构造器适配器；实际角色解析路径使用 gorm.G[T] 固定投影，关系字段不生成外键。",
       "test": "go -C server test ./internal/platform/iamplatform -run Test.*Role"
     },
     {
       "id": "IAM_PERMISSION_JOIN_COMPAT",
       "path": "server/internal/platform/iamplatform/gorm_store.go",
-      "line_regex": "\\.(Table|Joins)\\(\\\"(iam_policies AS ip|JOIN permissions AS p)",
+      "line_regex": "\\.(Table|Joins)\\(\\\"(gvba_iam_policies AS ip|JOIN gvba_iam_permissions AS p)",
       "reason": "保留权限解析的旧查询构造器测试适配器；正式查询返回 projection row 并绑定全部运行时参数。",
       "test": "go -C server test ./internal/platform/iamplatform -run Test.*Permission"
     },

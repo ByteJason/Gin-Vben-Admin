@@ -140,7 +140,7 @@ func testAuthRefreshRotation(t *testing.T, driver, dsn, redisAddr string) {
 		t.Fatalf("password hash error = %v", err)
 	}
 	if err := app.Database().Write(ctx).Exec(
-		"INSERT INTO users (username, username_normalized, password_hash, status) VALUES (?, ?, ?, ?)",
+		"INSERT INTO gvba_iam_users (username, username_normalized, password_hash, status) VALUES (?, ?, ?, ?)",
 		username, strings.ToLower(username), passwordHash, "active",
 	).Error; err != nil {
 		t.Fatalf("create integration user error = %v", err)
@@ -148,8 +148,8 @@ func testAuthRefreshRotation(t *testing.T, driver, dsn, redisAddr string) {
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()
-		_ = app.Database().Write(cleanupCtx).Exec("DELETE FROM users WHERE username = ?", username).Error
-		_ = app.Database().Write(cleanupCtx).Exec("DELETE FROM users WHERE username = ?", registeredUsername).Error
+		_ = app.Database().Write(cleanupCtx).Exec("DELETE FROM gvba_iam_users WHERE username = ?", username).Error
+		_ = app.Database().Write(cleanupCtx).Exec("DELETE FROM gvba_iam_users WHERE username = ?", registeredUsername).Error
 	})
 
 	ts := httptest.NewServer(app.HTTPServer().Handler)
@@ -165,7 +165,7 @@ func testAuthRefreshRotation(t *testing.T, driver, dsn, redisAddr string) {
 		t.Fatalf("register status/code = %d/%d, body=%s", registerResponse.status, registerResponse.envelope.Code, registerResponse.body)
 	}
 	var registeredHash string
-	if err := app.Database().Read(ctx).Table("users").Select("password_hash").Where("username = ?", registeredUsername).Scan(&registeredHash).Error; err != nil {
+	if err := app.Database().Read(ctx).Table("gvba_iam_users").Select("password_hash").Where("username = ?", registeredUsername).Scan(&registeredHash).Error; err != nil {
 		t.Fatalf("registered user lookup error = %v", err)
 	}
 	if registeredHash == "" || registeredHash == registeredPassword {
@@ -203,7 +203,7 @@ func testAuthRefreshRotation(t *testing.T, driver, dsn, redisAddr string) {
 		t.Fatalf("parse login refresh token error = %v", err)
 	}
 	var sessionCount int64
-	if err := app.Database().Read(ctx).Table("auth_sessions").Where("id = ?", claims.SessionID).Count(&sessionCount).Error; err != nil {
+	if err := app.Database().Read(ctx).Table("gvba_auth_sessions").Where("id = ?", claims.SessionID).Count(&sessionCount).Error; err != nil {
 		t.Fatalf("count durable auth session error = %v", err)
 	}
 	if sessionCount != 1 {
@@ -225,7 +225,7 @@ func testAuthRefreshRotation(t *testing.T, driver, dsn, redisAddr string) {
 		UserAgent string
 		SessionID string
 	}
-	if err := app.Database().Read(ctx).Table("auth_audit_events").Where("session_id = ? AND event_type = ?", claims.SessionID, "auth.login").Order("id DESC").Take(&loginAudit).Error; err != nil {
+	if err := app.Database().Read(ctx).Table("gvba_audit_auth_events").Where("session_id = ? AND event_type = ?", claims.SessionID, "auth.login").Order("id DESC").Take(&loginAudit).Error; err != nil {
 		t.Fatalf("login audit lookup error = %v", err)
 	}
 	if loginAudit.Outcome != "success" || loginAudit.RequestID != requestHeaders["X-Request-ID"] || loginAudit.UserAgent != requestHeaders["User-Agent"] || loginAudit.SessionID != claims.SessionID {
@@ -234,8 +234,8 @@ func testAuthRefreshRotation(t *testing.T, driver, dsn, redisAddr string) {
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()
-		_ = app.Database().Write(cleanupCtx).Exec("DELETE FROM auth_sessions WHERE id = ?", claims.SessionID).Error
-		_ = app.Database().Write(cleanupCtx).Exec("DELETE FROM auth_audit_events WHERE session_id = ?", claims.SessionID).Error
+		_ = app.Database().Write(cleanupCtx).Exec("DELETE FROM gvba_auth_sessions WHERE id = ?", claims.SessionID).Error
+		_ = app.Database().Write(cleanupCtx).Exec("DELETE FROM gvba_audit_auth_events WHERE session_id = ?", claims.SessionID).Error
 	})
 	sessionKey, err := app.Redis().Key("auth-session", claims.SessionID)
 	if err != nil {
@@ -312,8 +312,8 @@ func testAuthRefreshRotation(t *testing.T, driver, dsn, redisAddr string) {
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()
-		_ = app.Database().Write(cleanupCtx).Exec("DELETE FROM auth_sessions WHERE id = ?", secondClaims.SessionID).Error
-		_ = app.Database().Write(cleanupCtx).Exec("DELETE FROM auth_audit_events WHERE session_id = ?", secondClaims.SessionID).Error
+		_ = app.Database().Write(cleanupCtx).Exec("DELETE FROM gvba_auth_sessions WHERE id = ?", secondClaims.SessionID).Error
+		_ = app.Database().Write(cleanupCtx).Exec("DELETE FROM gvba_audit_auth_events WHERE session_id = ?", secondClaims.SessionID).Error
 	})
 	secondHeaders := cloneHeaders(requestHeaders)
 	secondHeaders["Authorization"] = "Bearer " + secondLogin.envelope.Data.AccessToken

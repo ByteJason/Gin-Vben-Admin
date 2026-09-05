@@ -31,7 +31,7 @@ class SQLAllowlistTest(unittest.TestCase):
             root = Path(directory)
             source = root / "server/internal/platform/tasks/gorm_repository.go"
             source.parent.mkdir(parents=True)
-            source.write_text('db.Table("users").Find(&rows)\n', encoding="utf-8")
+            source.write_text('db.Table("gvba_iam_users").Find(&rows)\n', encoding="utf-8")
             self.assertEqual(len(MODULE.scan(root, [])), 1)
 
 

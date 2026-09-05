@@ -43,19 +43,19 @@ func TestSchemaRelationshipIDsRemainScalarWithoutForeignKeyDDL(t *testing.T) {
 }
 
 func TestSchemaUsesPortableJSONAndBinaryTypes(t *testing.T) {
-	for _, table := range []string{"app_metadata", "setting_versions", "iam_data_scopes", "task_definitions"} {
+	for _, table := range []string{"gvba_sys_app_metadata", "gvba_sys_setting_versions", "gvba_iam_data_scopes", "gvba_task_definitions"} {
 		requireFields(t, table, map[string]string{
-			"app_metadata":     "metadata_value",
-			"setting_versions": "value",
-			"iam_data_scopes":  "ids",
-			"task_definitions": "payload_schema",
+			"gvba_sys_app_metadata":     "metadata_value",
+			"gvba_sys_setting_versions": "value",
+			"gvba_iam_data_scopes":      "ids",
+			"gvba_task_definitions":     "payload_schema",
 		}[table])
 	}
-	requireFields(t, "smtp_accounts", "password_ciphertext")
+	requireFields(t, "gvba_notify_smtp_accounts", "password_ciphertext")
 }
 
 func TestSchemaSeedTablesArePresent(t *testing.T) {
-	for _, table := range []string{"app_metadata", "tenants", "organizations", "dictionary_types", "dictionary_items", "dictionary_cache_versions"} {
+	for _, table := range []string{"gvba_sys_app_metadata", "gvba_sys_tenants", "gvba_sys_organizations", "gvba_dict_types", "gvba_dict_items", "gvba_dict_cache_versions"} {
 		if _, ok := parsedSchemas(t)[table]; !ok {
 			t.Fatalf("seed table %s missing", table)
 		}

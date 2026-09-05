@@ -33,9 +33,9 @@ func TestFindUserForAuthorizationResetsRelationQuerySession(t *testing.T) {
 	reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem().Set(reflect.ValueOf(gdb))
 	persistence := NewGORMStore(store)
 	userCols := []string{"id", "tenant_id", "org_id", "username", "username_normalized", "email", "email_normalized", "nickname", "avatar", "phone", "password_hash", "status", "last_login_ip", "last_login_at", "password_changed_at"}
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "users" WHERE tenant_id = $1 AND id = $2 LIMIT $3`)).WithArgs("default", 1, 1).WillReturnRows(sqlmock.NewRows(userCols).AddRow(1, "default", nil, "admin", "admin", nil, nil, "", "", nil, "hash", "active", "", nil, nil))
-	mock.ExpectQuery(`SELECT .*role_id.*FROM "user_roles" WHERE tenant_id = \$1 AND user_id = \$2 ORDER BY role_id ASC`).WithArgs("default", 1).WillReturnRows(sqlmock.NewRows([]string{"role_id"}).AddRow("role-super-admin"))
-	mock.ExpectQuery(`SELECT ur\.role_id FROM user_roles AS ur JOIN roles AS r .*`).WithArgs("default", 1, "active").WillReturnRows(sqlmock.NewRows([]string{"role_id"}).AddRow("role-super-admin"))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "gvba_iam_users" WHERE tenant_id = $1 AND id = $2 LIMIT $3`)).WithArgs("default", 1, 1).WillReturnRows(sqlmock.NewRows(userCols).AddRow(1, "default", nil, "admin", "admin", nil, nil, "", "", nil, "hash", "active", "", nil, nil))
+	mock.ExpectQuery(`SELECT .*role_id.*FROM "gvba_iam_user_roles" WHERE tenant_id = \$1 AND user_id = \$2 ORDER BY role_id ASC`).WithArgs("default", 1).WillReturnRows(sqlmock.NewRows([]string{"role_id"}).AddRow("role-super-admin"))
+	mock.ExpectQuery(`SELECT ur\.role_id FROM gvba_iam_user_roles AS ur JOIN gvba_iam_roles AS r .*`).WithArgs("default", 1, "active").WillReturnRows(sqlmock.NewRows([]string{"role_id"}).AddRow("role-super-admin"))
 	ctx := tenant.WithContext(context.Background(), tenant.Context{TenantID: "default"})
 	service := iamapp.NewServiceWithRepositories(persistence, persistence, persistence, persistence, persistence, persistence)
 	user, err := service.GetAuthorizationUser(ctx, "1")

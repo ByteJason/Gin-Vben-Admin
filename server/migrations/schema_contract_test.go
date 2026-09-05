@@ -12,13 +12,13 @@ import (
 )
 
 var expectedSchemaTables = []string{
-	"app_metadata", "tenants", "organizations", "users", "roles", "user_roles",
-	"menus", "permissions", "iam_policies", "iam_data_scopes", "auth_sessions",
-	"auth_audit_events", "setting_versions", "file_objects", "media_categories", "media_usages", "smtp_accounts",
-	"email_messages", "email_recipients", "email_delivery_attempts", "notification_callers", "notification_caller_accounts",
-	"notification_templates", "notification_template_locales", "notification_template_versions", "verification_policies", "verification_challenges", "dictionary_types",
-	"dictionary_items", "dictionary_cache_versions", "task_definitions", "task_runs",
-	"task_run_logs", "import_export_jobs", "import_export_errors", "import_export_artifacts",
+	"gvba_sys_app_metadata", "gvba_sys_tenants", "gvba_sys_organizations", "gvba_iam_users", "gvba_iam_roles", "gvba_iam_user_roles",
+	"gvba_iam_menus", "gvba_iam_permissions", "gvba_iam_policies", "gvba_iam_data_scopes", "gvba_auth_sessions",
+	"gvba_audit_auth_events", "gvba_sys_setting_versions", "gvba_storage_file_objects", "gvba_storage_media_categories", "gvba_storage_media_usages", "gvba_notify_smtp_accounts",
+	"gvba_notify_email_messages", "gvba_notify_email_recipients", "gvba_notify_email_delivery_attempts", "gvba_notify_callers", "gvba_notify_caller_accounts",
+	"gvba_notify_templates", "gvba_notify_template_locales", "gvba_notify_template_versions", "gvba_verify_policies", "gvba_verify_challenges", "gvba_dict_types",
+	"gvba_dict_items", "gvba_dict_cache_versions", "gvba_task_definitions", "gvba_task_runs",
+	"gvba_task_run_logs", "gvba_import_jobs", "gvba_import_errors", "gvba_import_artifacts",
 }
 
 func parsedSchemas(t *testing.T) map[string]*schema.Schema {

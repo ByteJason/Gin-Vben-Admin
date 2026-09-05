@@ -63,7 +63,7 @@ type metadataColumn struct {
 	MetadataJSON *persistencemodel.JSONValue `gorm:"column:metadata_json;comment:媒体元数据"`
 }
 
-func (metadataColumn) TableName() string { return "file_objects" }
+func (metadataColumn) TableName() string { return "gvba_storage_file_objects" }
 
 type indexSpec struct {
 	model any
@@ -76,17 +76,17 @@ type indexSpec struct {
 // pre-existing index. Index discovery uses GetIndexes (rather than HasIndex),
 // because the latter intentionally suppresses catalog query errors.
 var additiveIndexes = []indexSpec{
-	{model: &persistencemodel.FileObject{}, name: "idx_file_objects_scope_category_created"},
-	{model: &persistencemodel.FileObject{}, name: "idx_file_objects_scope_mime_created"},
-	{model: &persistencemodel.FileObject{}, name: "idx_file_objects_scope_owner_created"},
-	{model: &persistencemodel.FileObject{}, name: "idx_file_objects_status_created"},
-	{model: &persistencemodel.FileObject{}, name: "uq_file_objects_reconcile_key"},
-	{model: &persistencemodel.EmailMessage{}, name: "idx_email_messages_caller"},
-	{model: &persistencemodel.EmailMessage{}, name: "idx_email_messages_template"},
-	{model: &persistencemodel.EmailMessage{}, name: "idx_email_messages_test"},
-	{model: &persistencemodel.EmailMessage{}, name: "idx_email_messages_challenge"},
-	{model: &persistencemodel.EmailMessage{}, name: "idx_email_messages_relay"},
-	{model: &persistencemodel.EmailMessage{}, name: "uq_email_messages_idempotency_scope"},
+	{model: &persistencemodel.FileObject{}, name: "idx_gvba_storage_file_objects_scope_category_created"},
+	{model: &persistencemodel.FileObject{}, name: "idx_gvba_storage_file_objects_scope_mime_created"},
+	{model: &persistencemodel.FileObject{}, name: "idx_gvba_storage_file_objects_scope_owner_created"},
+	{model: &persistencemodel.FileObject{}, name: "idx_gvba_storage_file_objects_status_created"},
+	{model: &persistencemodel.FileObject{}, name: "uq_gvba_storage_file_objects_reconcile_key"},
+	{model: &persistencemodel.EmailMessage{}, name: "idx_gvba_notify_email_messages_caller"},
+	{model: &persistencemodel.EmailMessage{}, name: "idx_gvba_notify_email_messages_template"},
+	{model: &persistencemodel.EmailMessage{}, name: "idx_gvba_notify_email_messages_test"},
+	{model: &persistencemodel.EmailMessage{}, name: "idx_gvba_notify_email_messages_challenge"},
+	{model: &persistencemodel.EmailMessage{}, name: "idx_gvba_notify_email_messages_relay"},
+	{model: &persistencemodel.EmailMessage{}, name: "uq_gvba_notify_email_messages_idempotency_scope"},
 }
 
 // Up applies the additive common-capabilities schema. Every operation is
@@ -293,7 +293,7 @@ func backfillLegacyRelayStatus(tx *gorm.DB) error {
 			Where("status = ? AND (relay_status IS NULL OR relay_status = ?)", status, "pending").
 			Set(clause.Assignments(map[string]any{"relay_status": status})).
 			Update(context.Background()); err != nil {
-			return fmt.Errorf("backfill email_messages.relay_status=%s: %w", status, err)
+			return fmt.Errorf("backfill gvba_notify_email_messages.relay_status=%s: %w", status, err)
 		}
 	}
 	return nil
@@ -353,7 +353,7 @@ func createCapabilityTable(tx *gorm.DB, model any) error {
 func escapeSQLLiteral(value string) string { return strings.ReplaceAll(value, "'", "''") }
 
 func finalizeMetadataColumn(tx *gorm.DB) error {
-	const table = "file_objects"
+	const table = "gvba_storage_file_objects"
 	// Backfill every row, including soft-deleted rows, before tightening the
 	// constraint. This makes a retry after a partially completed migration safe.
 	if err := tx.Unscoped().Model(&persistencemodel.FileObject{}).

@@ -33,25 +33,25 @@ func TestGORMInitialAdminPasswordStoreResetsOnlyInstalledIdentity(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "app_metadata" WHERE metadata_key = $1 LIMIT $2 FOR UPDATE`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "gvba_sys_app_metadata" WHERE metadata_key = $1 LIMIT $2 FOR UPDATE`)).
 		WithArgs(installationMetadataKey, 1).
 		WillReturnRows(sqlmock.NewRows([]string{"metadata_key", "metadata_value", "version"}).
 			AddRow(installationMetadataKey, metadata, 1))
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "users" WHERE tenant_id = $1 AND id = $2 AND username = $3 LIMIT $4 FOR UPDATE`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "gvba_iam_users" WHERE tenant_id = $1 AND id = $2 AND username = $3 LIMIT $4 FOR UPDATE`)).
 		WithArgs(initialTenantID, uint64(17), "Admin", 1).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "tenant_id", "org_id", "username", "username_normalized", "password_hash", "status", "must_change_password",
 		}).AddRow(17, initialTenantID, nil, "Admin", "admin", "$2a$12$old", "active", true))
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "app_metadata" WHERE metadata_key = $1 LIMIT $2 FOR UPDATE`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "gvba_sys_app_metadata" WHERE metadata_key = $1 LIMIT $2 FOR UPDATE`)).
 		WithArgs(installationMetadataKey, 1).
 		WillReturnRows(sqlmock.NewRows([]string{"metadata_key", "metadata_value", "version"}).
 			AddRow(installationMetadataKey, metadata, 1))
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "users" WHERE tenant_id = $1 AND id = $2 AND username = $3 LIMIT $4 FOR UPDATE`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "gvba_iam_users" WHERE tenant_id = $1 AND id = $2 AND username = $3 LIMIT $4 FOR UPDATE`)).
 		WithArgs(initialTenantID, uint64(17), "Admin", 1).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "tenant_id", "org_id", "username", "username_normalized", "password_hash", "status", "must_change_password",
 		}).AddRow(17, initialTenantID, nil, "Admin", "admin", "$2a$12$old", "active", true))
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE "users" SET "failed_attempts"=$1,"locked_until"=$2,"must_change_password"=$3,"password_changed_at"=$4,"password_hash"=$5 WHERE tenant_id = $6 AND id = $7 AND username = $8 AND status = $9`)).
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE "gvba_iam_users" SET "failed_attempts"=$1,"locked_until"=$2,"must_change_password"=$3,"password_changed_at"=$4,"password_hash"=$5 WHERE tenant_id = $6 AND id = $7 AND username = $8 AND status = $9`)).
 		WithArgs(0, nil, false, sqlmock.AnyArg(), "$2a$12$new", initialTenantID, uint64(17), "Admin", "active").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
@@ -81,7 +81,7 @@ func TestGORMInitialAdminPasswordStoreRejectsIncompleteReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "app_metadata" WHERE metadata_key = $1 LIMIT $2 FOR UPDATE`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "gvba_sys_app_metadata" WHERE metadata_key = $1 LIMIT $2 FOR UPDATE`)).
 		WithArgs(installationMetadataKey, 1).
 		WillReturnRows(sqlmock.NewRows([]string{"metadata_key", "metadata_value", "version"}).
 			AddRow(installationMetadataKey, metadata, 1))

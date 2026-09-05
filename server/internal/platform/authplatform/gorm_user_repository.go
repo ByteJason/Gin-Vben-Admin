@@ -64,7 +64,7 @@ type gormUserRow struct {
 	PasswordChangedAt  *time.Time `gorm:"column:password_changed_at"`
 }
 
-func (gormUserRow) TableName() string { return "users" }
+func (gormUserRow) TableName() string { return "gvba_iam_users" }
 
 // FindByIdentifier loads a user by normalized username or email through the
 // primary/write route. Authentication must not accept stale replica state

@@ -58,7 +58,7 @@ func TestRoleListQueryKeepsGlobalAndCurrentOrganizationOnly(t *testing.T) {
 	defer database.Close()
 	scope := tenant.Context{TenantID: "tenant-a", Organization: "org-a"}
 	ctx := tenant.WithContext(context.Background(), scope)
-	query := scopedRoleListQuery(database.Read(ctx).Session(&gorm.Session{DryRun: true}).Table("roles"), scope)
+	query := scopedRoleListQuery(database.Read(ctx).Session(&gorm.Session{DryRun: true}).Table("gvba_iam_roles"), scope)
 	statement := query.Find(&[]roleRow{}).Statement
 	sql := statement.SQL.String()
 	if !strings.Contains(sql, "tenant_id =") || !strings.Contains(sql, "org_id =") || !strings.Contains(sql, "org_id IS NULL") {
@@ -91,7 +91,7 @@ func TestActiveRoleAuthorizationQueryFiltersStatusTenantAndOrganizationAcrossDia
 					t.Fatal(result.Error)
 				}
 				sql := strings.ToUpper(result.Statement.SQL.String())
-				for _, fragment := range []string{"JOIN ROLES AS R", "R.TENANT_ID = UR.TENANT_ID", "R.STATUS =", "UR.TENANT_ID =", "UR.USER_ID ="} {
+				for _, fragment := range []string{"JOIN GVBA_IAM_ROLES AS R", "R.TENANT_ID = UR.TENANT_ID", "R.STATUS =", "UR.TENANT_ID =", "UR.USER_ID ="} {
 					if !strings.Contains(sql, fragment) {
 						t.Fatalf("scope=%+v SQL missing %q: %s", scope, fragment, sql)
 					}

@@ -209,7 +209,7 @@ func (r *GORMMessageRepository) List(ctx context.Context, tenantID, orgID string
 	}
 	if keyword := strings.TrimSpace(filter.Keyword); keyword != "" {
 		pattern := "%" + strings.ToLower(keyword) + "%"
-		query = query.Where("LOWER(id) LIKE ? OR LOWER(subject) LIKE ? OR LOWER(caller_key) LIKE ? OR LOWER(template_key) LIKE ? OR id IN (SELECT message_id FROM email_recipients WHERE LOWER(address) LIKE ? AND deleted_at IS NULL)", pattern, pattern, pattern, pattern, pattern)
+		query = query.Where("LOWER(id) LIKE ? OR LOWER(subject) LIKE ? OR LOWER(caller_key) LIKE ? OR LOWER(template_key) LIKE ? OR id IN (SELECT message_id FROM gvba_notify_email_recipients WHERE LOWER(address) LIKE ? AND deleted_at IS NULL)", pattern, pattern, pattern, pattern, pattern)
 	}
 	total, err := query.Count(ctx, "*")
 	if err != nil {

@@ -106,7 +106,7 @@ func testDatabaseLifecycle(t *testing.T, driver, dsn string) {
 	cleanupKeys := func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()
-		_ = store.Write(cleanupCtx).Exec("DELETE FROM app_metadata WHERE metadata_key IN (?, ?)", commitKey, rollbackKey).Error
+		_ = store.Write(cleanupCtx).Exec("DELETE FROM gvba_sys_app_metadata WHERE metadata_key IN (?, ?)", commitKey, rollbackKey).Error
 	}
 	cleanupKeys()
 	t.Cleanup(cleanupKeys)
@@ -158,7 +158,7 @@ func insertMetadata(tx *gorm.DB, key string, payload any) error {
 		return fmt.Errorf("encode metadata payload: %w", err)
 	}
 	return tx.Exec(
-		"INSERT INTO app_metadata (metadata_key, metadata_value, version) VALUES (?, ?, ?)",
+		"INSERT INTO gvba_sys_app_metadata (metadata_key, metadata_value, version) VALUES (?, ?, ?)",
 		key,
 		string(encoded),
 		1,
@@ -178,7 +178,7 @@ func assertMigrationStatus(t *testing.T, runner *migration.Runner, wantVersion u
 
 func assertMetadataTable(t *testing.T, store *gormdb.Store, ctx context.Context, want bool) {
 	t.Helper()
-	got := store.Write(ctx).Migrator().HasTable("app_metadata")
+	got := store.Write(ctx).Migrator().HasTable("gvba_sys_app_metadata")
 	if got != want {
 		t.Fatalf("app_metadata table present = %t, want %t", got, want)
 	}
@@ -187,7 +187,7 @@ func assertMetadataTable(t *testing.T, store *gormdb.Store, ctx context.Context,
 func assertMetadataRow(t *testing.T, store *gormdb.Store, ctx context.Context, key string, want bool) {
 	t.Helper()
 	var count int64
-	if err := store.Read(ctx).Table("app_metadata").Where("metadata_key = ?", key).Count(&count).Error; err != nil {
+	if err := store.Read(ctx).Table("gvba_sys_app_metadata").Where("metadata_key = ?", key).Count(&count).Error; err != nil {
 		t.Fatalf("count metadata key %q: %v", key, err)
 	}
 	if (count > 0) != want {
@@ -197,7 +197,7 @@ func assertMetadataRow(t *testing.T, store *gormdb.Store, ctx context.Context, k
 
 func assertAuthTables(t *testing.T, store *gormdb.Store, ctx context.Context, want bool) {
 	t.Helper()
-	for _, table := range []string{"users", "auth_sessions"} {
+	for _, table := range []string{"gvba_iam_users", "gvba_auth_sessions"} {
 		got := store.Write(ctx).Migrator().HasTable(table)
 		if got != want {
 			t.Fatalf("%s table present = %t, want %t", table, got, want)
@@ -207,7 +207,7 @@ func assertAuthTables(t *testing.T, store *gormdb.Store, ctx context.Context, wa
 
 func assertRBACTables(t *testing.T, store *gormdb.Store, ctx context.Context, want bool) {
 	t.Helper()
-	for _, table := range []string{"roles", "user_roles", "menus", "permissions", "iam_policies", "iam_data_scopes"} {
+	for _, table := range []string{"gvba_iam_roles", "gvba_iam_user_roles", "gvba_iam_menus", "gvba_iam_permissions", "gvba_iam_policies", "gvba_iam_data_scopes"} {
 		got := store.Write(ctx).Migrator().HasTable(table)
 		if got != want {
 			t.Fatalf("%s table present = %t, want %t", table, got, want)

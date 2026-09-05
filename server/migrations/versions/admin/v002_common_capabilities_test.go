@@ -19,11 +19,11 @@ func TestCommonCapabilitiesVersionAndModels(t *testing.T) {
 		t.Fatalf("version = %q", Version)
 	}
 	want := map[string]bool{
-		"media_categories": true, "media_usages": true,
-		"notification_callers": true, "notification_caller_accounts": true,
-		"notification_templates": true, "notification_template_locales": true,
-		"notification_template_versions": true, "verification_policies": true,
-		"verification_challenges": true,
+		"gvba_storage_media_categories": true, "gvba_storage_media_usages": true,
+		"gvba_notify_callers": true, "gvba_notify_caller_accounts": true,
+		"gvba_notify_templates": true, "gvba_notify_template_locales": true,
+		"gvba_notify_template_versions": true, "gvba_verify_policies": true,
+		"gvba_verify_challenges": true,
 	}
 	for _, value := range newModels {
 		parsed, err := schema.Parse(value, &sync.Map{}, schema.NamingStrategy{})
@@ -105,7 +105,7 @@ func TestAdditiveNonNullColumnsHaveCompatibilityDefaults(t *testing.T) {
 		}
 		for _, column := range set.columns {
 			field := parsed.FieldsByDBName[column]
-			if field == nil || !field.NotNull || (parsed.Table == "file_objects" && column == "metadata_json") {
+			if field == nil || !field.NotNull || (parsed.Table == "gvba_storage_file_objects" && column == "metadata_json") {
 				continue
 			}
 			if !field.HasDefaultValue && field.DefaultValue == "" && field.DefaultValueInterface == nil {
@@ -126,14 +126,14 @@ func TestMigrationTableNameErrorsUseCanonicalNames(t *testing.T) {
 func TestLegacySchemaPreconditionReportsAllMissingTables(t *testing.T) {
 	// Keep this contract test independent of a live database; requireLegacyTables
 	// obtains the same canonical names from legacyModels after reading GetTables.
-	want := []string{"file_objects", "smtp_accounts", "email_messages"}
+	want := []string{"gvba_storage_file_objects", "gvba_notify_smtp_accounts", "gvba_notify_email_messages"}
 	if got := missingLegacyTables(nil); strings.Join(got, ", ") != strings.Join(want, ", ") {
 		t.Fatalf("missing legacy tables = %v, want %v", got, want)
 	}
-	present := map[string]struct{}{"file_objects": {}, "SMTP_ACCOUNTS": {}}
+	present := map[string]struct{}{"gvba_storage_file_objects": {}, "GVBA_NOTIFY_SMTP_ACCOUNTS": {}}
 	got := missingLegacyTables(present)
-	if strings.Join(got, ", ") != "email_messages" {
-		t.Fatalf("partial legacy schema missing = %v, want [email_messages]", got)
+	if strings.Join(got, ", ") != "gvba_notify_email_messages" {
+		t.Fatalf("partial legacy schema missing = %v, want [gvba_notify_email_messages]", got)
 	}
 }
 
@@ -146,15 +146,15 @@ func TestUpRejectsMissingLegacyTableBeforeIssuingDDL(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectQuery(`SELECT table_name FROM information_schema.tables WHERE table_schema = CURRENT_SCHEMA\(\) AND table_type = \$1`).
 		WithArgs("BASE TABLE").
-		WillReturnRows(sqlmock.NewRows([]string{"table_name"}).AddRow("file_objects").AddRow("smtp_accounts"))
+		WillReturnRows(sqlmock.NewRows([]string{"table_name"}).AddRow("gvba_storage_file_objects").AddRow("gvba_notify_smtp_accounts"))
 	mock.ExpectRollback()
 	db, err := gorm.Open(gormpostgres.New(gormpostgres.Config{Conn: sqlDB, PreferSimpleProtocol: true}), &gorm.Config{DisableAutomaticPing: true})
 	if err != nil {
 		t.Fatalf("gorm.Open() error = %v", err)
 	}
 	got := Up(db)
-	if got == nil || !strings.Contains(got.Error(), "email_messages") {
-		t.Fatalf("Up() error = %v, want missing email_messages", got)
+	if got == nil || !strings.Contains(got.Error(), "gvba_notify_email_messages") {
+		t.Fatalf("Up() error = %v, want missing gvba_notify_email_messages", got)
 	}
 	if errors.Is(got, sql.ErrNoRows) {
 		t.Fatalf("Up() leaked driver row error instead of migration precondition: %v", got)
@@ -176,7 +176,7 @@ func TestBackfillLegacyRelayStatusRepairsTerminalRows(t *testing.T) {
 	// default after the compatibility column is introduced.
 	for _, status := range []string{"sent", "failed"} {
 		mock.ExpectBegin()
-		mock.ExpectExec(`UPDATE "email_messages" SET "relay_status"=\$1 WHERE status = \$2 AND \(relay_status IS NULL OR relay_status = \$3\)`).
+		mock.ExpectExec(`UPDATE "gvba_notify_email_messages" SET "relay_status"=\$1 WHERE status = \$2 AND \(relay_status IS NULL OR relay_status = \$3\)`).
 			WithArgs(status, status, "pending").
 			WillReturnResult(sqlmock.NewResult(0, 1))
 		mock.ExpectCommit()
@@ -200,13 +200,13 @@ func TestExistingIndexesPropagatesCatalogErrors(t *testing.T) {
 	}
 	defer func() { _ = sqlDB.Close() }()
 	wantErr := errors.New("index catalog unavailable")
-	mock.ExpectQuery(`SELECT`).WithArgs("email_messages").WillReturnError(wantErr)
+	mock.ExpectQuery(`SELECT`).WithArgs("gvba_notify_email_messages").WillReturnError(wantErr)
 	db, err := gorm.Open(gormpostgres.New(gormpostgres.Config{Conn: sqlDB, PreferSimpleProtocol: true}), &gorm.Config{DisableAutomaticPing: true})
 	if err != nil {
 		t.Fatalf("gorm.Open() error = %v", err)
 	}
 	_, got := existingIndexes(db, &persistencemodel.EmailMessage{})
-	if got == nil || !errors.Is(got, wantErr) || !strings.Contains(got.Error(), "email_messages") {
+	if got == nil || !errors.Is(got, wantErr) || !strings.Contains(got.Error(), "gvba_notify_email_messages") {
 		t.Fatalf("existingIndexes() error = %v, want wrapped catalog error", got)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

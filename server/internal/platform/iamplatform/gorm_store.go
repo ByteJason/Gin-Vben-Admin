@@ -84,7 +84,7 @@ func (s *GORMStore) findUser(ctx context.Context, id string, authorization bool)
 		return domain.User{}, ErrStoreUnavailable
 	}
 	// Build the relation query from a fresh resolver session. Reusing the
-	// completed user query carries its WHERE/LIMIT statement into `user_roles`.
+	// completed user query carries its WHERE/LIMIT statement into `gvba_iam_user_roles`.
 	// Select the same read/write route explicitly so authorization still pins
 	// to the primary while ordinary profile reads retain replica routing.
 	roleDatabase := s.read(ctx)
@@ -504,7 +504,7 @@ func (s *GORMStore) ListUsersPage(ctx context.Context, filter domain.UserListQue
 		base = base.Where("status <> ?", "active")
 	}
 	if filter.RoleID != "" {
-		base = base.Where("EXISTS (SELECT 1 FROM user_roles ur WHERE ur.tenant_id = users.tenant_id AND ur.user_id = users.id AND ur.role_id = ?)", filter.RoleID)
+		base = base.Where("EXISTS (SELECT 1 FROM gvba_iam_user_roles ur WHERE ur.tenant_id = gvba_iam_users.tenant_id AND ur.user_id = gvba_iam_users.id AND ur.role_id = ?)", filter.RoleID)
 	}
 	if filter.OrgID != "" {
 		base = base.Where("org_id = ?", filter.OrgID)
@@ -1243,7 +1243,7 @@ func (s *GORMStore) ListDataScopes(ctx context.Context) ([]domain.DataScope, err
 // an authorization decision. A replica may lag immediately after a role scope
 // is narrowed, which must never preserve the former wider access window.
 func (s *GORMStore) authorizationDataScopesQuery(ctx context.Context, scope tenant.Context) *gorm.DB {
-	query := s.write(ctx).Table("iam_data_scopes").Where("tenant_id = ?", scope.TenantID)
+	query := s.write(ctx).Table("gvba_iam_data_scopes").Where("tenant_id = ?", scope.TenantID)
 	return organizationReadQuery(query, "org_id", scope)
 }
 
@@ -1304,9 +1304,9 @@ func activeRoleIDsGeneric(database *gorm.DB, ctx context.Context, scope tenant.C
 	// models. Build the fixed, identifier-only FROM/JOIN clause as a GORM
 	// clause option instead; the terminal query and scan remain gorm.G[T].
 	from := clause.From{
-		Tables: []clause.Table{{Name: "user_roles AS ur", Raw: true}},
+		Tables: []clause.Table{{Name: "gvba_iam_user_roles AS ur", Raw: true}},
 		Joins: []clause.Join{{
-			Table: clause.Table{Name: "roles AS r", Raw: true},
+			Table: clause.Table{Name: "gvba_iam_roles AS r", Raw: true},
 			ON: clause.Where{Exprs: []clause.Expression{
 				clause.Expr{SQL: "r.tenant_id = ur.tenant_id AND r.id = ur.role_id"},
 			}},
@@ -1332,9 +1332,9 @@ type activeRoleIDRow struct {
 }
 
 func activeRoleIDsQuery(database *gorm.DB, scope tenant.Context, userID uint64) *gorm.DB {
-	query := database.Table("user_roles AS ur").
+	query := database.Table("gvba_iam_user_roles AS ur").
 		Select("ur.role_id").
-		Joins("JOIN roles AS r ON r.tenant_id = ur.tenant_id AND r.id = ur.role_id").
+		Joins("JOIN gvba_iam_roles AS r ON r.tenant_id = ur.tenant_id AND r.id = ur.role_id").
 		Where("ur.tenant_id = ? AND ur.user_id = ? AND r.status = ?", scope.TenantID, userID, "active")
 	if !scope.PlatformAdmin {
 		if scope.Organization == "" {
@@ -1355,9 +1355,9 @@ func (s *GORMStore) rolePermissionIDs(ctx context.Context, tenantID, roleID stri
 		return nil, err
 	}
 	from := clause.From{
-		Tables: []clause.Table{{Name: "iam_policies AS ip", Raw: true}},
+		Tables: []clause.Table{{Name: "gvba_iam_policies AS ip", Raw: true}},
 		Joins: []clause.Join{{
-			Table: clause.Table{Name: "permissions AS p", Raw: true},
+			Table: clause.Table{Name: "gvba_iam_permissions AS p", Raw: true},
 			ON: clause.Where{Exprs: []clause.Expression{
 				clause.Expr{SQL: "p.tenant_id = ip.tenant_id AND p.method = ip.method AND p.path = ip.path"},
 			}},
@@ -1552,7 +1552,7 @@ type userRow struct {
 	PasswordChangedAt  *time.Time `gorm:"column:password_changed_at"`
 }
 
-func (userRow) TableName() string { return "users" }
+func (userRow) TableName() string { return "gvba_iam_users" }
 
 type userRoleRow struct {
 	UserID   uint64  `gorm:"column:user_id"`
@@ -1561,7 +1561,7 @@ type userRoleRow struct {
 	OrgID    *string `gorm:"column:org_id"`
 }
 
-func (userRoleRow) TableName() string { return "user_roles" }
+func (userRoleRow) TableName() string { return "gvba_iam_user_roles" }
 
 func (row userRow) toDomain(roleIDs []string) domain.User {
 	nickname := stringValue(row.Nickname)
@@ -1715,7 +1715,7 @@ type roleRow struct {
 	DataScope string `gorm:"column:data_scope"`
 }
 
-func (roleRow) TableName() string { return "roles" }
+func (roleRow) TableName() string { return "gvba_iam_roles" }
 
 func (row roleRow) toDomain(userIDs []string) domain.Role {
 	return domain.Role{
@@ -1743,7 +1743,7 @@ type menuRow struct {
 	External   bool
 }
 
-func (menuRow) TableName() string { return "menus" }
+func (menuRow) TableName() string { return "gvba_iam_menus" }
 
 type menuWriteRow struct {
 	ID         string  `gorm:"column:id;primaryKey"`
@@ -1764,7 +1764,7 @@ type menuWriteRow struct {
 	External   bool    `gorm:"column:external"`
 }
 
-func (menuWriteRow) TableName() string { return "menus" }
+func (menuWriteRow) TableName() string { return "gvba_iam_menus" }
 
 func (row menuRow) toDomain() domain.Menu {
 	menuType := domain.MenuType(row.MenuType.String)
@@ -1790,7 +1790,7 @@ type permissionRow struct {
 	Status   string
 }
 
-func (permissionRow) TableName() string { return "permissions" }
+func (permissionRow) TableName() string { return "gvba_iam_permissions" }
 
 type iamPolicyWriteRow struct {
 	ID       uint64  `gorm:"column:id;primaryKey"`
@@ -1804,7 +1804,7 @@ type iamPolicyWriteRow struct {
 	Effect   string  `gorm:"column:effect"`
 }
 
-func (iamPolicyWriteRow) TableName() string { return "iam_policies" }
+func (iamPolicyWriteRow) TableName() string { return "gvba_iam_policies" }
 
 type iamDataScopeWriteRow struct {
 	ID       uint64  `gorm:"column:id;primaryKey"`
@@ -1818,19 +1818,19 @@ type iamDataScopeWriteRow struct {
 	IDs      []byte  `gorm:"column:ids"`
 }
 
-func (iamDataScopeWriteRow) TableName() string { return "iam_data_scopes" }
+func (iamDataScopeWriteRow) TableName() string { return "gvba_iam_data_scopes" }
 
 type roleIDRow struct {
 	RoleID string `gorm:"column:role_id"`
 }
 
-func (roleIDRow) TableName() string { return "user_roles" }
+func (roleIDRow) TableName() string { return "gvba_iam_user_roles" }
 
 type permissionIDRow struct {
 	ID string `gorm:"column:id"`
 }
 
-func (permissionIDRow) TableName() string { return "permissions" }
+func (permissionIDRow) TableName() string { return "gvba_iam_permissions" }
 
 type policyRow struct {
 	UserID sql.NullInt64  `gorm:"column:user_id"`
@@ -1842,7 +1842,7 @@ type policyRow struct {
 	Effect string
 }
 
-func (policyRow) TableName() string { return "iam_policies" }
+func (policyRow) TableName() string { return "gvba_iam_policies" }
 
 type scopeRow struct {
 	TenantID string         `gorm:"column:tenant_id"`
@@ -1855,7 +1855,7 @@ type scopeRow struct {
 	IDs      []byte
 }
 
-func (scopeRow) TableName() string { return "iam_data_scopes" }
+func (scopeRow) TableName() string { return "gvba_iam_data_scopes" }
 
 var (
 	_ interface {

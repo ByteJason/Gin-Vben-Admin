@@ -85,18 +85,18 @@ func testReadWriteTopology(t *testing.T, ctx context.Context, driver, primaryDSN
 	cleanup := func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = store.Write(cleanupCtx).Exec("DELETE FROM app_metadata WHERE metadata_key = ?", key).Error
+		_ = store.Write(cleanupCtx).Exec("DELETE FROM gvba_sys_app_metadata WHERE metadata_key = ?", key).Error
 	}
 	cleanup()
 	t.Cleanup(cleanup)
-	if err := store.Write(ctx).Exec("INSERT INTO app_metadata (metadata_key, metadata_value, version) VALUES (?, ?, ?)", key, string(encoded), 1).Error; err != nil {
+	if err := store.Write(ctx).Exec("INSERT INTO gvba_sys_app_metadata (metadata_key, metadata_value, version) VALUES (?, ?, ?)", key, string(encoded), 1).Error; err != nil {
 		t.Fatalf("write on primary %s: %v", driver, err)
 	}
 
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		var count int64
-		err := store.Read(ctx).Table("app_metadata").Where("metadata_key = ?", key).Count(&count).Error
+		err := store.Read(ctx).Table("gvba_sys_app_metadata").Where("metadata_key = ?", key).Count(&count).Error
 		if err == nil && count == 1 {
 			return
 		}

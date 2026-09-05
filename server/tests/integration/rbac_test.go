@@ -59,18 +59,18 @@ func testRBACPersistence(t *testing.T, driver, dsn string) {
 	cleanup := func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()
-		store.Write(cleanupCtx).Exec("DELETE FROM menus WHERE id = ?", menuID)
-		store.Write(cleanupCtx).Exec("DELETE FROM permissions WHERE id = ?", permissionID)
-		store.Write(cleanupCtx).Exec("DELETE FROM roles WHERE id = ?", roleID)
-		store.Write(cleanupCtx).Exec("DELETE FROM users WHERE username = ?", username)
+		store.Write(cleanupCtx).Exec("DELETE FROM gvba_iam_menus WHERE id = ?", menuID)
+		store.Write(cleanupCtx).Exec("DELETE FROM gvba_iam_permissions WHERE id = ?", permissionID)
+		store.Write(cleanupCtx).Exec("DELETE FROM gvba_iam_roles WHERE id = ?", roleID)
+		store.Write(cleanupCtx).Exec("DELETE FROM gvba_iam_users WHERE username = ?", username)
 	}
 	t.Cleanup(cleanup)
 
-	if err := store.Write(ctx).Exec("INSERT INTO users (username, username_normalized, password_hash, status) VALUES (?, ?, ?, ?)", username, strings.ToLower(username), "test-hash", "active").Error; err != nil {
+	if err := store.Write(ctx).Exec("INSERT INTO gvba_iam_users (username, username_normalized, password_hash, status) VALUES (?, ?, ?, ?)", username, strings.ToLower(username), "test-hash", "active").Error; err != nil {
 		t.Fatal(err)
 	}
 	var userID uint64
-	if err := store.Read(ctx).Table("users").Where("username = ?", username).Pluck("id", &userID).Error; err != nil {
+	if err := store.Read(ctx).Table("gvba_iam_users").Where("username = ?", username).Pluck("id", &userID).Error; err != nil {
 		t.Fatal(err)
 	}
 	user := domain.User{ID: fmt.Sprint(userID), Username: username, Active: true, RoleIDs: []string{roleID}}
@@ -83,7 +83,7 @@ func testRBACPersistence(t *testing.T, driver, dsn string) {
 	if err := persistence.SavePolicy(scopeCtx, domain.Policy{RoleID: roleID, Method: "GET", Path: "/api/admin/v1/iam/users", Effect: domain.EffectAllow}); err != nil {
 		t.Fatal(err)
 	}
-	if err := persistence.SaveDataScope(scopeCtx, domain.DataScope{RoleID: roleID, Resource: "users", Scope: domain.ScopeOrg, IDs: []string{"org-a"}}); err != nil {
+	if err := persistence.SaveDataScope(scopeCtx, domain.DataScope{RoleID: roleID, Resource: "gvba_iam_users", Scope: domain.ScopeOrg, IDs: []string{"org-a"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := persistence.SaveMenu(scopeCtx, domain.Menu{ID: menuID, Name: "Users", Path: "/users", Visible: true, Active: true}); err != nil {
@@ -110,7 +110,7 @@ func testRBACPersistence(t *testing.T, driver, dsn string) {
 	if err != nil || !ok {
 		t.Fatalf("persistent authorization ok=%v err=%v", ok, err)
 	}
-	dataScope, err := service.ResolveDataScope(scopeCtx, domain.Subject{UserID: fmt.Sprint(userID), RoleIDs: []string{roleID}}, "users")
+	dataScope, err := service.ResolveDataScope(scopeCtx, domain.Subject{UserID: fmt.Sprint(userID), RoleIDs: []string{roleID}}, "gvba_iam_users")
 	if err != nil || dataScope.Scope != domain.ScopeOrg || len(dataScope.IDs) != 1 {
 		t.Fatalf("persistent scope=%+v err=%v", dataScope, err)
 	}

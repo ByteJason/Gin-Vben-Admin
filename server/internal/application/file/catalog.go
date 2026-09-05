@@ -1052,7 +1052,7 @@ func (c *CatalogAdapter) toResource(item File, scope tenant.Context) ResourceRef
 	status := item.Status
 	if status == "" {
 		// Only dependency-free fixtures use the sidecar. Durable catalog reads
-		// already carry lifecycle_status from file_objects in item.Status.
+		// already carry lifecycle_status from gvba_storage_file_objects in item.Status.
 		if c.service == nil || c.service.repo == nil {
 			status = c.statusFor(item.ID)
 		}

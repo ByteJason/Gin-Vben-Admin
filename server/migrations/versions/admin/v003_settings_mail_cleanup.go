@@ -27,7 +27,7 @@ type LegacyMailCacheCleaner interface {
 }
 
 // CleanupReport gives operators an auditable count without exposing deleted
-// values. Independent mail tables (smtp_accounts, email_messages and related
+// values. Independent mail tables (gvba_notify_smtp_accounts, gvba_notify_email_messages and related
 // outbox tables) are intentionally absent from this report and untouched.
 type CleanupReport struct {
 	SettingRows    int64 `json:"settingRows"`
@@ -74,7 +74,7 @@ func UpV003WithCache(ctx context.Context, db *gorm.DB, cache LegacyMailCacheClea
 		if err != nil {
 			return err
 		}
-		if tables["setting_versions"] {
+		if tables["gvba_sys_setting_versions"] {
 			keyColumn := `"key"`
 			if strings.EqualFold(tx.Dialector.Name(), "mysql") {
 				keyColumn = "`key`"
@@ -88,7 +88,7 @@ func UpV003WithCache(ctx context.Context, db *gorm.DB, cache LegacyMailCacheClea
 			}
 			report.SettingRows = result.RowsAffected
 		}
-		if tables["auth_audit_events"] {
+		if tables["gvba_audit_auth_events"] {
 			// Iterate by primary-key batches so a large audit table never has to be
 			// materialized in memory. We intentionally inspect every row in each
 			// batch because event-type and metadata formats varied across retired
@@ -131,14 +131,14 @@ func UpV003WithCache(ctx context.Context, db *gorm.DB, cache LegacyMailCacheClea
 		// persistence model and leaves the independent mail/notification routes
 		// untouched.
 		var retiredRoutes []permissionRoute
-		if tables["permissions"] {
+		if tables["gvba_iam_permissions"] {
 			rows, queryErr := loadRetiredPermissionRoutes(tx.WithContext(ctx), retiredSettingsPermissionIDs)
 			if queryErr != nil {
 				return queryErr
 			}
 			retiredRoutes = rows
 		}
-		if tables["iam_policies"] && len(retiredRoutes) > 0 {
+		if tables["gvba_iam_policies"] && len(retiredRoutes) > 0 {
 			predicate, args := permissionRoutePredicate(retiredRoutes)
 			result := tx.WithContext(ctx).Unscoped().Where(predicate, args...).Delete(&persistencemodel.IAMPolicy{})
 			if result.Error != nil {
@@ -146,7 +146,7 @@ func UpV003WithCache(ctx context.Context, db *gorm.DB, cache LegacyMailCacheClea
 			}
 			report.PolicyRows = result.RowsAffected
 		}
-		if tables["permissions"] {
+		if tables["gvba_iam_permissions"] {
 			result := tx.WithContext(ctx).Unscoped().Where("id IN ?", retiredSettingsPermissionIDs).Delete(&persistencemodel.Permission{})
 			if result.Error != nil {
 				return fmt.Errorf("remove retired settings permissions: %w", result.Error)
@@ -237,7 +237,7 @@ type legacyMailAuditRow struct {
 
 const legacyAuditBatchSize = 500
 
-func (legacyMailAuditRow) TableName() string { return "auth_audit_events" }
+func (legacyMailAuditRow) TableName() string { return "gvba_audit_auth_events" }
 
 func loadLegacyMailAuditRows(tx *gorm.DB) ([]legacyMailAuditRow, error) {
 	var rows []legacyMailAuditRow

@@ -102,7 +102,7 @@ type installationUserRow struct {
 	MustChangePassword bool    `gorm:"column:must_change_password"`
 }
 
-func (installationUserRow) TableName() string { return "users" }
+func (installationUserRow) TableName() string { return "gvba_iam_users" }
 
 // Installer seed rows intentionally contain only the columns owned by the
 // bootstrap transaction. They are typed GORM records rather than map inserts,
@@ -116,7 +116,7 @@ type installationRoleRow struct {
 	DataScope string  `gorm:"column:data_scope"`
 }
 
-func (installationRoleRow) TableName() string { return "roles" }
+func (installationRoleRow) TableName() string { return "gvba_iam_roles" }
 
 type installationUserRoleRow struct {
 	TenantID string  `gorm:"column:tenant_id"`
@@ -125,7 +125,7 @@ type installationUserRoleRow struct {
 	RoleID   string  `gorm:"column:role_id"`
 }
 
-func (installationUserRoleRow) TableName() string { return "user_roles" }
+func (installationUserRoleRow) TableName() string { return "gvba_iam_user_roles" }
 
 type installationPolicyRow struct {
 	TenantID string  `gorm:"column:tenant_id"`
@@ -137,7 +137,7 @@ type installationPolicyRow struct {
 	Effect   string  `gorm:"column:effect"`
 }
 
-func (installationPolicyRow) TableName() string { return "iam_policies" }
+func (installationPolicyRow) TableName() string { return "gvba_iam_policies" }
 
 // Rollback uses these delete-only projections without DeletedAt fields so the
 // installer removes only the rows it owns (rather than invoking a soft delete).
@@ -145,23 +145,23 @@ type installationAuditDeleteRow struct {
 	UserID uint64 `gorm:"column:user_id"`
 }
 
-func (installationAuditDeleteRow) TableName() string { return "auth_audit_events" }
+func (installationAuditDeleteRow) TableName() string { return "gvba_audit_auth_events" }
 
 type installationSessionDeleteRow struct {
 	UserID uint64 `gorm:"column:user_id"`
 }
 
-func (installationSessionDeleteRow) TableName() string { return "auth_sessions" }
+func (installationSessionDeleteRow) TableName() string { return "gvba_auth_sessions" }
 
 type installationDataScopeDeleteRow struct{ TenantID, RoleID string }
 
-func (installationDataScopeDeleteRow) TableName() string { return "iam_data_scopes" }
+func (installationDataScopeDeleteRow) TableName() string { return "gvba_iam_data_scopes" }
 
 type installationMetadataDeleteRow struct {
 	MetadataKey string `gorm:"column:metadata_key"`
 }
 
-func (installationMetadataDeleteRow) TableName() string { return "app_metadata" }
+func (installationMetadataDeleteRow) TableName() string { return "gvba_sys_app_metadata" }
 
 func (s *GORMIdentityStore) Initialize(ctx context.Context, reference, username, passwordHash string) error {
 	if s == nil || s.database == nil || !validIdentityInput(reference, username, passwordHash) {
@@ -247,7 +247,7 @@ type navigationMenuSeedRow struct {
 	External   bool    `gorm:"column:external"`
 }
 
-func (navigationMenuSeedRow) TableName() string { return "menus" }
+func (navigationMenuSeedRow) TableName() string { return "gvba_iam_menus" }
 
 type navigationPermissionSeedRow struct {
 	ID       string  `gorm:"column:id;primaryKey"`
@@ -259,7 +259,7 @@ type navigationPermissionSeedRow struct {
 	Status   string  `gorm:"column:status"`
 }
 
-func (navigationPermissionSeedRow) TableName() string { return "permissions" }
+func (navigationPermissionSeedRow) TableName() string { return "gvba_iam_permissions" }
 
 const legacyOverviewRuntimeMenuID = "menu-overview-runtime"
 
@@ -420,7 +420,7 @@ func (s gormNavigationSeedStore) createMenu(menu initialMenuSeed) *gorm.DB {
 		Visible: menu.Visible, Status: statusForSeed(menu.Active), KeepAlive: menu.KeepAlive, External: menu.External,
 	}
 	err := gorm.G[navigationMenuSeedRow](s.tx).Create(seedContext(s.tx), &row)
-	return seedCreateResult(s.tx, "menus", err)
+	return seedCreateResult(s.tx, "gvba_iam_menus", err)
 }
 
 func (s gormNavigationSeedStore) createPermission(permission initialPermissionSeed) *gorm.DB {
@@ -429,7 +429,7 @@ func (s gormNavigationSeedStore) createPermission(permission initialPermissionSe
 		Path: permission.Path, Status: statusForSeed(permission.Active),
 	}
 	err := gorm.G[navigationPermissionSeedRow](s.tx).Create(seedContext(s.tx), &row)
-	return seedCreateResult(s.tx, "permissions", err)
+	return seedCreateResult(s.tx, "gvba_iam_permissions", err)
 }
 
 // seedCreateResult keeps the historical helper's *gorm.DB return shape for

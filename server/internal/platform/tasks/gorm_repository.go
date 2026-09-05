@@ -248,7 +248,7 @@ func (r *GORMRunRepository) ListLogs(ctx context.Context, runID, tenantID, orgID
 	}
 	// The join is a dedicated projection: logs are tenant-scoped through their
 	// parent run, while the returned shape remains the persistence model.
-	sql := "SELECT l.id, l.run_id, l.attempt, l.status, l.error_code, l.message, l.deleted_at, l.created_at, l.updated_at FROM task_run_logs AS l JOIN task_runs AS r ON r.id = l.run_id WHERE l.run_id = ? AND r.tenant_id = ? AND r.deleted_at IS NULL AND l.deleted_at IS NULL"
+	sql := "SELECT l.id, l.run_id, l.attempt, l.status, l.error_code, l.message, l.deleted_at, l.created_at, l.updated_at FROM gvba_task_run_logs AS l JOIN gvba_task_runs AS r ON r.id = l.run_id WHERE l.run_id = ? AND r.tenant_id = ? AND r.deleted_at IS NULL AND l.deleted_at IS NULL"
 	args := []any{strings.TrimSpace(runID), tenantID}
 	if strings.TrimSpace(orgID) != "" {
 		sql += " AND r.org_id = ?"

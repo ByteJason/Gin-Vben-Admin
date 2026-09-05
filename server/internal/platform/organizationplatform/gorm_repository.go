@@ -26,7 +26,7 @@ type organizationRow struct {
 	Status   string  `gorm:"column:status"`
 }
 
-func (organizationRow) TableName() string { return "organizations" }
+func (organizationRow) TableName() string { return "gvba_sys_organizations" }
 
 func (r *GORMRepository) Create(ctx context.Context, value organization.Organization) error {
 	if err := organization.Validate(value); err != nil {

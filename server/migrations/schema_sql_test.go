@@ -21,7 +21,7 @@ func TestPostgresTableCommentUsesParserSafeLiteral(t *testing.T) {
 	}
 	defer sqlDB.Close()
 
-	mock.ExpectExec(regexp.QuoteMeta(`COMMENT ON TABLE "users" IS '用''户'`)).
+	mock.ExpectExec(regexp.QuoteMeta(`COMMENT ON TABLE "gvba_iam_users" IS '用''户'`)).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	database, err := gorm.Open(
 		gormpostgres.New(gormpostgres.Config{Conn: sqlDB, PreferSimpleProtocol: true}),
@@ -31,7 +31,7 @@ func TestPostgresTableCommentUsesParserSafeLiteral(t *testing.T) {
 		t.Fatalf("gorm.Open() error = %v", err)
 	}
 
-	if err := commentPostgresTable(database, "users", "用'户"); err != nil {
+	if err := commentPostgresTable(database, "gvba_iam_users", "用'户"); err != nil {
 		t.Fatalf("commentPostgresTable() error = %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -67,8 +67,8 @@ func TestCreateTableDDLHasCommentsAndNoForeignKeys(t *testing.T) {
 				}
 				return gormpostgres.New(gormpostgres.Config{Conn: sqlDB, PreferSimpleProtocol: true}), func() { _ = sqlDB.Close() }
 			},
-			wantTable: `COMMENT ON TABLE "users" IS '用户'`,
-			wantField: `COMMENT ON COLUMN "users"."id" IS '用户标识'`,
+			wantTable: `COMMENT ON TABLE "gvba_iam_users" IS '用户'`,
+			wantField: `COMMENT ON COLUMN "gvba_iam_users"."id" IS '用户标识'`,
 		},
 	}
 

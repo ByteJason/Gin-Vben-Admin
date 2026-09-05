@@ -4,7 +4,7 @@
 版本文件只执行显式 GORM Migrator 操作，并在文档中注明租户/组织作用域。
 
 `v002_common_capabilities.go` 是公共邮件、验证码和媒体能力的显式升级入口：
-它创建新增表，为已有 `file_objects`、`smtp_accounts`、`email_messages` 表补充
+它创建新增表，为已有 `gvba_storage_file_objects`、`gvba_notify_smtp_accounts`、`gvba_notify_email_messages` 表补充
 字段和索引，并保持重复执行幂等。`metadata_json` 会先以可空列加入、回填 `{}`
 （包含软删除行）后再收紧为 `NOT NULL`，避免旧数据在严格 PostgreSQL/MySQL
 配置下升级失败。该版本不在服务启动时隐式执行，需由经过审核的迁移命令调用
@@ -18,18 +18,18 @@ fresh schema 请保留最终列形态并通过备份/恢复回滚。
 失败，修复缺失前置条件或冲突后可安全重试，所有已执行步骤均由存在性检查保护；索引目录
 读取错误会显式中止，不会把未知状态当作“索引不存在”。
 
-本版本保留 `smtp_accounts` 原有 `uq_smtp_accounts_tenant_name` 与
-`uq_smtp_accounts_tenant_endpoint` 的 tenant-wide 唯一范围；新增 `scope_type` 只用于
+本版本保留 `gvba_notify_smtp_accounts` 原有 `uq_gvba_notify_smtp_accounts_tenant_name` 与
+`uq_gvba_notify_smtp_accounts_tenant_endpoint` 的 tenant-wide 唯一范围；新增 `scope_type` 只用于
 路由和查询索引，不在升级窗口内重写唯一键，避免旧数据发生隐式冲突。若后续需要把
 账号唯一性收紧到组织作用域，应另行提供冲突报告、数据清理和独立版本迁移。
 
-`media_categories.path` 保留 1024 字符容量但不建立 MySQL 全值索引；按 utf8mb4
+`gvba_storage_media_categories.path` 保留 1024 字符容量但不建立 MySQL 全值索引；按 utf8mb4
 计算会超过 InnoDB 3072 字节键上限。树查询使用 scope/parent 索引，路径检索如需
 索引应按数据库方言另行采用前缀或摘要列。
 
 `v003_settings_mail_cleanup.go` 是配置中心邮件残留清理迁移。它只删除
-`setting_versions` 中 `mail.*`、`email.*`、`smtp.*` 键及旧配置中心审计事件，
-不会访问或删除 `smtp_accounts`、`email_messages`、通知模板等独立邮件模块表。
+`gvba_sys_setting_versions` 中 `mail.*`、`email.*`、`smtp.*` 键及旧配置中心审计事件，
+不会访问或删除 `gvba_notify_smtp_accounts`、`gvba_notify_email_messages`、通知模板等独立邮件模块表。
 迁移按数据库事务执行且可重复运行；可选的 `LegacyMailCacheCleaner` 在事务提交后
 清除命名空间内旧设置缓存。缓存清理失败会返回错误以便重试，数据库清理不会回滚。
 该数据删除不可逆，`Down` 保持幂等空操作，回滚请使用迁移前备份恢复。

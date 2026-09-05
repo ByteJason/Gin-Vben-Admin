@@ -113,7 +113,7 @@ func (r *GORMRepository) ListErrors(ctx context.Context, jobID, tenantID, orgID 
 	// Dedicated projection (fixed SQL allowlist): the parent-job join enforces
 	// tenant/organization scope while returning only public row-error fields;
 	// runtime values are always passed as bound arguments below.
-	sql := "SELECT e.id, e.job_id, e.row_number, e.column_name, e.code, e.message_key, e.deleted_at, e.created_at, e.updated_at FROM import_export_errors AS e JOIN import_export_jobs AS j ON j.id = e.job_id WHERE e.job_id = ? AND e.deleted_at IS NULL AND j.tenant_id = ? AND j.deleted_at IS NULL"
+	sql := "SELECT e.id, e.job_id, e.row_number, e.column_name, e.code, e.message_key, e.deleted_at, e.created_at, e.updated_at FROM gvba_import_errors AS e JOIN gvba_import_jobs AS j ON j.id = e.job_id WHERE e.job_id = ? AND e.deleted_at IS NULL AND j.tenant_id = ? AND j.deleted_at IS NULL"
 	args := []any{jobID, tenantID}
 	if strings.TrimSpace(orgID) != "" {
 		sql += " AND j.org_id = ?"

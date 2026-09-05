@@ -73,10 +73,10 @@ func TestScopedUniqueIndexesCarryTenantAndOrganizationDimensions(t *testing.T) {
 		index  string
 		fields []string
 	}{
-		"notification_callers":   {index: "uq_notification_callers_scope_key", fields: []string{"tenant_id", "org_id", "scope_type", "caller_key"}},
-		"notification_templates": {index: "uq_notification_templates_scope_key", fields: []string{"tenant_id", "org_id", "scope_type", "template_key"}},
-		"verification_policies":  {index: "uq_verification_policies_scope_key", fields: []string{"tenant_id", "org_id", "scope_type", "policy_key"}},
-		"media_categories":       {index: "uq_media_categories_scope_parent_name", fields: []string{"tenant_id", "org_id", "scope_type", "parent_id", "name"}},
+		"gvba_notify_callers":           {index: "uq_gvba_notify_callers_scope_key", fields: []string{"tenant_id", "org_id", "scope_type", "caller_key"}},
+		"gvba_notify_templates":         {index: "uq_gvba_notify_templates_scope_key", fields: []string{"tenant_id", "org_id", "scope_type", "template_key"}},
+		"gvba_verify_policies":          {index: "uq_gvba_verify_policies_scope_key", fields: []string{"tenant_id", "org_id", "scope_type", "policy_key"}},
+		"gvba_storage_media_categories": {index: "uq_gvba_storage_media_categories_scope_parent_name", fields: []string{"tenant_id", "org_id", "scope_type", "parent_id", "name"}},
 	}
 	for _, definition := range Definitions() {
 		parsed, err := schema.Parse(definition.New(), &sync.Map{}, schema.NamingStrategy{})

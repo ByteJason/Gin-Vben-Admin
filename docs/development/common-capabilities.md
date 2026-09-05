@@ -37,7 +37,7 @@
 | SMTP | `server/internal/application/mail.Service` 保留租户账号、投递记录、重试和密文正文；`server/internal/application/mail/ports.go`、`server/internal/application/notification/runtime.go` 已提供 caller/模板/策略解析、同步测试发送和验证码入口；管理端模板测试缺省变量自动填充本地化示例值并返回可定位错误 key | 持久化 outbox/relay、真实 provider 健康回退和审计落库继续收口 |
 | 密码找回 | `server/internal/bootstrap/http.go` 构造并注入公共 notification runtime；预置 caller/template/policy 可通过管理端热更新 | 迁移一个真实密码找回或通知调用方，完成端到端回归 |
 | 媒体 | `server/internal/application/file/catalog.go` 提供 `CatalogAdapter`/`MediaCatalog`，支持流式上传、作用域、分类、签名 URL、引用保护和预置 reconcile | 持久化 catalog repository、对象存储清理 worker 和配额对账继续收口 |
-| 文件模型 | `file_objects` 已扩展 category/provider/status/metadata/reconcile 字段；新增 `media_categories`、`media_usages` 模型 | 双库兼容迁移、旧数据回填和生产回滚演练 |
+| 文件模型 | `gvba_storage_file_objects` 已扩展 category/provider/status/metadata/reconcile 字段；新增 `gvba_storage_media_categories`、`gvba_storage_media_usages` 模型 | 双库兼容迁移、旧数据回填和生产回滚演练 |
 | 设置 | `server/internal/application/settings/runtime_snapshot.go` 提供 immutable snapshot、generation 和订阅失效；应用服务可即时读取最终态 | 集群广播与持久化审计接线继续收口 |
 | UI/API | 三套 `system/mail`、`system/files` 页面已接入共享引导 schema、侧边抽屉、媒体图片筛选基础能力；`admin/packages/api-client/src/generated/admin-v1.ts` 已由 OpenAPI 生成并包含 challenge/media endpoint 常量 | 模板管理交互、Logo 业务引用和 E2E/axe 一致性验收 |
 | 任务 | 已有 `jobs.Queue`/worker 和持久化任务相关能力 | outbox relay、provider 清理、补偿和 reconcile 复用具名 jobs port |
@@ -276,7 +276,7 @@ type DetachRequest struct {
 
 当前实现使用显式 `scope_type=system|tenant|org`。可见性查找顺序为 **org → tenant → system**（组织覆盖租户，租户覆盖系统；当前层未命中再回退）。非公开资源还必须匹配当前 principal；platform-admin 仅在内部 catalog 授权 seam 显式放宽跨作用域检查，系统资源始终只读。租户/组织可复制后覆盖。生产化仍需补齐双库迁移、回填和授权回归。
 
-`media_usages` 记录 `resource_id、scope、caller/module、entity_type、entity_id、field`，并以唯一键防重复；`Attach`/`Detach` 的 `UsageInput`/`DetachRequest` 带业务幂等键。当前 Logo adapter 读取旧值后先更新 branding 设置，再绑定新 usage、解绑旧 usage；任一步失败时补偿设置和新旧 usage，页面保留旧 Logo。后续持久化实现将设置与 usage 纳入服务端事务。被引用资源只能软删除/停用，物理清理由后台任务执行。
+`gvba_storage_media_usages` 记录 `resource_id、scope、caller/module、entity_type、entity_id、field`，并以唯一键防重复；`Attach`/`Detach` 的 `UsageInput`/`DetachRequest` 带业务幂等键。当前 Logo adapter 读取旧值后先更新 branding 设置，再绑定新 usage、解绑旧 usage；任一步失败时补偿设置和新旧 usage，页面保留旧 Logo。后续持久化实现将设置与 usage 纳入服务端事务。被引用资源只能软删除/停用，物理清理由后台任务执行。
 
 ## 5. 数据模型与迁移（实现切片与收口项）
 
@@ -284,7 +284,7 @@ type DetachRequest struct {
 
 ### 5.1 媒体表
 
-**`file_objects` 扩展（已落地切片）**：
+**`gvba_storage_file_objects` 扩展（已落地切片）**：
 
 ```text
 scope_type, category_id, provider_id, lifecycle_status,
@@ -296,7 +296,7 @@ pending_at, ready_at, deleted_at
 
 本地 provider 的新上传采用可读的日期分区：`YYYY/MMDD/<opaque-resource-id>[.ext]`（第一层为四位年份，第二层为月日，不再使用 `v1` 或哈希分片前缀）。已有记录中的旧 object key 继续按原值读取，迁移期间不会改写对象。
 
-**`media_categories`（新增）**：
+**`gvba_storage_media_categories`（新增）**：
 
 ```text
 id, scope_type, tenant_id, org_id, parent_id, path, depth,
@@ -305,7 +305,7 @@ name, sort_order, enabled, system_owned, created_at, updated_at, deleted_at
 
 同一父节点名称唯一；移动操作使用事务锁/乐观版本，更新整棵 path/depth 并拒绝环路。
 
-**`media_usages`（新增）**：
+**`gvba_storage_media_usages`（新增）**：
 
 ```text
 id, scope_type, tenant_id, org_id, resource_id, caller_key,
@@ -314,12 +314,12 @@ module, entity_type, entity_id, field, created_at, updated_at, deleted_at
 
 ### 5.2 通知与验证码表
 
-- `notification_callers`：稳定 caller key、能力、scope、启停、system_owned。
-- `notification_caller_accounts`：caller 与 SMTP account 的 allowlist、weight、priority、strategy、默认标记。
-- `notification_templates` + `notification_template_versions`：模板键、locale、变量 schema、draft/published/disabled/soft-deleted、供投递重试使用的不可变发布快照、审计字段；后台配置界面只保存和呈现当前最终态，快照标识仅用于投递关联。
-- `verification_policies`：purpose/caller/scope、长度、字符集、TTL、失败/重发/频率限制。
-- `verification_challenges`：challenge ID、purpose/caller、recipient digest（原文按最小化/加密策略保存）、code digest、状态、失败次数、过期、重发时间、message ID、template key/generation、locale。
-- 现有 `email_messages` 优先扩展为邮件 outbox：增加 caller/template/generation、`is_test`、challenge ID 和 relay 状态；后续渠道出现统一需求时再抽象通用表。
+- `gvba_notify_callers`：稳定 caller key、能力、scope、启停、system_owned。
+- `gvba_notify_caller_accounts`：caller 与 SMTP account 的 allowlist、weight、priority、strategy、默认标记。
+- `gvba_notify_templates` + `gvba_notify_template_versions`：模板键、locale、变量 schema、draft/published/disabled/soft-deleted、供投递重试使用的不可变发布快照、审计字段；后台配置界面只保存和呈现当前最终态，快照标识仅用于投递关联。
+- `gvba_auth_verification_policies`：purpose/caller/scope、长度、字符集、TTL、失败/重发/频率限制。
+- `gvba_auth_verification_challenges`：challenge ID、purpose/caller、recipient digest（原文按最小化/加密策略保存）、code digest、状态、失败次数、过期、重发时间、message ID、template key/generation、locale。
+- 现有 `gvba_notify_email_messages` 优先扩展为邮件 outbox：增加 caller/template/generation、`is_test`、challenge ID 和 relay 状态；后续渠道出现统一需求时再抽象通用表。
 
 所有新增字段必须有中文 field comment、created/updated/deleted 时间和明确 scope 索引。SMTP 唯一索引是否从“tenant-wide”扩展为“scope-aware”需在 migration SQL 和数据冲突报告中明确。
 
@@ -389,7 +389,7 @@ ready → deleting (soft delete) → deleted (physical cleanup job)
 
 ### 6.4 语言回退
 
-模板 locale 解析顺序：显式调用 locale → `users.locale` → 租户默认 → 系统默认（当前核心为 `zh-CN`、`en-US`）。邮件记录保存实际 locale、template key/generation；缺译时回退并写审计提示。正式开发需给 `users` 增加 locale 字段和 migration。
+模板 locale 解析顺序：显式调用 locale → `users.locale` → 租户默认 → 系统默认（当前核心为 `zh-CN`、`en-US`）。邮件记录保存实际 locale、template key/generation；缺译时回退并写审计提示。正式开发需给 `gvba_iam_users` 增加 locale 字段和 migration。
 
 ## 7. 管理 API 与 UI（实现与收口）
 

@@ -52,15 +52,15 @@ func testOrganizationTreeIsolation(t *testing.T, driver, dsn string) {
 	tenantA, tenantB := "org-tenant-a-"+suffix, "org-tenant-b-"+suffix
 	rootID, childID := "org-root-"+suffix, "org-child-"+suffix
 	for _, id := range []string{tenantA, tenantB} {
-		if err := store.Write(ctx).Table("tenants").Create(map[string]any{"id": id, "name": id, "status": "active"}).Error; err != nil {
+		if err := store.Write(ctx).Table("gvba_sys_tenants").Create(map[string]any{"id": id, "name": id, "status": "active"}).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()
-		_ = store.Write(cleanupCtx).Exec("DELETE FROM organizations WHERE id IN (?, ?)", rootID, childID).Error
-		_ = store.Write(cleanupCtx).Exec("DELETE FROM tenants WHERE id IN (?, ?)", tenantA, tenantB).Error
+		_ = store.Write(cleanupCtx).Exec("DELETE FROM gvba_sys_organizations WHERE id IN (?, ?)", rootID, childID).Error
+		_ = store.Write(cleanupCtx).Exec("DELETE FROM gvba_sys_tenants WHERE id IN (?, ?)", tenantA, tenantB).Error
 	})
 
 	repo := organizationplatform.NewGORMRepository(store)
