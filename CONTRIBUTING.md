@@ -2,6 +2,9 @@
 
 感谢参与 Gin-Vben-Admin。提交改动前请先阅读 `README.md`、相关 OpenAPI 契约和本地运行说明。
 
+AI/vibecoding 协作请同时遵守根目录 [`AGENTS.md`](AGENTS.md)；其中的业务边界、依赖方向和提交前检查是本仓库的强制约定。
+业务模块的目录决策可参考 [`docs/development/gin-vben-business-boundaries.md`](docs/development/gin-vben-business-boundaries.md)。
+
 ## 开发流程
 
 1. 从最新 `main` 创建聚焦单一主题的分支。
