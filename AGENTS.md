@@ -22,7 +22,7 @@ Gin-Vben-Admin 基座提供启动装配、HTTP 传输、配置、数据库/缓�
 | `server/internal/application/<domain>/` | 用例编排、事务边界和端口调用 | `domain/`、稳定端口、契约映射 | Gin handler、ORM model、第三方 SDK |
 | `server/internal/transport/http/` | 路由、参数校验、认证上下文、DTO 映射、错误响应 | 模块用例、生成契约、Gin 适配器 | 数据库和缓存实现、业务规则 |
 | `server/internal/platform/` | DB/cache/log/observability/provider 等基座适配器 | 第三方 SDK、标准库、模块端口 | 具体业务用例和页面逻辑 |
-| `server/internal/bootstrap/` | 配置读取、依赖装配、生命周期管理 | transport、platform、modules | 业务规则（只能组装，不能承载业务） |
+| `server/internal/bootstrap/` | 配置读取、依赖装配、生命周期管理 | transport、platform、application/domain | 业务规则（只能组装，不能承载业务） |
 | `admin/` | 管理端 UI、状态和 API client | 生成的 API client、公开 HTTP 契约、前端 workspace 包 | `server/internal`、Go 包、数据库实现 |
 | `scripts/` | 跨边界编排、生成、验证 | 各边界公开命令 | 深层导入业务包、业务规则 |
 
@@ -34,7 +34,7 @@ Gin-Vben-Admin 基座提供启动装配、HTTP 传输、配置、数据库/缓�
 transport/http  ──────→  application  ──────→  domain
        │                       ↑                │
        └──── contracts ────────┘                │
-                               platform ────────┘
+platform adapters ─────→  application ports
 bootstrap ───────────────→  transport / application / platform
 admin ───────────────────→  public HTTP API / generated client
 ```
