@@ -64,6 +64,10 @@ test('workspace has the expected package layout', () => {
   assert.match(pkg.scripts['test:e2e:a11y'], /build:installer/);
   assert.match(pkg.scripts['test:e2e:a11y'], /playwright test/);
   assert.equal(Object.hasOwn(pkg.scripts, 'preinstall'), false);
+  // Selective UI installs must scope lifecycle stub builds to the selected
+  // dependency closure; the root postinstall wrapper owns that decision.
+  assert.equal(pkg.scripts.postinstall, 'node ./scripts/postinstall.mjs');
+  assert.ok(existsSync(resolve(root, 'scripts', 'postinstall.mjs')));
   for (const command of ['preinstall', 'install', 'postinstall']) {
     assert.doesNotMatch(pkg.scripts[command] ?? '', /\bnpx\b|only-allow/);
   }
