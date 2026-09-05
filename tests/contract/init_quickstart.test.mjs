@@ -49,11 +49,11 @@ test('ordinary API replaces the temporary init command', () => {
   assert.equal(existsSync(join(root, 'admin/scripts/init-runtime.mjs')), false);
 });
 
-test('README documents the dependency-minimal quick start and protected state', () => {
+test('README documents the workspace quick start and protected state', () => {
   const readmes = `${read('README.md')}\n${read('admin/README.md')}`;
   assert.doesNotMatch(read('README.md'), /^pnpm --dir admin install\b/m);
   for (const command of [
-    'go run ./cmd/api/main.go',
+    'go run ./cmd/api/',
     'pnpm run init',
     'pnpm run build',
     'pnpm run dev',
@@ -109,7 +109,7 @@ test('fresh source quick start selects UI in the browser without an init termina
     ['admin README', adminQuickStart],
     ['acceptance', acceptanceQuickStart],
   ]) {
-    assert.match(section, /go run \.\/cmd\/api\/main\.go/iu, name);
+    assert.match(section, /go run \.\/cmd\/api\//iu, name);
     assert.match(section, /http:\/\/127\.0\.0\.1:8080\/install/iu, name);
     assert.match(section, /Ant Design Vue|Element Plus|Naive UI/iu, name);
     assert.doesNotMatch(section, /^\s*pnpm run init(?:\s|$)/mu, name);
@@ -140,10 +140,9 @@ test('post-install quick start uses two terminals and installs before dev withou
   ]) {
     assert.match(section, /终端 1/iu, name);
     assert.match(section, /终端 2/iu, name);
-    assert.match(section, /终端 1[\s\S]*cd server[\s\S]*go run \.\/cmd\/api\/main\.go[\s\S]*终端 2[\s\S]*cd admin[\s\S]*pnpm run ui:install[\s\S]*pnpm run dev/iu, name);
-    assert.match(section, /go run \.\/cmd\/api\/main\.go/iu, name);
-    assert.match(section, /pnpm run ui:install[\s\S]*pnpm run dev/iu, name);
-    assert.doesNotMatch(section, /^\s*pnpm install(?:\s|$)/mu, name);
+    assert.match(section, /终端 1[\s\S]*cd server[\s\S]*go run \.\/cmd\/api\/[\s\S]*终端 2[\s\S]*cd admin[\s\S]*pnpm install[\s\S]*pnpm run dev/iu, name);
+    assert.match(section, /go run \.\/cmd\/api\//iu, name);
+    assert.match(section, /pnpm install[\s\S]*pnpm run dev/iu, name);
     assert.doesNotMatch(section, /pnpm run build/iu, name);
   }
 });

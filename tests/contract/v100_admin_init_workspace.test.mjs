@@ -37,8 +37,7 @@ test('INIT-100 web installer selects UI before exposing it as read-only plan sta
   assert.match(script, /JSON\.stringify\(\{\s*mode\s*\}\)/);
   assert.match(script, /重新启动|重启/);
   assert.match(script, /pnpm run dev/);
-  assert.match(script, /pnpm run ui:install/);
-  assert.doesNotMatch(script, /pnpm install(?:\s|<)/);
+  assert.match(script, /pnpm install/);
   assert.doesNotMatch(script, /pnpm run build/);
   assert.match(script, /\.focus\(\)/, 'state and error transitions move focus');
   assert.match(script, /aria-valuetext/);
@@ -79,7 +78,7 @@ test('INIT-100 public clone and acceptance docs use Go /install before public de
   const acceptance = read('docs/manual-acceptance/1.0.0-dev-end-to-end.md');
 
   for (const document of [rootReadme, adminReadme, acceptance]) {
-    assert.match(document, /go run \.\/cmd\/api\/main\.go/);
+    assert.match(document, /go run \.\/cmd\/api\//);
     assert.match(document, /127\.0\.0\.1:8080\/install/);
     assert.match(document, /pnpm run (?:dev|build)/);
   }

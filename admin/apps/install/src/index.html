@@ -621,7 +621,7 @@
                     </dl>
                     <p class="failure-location">
                       当前页面直接显示公开原因；更详细的定位可在运行
-                      <code>go run ./cmd/api/main.go</code> 的服务端终端中按任务
+                      <code>go run ./cmd/api/</code> 的服务端终端中按任务
                       ID 查找 <code>installation.job.failed</code>。
                     </p>
                   </section>
@@ -668,12 +668,12 @@
               <article class="terminal-card" aria-label="终端 1：服务端">
                 <header><span>终端 1</span><strong>服务端</strong></header>
                 <pre><code>cd server
-go run ./cmd/api/main.go</code></pre>
+go run ./cmd/api/</code></pre>
               </article>
               <article class="terminal-card" aria-label="终端 2：管理端">
                 <header><span>终端 2</span><strong>管理端</strong></header>
                 <pre><code>cd admin
-pnpm run ui:install
+pnpm install
 pnpm run dev</code></pre>
               </article>
             </div>

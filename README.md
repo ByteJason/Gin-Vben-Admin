@@ -97,6 +97,7 @@
 ├── docs/                               # 公开文档
 ├── LICENSES/                           # 第三方许可证
 ├── .github/
+├── .env.example
 ├── LICENSE
 ├── NOTICE
 ├── README.md
@@ -148,8 +149,8 @@ corepack enable
 corepack prepare pnpm@11.16.0 --activate
 ```
 
-先按上面的“获取源码”进入仓库。不要先执行无过滤条件的 `pnpm install`；下面的浏览器优先和
-CLI 优先流程 **二选一**，不要混用。两条流程都会保留三套源码，并只安装当前 UI 的依赖闭包。
+先按上面的“获取源码”进入仓库。下面的浏览器优先和 CLI 优先流程 **二选一**，不要混用。
+网页/CLI 初始化完成后，统一在 `admin/` 执行一次 `pnpm install`，确保 workspace 依赖和本地链接完整。
 
 #### 2A. 浏览器优先（普通用户推荐）
 
@@ -157,25 +158,24 @@ CLI 优先流程 **二选一**，不要混用。两条流程都会保留三套�
 
 ```text
 cd server
-go run ./cmd/api/main.go
+go run ./cmd/api/
 ```
 
 打开 [http://127.0.0.1:8080/install](http://127.0.0.1:8080/install)，选择 Ant Design Vue、
-Element Plus 或 Naive UI。网页准备任务会写入本机选择，并在后台对选中包执行冻结 lockfile 的
-过滤安装；另外两套源码保持原样。
+Element Plus 或 Naive UI。网页准备任务会写入本机选择，并完成 profile、workspace 与所选 UI 的依赖准备；
+另外两套源码保持原样。
 
 在网页中完成数据库、Redis、管理员和默认项配置并看到安装成功后，进入下面“两条路径共同的完成步骤”。
 
 #### 2B. CLI 优先（开发者）
 
-若选择本路径，请跳过 2A。先预览并写入本机选择，再用统一命令安装当前 UI 的依赖：
+若选择本路径，请跳过 2A。先预览并写入本机选择：
 
 ```text
 cd admin
 pnpm run ui:select -- --check
 pnpm run ui:select -- ele --dry-run
 pnpm run ui:select -- ele
-pnpm run ui:install
 ```
 
 可选值为 `antd`、`ele`、`naive`。选择记录在
@@ -183,7 +183,7 @@ pnpm run ui:install
 
 ```text
 cd ../server
-go run ./cmd/api/main.go
+go run ./cmd/api/
 # 浏览器打开 http://127.0.0.1:8080/install
 ```
 
@@ -197,17 +197,16 @@ go run ./cmd/api/main.go
 ```text
 # 终端 1：服务端
 cd server
-go run ./cmd/api/main.go
+go run ./cmd/api/
 
 # 终端 2：管理端
 cd admin
-# ui:install 内部执行 pnpm install --filter 当前 profile... --frozen-lockfile
-pnpm run ui:install
+pnpm install
 pnpm run dev
 ```
 
-`ui:install` 会解析当前 profile、安装选中包的依赖闭包并刷新本机依赖收据；重复执行是幂等的。
-浏览器准备阶段已完成同一项过滤安装，安装成功后再次执行用于统一所有本地启动、拉取和切换流程。
+`pnpm install` 使用 `admin/pnpm-lock.yaml` 安装 workspace 依赖并刷新本地链接；重复执行是幂等的。
+如果只切换 UI 或在 CI 中按 profile 安装，可继续使用 `pnpm run ui:install` 的过滤安装入口。
 
 若首次登录持续提示凭据无效，先停止正在运行的 Go 服务端，再在仓库的 `server` 目录重设
 **安装收据中记录的初始管理员**密码；成功后重新启动服务端。
@@ -232,7 +231,7 @@ Redis 中该账号的登录失败/锁定状态。使用非默认 YAML 时追加 
 #### 3. 运行与安装状态
 
 `dev`、`build`、`preview` 只分发当前选择的包；公共业务包和三套 UI adapter 仍由同一
-workspace 管理。有效 profile 处于 `ui_prepared` 时，前端命令已经可以分发到所选包；
+workspace 管理。执行 `pnpm install` 并完成网页安装后，前端命令即可分发到所选包；
 `.runtime/install/.installed` 只证明后端数据库/管理员安装完成，并控制业务 API 门禁，不是
 前端依赖或构建门禁。教程仍把 `pnpm run dev` 放在网页安装之后，以免开发页面请求尚未开放的
 业务 API。
@@ -250,14 +249,15 @@ pnpm run init -- --check
 git status
 git pull --ff-only
 cd admin
-pnpm run ui:install
+pnpm install
 pnpm run dev
 ```
 
 选择器不会删除 tracked UI 路径，因此不会因为“本机选了其中一套”制造 `modify/delete` 冲突。
 用户自己修改了上游同一文件、提交历史已经分叉或存在未提交改动时，仍按普通 Git 工作流先提交、
 暂存、rebase 或 merge；`git pull --ff-only` 只适用于当前分支能够快进的情况。lockfile 或公共包
-变化后重新执行 `pnpm run ui:install`，它会刷新当前 UI 的依赖收据。
+变化后重新执行 `pnpm install`；若需要节省安装范围，可使用 `pnpm run ui:install` 刷新当前 UI
+的依赖收据。
 
 ##### 从旧版“删除两套 UI”工作区一次性收敛
 
@@ -271,7 +271,7 @@ tracked 目录恢复到当前提交，再写入同一个本机选择。以下示
 git restore --source=HEAD -- admin/apps/web-antd admin/apps/web-naive
 cd admin
 pnpm run ui:select -- ele
-pnpm run ui:install
+pnpm install
 cd ..
 git status --short
 git pull --ff-only
@@ -290,7 +290,7 @@ fast-forward 流程。旧 `.ui-profile.json`/receipt 只保留作兼容证据，
 cd admin
 pnpm run ui:select -- naive --check   # 查看计划
 pnpm run ui:select -- naive           # 写入新选择
-pnpm run ui:install                    # 只安装新 UI 的依赖闭包
+pnpm install                            # 安装并刷新当前 workspace 依赖
 pnpm run dev
 ```
 
@@ -303,8 +303,8 @@ pnpm run dev
 
 已完成网页安装的工作区会保留原 `.runtime/install/.installed`，并在
 `.runtime/install/ui-switch-history/` 保存字节一致的历史副本作为审计证据。服务端继续报告
-`installed`，现有数据库、管理员和业务 API 保持可用；切换后只需运行 `pnpm run ui:install`，
-无需再次执行网页后端安装。
+`installed`，现有数据库、管理员和业务 API 保持可用；切换后运行 `pnpm install`，无需再次执行
+网页后端安装。
 
 #### 6. CI / Docker
 
@@ -338,6 +338,25 @@ go -C server run ./cmd/migrate down --steps 1
 
 启用管理端认证时，在本地配置中填写至少 32 字节的 `auth.jwt_secret`（或设置 `AUTH_JWT_SECRET`），并同时启用数据库与 Redis。登录、刷新和登出接口见 `contracts/openapi/admin-v1.yaml`；refresh token 只保存在 HttpOnly Cookie。
 
+### 配置文件
+
+配置按“示例可提交、运行时本地化”管理：
+
+- `server/configs/server.example.yaml`：服务端完整默认模板，保持数据库、Redis 和认证关闭，适合复制后再按部署需要修改。
+- `server/configs/server.yaml`：本机服务端配置（Git ignored），从示例复制或由初始化脚本生成；运行服务端时从 `server/` 目录读取。
+- `.env.example`：根目录环境变量最小模板；复制为 `.env` 后设置 `0600` 权限。环境变量优先于 YAML，安装页会在提交时原子写入实际连接和认证参数。
+- `admin/apps/web-*/.env.*.example`：各管理端的公开 Vite 默认值；初始化会为当前 UI 生成被忽略的本地文件，不要在其中写入服务端密钥。
+
+常用本地准备命令：
+
+```text
+cp server/configs/server.example.yaml server/configs/server.yaml
+cp .env.example .env
+chmod 600 .env server/configs/server.yaml
+```
+
+全新安装优先使用 `/install` 页面填写数据库、Redis 和管理员信息；页面会安全更新根 `.env`，无需手工拼接 DSN 或密码。
+
 #### 初始化状态文件
 
 以下文件或目录由网页准备任务、Node 初始化器和服务端共同维护，**不要手动删除、改名或编辑**。个人选择文件不进入 Git；中断后重新运行选择命令或重新打开 `/install`：
@@ -352,7 +371,7 @@ go -C server run ./cmd/migrate down --steps 1
 | `admin/.ui-profile.json` | 旧版兼容读取入口；新选择流程不会改写它 |
 | `.runtime/install/` | 初始化事务根目录；租约、依赖收据、切换报告等由程序维护，请勿删除或编辑 |
 | `.runtime/install/workspace-transaction.json` | 非破坏 journal；`switching_ui` 保护 selector/`APP_UI_ACTIVE` 的原子切换，`dependencies_pending` 保护依赖准备，`moves` 始终为空。中断后用同一目标重跑；journal 存在时 dev/build 门禁保持关闭 |
-| `.runtime/install/workspace-dependencies.json` | 当前 UI 与 lockfile 摘要；`pnpm run ui:install` 成功后刷新 |
+| `.runtime/install/workspace-dependencies.json` | 当前 UI 与 lockfile 摘要；过滤安装入口成功后刷新 |
 | `.runtime/install/ui-switch-report.json` | 切换前后 UI、公共层保留与 adapter 复核提示 |
 | `.runtime/install/ui-switch-history/` | 已安装工作区切换时保存的后端安装标记只读历史副本；原标记保持不变 |
 | `.runtime/install/.installed` | 网页后端安装完成标记和业务 API 门禁；不作为前端依赖/build 门禁，切换 UI 时保留 |
@@ -383,7 +402,7 @@ go -C server run ./cmd/migrate down --steps 1
 
 ```text
 cd admin
-pnpm run ui:install
+pnpm install
 pnpm run build
 ```
 

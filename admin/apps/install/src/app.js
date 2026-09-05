@@ -13,7 +13,7 @@ const uiResetEndpoint = '/api/system/install/v1/ui/reset';
 const missingUIToolsMessage =
   '准备管理界面需要 Node.js ^22.18.0 或 ^24.12.0，以及 pnpm >=11.0.0；升级后重新检查运行能力。';
 const installationCompletedMessage =
-  '安装已完成。请停止旧服务端，回到仓库根目录，并按下方两个终端命令分别重启服务端和启动管理端；管理端先运行 pnpm run ui:install 安装所选工作区闭包，再运行 pnpm run dev。';
+  '安装已完成。请停止旧服务端，回到仓库根目录，并按下方两个终端命令分别重启服务端和启动管理端；管理端先运行 pnpm install，再运行 pnpm run dev。';
 
 const title = document.querySelector('#status-title');
 const badge = document.querySelector('#status-badge');

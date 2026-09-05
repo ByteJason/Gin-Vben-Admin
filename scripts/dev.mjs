@@ -22,17 +22,18 @@ if (invalid) {
 
 const adminCommand = buildPnpmCommand(['--dir', 'admin', 'run', 'dev']);
 const commands = [
-  { label: 'server', command: 'go', args: ['-C', 'server', 'run', './cmd/api/main.go'] },
+  { label: 'server', command: 'go', args: ['-C', 'server', 'run', './cmd/api/'] },
   { label: 'admin', ...adminCommand },
 ];
 
-console.log(`DEV_ROOT=${root}`);
-console.log(`DEV_COMMANDS=${commands.map(({ command, args }) => [command, ...args].join(' ')).join(' | ')}`);
-
 if (checkOnly) {
+  console.log(`DEV_ROOT=${root}`);
+  console.log(`DEV_COMMANDS=${commands.map(({ command, args }) => [command, ...args].join(' ')).join(' | ')}`);
   console.log('DEV_CHECK_OK');
   process.exit(0);
 }
+
+console.log('Starting Gin API and admin development servers…');
 
 const children = [];
 let stopping = false;

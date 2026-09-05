@@ -35,6 +35,8 @@ test('repository exposes the required code boundaries', () => {
     'admin/apps/install/src/styles.css',
     'admin/apps/install/package.json',
     'admin/pnpm-lock.yaml',
+    '.env.example',
+    'server/configs/server.example.yaml',
     'LICENSE',
     'LICENSES/Vue-Vben-Admin-MIT.txt',
     'NOTICE',
@@ -49,6 +51,33 @@ test('repository exposes the required code boundaries', () => {
     .filter((entry) => entry.isDirectory() && !allowed.has(entry.name))
     .map((entry) => entry.name);
   assert.deepEqual(unexpected, []);
+});
+
+test('runtime configuration examples are compact and credential-free', () => {
+  const envExample = readFileSync(join(root, '.env.example'), 'utf8');
+  const serverExample = readFileSync(
+    join(root, 'server/configs/server.example.yaml'),
+    'utf8',
+  );
+
+  for (const key of [
+    'APP_UI_ACTIVE',
+    'SERVER_ADDR',
+    'LOGGING_LEVEL',
+    'DATABASE_ENABLED',
+    'REDIS_ENABLED',
+    'AUTH_ENABLED',
+    'I18N_DEFAULT_LOCALE',
+  ]) {
+    assert.match(envExample, new RegExp(`^${key}=`, 'm'), key);
+  }
+  assert.doesNotMatch(envExample, /^(?:DATABASE_DSN|REDIS_PASSWORD|AUTH_JWT_SECRET)=\S+/m);
+  assert.match(serverExample, /^version:\s*0\.2\.0-dev$/m);
+  assert.match(serverExample, /^database:\s*$/m);
+  assert.match(serverExample, /^redis:\s*$/m);
+  assert.match(serverExample, /^auth:\s*$/m);
+  assert.match(serverExample, /^  namespace:\s*app:v1$/m);
+  assert.doesNotMatch(serverExample, /(?:password|dsn|jwt_secret):\s*["'][^"']+["']/i);
 });
 
 test('OpenAPI scopes stay separate and expose the HTTP seams', () => {

@@ -6,10 +6,12 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/bootstrap"
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/config"
+	"github.com/gin-gonic/gin"
 )
 
 func main() {
@@ -21,6 +23,13 @@ func main() {
 		log.Printf("api configuration error: %v", err)
 		os.Exit(2)
 	}
+	// Keep normal startup quiet; set logging.level=debug when Gin route
+	// registration diagnostics are needed during local troubleshooting.
+	if strings.EqualFold(strings.TrimSpace(cfg.Logging.Level), "debug") {
+		gin.SetMode(gin.DebugMode)
+	} else {
+		gin.SetMode(gin.ReleaseMode)
+	}
 	app, err := bootstrap.New(cfg)
 	if err != nil {
 		log.Printf("api initialization error: %v", err)
@@ -28,14 +37,7 @@ func main() {
 	}
 	defer app.Close()
 
-	summary := cfg.SafeSummary()
-	log.Printf("api listening on %s (database_enabled=%t database_mode=%s redis_enabled=%t redis_mode=%s)",
-		summary.Server.Addr,
-		summary.Database.Enabled,
-		summary.Database.Mode,
-		summary.Redis.Enabled,
-		summary.Redis.Mode,
-	)
+	log.Printf("api listening on %s", cfg.Server.Addr)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

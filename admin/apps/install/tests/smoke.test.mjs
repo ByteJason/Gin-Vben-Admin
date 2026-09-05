@@ -98,9 +98,8 @@ test('installation shell is independent and exposes an accessible status region'
   assert.match(html, /class="terminal-grid"/);
   assert.match(html, /终端 1：服务端/);
   assert.match(html, /终端 2：管理端/);
-  assert.match(html, /go run \.\/cmd\/api\/main\.go/);
-  assert.match(html, /pnpm run ui:install/);
-  assert.doesNotMatch(html, /pnpm install(?:\s|<)/);
+  assert.match(html, /go run \.\/cmd\/api\//);
+  assert.match(html, /pnpm install/);
   assert.match(html, /pnpm run dev/);
   assert.doesNotMatch(html, /pnpm run build/);
   const nextSteps =
@@ -108,7 +107,7 @@ test('installation shell is independent and exposes an accessible status region'
     '';
   assert.match(
     nextSteps,
-    /终端 1：[\s\S]*?cd server[\s\S]*?go run \.\/cmd\/api\/main\.go[\s\S]*?终端 2：[\s\S]*?cd admin[\s\S]*?pnpm run ui:install[\s\S]*?pnpm run dev/,
+    /终端 1：[\s\S]*?cd server[\s\S]*?go run \.\/cmd\/api\/[\s\S]*?终端 2：[\s\S]*?cd admin[\s\S]*?pnpm install[\s\S]*?pnpm run dev/,
   );
   assert.doesNotMatch(nextSteps, /pnpm run build/);
   assert.doesNotMatch(
@@ -179,8 +178,7 @@ test('installation shell is independent and exposes an accessible status region'
   assert.match(script, /安装任务正在执行/);
   assert.doesNotMatch(script, /Ctrl\+C/);
   assert.match(script, /pnpm run dev/);
-  assert.match(script, /pnpm run ui:install/);
-  assert.doesNotMatch(script, /pnpm install(?:\s|。|，)/);
+  assert.match(script, /pnpm install/);
   assert.match(script, /const installationCompletedMessage\s*=/);
   assert.equal(script.match(/installationCompletedMessage/g)?.length, 3);
   assert.doesNotMatch(script, /pnpm run build/);

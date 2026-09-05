@@ -148,7 +148,7 @@ test('installed quick start stacks both terminal cards without overflow at 320px
   await expect(page.locator('#next-steps')).toBeVisible();
   await expect(page.locator('.terminal-card')).toHaveCount(2);
   await expect(page.locator('.terminal-card').nth(0)).toContainText(
-    'go run ./cmd/api/main.go',
+    'go run ./cmd/api/',
   );
   await expect(page.locator('.terminal-card').nth(1)).toContainText(
     'pnpm install',

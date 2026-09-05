@@ -18,7 +18,8 @@
 ## 初始化与验证
 
 本机首次安装有两条互斥路径；选择其中一条，不要先后重复执行。两条路径都保留三套源码，
-管理端开发服务器都只在网页后端安装完成后启动一次。
+管理端开发服务器都只在网页后端安装完成后启动一次。网页安装完成后，先运行
+`pnpm install`，再启动开发服务器。
 
 ### A. 浏览器优先（普通用户推荐）
 
@@ -26,32 +27,30 @@
 
 ```text
 cd server
-go run ./cmd/api/main.go
+go run ./cmd/api/
 ```
 
 打开 [http://127.0.0.1:8080/install](http://127.0.0.1:8080/install)，在网页中选择
 Ant Design Vue、Element Plus 或 Naive UI，再完成数据库、Redis、管理员和默认项配置。网页准备任务
-会按选择执行冻结 lockfile 的过滤安装，三套 `apps/web-*` 源码始终保留。安装路由只接受真实
+会按选择完成 profile、workspace 和所选 UI 的依赖准备，三套 `apps/web-*` 源码始终保留。安装路由只接受真实
 loopback 来源和 loopback Host，不信任代理头。
 
 ### B. CLI 优先（开发者）
 
-若选择本路径，请跳过 A。先在 `admin/` 预览选择、写入本机 profile，并统一安装当前 UI 依赖：
+若选择本路径，请跳过 A。先在 `admin/` 预览选择并写入本机 profile：
 
 ```text
 cd admin
 pnpm run ui:select -- ele --check
 pnpm run ui:select -- ele
-pnpm run ui:install
 
 cd ../server
-go run ./cmd/api/main.go
+go run ./cmd/api/
 ```
 
 再打开 [http://127.0.0.1:8080/install](http://127.0.0.1:8080/install)。网页将 CLI 已选 UI
-显示为只读项，只继续后端安装；此时不要另开一个 `pnpm run dev`。`pnpm run ui:install` 会从
-`.ui-profile.local.json` 解析选中包，底层执行
-`pnpm install --filter <selected-package>... --frozen-lockfile`，并刷新依赖收据。
+显示为只读项，只继续后端安装；此时不要另开一个 `pnpm run dev`。后端安装完成后，先在
+`admin/` 运行 `pnpm install`，再启动开发服务器。
 
 选择、依赖安装或网页安装中断后，重新打开页面即可继续固定选择；合法的零移动 journal 在 Go
 重启后仍显示为 `ui_prepare`。网页安装事务不会把密码或 DSN 写入事务文件。
@@ -79,18 +78,16 @@ pnpm run build
 pnpm run preview
 ```
 
-安装成功后停止旧服务端，并在两个终端分别运行。管理端只启动一次，本地依赖统一由
-`ui:install` 解析当前 profile：
+安装成功后停止旧服务端，并在两个终端分别运行。管理端只启动一次，先安装 workspace 依赖：
 
 ```text
 # 仓库根目录，终端 1：服务端
 cd server
-go run ./cmd/api/main.go
+go run ./cmd/api/
 
 # 仓库根目录，终端 2：管理端
 cd admin
-# ui:install 内部执行 pnpm install --filter 当前 profile... --frozen-lockfile
-pnpm run ui:install
+pnpm install
 pnpm run dev
 ```
 
@@ -100,7 +97,7 @@ pnpm run dev
 git status
 git pull --ff-only
 cd admin
-pnpm run ui:install
+pnpm install
 ```
 
 选择器保留三个 tracked UI 路径，不会因为本机只激活一套而制造 `modify/delete` 冲突；用户自己的
@@ -108,13 +105,13 @@ pnpm run ui:install
 
 旧版已经删除/暂存两套 UI 的工作区需一次性收敛：先用 `pnpm run init -- --check` 完成或恢复任何
 活动事务，然后从当前 `HEAD` 只恢复两套**未选择**的 tracked 目录，再对原选择执行
-`pnpm run ui:select -- <antd|ele|naive>` 和 `pnpm run ui:install`。例如原选择为 `ele`：
+`pnpm run ui:select -- <antd|ele|naive>` 和 `pnpm install`。例如原选择为 `ele`：
 
 ```text
 git restore --source=HEAD -- admin/apps/web-antd admin/apps/web-naive
 cd admin
 pnpm run ui:select -- ele
-pnpm run ui:install
+pnpm install
 ```
 
 这样保留已选择 UI 的本地适配，同时消除另外两棵树的本机删除；随后回到仓库根目录执行
@@ -126,7 +123,7 @@ pnpm run ui:install
 cd admin
 pnpm run ui:select -- naive --check
 pnpm run ui:select -- naive
-pnpm run ui:install
+pnpm install
 pnpm run dev
 ```
 
@@ -157,7 +154,7 @@ pnpm run dev
 | `.runtime/install/process.guard` | 服务端安装锁共用的持久跨进程保护文件；空闲时也不要删除 |
 | `.runtime/install/.installed.lock` | 并发安装互斥锁 |
 | `.runtime/install/workspace-transaction.json` | 零移动 journal：`switching_ui` 用于原子切换恢复，`dependencies_pending` 用于依赖准备；中断后以同一 UI 重跑，未完成时 dev/build 会被门禁阻止 |
-| `.runtime/install/workspace-dependencies.json` | 当前 UI 与 lockfile 摘要；`pnpm run ui:install` 成功后刷新 |
+| `.runtime/install/workspace-dependencies.json` | 当前 UI 与 lockfile 摘要；过滤安装入口成功后刷新 |
 | `.runtime/install/ui-switch-report.json` | 切换前后选择及公共层/adapter 人工复核提示 |
 | `.runtime/install/ui-switch-history/` | 已安装切换时归档的后端 marker 字节副本；原 marker 保持不变 |
 | `.runtime/install/transaction.json` | 旧版 UI 移动事务兼容记录 |
