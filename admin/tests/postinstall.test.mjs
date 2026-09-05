@@ -6,7 +6,7 @@ import { buildPostinstallArgs } from '../scripts/postinstall.mjs';
 test('postinstall limits stub builds to the selected UI dependency closure', () => {
   assert.deepEqual(
     buildPostinstallArgs({
-      mode: 'workspace',
+      mode: 'WORKSPACE',
       profile: { packageName: '@vben/web-antd' },
     }),
     ['--filter', '@vben/web-antd...', '-r', 'run', '--if-present', 'stub'],
