@@ -2,6 +2,7 @@ package notificationplatform
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -45,6 +46,17 @@ func TestSMTPMailerDeliversMessageToIsolatedFixture(t *testing.T) {
 		if !strings.Contains(message, want) {
 			t.Fatalf("fixture message missing %q: %s", want, message)
 		}
+	}
+}
+
+func TestWriteMessageHTMLContentType(t *testing.T) {
+	var output bytes.Buffer
+	err := writeMessage(&output, "sender@example.com", "recipient@example.com", appnotification.Message{Subject: "Subject", Body: "<p>Hello</p>", BodyFormat: "html"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "Content-Type: text/html; charset=UTF-8") {
+		t.Fatalf("expected html content type, got %q", output.String())
 	}
 }
 

@@ -3,6 +3,7 @@ package notification
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -400,5 +401,20 @@ func TestRuntimeSeedsBuiltInDefaultsWithoutOverwritingCustomState(t *testing.T) 
 	updated, _ := runtime.Template("security.password-changed")
 	if updated.Locales["en-US"].Subject != "custom" {
 		t.Fatalf("custom template was overwritten: %+v", updated)
+	}
+}
+
+func TestRenderTemplateHTMLUsesContextEscaping(t *testing.T) {
+	subject, body, err := renderTemplate(Template{Key: "html", Variables: []string{"name"}, Locales: map[string]TemplateLocale{
+		"en-US": {Subject: "Hi {{.name}}", Body: `<p>Hello {{.name}}</p>`, BodyFormat: "html"},
+	}}, "en-US", map[string]string{"name": `<script>alert(1)</script>`}, "en-US")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if subject != "Hi <script>alert(1)</script>" {
+		t.Fatalf("subject should remain text: %q", subject)
+	}
+	if strings.Contains(body, "<script>") || !strings.Contains(body, "&lt;script&gt;") {
+		t.Fatalf("html variable was not escaped: %q", body)
 	}
 }

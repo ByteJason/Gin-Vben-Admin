@@ -52,6 +52,7 @@ export interface EmailMessage {
   subject: string;
   recipients: EmailRecipient[];
   body?: string;
+  bodyFormat?: 'text' | 'html';
   bodyDigest: string;
   status: string;
   attemptCount: number;
@@ -152,7 +153,7 @@ export interface NotificationTemplate {
   enabled?: boolean;
   published?: boolean;
   defaultLocale?: string;
-  locales?: Record<string, { body: string; locale?: string; subject: string }>;
+  locales?: Record<string, { body: string; bodyFormat?: 'text' | 'html'; locale?: string; subject: string }>;
   variables?: string[];
 }
 export interface VerificationPolicy {

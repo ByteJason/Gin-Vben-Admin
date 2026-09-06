@@ -577,7 +577,11 @@ func writeMessage(writer io.Writer, from, to string, message appnotification.Mes
 			return err
 		}
 	}
-	if _, err := io.WriteString(buffer, "MIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n"); err != nil {
+	contentType := "text/plain"
+	if strings.EqualFold(strings.TrimSpace(message.BodyFormat), "html") {
+		contentType = "text/html"
+	}
+	if _, err := fmt.Fprintf(buffer, "MIME-Version: 1.0\r\nContent-Type: %s; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n", contentType); err != nil {
 		return err
 	}
 	if _, err := io.WriteString(buffer, strings.ReplaceAll(message.Body, "\n", "\r\n")); err != nil {

@@ -214,6 +214,7 @@ type TemplateDraft = {
   defaultLocale: 'en-US' | 'zh-CN';
   enabled: boolean;
   enBody: string;
+  enBodyFormat: 'text' | 'html';
   enSubject: string;
   key: string;
   published: boolean;
@@ -223,6 +224,7 @@ type TemplateDraft = {
   testVariables: string;
   variables: string;
   zhBody: string;
+  zhBodyFormat: 'text' | 'html';
   zhSubject: string;
 };
 type PolicyDraft = {
@@ -271,8 +273,10 @@ const templateForm = reactive<TemplateDraft>({
   variables: '',
   zhSubject: '',
   zhBody: '',
+  zhBodyFormat: 'text',
   enSubject: '',
   enBody: '',
+  enBodyFormat: 'text',
   enabled: true,
   published: false,
   testRecipient: '',
@@ -467,8 +471,10 @@ function resetTemplateForm(open = false) {
     variables: '',
     zhSubject: '',
     zhBody: '',
+    zhBodyFormat: 'text',
     enSubject: '',
     enBody: '',
+    enBodyFormat: 'text',
     enabled: true,
     published: false,
     testRecipient: '',
@@ -597,11 +603,13 @@ function editTemplate(value: NotificationTemplate) {
       (value.defaultLocale === 'zh-CN' ? (value.subject ?? '') : ''),
     zhBody:
       zh?.body ?? (value.defaultLocale === 'zh-CN' ? (value.body ?? '') : ''),
+    zhBodyFormat: zh?.bodyFormat === 'html' ? 'html' : 'text',
     enSubject:
       en?.subject ??
       (value.defaultLocale === 'en-US' ? (value.subject ?? '') : ''),
     enBody:
       en?.body ?? (value.defaultLocale === 'en-US' ? (value.body ?? '') : ''),
+    enBodyFormat: en?.bodyFormat === 'html' ? 'html' : 'text',
     enabled: value.enabled !== false,
     published: value.published === true,
     testVariables: serializeVariables(testVariables),
@@ -611,13 +619,14 @@ function editTemplate(value: NotificationTemplate) {
 function templatePayload() {
   const locales: Record<
     string,
-    { body: string; locale: string; subject: string }
+    { body: string; bodyFormat: 'text' | 'html'; locale: string; subject: string }
   > = {};
   if (templateForm.zhSubject.trim() || templateForm.zhBody.trim()) {
     locales['zh-CN'] = {
       locale: 'zh-CN',
       subject: templateForm.zhSubject.trim(),
       body: templateForm.zhBody,
+      bodyFormat: templateForm.zhBodyFormat,
     };
   }
   if (templateForm.enSubject.trim() || templateForm.enBody.trim()) {
@@ -625,6 +634,7 @@ function templatePayload() {
       locale: 'en-US',
       subject: templateForm.enSubject.trim(),
       body: templateForm.enBody,
+      bodyFormat: templateForm.enBodyFormat,
     };
   }
   return {
@@ -1876,13 +1886,21 @@ onMounted(load);
                 ><span>{{ $t('page.mail.templateSubject') }}</span
                 ><input v-model="templateForm.enSubject" autocomplete="off"
               /></label>
+              <div class="wide template-format-picker" role="group" :aria-label="$t('page.mail.templateBodyFormat')">
+                <span class="field-label">{{ $t('page.mail.templateBodyFormat') }}</span>
+                <div class="segmented-control">
+                  <button type="button" :class="{ active: (templateLocaleEditor === 'zh-CN' ? templateForm.zhBodyFormat : templateForm.enBodyFormat) === 'text' }" @click="templateLocaleEditor === 'zh-CN' ? (templateForm.zhBodyFormat = 'text') : (templateForm.enBodyFormat = 'text')">{{ $t('page.mail.templateBodyText') }}</button>
+                  <button type="button" :class="{ active: (templateLocaleEditor === 'zh-CN' ? templateForm.zhBodyFormat : templateForm.enBodyFormat) === 'html' }" @click="templateLocaleEditor === 'zh-CN' ? (templateForm.zhBodyFormat = 'html') : (templateForm.enBodyFormat = 'html')">{{ $t('page.mail.templateBodyHtml') }}</button>
+                </div>
+                <small class="helper">{{ $t('page.mail.templateBodyFormatHint') }}</small>
+              </div>
               <label v-if="templateLocaleEditor === 'zh-CN'" class="wide"
                 ><span>{{ $t('page.mail.templateBody') }}</span
-                ><textarea v-model="templateForm.zhBody" rows="8"></textarea>
+                ><textarea v-model="templateForm.zhBody" rows="8" :spellcheck="templateForm.zhBodyFormat !== 'html'"></textarea>
               </label>
               <label v-else class="wide"
                 ><span>{{ $t('page.mail.templateBody') }}</span
-                ><textarea v-model="templateForm.enBody" rows="8"></textarea>
+                ><textarea v-model="templateForm.enBody" rows="8" :spellcheck="templateForm.enBodyFormat !== 'html'"></textarea>
               </label>
               <label class="toggle"
                 ><input
@@ -3055,6 +3073,44 @@ button:focus-visible {
   background: #eff6ff;
   border: 1px solid #bfdbfe;
   font-weight: 600;
+}
+
+.template-format-picker {
+  display: grid;
+  gap: 6px;
+}
+
+.field-label {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.segmented-control {
+  display: inline-flex;
+  width: fit-content;
+  padding: 3px;
+  gap: 3px;
+  background: var(--surface-muted, #f1f5f9);
+  border-radius: 8px;
+}
+
+.segmented-control button {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.segmented-control button.active,
+.segmented-control button:focus-visible {
+  background: var(--surface, #fff);
+  color: var(--primary, #2563eb);
+  box-shadow: 0 1px 3px rgb(15 23 42 / 12%);
 }
 
 .locale-tabs {

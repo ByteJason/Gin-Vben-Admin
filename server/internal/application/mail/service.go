@@ -120,6 +120,7 @@ type EmailMessage struct {
 	TemplateGeneration   string      `json:"templateGeneration,omitempty"`
 	PolicyGeneration     string      `json:"policyGeneration,omitempty"`
 	Locale               string      `json:"locale,omitempty"`
+	BodyFormat           string      `json:"bodyFormat,omitempty"`
 	IsTest               bool        `json:"isTest,omitempty"`
 	ChallengeID          string      `json:"challengeId,omitempty"`
 	RelayStatus          string      `json:"relayStatus,omitempty"`
@@ -153,6 +154,7 @@ type MessageView struct {
 	TemplateGeneration string      `json:"templateGeneration,omitempty"`
 	PolicyGeneration   string      `json:"policyGeneration,omitempty"`
 	Locale             string      `json:"locale,omitempty"`
+	BodyFormat         string      `json:"bodyFormat,omitempty"`
 	IsTest             bool        `json:"isTest,omitempty"`
 	ChallengeID        string      `json:"challengeId,omitempty"`
 	RelayStatus        string      `json:"relayStatus,omitempty"`
@@ -175,6 +177,7 @@ type SendInput struct {
 	To             string   `json:"to,omitempty"`
 	Subject        string   `json:"subject"`
 	Body           string   `json:"body"`
+	BodyFormat     string   `json:"bodyFormat,omitempty"`
 	IdempotencyKey string   `json:"idempotencyKey,omitempty"`
 	// The following fields are populated by trusted application adapters, not
 	// by public SMTP request bodies. They let the common notification runtime
@@ -621,7 +624,8 @@ func (s *Service) send(ctx context.Context, input SendInput) (MessageView, error
 	}
 	isTest := input.IsTest || input.Mode == appnotification.SendModeAdminTest
 	idempotencyKey := strings.TrimSpace(input.IdempotencyKey)
-	bodyDigest := sha256.Sum256([]byte(input.Body))
+	bodyFormat := normalizeBodyFormat(input.BodyFormat)
+	bodyDigest := sha256.Sum256([]byte(bodyFormat + "\x00" + input.Body))
 	if idempotencyKey != "" {
 		if existing, found, lookupErr := s.lookupIdempotent(ctx, scope, callerKey, templateKey, idempotencyKey); lookupErr != nil {
 			return MessageView{}, lookupErr
@@ -651,7 +655,7 @@ func (s *Service) send(ctx context.Context, input SendInput) (MessageView, error
 	if idempotencyKey != "" {
 		scopeHash = idempotencyScopeHash(scope.TenantID, scope.Organization, callerKey, templateKey, idempotencyKey)
 	}
-	record := EmailMessage{ID: id, TenantID: scope.TenantID, OrgID: scope.Organization, ScopeType: scopeType(scope), SenderID: actorFromContext(ctx), CallerKey: callerKey, TemplateKey: templateKey, TemplateGeneration: strings.TrimSpace(input.TemplateGeneration), PolicyGeneration: strings.TrimSpace(input.PolicyGeneration), Locale: locale, IsTest: isTest, ChallengeID: strings.TrimSpace(input.ChallengeID), RelayStatus: "pending", Subject: strings.TrimSpace(input.Subject), Recipients: recipients, BodyCiphertext: ciphertext, BodyDigest: hex.EncodeToString(bodyDigest[:]), Status: StatusPending, IdempotencyKey: idempotencyKey, IdempotencyScopeHash: scopeHash, CreatedAt: now, UpdatedAt: now}
+	record := EmailMessage{ID: id, TenantID: scope.TenantID, OrgID: scope.Organization, ScopeType: scopeType(scope), SenderID: actorFromContext(ctx), CallerKey: callerKey, TemplateKey: templateKey, TemplateGeneration: strings.TrimSpace(input.TemplateGeneration), PolicyGeneration: strings.TrimSpace(input.PolicyGeneration), Locale: locale, BodyFormat: bodyFormat, IsTest: isTest, ChallengeID: strings.TrimSpace(input.ChallengeID), RelayStatus: "pending", Subject: strings.TrimSpace(input.Subject), Recipients: recipients, BodyCiphertext: ciphertext, BodyDigest: hex.EncodeToString(bodyDigest[:]), Status: StatusPending, IdempotencyKey: idempotencyKey, IdempotencyScopeHash: scopeHash, CreatedAt: now, UpdatedAt: now}
 	record, err = s.messages.Create(ctx, record)
 	if err != nil {
 		// A unique database index may win a cross-process race after the
@@ -715,7 +719,7 @@ func (s *Service) send(ctx context.Context, input SendInput) (MessageView, error
 			for _, recipient := range recipients {
 				recipientAddresses = append(recipientAddresses, recipient.Address)
 			}
-			notificationMessage := appnotification.Message{ID: record.ID, To: recipients[0].Address, Recipients: recipientAddresses, Subject: record.Subject, Body: input.Body, CallerKey: record.CallerKey, TemplateKey: record.TemplateKey, TemplateGeneration: record.TemplateGeneration, PolicyGeneration: record.PolicyGeneration, Locale: record.Locale, Mode: input.Mode, IsTest: record.IsTest, ChallengeID: record.ChallengeID, IdempotencyKey: record.IdempotencyKey, CreatedAt: record.CreatedAt}
+			notificationMessage := appnotification.Message{ID: record.ID, To: recipients[0].Address, Recipients: recipientAddresses, Subject: record.Subject, Body: input.Body, BodyFormat: record.BodyFormat, CallerKey: record.CallerKey, TemplateKey: record.TemplateKey, TemplateGeneration: record.TemplateGeneration, PolicyGeneration: record.PolicyGeneration, Locale: record.Locale, Mode: input.Mode, IsTest: record.IsTest, ChallengeID: record.ChallengeID, IdempotencyKey: record.IdempotencyKey, CreatedAt: record.CreatedAt}
 			if resultProvider, ok := s.provider.(StringResultProvider); ok {
 				record.ProviderMessageID, last = resultProvider.SendWithResult(ctx, providerAccount, notificationMessage)
 			} else if resultProvider, ok := s.provider.(ResultProvider); ok {
@@ -794,7 +798,7 @@ func (s *Service) lookupIdempotent(ctx context.Context, scope tenant.Context, ca
 }
 
 func sameIdempotencyPayload(existing EmailMessage, input SendInput, caller, template, locale string, isTest bool, subject, bodyDigest string, recipients []Recipient) bool {
-	if existing.CallerKey != caller || existing.TemplateKey != template || existing.Locale != locale || existing.IsTest != isTest || existing.Subject != subject || existing.BodyDigest != bodyDigest || existing.ChallengeID != strings.TrimSpace(input.ChallengeID) || existing.TemplateGeneration != strings.TrimSpace(input.TemplateGeneration) || existing.PolicyGeneration != strings.TrimSpace(input.PolicyGeneration) {
+	if existing.CallerKey != caller || existing.TemplateKey != template || existing.Locale != locale || existing.IsTest != isTest || existing.Subject != subject || existing.BodyDigest != bodyDigest || normalizeBodyFormat(existing.BodyFormat) != normalizeBodyFormat(input.BodyFormat) || existing.ChallengeID != strings.TrimSpace(input.ChallengeID) || existing.TemplateGeneration != strings.TrimSpace(input.TemplateGeneration) || existing.PolicyGeneration != strings.TrimSpace(input.PolicyGeneration) {
 		return false
 	}
 	left := canonicalRecipients(existing.Recipients)
@@ -862,12 +866,19 @@ func (s *Service) providerAccount(ctx context.Context, account Account) (appnoti
 	return appnotification.SMTPAccount{Enabled: account.Enabled, Name: account.Name, TenantID: account.TenantID, OrgID: account.OrgID, ScopeType: account.ScopeType, Host: account.Host, Port: account.Port, Username: account.Username, Password: string(password), Weight: account.Weight, FromEmail: account.FromEmail, FromName: account.FromName, ImplicitTLS: account.ImplicitTLS}, nil
 }
 
+func normalizeBodyFormat(value string) string {
+	if strings.EqualFold(strings.TrimSpace(value), "html") {
+		return "html"
+	}
+	return "text"
+}
+
 func (s *Service) view(ctx context.Context, record EmailMessage, includeBody bool) (MessageView, error) {
 	view := MessageView{
 		ID: record.ID, TenantID: record.TenantID, OrgID: record.OrgID, ScopeType: record.ScopeType,
 		SMTPAccountID: record.SMTPAccountID, SenderID: record.SenderID, CallerKey: record.CallerKey,
 		TemplateKey: record.TemplateKey, TemplateGeneration: record.TemplateGeneration,
-		PolicyGeneration: record.PolicyGeneration, Locale: record.Locale, IsTest: record.IsTest,
+		PolicyGeneration: record.PolicyGeneration, Locale: record.Locale, BodyFormat: normalizeBodyFormat(record.BodyFormat), IsTest: record.IsTest,
 		ChallengeID: record.ChallengeID, RelayStatus: record.RelayStatus, Subject: record.Subject,
 		Recipients: cloneRecipients(record.Recipients), BodyDigest: record.BodyDigest, Status: record.Status,
 		AttemptCount: record.AttemptCount, ProviderMessageID: record.ProviderMessageID,

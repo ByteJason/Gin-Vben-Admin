@@ -2813,6 +2813,7 @@ components:
         locale: { type: string }
         subject: { type: string }
         body: { type: string }
+        bodyFormat: { type: string, enum: [text, html], default: text, description: 正文格式；缺省按纯文本处理 }
         variables: { type: array, items: { type: string } }
         locales: { type: object, additionalProperties: { $ref: '#/components/schemas/NotificationTemplateLocale' } }
         enabled: { type: boolean }
@@ -2828,6 +2829,7 @@ components:
         locale: { type: string }
         subject: { type: string }
         body: { type: string }
+        bodyFormat: { type: string, enum: [text, html], default: text, description: 正文格式；缺省按纯文本处理 }
     NotificationTemplateInput:
       type: object
       properties:
@@ -2838,6 +2840,7 @@ components:
         locale: { type: string }
         subject: { type: string }
         body: { type: string }
+        bodyFormat: { type: string, enum: [text, html], default: text, description: 正文格式；缺省按纯文本处理 }
         variables: { type: array, items: { type: string } }
         locales: { type: object, additionalProperties: { $ref: '#/components/schemas/NotificationTemplateLocale' } }
         enabled: { type: boolean }

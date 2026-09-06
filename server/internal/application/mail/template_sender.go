@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	htmltemplate "html/template"
+	"io"
 	"strings"
 	"text/template"
 
@@ -15,6 +17,10 @@ import (
 // snapshot, the notification Runtime, or a deterministic fixture.
 type TemplateRenderer interface {
 	Render(context.Context, string, string, map[string]string) (subject, body, generation string, err error)
+}
+
+type templateFormatRenderer interface {
+	RenderWithFormat(context.Context, string, string, map[string]string) (subject, body, generation, format string, err error)
 }
 
 // ServiceSender adapts the existing tenant-scoped Service to the public
@@ -42,6 +48,7 @@ func (m NotificationMailer) Send(ctx context.Context, message notification.Messa
 		Recipients:         recipients,
 		Subject:            message.Subject,
 		Body:               message.Body,
+		BodyFormat:         message.BodyFormat,
 		CallerKey:          message.CallerKey,
 		TemplateKey:        message.TemplateKey,
 		TemplateGeneration: message.TemplateGeneration,
@@ -71,7 +78,14 @@ func (s *ServiceSender) Send(ctx context.Context, request SendRequest) (SendResu
 	if len(request.Recipients) == 0 {
 		return SendResult{}, notification.ErrInvalidRecipient
 	}
-	subject, body, generation, err := s.renderer.Render(ctx, strings.TrimSpace(request.TemplateKey), request.Locale, request.Variables)
+	format := "text"
+	var subject, body, generation string
+	var err error
+	if renderer, ok := s.renderer.(templateFormatRenderer); ok {
+		subject, body, generation, format, err = renderer.RenderWithFormat(ctx, strings.TrimSpace(request.TemplateKey), request.Locale, request.Variables)
+	} else {
+		subject, body, generation, err = s.renderer.Render(ctx, strings.TrimSpace(request.TemplateKey), request.Locale, request.Variables)
+	}
 	if err != nil {
 		return SendResult{}, err
 	}
@@ -86,6 +100,7 @@ func (s *ServiceSender) Send(ctx context.Context, request SendRequest) (SendResu
 		Recipients:         addresses,
 		Subject:            subject,
 		Body:               body,
+		BodyFormat:         format,
 		IdempotencyKey:     request.IdempotencyKey,
 		CallerKey:          request.CallerKey,
 		TemplateKey:        request.TemplateKey,
@@ -113,8 +128,9 @@ type MapTemplateRenderer struct {
 }
 
 type TemplateView struct {
-	Subject string
-	Body    string
+	Subject    string
+	Body       string
+	BodyFormat string
 }
 
 func (r MapTemplateRenderer) Render(_ context.Context, key, _ string, variables map[string]string) (string, string, string, error) {
@@ -122,8 +138,14 @@ func (r MapTemplateRenderer) Render(_ context.Context, key, _ string, variables 
 	if !ok {
 		return "", "", "", notification.ErrTemplateNotFound
 	}
-	render := func(source string) (string, error) {
-		parsed, err := template.New("mail").Option("missingkey=error").Parse(source)
+	render := func(source string, htmlBody bool) (string, error) {
+		var parsed interface{ Execute(io.Writer, any) error }
+		var err error
+		if htmlBody {
+			parsed, err = htmltemplate.New("mail").Option("missingkey=error").Parse(source)
+		} else {
+			parsed, err = template.New("mail").Option("missingkey=error").Parse(source)
+		}
 		if err != nil {
 			return "", errors.New("invalid template")
 		}
@@ -133,15 +155,27 @@ func (r MapTemplateRenderer) Render(_ context.Context, key, _ string, variables 
 		}
 		return output.String(), nil
 	}
-	subject, err := render(value.Subject)
+	subject, err := render(value.Subject, false)
 	if err != nil {
 		return "", "", "", err
 	}
-	body, err := render(value.Body)
+	body, err := render(value.Body, strings.EqualFold(strings.TrimSpace(value.BodyFormat), "html"))
 	if err != nil {
 		return "", "", "", err
 	}
 	return subject, body, "", nil
+}
+
+func (r MapTemplateRenderer) RenderWithFormat(ctx context.Context, key, locale string, variables map[string]string) (string, string, string, string, error) {
+	subject, body, generation, err := r.Render(ctx, key, locale, variables)
+	if err != nil {
+		return "", "", "", "text", err
+	}
+	format := "text"
+	if value, ok := r.Templates[key]; ok && strings.EqualFold(strings.TrimSpace(value.BodyFormat), "html") {
+		format = "html"
+	}
+	return subject, body, generation, format, nil
 }
 
 var _ MailSender = (*ServiceSender)(nil)

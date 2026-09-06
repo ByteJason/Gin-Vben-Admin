@@ -36,6 +36,9 @@ type Message struct {
 	Recipients []string `json:"-"`
 	Subject    string   `json:"subject"`
 	Body       string   `json:"-"`
+	// BodyFormat controls the MIME representation emitted by transports. Empty
+	// keeps backwards compatibility and is treated as text/plain.
+	BodyFormat string `json:"-"`
 	// The following correlation fields are populated by trusted application
 	// adapters. They are deliberately omitted from the legacy JSON envelope so
 	// existing transport clients keep the same shape while the SMTP service can
