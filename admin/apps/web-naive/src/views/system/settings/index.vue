@@ -38,6 +38,10 @@ const resetting = ref('');
 const clearing = ref('');
 const error = ref('');
 const notice = ref('');
+// The system settings center intentionally exposes only security controls.
+// Branding, storage and diagnostics are deployment/media concerns and have
+// dedicated configuration surfaces.
+const visibleModuleIds = new Set(['security', 'captcha']);
 
 const activeView = computed(() => views[selectedModule.value]);
 // Named grouping boundary for shared decorators and responsive card layouts.
@@ -46,13 +50,28 @@ const visibleDefinitions = computed(() => {
   const view = activeView.value;
   const keyword = search.value.trim().toLocaleLowerCase();
   if (!view) return [];
-  if (!keyword) return view.definitions;
-  return view.definitions.filter((definition) =>
+  const definitions = view.definitions.filter((definition) => {
+    if (view.module === 'captcha') {
+      const enabledDefinition = definitionFor(view, 'captcha.enabled');
+      const enabled = enabledDefinition ? boolValue(view, enabledDefinition) : true;
+      if (!enabled && definition.key !== 'captcha.enabled') return false;
+      const type = displayValue(view, definitionFor(view, 'captcha.type') ?? definition).toLowerCase();
+      if (definition.key.startsWith('captcha.cloudflare.') && type !== 'cloudflare') return false;
+      if (['captcha.length', 'captcha.charset', 'captcha.width', 'captcha.height', 'captcha.failure_limit'].includes(definition.key) && type !== 'image') return false;
+    }
+    return true;
+  });
+  if (!keyword) return definitions;
+  return definitions.filter((definition) =>
     [definition.displayName, definition.key, definition.description]
       .filter(Boolean)
       .some((item) => item!.toLocaleLowerCase().includes(keyword)),
   );
 });
+
+function definitionFor(view: SettingModuleView, key: string) {
+  return view.definitions.find((item) => item.key === key);
+}
 const draftCount = computed(() =>
   Object.values(drafts).reduce((count, values) => count + Object.keys(values).length, 0),
 );
@@ -319,6 +338,7 @@ async function load() {
       modules.value = await loadLegacyModules();
       if (!modules.value.length) throw moduleError;
     }
+    modules.value = modules.value.filter((module) => visibleModuleIds.has(module.id));
     selectedModule.value = modules.value[0]?.id ?? '';
   } catch {
     error.value = t('page.settings.loadError', '系统设置加载失败，请稍后重试');
@@ -586,11 +606,11 @@ h1, h2, h3, p { margin-top: 0; }
 .search-box { flex: 1; max-width: 480px; }
 .search-box input { width: 100%; }
 .toolbar-hint { color: var(--settings-muted); font-size: 13px; }
-.settings-layout { display: grid; gap: 20px; grid-template-columns: minmax(180px, 230px) minmax(0, 1fr); }
-.module-nav { display: flex; flex-direction: column; gap: 8px; }
-.module-tab { background: transparent; border: 1px solid var(--settings-border); border-radius: 10px; cursor: pointer; display: flex; flex-direction: column; gap: 5px; padding: 12px; text-align: left; }
+.settings-layout { display: flex; flex-direction: column; gap: 0; }
+.module-nav { display: flex; gap: 8px; overflow-x: auto; border-bottom: 1px solid var(--settings-border); }
+.module-tab { background: transparent; border: 0; border-bottom: 2px solid transparent; border-radius: 0; cursor: pointer; display: flex; flex-direction: column; gap: 5px; padding: 12px 18px; text-align: center; white-space: nowrap; }
 .module-tab small { color: var(--settings-muted); }
-.module-tab.active { border-color: var(--color-primary, #1677ff); box-shadow: 0 0 0 1px var(--color-primary, #1677ff); }
+.module-tab.active { border-bottom-color: var(--color-primary, #1677ff); color: var(--color-primary, #1677ff); }
 .module-panel { min-width: 0; }
 .module-heading { align-items: flex-start; border-bottom: 1px solid var(--settings-border); padding-bottom: 16px; }
 .module-meta { flex-wrap: wrap; justify-content: flex-end; }
@@ -617,5 +637,5 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
 .page-state { color: var(--settings-muted); padding: 40px 12px; text-align: center; }
 .sr-only { height: 1px; margin: -1px; overflow: hidden; position: absolute; width: 1px; clip: rect(0, 0, 0, 0); }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; } }
-@media (max-width: 760px) { .settings-page { padding: 16px; } .settings-layout { grid-template-columns: 1fr; } .module-nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); } .module-heading { flex-direction: column; } .module-meta { justify-content: flex-start; } .toolbar { align-items: stretch; flex-direction: column; } .search-box { max-width: none; } }
+@media (max-width: 760px) { .settings-page { padding: 16px; } .module-heading { flex-direction: column; } .module-meta { justify-content: flex-start; } .toolbar { align-items: stretch; flex-direction: column; } .search-box { max-width: none; } }
 </style>

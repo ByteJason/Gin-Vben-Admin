@@ -6,6 +6,10 @@
 
 version: 0.2.0-dev
 
+site:
+  name: Gin-Vben-Admin
+  logo: ""
+
 server:
   addr: ":8080"
   read_timeout: 10s
@@ -84,7 +88,7 @@ auth:
   jwt_secret: ""
   issuer: gin-vben-admin
   audience: admin
-  access_ttl: 30m
+  access_ttl: 24h
   refresh_ttl: 168h
   refresh_cookie_name: refresh_token
   secure_cookie: false
@@ -94,6 +98,14 @@ auth:
   lockout_threshold: 5
   lockout_duration: 15m
   captcha_enabled: false
+  captcha_type: image
+  captcha_length: 6
+  captcha_charset: alphanumeric
+  captcha_width: 240
+  captcha_height: 80
+  captcha_failure_limit: 0
+  captcha_cloudflare_site_key: ""
+  captcha_cloudflare_secret_key: ""
   captcha_risk_threshold: 3
   captcha_risk_window: 15m
   captcha_challenge_ttl: 2m

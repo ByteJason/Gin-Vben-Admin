@@ -39,6 +39,7 @@ import {
   uploadMediaResourceApi,
 } from '#/api/core/files';
 import { $t } from '#/locales';
+import { getSettingApi, updateSettingApi } from '#/api/core/settings';
 
 const { hasAccessByCodes } = useAccess();
 const canManage = computed(
@@ -97,6 +98,9 @@ function closeGuide() {
 }
 const cleanupAge = ref(180 * 24 * 60 * 60);
 const cleanupLoading = ref(false);
+const storageProvider = ref('local');
+const storageProviderVersion = ref(0);
+const storageSaving = ref(false);
 const cleanupReport = ref<{
   bytes: number;
   cutoff: string;
@@ -625,9 +629,37 @@ async function cleanupDryRun() {
   }
 }
 
+async function loadStorageProvider() {
+  try {
+    const setting = await getSettingApi('file.provider');
+    storageProvider.value = setting.value.replace(/^"|"$/g, '') || 'local';
+    storageProviderVersion.value = setting.version ?? 0;
+  } catch {
+    storageProvider.value = 'local';
+  }
+}
+
+async function saveStorageProvider() {
+  if (!canManage.value || storageSaving.value) return;
+  storageSaving.value = true;
+  try {
+    const result = await updateSettingApi('file.provider', {
+      value: JSON.stringify(storageProvider.value),
+      expectedVersion: storageProviderVersion.value,
+    });
+    storageProviderVersion.value = result.version ?? storageProviderVersion.value + 1;
+    notifySuccess('存储驱动已保存');
+  } catch {
+    notifyError('存储驱动保存失败');
+  } finally {
+    storageSaving.value = false;
+  }
+}
+
 onBeforeUnmount(revokePreviewURLs);
 
 onMounted(async () => {
+  await loadStorageProvider();
   await loadCategories();
   await load();
   try {
@@ -658,10 +690,28 @@ onMounted(async () => {
         <button class="secondary" type="button" @click="openGuide">
           {{ $t('page.files.guideButton') }}
         </button>
-        <span class="provider-chip">{{ $t('page.files.localProvider') }}</span>
-        <a href="/system/settings">{{ $t('page.files.providerSettings') }}</a>
+        <span class="provider-chip">{{ storageProvider }}</span>
       </div>
     </header>
+
+    <section class="storage-settings" aria-labelledby="storage-settings-title">
+      <div>
+        <p class="eyebrow">媒体库配置</p>
+        <h2 id="storage-settings-title">存储驱动</h2>
+        <p class="description">local 为默认本地存储，其他驱动仅预留入口。</p>
+      </div>
+      <div class="storage-controls">
+        <select v-model="storageProvider" :disabled="!canManage || storageSaving" aria-label="存储驱动">
+          <option value="local">local（本地）</option>
+          <option value="s3">s3（预留）</option>
+          <option value="oss">oss（预留）</option>
+          <option value="cos">cos（预留）</option>
+        </select>
+        <button class="primary" type="button" :disabled="!canManage || storageSaving" @click="saveStorageProvider">
+          {{ storageSaving ? '保存中…' : '保存' }}
+        </button>
+      </div>
+    </section>
 
     <p v-if="error" class="sr-only" role="alert" tabindex="-1">
       {{ error }}
@@ -1106,6 +1156,20 @@ onMounted(async () => {
   font-size: 0.8rem;
   color: hsl(var(--primary));
 }
+
+.storage-settings {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 1rem 0 1.25rem;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+}
+.storage-settings h2 { margin: 0 0 0.25rem; }
+.storage-controls { display: flex; align-items: center; gap: 0.5rem; }
+.storage-controls select { min-width: 180px; }
 
 .eyebrow {
   margin: 0 0 0.35rem;

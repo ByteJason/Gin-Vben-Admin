@@ -23,14 +23,8 @@ let expiryTimer: ReturnType<typeof setInterval> | undefined;
 
 const expiresInLabel = computed(() => {
   if (!challenge.value) return '';
-  if (remainingSeconds.value <= 0) {
-    return String($t('authentication.captchaExpired'));
-  }
-  return String(
-    $t('authentication.captchaExpiresIn', {
-      seconds: remainingSeconds.value,
-    }),
-  );
+  if (remainingSeconds.value <= 0) return String($t('authentication.captchaExpired'));
+  return String($t('authentication.captchaExpiresIn', { seconds: remainingSeconds.value }));
 });
 
 function clearExpiryTimer() {
@@ -120,28 +114,20 @@ onBeforeUnmount(clearExpiryTimer);
           {{ failed ? refreshText : '…' }}
         </span>
       </button>
-      <button
-        class="text-foreground text-sm underline-offset-4 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
-        :disabled="disabled || loading"
-        type="button"
-        @click="refresh"
-      >
-        {{ refreshText }}
-      </button>
+      <input
+        v-model="modelValue"
+        :aria-label="inputPlaceholder"
+        autocomplete="off"
+        class="border-input bg-background focus-visible:ring-ring h-14 min-w-0 flex-1 rounded-md border px-3 text-sm focus-visible:outline-none focus-visible:ring-2"
+        data-testid="image-captcha-input"
+        :disabled="disabled || loading || !challenge || remainingSeconds <= 0"
+        :name="name"
+        :placeholder="inputPlaceholder"
+        spellcheck="false"
+        type="text"
+      />
     </div>
-    <input
-      v-model="modelValue"
-      :aria-label="inputPlaceholder"
-      autocomplete="off"
-      class="border-input bg-background focus-visible:ring-ring h-9 w-full rounded-md border px-3 text-sm focus-visible:outline-none focus-visible:ring-2"
-      data-testid="image-captcha-input"
-      :disabled="disabled || loading || !challenge || remainingSeconds <= 0"
-      :name="name"
-      :placeholder="inputPlaceholder"
-      spellcheck="false"
-      type="text"
-    />
-    <span v-if="expiresInLabel" class="text-muted-foreground text-xs">
+    <span v-if="expiresInLabel" class="sr-only" aria-live="polite">
       {{ expiresInLabel }}
     </span>
   </div>

@@ -1676,6 +1676,18 @@ func validateModuleValues(module string, definitions map[string]Definition, valu
 				}
 			}
 		}
+	case "captcha":
+		if value, ok := stringValue(values["captcha.type"]); ok {
+			typeName := strings.ToLower(strings.TrimSpace(value))
+			if typeName != "image" && typeName != "slider" && typeName != "cloudflare" {
+				return fmt.Errorf("%w: captcha.type must be image, slider, or cloudflare", ErrInvalidSetting)
+			}
+		}
+		for _, key := range []string{"captcha.length", "captcha.width", "captcha.height", "captcha.failure_limit"} {
+			if value, ok := numberValue(values[key]); ok && value < 0 {
+				return fmt.Errorf("%w: %s must not be negative", ErrInvalidSetting, key)
+			}
+		}
 	}
 	return nil
 }

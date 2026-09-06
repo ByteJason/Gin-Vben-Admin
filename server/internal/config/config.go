@@ -19,6 +19,7 @@ const defaultConfigPath = "configs/server.yaml"
 // Config contains the runtime settings used by the HTTP service and its optional
 // infrastructure dependencies.
 type Config struct {
+	Site          SiteConfig           `mapstructure:"site" yaml:"site"`
 	Server        ServerConfig         `mapstructure:"server" yaml:"server"`
 	Logging       LoggingConfig        `mapstructure:"logging" yaml:"logging"`
 	Database      DatabaseConfig       `mapstructure:"database" yaml:"database"`
@@ -36,6 +37,13 @@ type Config struct {
 	// fill compiled defaults, but must not override these higher-authority
 	// sources (DEC-018).
 	dynamicObservabilityLocked map[string]bool
+}
+
+// SiteConfig contains deployment-time branding. It is deliberately not part
+// of the database-backed settings center.
+type SiteConfig struct {
+	Name string `mapstructure:"name" yaml:"name"`
+	Logo string `mapstructure:"logo" yaml:"logo"`
 }
 
 type ServerConfig struct {
@@ -99,11 +107,22 @@ type AuthConfig struct {
 	LockoutThreshold     int           `mapstructure:"lockout_threshold" yaml:"lockout_threshold"`
 	LockoutDuration      time.Duration `mapstructure:"lockout_duration" yaml:"lockout_duration"`
 	CaptchaEnabled       bool          `mapstructure:"captcha_enabled" yaml:"captcha_enabled"`
-	CaptchaRiskThreshold int           `mapstructure:"captcha_risk_threshold" yaml:"captcha_risk_threshold"`
-	CaptchaRiskWindow    time.Duration `mapstructure:"captcha_risk_window" yaml:"captcha_risk_window"`
-	CaptchaChallengeTTL  time.Duration `mapstructure:"captcha_challenge_ttl" yaml:"captcha_challenge_ttl"`
-	CaptchaKeyPrefix     string        `mapstructure:"captcha_key_prefix" yaml:"captcha_key_prefix"`
-	RegistrationEnabled  bool          `mapstructure:"registration_enabled" yaml:"registration_enabled"`
+	// CaptchaType selects the interactive challenge shown on the login page.
+	// image remains the default and is fully handled by the built-in provider;
+	// slider and cloudflare are reserved integration modes.
+	CaptchaType                string        `mapstructure:"captcha_type" yaml:"captcha_type"`
+	CaptchaLength              int           `mapstructure:"captcha_length" yaml:"captcha_length"`
+	CaptchaCharset             string        `mapstructure:"captcha_charset" yaml:"captcha_charset"`
+	CaptchaWidth               int           `mapstructure:"captcha_width" yaml:"captcha_width"`
+	CaptchaHeight              int           `mapstructure:"captcha_height" yaml:"captcha_height"`
+	CaptchaFailureLimit        int           `mapstructure:"captcha_failure_limit" yaml:"captcha_failure_limit"`
+	CaptchaCloudflareSiteKey   string        `mapstructure:"captcha_cloudflare_site_key" yaml:"captcha_cloudflare_site_key"`
+	CaptchaCloudflareSecretKey string        `mapstructure:"captcha_cloudflare_secret_key" yaml:"captcha_cloudflare_secret_key" json:"-"`
+	CaptchaRiskThreshold       int           `mapstructure:"captcha_risk_threshold" yaml:"captcha_risk_threshold"`
+	CaptchaRiskWindow          time.Duration `mapstructure:"captcha_risk_window" yaml:"captcha_risk_window"`
+	CaptchaChallengeTTL        time.Duration `mapstructure:"captcha_challenge_ttl" yaml:"captcha_challenge_ttl"`
+	CaptchaKeyPrefix           string        `mapstructure:"captcha_key_prefix" yaml:"captcha_key_prefix"`
+	RegistrationEnabled        bool          `mapstructure:"registration_enabled" yaml:"registration_enabled"`
 }
 
 // MailConfig is the optional SMTP transport configuration. It stays in the
@@ -240,6 +259,12 @@ type AuthSummary struct {
 	LockoutThreshold     int           `json:"lockout_threshold"`
 	LockoutDuration      time.Duration `json:"lockout_duration"`
 	CaptchaEnabled       bool          `json:"captcha_enabled"`
+	CaptchaType          string        `json:"captcha_type"`
+	CaptchaLength        int           `json:"captcha_length"`
+	CaptchaCharset       string        `json:"captcha_charset"`
+	CaptchaWidth         int           `json:"captcha_width"`
+	CaptchaHeight        int           `json:"captcha_height"`
+	CaptchaFailureLimit  int           `json:"captcha_failure_limit"`
 	CaptchaRiskThreshold int           `json:"captcha_risk_threshold"`
 	CaptchaRiskWindow    time.Duration `json:"captcha_risk_window"`
 	CaptchaChallengeTTL  time.Duration `json:"captcha_challenge_ttl"`
@@ -282,6 +307,7 @@ type TenantSummary struct {
 // external infrastructure services.
 func Default() Config {
 	return Config{
+		Site: SiteConfig{Name: "Gin-Vben-Admin"},
 		Server: ServerConfig{
 			Addr:            ":8080",
 			ReadTimeout:     10 * time.Second,
@@ -311,7 +337,7 @@ func Default() Config {
 		Auth: AuthConfig{
 			Issuer:               "gin-vben-admin",
 			Audience:             "admin",
-			AccessTTL:            30 * time.Minute,
+			AccessTTL:            24 * time.Hour,
 			RefreshTTL:           7 * 24 * time.Hour,
 			RefreshCookieName:    "refresh_token",
 			BcryptCost:           12,
@@ -320,6 +346,12 @@ func Default() Config {
 			LockoutThreshold:     5,
 			LockoutDuration:      15 * time.Minute,
 			CaptchaEnabled:       false,
+			CaptchaType:          "image",
+			CaptchaLength:        6,
+			CaptchaCharset:       "alphanumeric",
+			CaptchaWidth:         240,
+			CaptchaHeight:        80,
+			CaptchaFailureLimit:  0,
 			CaptchaRiskThreshold: 3,
 			CaptchaRiskWindow:    15 * time.Minute,
 			CaptchaChallengeTTL:  2 * time.Minute,
@@ -551,6 +583,28 @@ func (cfg AuthConfig) validate() error {
 	if cfg.CaptchaRiskThreshold <= 0 || cfg.CaptchaRiskWindow <= 0 || cfg.CaptchaChallengeTTL <= 0 {
 		return errors.New("captcha risk threshold, risk window, and challenge ttl must be positive")
 	}
+	if cfg.CaptchaType == "" {
+		cfg.CaptchaType = "image"
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.CaptchaType)) {
+	case "image", "slider", "cloudflare":
+	default:
+		return errors.New("captcha_type must be image, slider, or cloudflare")
+	}
+	if cfg.CaptchaLength < 1 || cfg.CaptchaLength > 12 {
+		return errors.New("captcha_length must be between 1 and 12")
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.CaptchaCharset)) {
+	case "numeric", "alpha", "alphanumeric":
+	default:
+		return errors.New("captcha_charset must be numeric, alpha, or alphanumeric")
+	}
+	if cfg.CaptchaWidth < 80 || cfg.CaptchaHeight < 40 {
+		return errors.New("captcha dimensions are invalid")
+	}
+	if cfg.CaptchaFailureLimit < 0 {
+		return errors.New("captcha_failure_limit must not be negative")
+	}
 	if strings.TrimSpace(cfg.CaptchaKeyPrefix) == "" || strings.ContainsAny(cfg.CaptchaKeyPrefix, "\r\n :") {
 		return errors.New("captcha key prefix must be a safe segment")
 	}
@@ -768,6 +822,12 @@ func (cfg Config) SafeSummary() Summary {
 			LockoutThreshold:     cfg.Auth.LockoutThreshold,
 			LockoutDuration:      cfg.Auth.LockoutDuration,
 			CaptchaEnabled:       cfg.Auth.CaptchaEnabled,
+			CaptchaType:          cfg.Auth.CaptchaType,
+			CaptchaLength:        cfg.Auth.CaptchaLength,
+			CaptchaCharset:       cfg.Auth.CaptchaCharset,
+			CaptchaWidth:         cfg.Auth.CaptchaWidth,
+			CaptchaHeight:        cfg.Auth.CaptchaHeight,
+			CaptchaFailureLimit:  cfg.Auth.CaptchaFailureLimit,
 			CaptchaRiskThreshold: cfg.Auth.CaptchaRiskThreshold,
 			CaptchaRiskWindow:    cfg.Auth.CaptchaRiskWindow,
 			CaptchaChallengeTTL:  cfg.Auth.CaptchaChallengeTTL,
@@ -819,6 +879,8 @@ func newViper() *viper.Viper {
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
 
+	v.SetDefault("site.name", cfg.Site.Name)
+	v.SetDefault("site.logo", cfg.Site.Logo)
 	v.SetDefault("server.addr", cfg.Server.Addr)
 	v.SetDefault("server.read_timeout", cfg.Server.ReadTimeout)
 	v.SetDefault("server.write_timeout", cfg.Server.WriteTimeout)
@@ -865,6 +927,14 @@ func newViper() *viper.Viper {
 	v.SetDefault("auth.lockout_threshold", cfg.Auth.LockoutThreshold)
 	v.SetDefault("auth.lockout_duration", cfg.Auth.LockoutDuration)
 	v.SetDefault("auth.captcha_enabled", cfg.Auth.CaptchaEnabled)
+	v.SetDefault("auth.captcha_type", cfg.Auth.CaptchaType)
+	v.SetDefault("auth.captcha_length", cfg.Auth.CaptchaLength)
+	v.SetDefault("auth.captcha_charset", cfg.Auth.CaptchaCharset)
+	v.SetDefault("auth.captcha_width", cfg.Auth.CaptchaWidth)
+	v.SetDefault("auth.captcha_height", cfg.Auth.CaptchaHeight)
+	v.SetDefault("auth.captcha_failure_limit", cfg.Auth.CaptchaFailureLimit)
+	v.SetDefault("auth.captcha_cloudflare_site_key", cfg.Auth.CaptchaCloudflareSiteKey)
+	v.SetDefault("auth.captcha_cloudflare_secret_key", cfg.Auth.CaptchaCloudflareSecretKey)
 	v.SetDefault("auth.captcha_risk_threshold", cfg.Auth.CaptchaRiskThreshold)
 	v.SetDefault("auth.captcha_risk_window", cfg.Auth.CaptchaRiskWindow)
 	v.SetDefault("auth.captcha_challenge_ttl", cfg.Auth.CaptchaChallengeTTL)
@@ -913,90 +983,100 @@ func newViper() *viper.Viper {
 }
 
 var environmentBindings = map[string]string{
-	"server.addr":                    "SERVER_ADDR",
-	"server.read_timeout":            "SERVER_READ_TIMEOUT",
-	"server.write_timeout":           "SERVER_WRITE_TIMEOUT",
-	"server.idle_timeout":            "SERVER_IDLE_TIMEOUT",
-	"server.shutdown_timeout":        "SERVER_SHUTDOWN_TIMEOUT",
-	"logging.level":                  "LOGGING_LEVEL",
-	"database.enabled":               "DATABASE_ENABLED",
-	"database.driver":                "DATABASE_DRIVER",
-	"database.dsn":                   "DATABASE_DSN",
-	"database.mode":                  "DATABASE_MODE",
-	"database.primary_dsn":           "DATABASE_PRIMARY_DSN",
-	"database.replica_dsns":          "DATABASE_REPLICA_DSNS",
-	"database.read_policy":           "DATABASE_READ_POLICY",
-	"database.max_open_conns":        "DATABASE_MAX_OPEN_CONNS",
-	"database.max_idle_conns":        "DATABASE_MAX_IDLE_CONNS",
-	"database.conn_max_lifetime":     "DATABASE_CONN_MAX_LIFETIME",
-	"database.conn_max_idle_time":    "DATABASE_CONN_MAX_IDLE_TIME",
-	"database.ping_timeout":          "DATABASE_PING_TIMEOUT",
-	"redis.enabled":                  "REDIS_ENABLED",
-	"redis.addr":                     "REDIS_ADDR",
-	"redis.username":                 "REDIS_USERNAME",
-	"redis.password":                 "REDIS_PASSWORD",
-	"redis.db":                       "REDIS_DB",
-	"redis.namespace":                "REDIS_NAMESPACE",
-	"redis.mode":                     "REDIS_MODE",
-	"redis.addrs":                    "REDIS_ADDRS",
-	"redis.master_name":              "REDIS_MASTER_NAME",
-	"redis.dial_timeout":             "REDIS_DIAL_TIMEOUT",
-	"redis.read_timeout":             "REDIS_READ_TIMEOUT",
-	"redis.write_timeout":            "REDIS_WRITE_TIMEOUT",
-	"redis.ping_timeout":             "REDIS_PING_TIMEOUT",
-	"auth.enabled":                   "AUTH_ENABLED",
-	"auth.jwt_secret":                "AUTH_JWT_SECRET",
-	"auth.issuer":                    "AUTH_ISSUER",
-	"auth.audience":                  "AUTH_AUDIENCE",
-	"auth.access_ttl":                "AUTH_ACCESS_TTL",
-	"auth.refresh_ttl":               "AUTH_REFRESH_TTL",
-	"auth.refresh_cookie_name":       "AUTH_REFRESH_COOKIE_NAME",
-	"auth.secure_cookie":             "AUTH_SECURE_COOKIE",
-	"auth.bcrypt_cost":               "AUTH_BCRYPT_COST",
-	"auth.rate_limit_window":         "AUTH_RATE_LIMIT_WINDOW",
-	"auth.rate_limit_max_attempts":   "AUTH_RATE_LIMIT_MAX_ATTEMPTS",
-	"auth.lockout_threshold":         "AUTH_LOCKOUT_THRESHOLD",
-	"auth.lockout_duration":          "AUTH_LOCKOUT_DURATION",
-	"auth.captcha_enabled":           "AUTH_CAPTCHA_ENABLED",
-	"auth.captcha_risk_threshold":    "AUTH_CAPTCHA_RISK_THRESHOLD",
-	"auth.captcha_risk_window":       "AUTH_CAPTCHA_RISK_WINDOW",
-	"auth.captcha_challenge_ttl":     "AUTH_CAPTCHA_CHALLENGE_TTL",
-	"auth.captcha_key_prefix":        "AUTH_CAPTCHA_KEY_PREFIX",
-	"auth.registration_enabled":      "AUTH_REGISTRATION_ENABLED",
-	"mail.enabled":                   "MAIL_ENABLED",
-	"mail.host":                      "MAIL_HOST",
-	"mail.port":                      "MAIL_PORT",
-	"mail.username":                  "MAIL_USERNAME",
-	"mail.password":                  "MAIL_PASSWORD",
-	"mail.from":                      "MAIL_FROM",
-	"mail.start_tls":                 "MAIL_START_TLS",
-	"mail.selection":                 "MAIL_SELECTION",
-	"file.enabled":                   "FILE_ENABLED",
-	"file.provider":                  "FILE_PROVIDER",
-	"file.root":                      "FILE_ROOT",
-	"file.base_url":                  "FILE_BASE_URL",
-	"file.signing_key":               "FILE_SIGNING_KEY",
-	"file.max_bytes":                 "FILE_MAX_BYTES",
-	"file.allowed_mimes":             "FILE_ALLOWED_MIMES",
-	"install.state_dir":              "INSTALL_STATE_DIR",
-	"install.workspace_root":         "INSTALL_WORKSPACE_ROOT",
-	"tenant.enabled":                 "TENANT_ENABLED",
-	"tenant.mode":                    "TENANT_MODE",
-	"tenant.default_id":              "TENANT_DEFAULT_ID",
-	"tenant.tenant_header":           "TENANT_HEADER",
-	"tenant.organization_header":     "TENANT_ORGANIZATION_HEADER",
-	"tenant.platform_admin_subjects": "TENANT_PLATFORM_ADMIN_SUBJECTS",
-	"i18n.mode":                      "I18N_MODE",
-	"i18n.default_locale":            "I18N_DEFAULT_LOCALE",
-	"i18n.supported_locales":         "I18N_SUPPORTED_LOCALES",
-	"observability.metrics_enabled":  "OBSERVABILITY_METRICS_ENABLED",
-	"observability.metrics_endpoint": "OBSERVABILITY_METRICS_ENDPOINT",
-	"observability.tracing_enabled":  "OBSERVABILITY_TRACING_ENABLED",
-	"observability.otlp_endpoint":    "OBSERVABILITY_OTLP_ENDPOINT",
-	"observability.otlp_protocol":    "OBSERVABILITY_OTLP_PROTOCOL",
-	"observability.tls_verify":       "OBSERVABILITY_TLS_VERIFY",
-	"observability.sample_rate":      "OBSERVABILITY_SAMPLE_RATE",
-	"observability.otlp_api_key":     "OBSERVABILITY_OTLP_API_KEY",
+	"site.name":                          "SITE_NAME",
+	"site.logo":                          "SITE_LOGO",
+	"server.addr":                        "SERVER_ADDR",
+	"server.read_timeout":                "SERVER_READ_TIMEOUT",
+	"server.write_timeout":               "SERVER_WRITE_TIMEOUT",
+	"server.idle_timeout":                "SERVER_IDLE_TIMEOUT",
+	"server.shutdown_timeout":            "SERVER_SHUTDOWN_TIMEOUT",
+	"logging.level":                      "LOGGING_LEVEL",
+	"database.enabled":                   "DATABASE_ENABLED",
+	"database.driver":                    "DATABASE_DRIVER",
+	"database.dsn":                       "DATABASE_DSN",
+	"database.mode":                      "DATABASE_MODE",
+	"database.primary_dsn":               "DATABASE_PRIMARY_DSN",
+	"database.replica_dsns":              "DATABASE_REPLICA_DSNS",
+	"database.read_policy":               "DATABASE_READ_POLICY",
+	"database.max_open_conns":            "DATABASE_MAX_OPEN_CONNS",
+	"database.max_idle_conns":            "DATABASE_MAX_IDLE_CONNS",
+	"database.conn_max_lifetime":         "DATABASE_CONN_MAX_LIFETIME",
+	"database.conn_max_idle_time":        "DATABASE_CONN_MAX_IDLE_TIME",
+	"database.ping_timeout":              "DATABASE_PING_TIMEOUT",
+	"redis.enabled":                      "REDIS_ENABLED",
+	"redis.addr":                         "REDIS_ADDR",
+	"redis.username":                     "REDIS_USERNAME",
+	"redis.password":                     "REDIS_PASSWORD",
+	"redis.db":                           "REDIS_DB",
+	"redis.namespace":                    "REDIS_NAMESPACE",
+	"redis.mode":                         "REDIS_MODE",
+	"redis.addrs":                        "REDIS_ADDRS",
+	"redis.master_name":                  "REDIS_MASTER_NAME",
+	"redis.dial_timeout":                 "REDIS_DIAL_TIMEOUT",
+	"redis.read_timeout":                 "REDIS_READ_TIMEOUT",
+	"redis.write_timeout":                "REDIS_WRITE_TIMEOUT",
+	"redis.ping_timeout":                 "REDIS_PING_TIMEOUT",
+	"auth.enabled":                       "AUTH_ENABLED",
+	"auth.jwt_secret":                    "AUTH_JWT_SECRET",
+	"auth.issuer":                        "AUTH_ISSUER",
+	"auth.audience":                      "AUTH_AUDIENCE",
+	"auth.access_ttl":                    "AUTH_ACCESS_TTL",
+	"auth.refresh_ttl":                   "AUTH_REFRESH_TTL",
+	"auth.refresh_cookie_name":           "AUTH_REFRESH_COOKIE_NAME",
+	"auth.secure_cookie":                 "AUTH_SECURE_COOKIE",
+	"auth.bcrypt_cost":                   "AUTH_BCRYPT_COST",
+	"auth.rate_limit_window":             "AUTH_RATE_LIMIT_WINDOW",
+	"auth.rate_limit_max_attempts":       "AUTH_RATE_LIMIT_MAX_ATTEMPTS",
+	"auth.lockout_threshold":             "AUTH_LOCKOUT_THRESHOLD",
+	"auth.lockout_duration":              "AUTH_LOCKOUT_DURATION",
+	"auth.captcha_enabled":               "AUTH_CAPTCHA_ENABLED",
+	"auth.captcha_type":                  "AUTH_CAPTCHA_TYPE",
+	"auth.captcha_length":                "AUTH_CAPTCHA_LENGTH",
+	"auth.captcha_charset":               "AUTH_CAPTCHA_CHARSET",
+	"auth.captcha_width":                 "AUTH_CAPTCHA_WIDTH",
+	"auth.captcha_height":                "AUTH_CAPTCHA_HEIGHT",
+	"auth.captcha_failure_limit":         "AUTH_CAPTCHA_FAILURE_LIMIT",
+	"auth.captcha_cloudflare_site_key":   "AUTH_CAPTCHA_CLOUDFLARE_SITE_KEY",
+	"auth.captcha_cloudflare_secret_key": "AUTH_CAPTCHA_CLOUDFLARE_SECRET_KEY",
+	"auth.captcha_risk_threshold":        "AUTH_CAPTCHA_RISK_THRESHOLD",
+	"auth.captcha_risk_window":           "AUTH_CAPTCHA_RISK_WINDOW",
+	"auth.captcha_challenge_ttl":         "AUTH_CAPTCHA_CHALLENGE_TTL",
+	"auth.captcha_key_prefix":            "AUTH_CAPTCHA_KEY_PREFIX",
+	"auth.registration_enabled":          "AUTH_REGISTRATION_ENABLED",
+	"mail.enabled":                       "MAIL_ENABLED",
+	"mail.host":                          "MAIL_HOST",
+	"mail.port":                          "MAIL_PORT",
+	"mail.username":                      "MAIL_USERNAME",
+	"mail.password":                      "MAIL_PASSWORD",
+	"mail.from":                          "MAIL_FROM",
+	"mail.start_tls":                     "MAIL_START_TLS",
+	"mail.selection":                     "MAIL_SELECTION",
+	"file.enabled":                       "FILE_ENABLED",
+	"file.provider":                      "FILE_PROVIDER",
+	"file.root":                          "FILE_ROOT",
+	"file.base_url":                      "FILE_BASE_URL",
+	"file.signing_key":                   "FILE_SIGNING_KEY",
+	"file.max_bytes":                     "FILE_MAX_BYTES",
+	"file.allowed_mimes":                 "FILE_ALLOWED_MIMES",
+	"install.state_dir":                  "INSTALL_STATE_DIR",
+	"install.workspace_root":             "INSTALL_WORKSPACE_ROOT",
+	"tenant.enabled":                     "TENANT_ENABLED",
+	"tenant.mode":                        "TENANT_MODE",
+	"tenant.default_id":                  "TENANT_DEFAULT_ID",
+	"tenant.tenant_header":               "TENANT_HEADER",
+	"tenant.organization_header":         "TENANT_ORGANIZATION_HEADER",
+	"tenant.platform_admin_subjects":     "TENANT_PLATFORM_ADMIN_SUBJECTS",
+	"i18n.mode":                          "I18N_MODE",
+	"i18n.default_locale":                "I18N_DEFAULT_LOCALE",
+	"i18n.supported_locales":             "I18N_SUPPORTED_LOCALES",
+	"observability.metrics_enabled":      "OBSERVABILITY_METRICS_ENABLED",
+	"observability.metrics_endpoint":     "OBSERVABILITY_METRICS_ENDPOINT",
+	"observability.tracing_enabled":      "OBSERVABILITY_TRACING_ENABLED",
+	"observability.otlp_endpoint":        "OBSERVABILITY_OTLP_ENDPOINT",
+	"observability.otlp_protocol":        "OBSERVABILITY_OTLP_PROTOCOL",
+	"observability.tls_verify":           "OBSERVABILITY_TLS_VERIFY",
+	"observability.sample_rate":          "OBSERVABILITY_SAMPLE_RATE",
+	"observability.otlp_api_key":         "OBSERVABILITY_OTLP_API_KEY",
 }
 
 type observabilitySource struct {
