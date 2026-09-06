@@ -940,7 +940,11 @@
     "guideTroubleshootingText": "An empty or malformed recipient is reported inline below the input. For connection failures, inspect the stage and code, then verify host, port, TLS, and credentials. Saved routing and templates take effect immediately.",
     "guideImmediateEffect": "Immediate effect",
     "guideImmediateEffectText": "Accounts, callers, templates, and verification policies are stored as final state. New requests read the latest configuration without restarting the Go service.",
-    "policySaveError": "Could not save verification policy"
+    "policySaveError": "Could not save verification policy",
+    "templateBodyFormat": "Body format",
+    "templateBodyText": "Plain text",
+    "templateBodyHtml": "HTML",
+    "templateBodyFormatHint": "HTML mode sends an HTML email; variables still use {{.variable}}."
   },
   "monitor": {
     "eyebrow": "OPERATIONS",

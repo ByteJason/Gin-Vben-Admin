@@ -15,6 +15,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	htmltemplate "html/template"
 	"io"
 	"net/mail"
 	"sort"
@@ -66,6 +67,9 @@ type TemplateLocale struct {
 	Locale  string `json:"locale"`
 	Subject string `json:"subject"`
 	Body    string `json:"body"`
+	// BodyFormat selects text/plain or text/html for this locale. Empty means
+	// text/plain for backwards compatibility with existing templates.
+	BodyFormat string `json:"bodyFormat,omitempty"`
 }
 
 // Template is an immutable-at-send-time final-state template definition.
@@ -468,6 +472,11 @@ func (r *Runtime) SetTemplateFor(ctx context.Context, value Template) error {
 	value.DefaultLocale = normalizeLocale(value.DefaultLocale)
 	value.Variables = normalizeVariables(value.Variables)
 	value.Locales = cloneLocales(value.Locales)
+	for locale, variant := range value.Locales {
+		variant.Locale = normalizeLocale(locale)
+		variant.BodyFormat = normalizeBodyFormat(variant.BodyFormat)
+		value.Locales[locale] = variant
+	}
 	if len(value.Locales) == 0 {
 		return ErrTemplateUnpublished
 	}
@@ -723,7 +732,7 @@ func (r *Runtime) Send(ctx context.Context, request NotificationRequest) (SendRe
 	// Include the rendered snapshot in the idempotency fingerprint. A template
 	// edit must not make a retry with the same client key silently return the
 	// result of a different subject/body generation.
-	payloadHash = notificationRenderedPayloadHash(payloadHash, tmpl.Generation, subject, body)
+	payloadHash = notificationRenderedPayloadHash(payloadHash, tmpl.Generation, subject, body, templateBodyFormat(tmpl, locale, r.defaultLocale))
 	policyGeneration := r.Generation()
 	idempotencyKey := strings.TrimSpace(request.IdempotencyKey)
 	scopeKey := ""
@@ -761,6 +770,7 @@ func (r *Runtime) Send(ctx context.Context, request NotificationRequest) (SendRe
 		To:                 recipients[0].Address,
 		Subject:            subject,
 		Body:               body,
+		BodyFormat:         templateBodyFormat(tmpl, locale, r.defaultLocale),
 		Recipients:         recipientAddresses(recipients),
 		CallerKey:          callerKey,
 		TemplateKey:        templateKey,
@@ -805,6 +815,25 @@ func (r *Runtime) Send(ctx context.Context, request NotificationRequest) (SendRe
 		r.mu.Unlock()
 	}
 	return result, nil
+}
+
+func templateBodyFormat(value Template, locale, fallback string) string {
+	variant, ok := chooseLocale(value.Locales, locale, value.DefaultLocale, fallback)
+	if !ok || strings.TrimSpace(variant.BodyFormat) == "" {
+		return "text"
+	}
+	format := strings.ToLower(strings.TrimSpace(variant.BodyFormat))
+	if format == "html" {
+		return "html"
+	}
+	return "text"
+}
+
+func normalizeBodyFormat(value string) string {
+	if strings.EqualFold(strings.TrimSpace(value), "html") {
+		return "html"
+	}
+	return "text"
 }
 
 func (r *Runtime) mailerSnapshot() Mailer {
@@ -1569,7 +1598,7 @@ func notificationPayloadHash(caller, key string, recipients []Recipient, variabl
 	return hex.EncodeToString(sum[:])
 }
 
-func notificationRenderedPayloadHash(base, generation, subject, body string) string {
+func notificationRenderedPayloadHash(base, generation, subject, body, bodyFormat string) string {
 	h := sha256.New()
 	_, _ = io.WriteString(h, base)
 	_, _ = io.WriteString(h, "\x00generation:")
@@ -1578,6 +1607,8 @@ func notificationRenderedPayloadHash(base, generation, subject, body string) str
 	_, _ = io.WriteString(h, subject)
 	_, _ = io.WriteString(h, "\x00body:")
 	_, _ = io.WriteString(h, body)
+	_, _ = io.WriteString(h, "\x00bodyFormat:")
+	_, _ = io.WriteString(h, normalizeBodyFormat(bodyFormat))
 	return hex.EncodeToString(h.Sum(nil))
 }
 
@@ -1597,22 +1628,39 @@ func renderTemplate(value Template, locale string, variables map[string]string, 
 			return "", "", fmt.Errorf("%w: %s", ErrTemplateVariableInvalid, key)
 		}
 	}
-	render := func(source string) (string, error) {
-		parsed, err := template.New(value.Key).Option("missingkey=error").Parse(source)
+	render := func(source string, htmlBody bool) (string, error) {
+		var err error
+		if htmlBody {
+			parsed, parseErr := htmltemplate.New(value.Key).Option("missingkey=error").Parse(source)
+			err = parseErr
+			if parseErr == nil {
+				var output strings.Builder
+				if execErr := parsed.Execute(&output, values); execErr != nil {
+					return "", fmt.Errorf("%w: execute", ErrTemplateVariableInvalid)
+				}
+				return output.String(), nil
+			}
+		} else {
+			parsed, parseErr := template.New(value.Key).Option("missingkey=error").Parse(source)
+			err = parseErr
+			if parseErr == nil {
+				var output strings.Builder
+				if execErr := parsed.Execute(&output, values); execErr != nil {
+					return "", fmt.Errorf("%w: execute", ErrTemplateVariableInvalid)
+				}
+				return output.String(), nil
+			}
+		}
 		if err != nil {
 			return "", fmt.Errorf("%w: parse", ErrTemplateVariableInvalid)
 		}
-		var output strings.Builder
-		if err := parsed.Execute(&output, values); err != nil {
-			return "", fmt.Errorf("%w: execute", ErrTemplateVariableInvalid)
-		}
-		return output.String(), nil
+		return "", fmt.Errorf("%w: parse", ErrTemplateVariableInvalid)
 	}
-	subject, err := render(variant.Subject)
+	subject, err := render(variant.Subject, false)
 	if err != nil {
 		return "", "", err
 	}
-	body, err := render(variant.Body)
+	body, err := render(variant.Body, normalizeBodyFormat(variant.BodyFormat) == "html")
 	if err != nil {
 		return "", "", err
 	}

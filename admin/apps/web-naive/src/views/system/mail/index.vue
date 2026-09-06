@@ -11,7 +11,7 @@ import type {
 import { computed, nextTick, onMounted, reactive, ref } from 'vue';
 
 import { useAccess } from '@vben/access';
-import { ManagementPage, notify } from '@vben/common-ui';
+import { ManagementDrawer, ManagementPage, notify } from '@vben/common-ui';
 import { preferences } from '@vben/preferences';
 import { commonCapabilitiesGuide } from '@vben/types';
 
@@ -214,6 +214,7 @@ type TemplateDraft = {
   defaultLocale: 'en-US' | 'zh-CN';
   enabled: boolean;
   enBody: string;
+  enBodyFormat: 'text' | 'html';
   enSubject: string;
   key: string;
   published: boolean;
@@ -223,6 +224,7 @@ type TemplateDraft = {
   testVariables: string;
   variables: string;
   zhBody: string;
+  zhBodyFormat: 'text' | 'html';
   zhSubject: string;
 };
 type PolicyDraft = {
@@ -249,6 +251,9 @@ const templateEditingId = ref<string>();
 const policyDrafts = reactive<Record<string, PolicyDraft>>({});
 const callerSaving = ref(false);
 const templateSaving = ref(false);
+const accountEditorOpen = ref(false);
+const callerEditorOpen = ref(false);
+const templateEditorOpen = ref(false);
 const policySaving = ref('');
 const templateTesting = ref('');
 const callerForm = reactive<CallerDraft>({
@@ -270,6 +275,7 @@ const templateForm = reactive<TemplateDraft>({
   zhBody: '',
   enSubject: '',
   enBody: '',
+  enBodyFormat: 'text',
   enabled: true,
   published: false,
   testRecipient: '',
@@ -435,12 +441,13 @@ function recordRangeBounds() {
   };
 }
 
-function resetForm() {
+function resetForm(open = false) {
   Object.assign(form, emptyForm());
   editingId.value = undefined;
+  accountEditorOpen.value = open;
 }
 
-function resetCallerForm() {
+function resetCallerForm(open = false) {
   Object.assign(callerForm, {
     key: '',
     name: '',
@@ -452,9 +459,10 @@ function resetCallerForm() {
     weights: '',
   });
   callerEditingId.value = undefined;
+  callerEditorOpen.value = open;
 }
 
-function resetTemplateForm() {
+function resetTemplateForm(open = false) {
   Object.assign(templateForm, {
     key: '',
     purpose: '',
@@ -464,6 +472,7 @@ function resetTemplateForm() {
     zhBody: '',
     enSubject: '',
     enBody: '',
+    enBodyFormat: 'text',
     enabled: true,
     published: false,
     testRecipient: '',
@@ -472,6 +481,7 @@ function resetTemplateForm() {
   });
   templateEditingId.value = undefined;
   templateRecipientError.value = '';
+  templateEditorOpen.value = open;
 }
 
 function splitCSV(value: string) {
@@ -502,6 +512,7 @@ function templateKey(value: NotificationTemplate) {
 }
 
 function editCaller(value: NotificationCaller) {
+  callerEditorOpen.value = true;
   callerEditingId.value = value.id;
   Object.assign(callerForm, {
     key: callerKey(value),
@@ -567,6 +578,7 @@ async function removeCaller(value: NotificationCaller) {
 }
 
 function editTemplate(value: NotificationTemplate) {
+  templateEditorOpen.value = true;
   templateRecipientError.value = '';
   const locales = value.locales ?? {};
   const zh = locales['zh-CN'];
@@ -589,11 +601,13 @@ function editTemplate(value: NotificationTemplate) {
       (value.defaultLocale === 'zh-CN' ? (value.subject ?? '') : ''),
     zhBody:
       zh?.body ?? (value.defaultLocale === 'zh-CN' ? (value.body ?? '') : ''),
+    zhBodyFormat: zh?.bodyFormat === 'html' ? 'html' : 'text',
     enSubject:
       en?.subject ??
       (value.defaultLocale === 'en-US' ? (value.subject ?? '') : ''),
     enBody:
       en?.body ?? (value.defaultLocale === 'en-US' ? (value.body ?? '') : ''),
+    enBodyFormat: en?.bodyFormat === 'html' ? 'html' : 'text',
     enabled: value.enabled !== false,
     published: value.published === true,
     testVariables: serializeVariables(testVariables),
@@ -603,13 +617,14 @@ function editTemplate(value: NotificationTemplate) {
 function templatePayload() {
   const locales: Record<
     string,
-    { body: string; locale: string; subject: string }
+    { body: string; bodyFormat: 'text' | 'html'; locale: string; subject: string }
   > = {};
   if (templateForm.zhSubject.trim() || templateForm.zhBody.trim()) {
     locales['zh-CN'] = {
       locale: 'zh-CN',
       subject: templateForm.zhSubject.trim(),
       body: templateForm.zhBody,
+      bodyFormat: templateForm.zhBodyFormat,
     };
   }
   if (templateForm.enSubject.trim() || templateForm.enBody.trim()) {
@@ -617,6 +632,7 @@ function templatePayload() {
       locale: 'en-US',
       subject: templateForm.enSubject.trim(),
       body: templateForm.enBody,
+      bodyFormat: templateForm.enBodyFormat,
     };
   }
   return {
@@ -924,6 +940,7 @@ async function savePolicy(value: VerificationPolicy) {
 
 function edit(account: SMTPAccount) {
   if (!canManage.value) return;
+  accountEditorOpen.value = true;
   editingId.value = account.id;
   Object.assign(form, {
     name: account.name,
@@ -1284,7 +1301,7 @@ onMounted(load);
                 v-if="canManage"
                 class="primary"
                 type="button"
-                @click="resetForm"
+                @click="resetForm(true)"
               >
                 {{ $t('page.mail.addSmtpAccount') }}
               </button>
@@ -1414,10 +1431,17 @@ onMounted(load);
           </div>
         </article>
 
-        <article
+        <ManagementDrawer
           v-if="canManage"
-          class="editor-card"
-          aria-labelledby="mail-editor-title"
+          :open="accountEditorOpen"
+          :title="
+            editingId
+              ? String($t('page.mail.editAccount'))
+              : String($t('page.mail.newAccount'))
+          "
+          :busy="saving"
+          wide
+          @close="accountEditorOpen = false"
         >
           <div class="section-heading">
             <div>
@@ -1434,7 +1458,7 @@ onMounted(load);
               v-if="editingId"
               class="secondary"
               type="button"
-              @click="resetForm"
+              @click="resetForm()"
             >
               {{ $t('page.mail.cancelEdit') }}
             </button>
@@ -1507,7 +1531,7 @@ onMounted(load);
               </button>
             </div>
           </form>
-        </article>
+        </ManagementDrawer>
       </section>
 
       <section
@@ -1518,10 +1542,17 @@ onMounted(load);
         aria-labelledby="mail-tab-callers"
       >
         <div class="two-column">
-          <article
+          <ManagementDrawer
             v-if="canManage"
-            class="editor-card"
-            aria-labelledby="caller-editor-title"
+            :open="callerEditorOpen"
+            :title="
+              callerEditingId
+                ? String($t('page.mail.callerEdit'))
+                : String($t('page.mail.callerNew'))
+            "
+            :busy="callerSaving"
+            wide
+            @close="callerEditorOpen = false"
           >
             <div class="section-heading">
               <div>
@@ -1538,7 +1569,7 @@ onMounted(load);
                 v-if="callerEditingId"
                 class="secondary"
                 type="button"
-                @click="resetCallerForm"
+                @click="resetCallerForm()"
               >
                 {{ $t('page.mail.cancelEdit') }}
               </button>
@@ -1607,7 +1638,7 @@ onMounted(load);
                 </button>
               </div>
             </form>
-          </article>
+          </ManagementDrawer>
           <article class="table-card" aria-labelledby="caller-list-title">
             <div class="section-heading">
               <div>
@@ -1617,6 +1648,14 @@ onMounted(load);
                   {{ $t('page.mail.callerCount', { count: callers.length }) }}
                 </p>
               </div>
+              <button
+                v-if="canManage"
+                class="primary"
+                type="button"
+                @click="resetCallerForm(true)"
+              >
+                {{ $t('page.mail.callerNew') }}
+              </button>
               <button
                 class="secondary"
                 type="button"
@@ -1739,10 +1778,17 @@ onMounted(load);
         aria-labelledby="mail-tab-templates"
       >
         <div class="two-column template-layout">
-          <article
+          <ManagementDrawer
             v-if="canManage"
-            class="editor-card"
-            aria-labelledby="template-editor-title"
+            :open="templateEditorOpen"
+            :title="
+              templateEditingId
+                ? String($t('page.mail.templateEdit'))
+                : String($t('page.mail.templateNew'))
+            "
+            :busy="templateSaving"
+            wide
+            @close="templateEditorOpen = false"
           >
             <div class="section-heading">
               <div>
@@ -1759,7 +1805,7 @@ onMounted(load);
                 v-if="templateEditingId"
                 class="secondary"
                 type="button"
-                @click="resetTemplateForm"
+                @click="resetTemplateForm()"
               >
                 {{ $t('page.mail.cancelEdit') }}
               </button>
@@ -1838,13 +1884,21 @@ onMounted(load);
                 ><span>{{ $t('page.mail.templateSubject') }}</span
                 ><input v-model="templateForm.enSubject" autocomplete="off"
               /></label>
+              <div class="wide template-format-picker" role="group" :aria-label="$t('page.mail.templateBodyFormat')">
+                <span class="field-label">{{ $t('page.mail.templateBodyFormat') }}</span>
+                <div class="segmented-control">
+                  <button type="button" :class="{ active: (templateLocaleEditor === 'zh-CN' ? templateForm.zhBodyFormat : templateForm.enBodyFormat) === 'text' }" @click="templateLocaleEditor === 'zh-CN' ? (templateForm.zhBodyFormat = 'text') : (templateForm.enBodyFormat = 'text')">{{ $t('page.mail.templateBodyText') }}</button>
+                  <button type="button" :class="{ active: (templateLocaleEditor === 'zh-CN' ? templateForm.zhBodyFormat : templateForm.enBodyFormat) === 'html' }" @click="templateLocaleEditor === 'zh-CN' ? (templateForm.zhBodyFormat = 'html') : (templateForm.enBodyFormat = 'html')">{{ $t('page.mail.templateBodyHtml') }}</button>
+                </div>
+                <small class="helper">{{ $t('page.mail.templateBodyFormatHint') }}</small>
+              </div>
               <label v-if="templateLocaleEditor === 'zh-CN'" class="wide"
                 ><span>{{ $t('page.mail.templateBody') }}</span
-                ><textarea v-model="templateForm.zhBody" rows="8"></textarea>
+                ><textarea v-model="templateForm.zhBody" rows="8" :spellcheck="templateForm.zhBodyFormat !== 'html'"></textarea>
               </label>
               <label v-else class="wide"
                 ><span>{{ $t('page.mail.templateBody') }}</span
-                ><textarea v-model="templateForm.enBody" rows="8"></textarea>
+                ><textarea v-model="templateForm.enBody" rows="8" :spellcheck="templateForm.enBodyFormat !== 'html'"></textarea>
               </label>
               <label class="toggle"
                 ><input
@@ -1862,7 +1916,7 @@ onMounted(load);
                 <button
                   class="secondary"
                   type="button"
-                  @click="resetTemplateForm"
+                  @click="resetTemplateForm()"
                 >
                   {{ $t('page.mail.reset') }}</button
                 ><button
@@ -1878,7 +1932,7 @@ onMounted(load);
                 </button>
               </div>
             </form>
-          </article>
+          </ManagementDrawer>
 
           <div class="template-side">
             <article
@@ -1979,6 +2033,14 @@ onMounted(load);
                     }}
                   </p>
                 </div>
+                <button
+                  v-if="canManage"
+                  class="primary"
+                  type="button"
+                  @click="resetTemplateForm(true)"
+                >
+                  {{ $t('page.mail.templateNew') }}
+                </button>
                 <button
                   class="secondary"
                   type="button"
@@ -3009,6 +3071,44 @@ button:focus-visible {
   background: #eff6ff;
   border: 1px solid #bfdbfe;
   font-weight: 600;
+}
+
+.template-format-picker {
+  display: grid;
+  gap: 6px;
+}
+
+.field-label {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.segmented-control {
+  display: inline-flex;
+  width: fit-content;
+  padding: 3px;
+  gap: 3px;
+  background: var(--surface-muted, #f1f5f9);
+  border-radius: 8px;
+}
+
+.segmented-control button {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.segmented-control button.active,
+.segmented-control button:focus-visible {
+  background: var(--surface, #fff);
+  color: var(--primary, #2563eb);
+  box-shadow: 0 1px 3px rgb(15 23 42 / 12%);
 }
 
 .locale-tabs {

@@ -42,6 +42,7 @@ type EmailMessage struct {
 	TemplateGeneration   *uint64     `gorm:"column:template_generation;comment:模板发布代次"`
 	PolicyGeneration     *string     `gorm:"column:policy_generation;size:64;comment:策略发布代次"`
 	Locale               *string     `gorm:"column:locale;size:32;comment:实际语言区域"`
+	BodyFormat           string      `gorm:"column:body_format;size:8;not null;default:text;comment:邮件正文格式"`
 	IsTest               bool        `gorm:"column:is_test;not null;default:false;index:idx_gvba_notify_email_messages_test;comment:是否测试消息"`
 	ChallengeID          *string     `gorm:"column:challenge_id;size:64;index:idx_gvba_notify_email_messages_challenge;comment:验证码挑战标识"`
 	RelayStatus          string      `gorm:"column:relay_status;size:16;not null;default:pending;index:idx_gvba_notify_email_messages_relay;comment:中继状态"`

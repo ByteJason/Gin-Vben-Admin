@@ -12,7 +12,7 @@ import type {
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 
 import { useAccess } from '@vben/access';
-import { ManagementPage, notify } from '@vben/common-ui';
+import { ManagementDrawer, ManagementPage, notify } from '@vben/common-ui';
 import { preferences } from '@vben/preferences';
 import { commonCapabilitiesGuide } from '@vben/types';
 
@@ -51,6 +51,8 @@ const selectedCategoryId = ref('');
 const categoryName = ref('');
 const categoryParentId = ref('');
 const categoryBusy = ref(false);
+const categoryEditorOpen = ref(false);
+const categoryEditingId = ref('');
 const page = ref<FilePage>({ items: [], limit: 50, offset: 0, total: 0 });
 const selectedFile = ref<File | null>(null);
 const selectedAsset = ref<FileObject | null>(null);
@@ -184,7 +186,7 @@ function selectCategory(id: string) {
   void load();
 }
 
-async function createCategory() {
+async function saveCategory() {
   if (!canManage.value || !categoryName.value.trim()) return;
   categoryBusy.value = true;
   try {
@@ -192,39 +194,44 @@ async function createCategory() {
       name: categoryName.value.trim(),
       parentId: categoryParentId.value || undefined,
     };
-    const created = await createFileCategoryApi(input);
+    const saved = categoryEditingId.value
+      ? await updateFileCategoryApi(categoryEditingId.value, input)
+      : await createFileCategoryApi(input);
     categoryName.value = '';
     categoryParentId.value = '';
+    const wasEditing = Boolean(categoryEditingId.value);
+    categoryEditingId.value = '';
+    categoryEditorOpen.value = false;
+    selectedCategoryId.value = saved.id;
     await loadCategories();
-    selectedCategoryId.value = created.id;
-    await load();
-    notifySuccess(String($t('page.files.categoryCreated')));
+    notifySuccess(
+      String(
+        $t(
+          wasEditing
+            ? 'page.files.categoryUpdated'
+            : 'page.files.categoryCreated',
+        ),
+      ),
+    );
   } catch {
     notifyError(String($t('page.files.categorySaveError')));
   } finally {
     categoryBusy.value = false;
   }
 }
-
-async function editCategory(category: FileCategory) {
+function openCreateCategory() {
   if (!canManage.value) return;
-  const name = window
-    .prompt(String($t('page.files.renameCategory')), category.name)
-    ?.trim();
-  if (!name || name === category.name) return;
-  categoryBusy.value = true;
-  try {
-    await updateFileCategoryApi(category.id, {
-      name,
-      parentId: category.parentId || undefined,
-    });
-    await loadCategories();
-    notifySuccess(String($t('page.files.categoryUpdated')));
-  } catch {
-    notifyError(String($t('page.files.categorySaveError')));
-  } finally {
-    categoryBusy.value = false;
-  }
+  categoryEditingId.value = '';
+  categoryName.value = '';
+  categoryParentId.value = selectedCategoryId.value || '';
+  categoryEditorOpen.value = true;
+}
+function editCategory(category: FileCategory) {
+  if (!canManage.value) return;
+  categoryEditingId.value = category.id;
+  categoryName.value = category.name;
+  categoryParentId.value = category.parentId || '';
+  categoryEditorOpen.value = true;
 }
 
 async function removeCategory(category: FileCategory) {
@@ -697,6 +704,14 @@ onMounted(async () => {
       <aside class="category-panel" aria-labelledby="category-title">
         <div class="section-heading">
           <h2 id="category-title">{{ $t('page.files.categories') }}</h2>
+          <button
+            v-if="canManage"
+            class="secondary"
+            type="button"
+            @click="openCreateCategory"
+          >
+            {{ $t('page.files.newCategory') }}
+          </button>
           <span>{{ categories.length }}</span>
         </div>
         <button
@@ -744,39 +759,55 @@ onMounted(async () => {
             {{ $t('page.files.noCategories') }}
           </p>
         </nav>
-        <form
+        <ManagementDrawer
           v-if="canManage"
-          class="category-form"
-          @submit.prevent="createCategory"
+          :open="categoryEditorOpen"
+          :title="
+            categoryEditingId
+              ? String($t('page.files.editCategory'))
+              : String($t('page.files.newCategory'))
+          "
+          :busy="categoryBusy"
+          @close="categoryEditorOpen = false"
         >
-          <h3>{{ $t('page.files.newCategory') }}</h3>
-          <input
-            v-model="categoryName"
-            :placeholder="$t('page.files.categoryName')"
-            maxlength="80"
-          />
-          <select v-model="categoryParentId">
-            <option value="">{{ $t('page.files.rootCategory') }}</option>
-            <option
-              v-for="category in categoryRows"
-              :key="category.id"
-              :value="category.id"
+          <form class="category-form" @submit.prevent="saveCategory">
+            <h3>
+              {{
+                categoryEditingId
+                  ? $t('page.files.editCategory')
+                  : $t('page.files.newCategory')
+              }}
+            </h3>
+            <input
+              v-model="categoryName"
+              :placeholder="$t('page.files.categoryName')"
+              maxlength="80"
+            />
+            <select v-model="categoryParentId">
+              <option value="">{{ $t('page.files.rootCategory') }}</option>
+              <option
+                v-for="category in categoryRows"
+                :key="category.id"
+                :value="category.id"
+              >
+                {{ '· '.repeat(category.depth) }}{{ category.name }}
+              </option>
+            </select>
+            <button
+              class="primary"
+              type="submit"
+              :disabled="categoryBusy || !categoryName.trim()"
             >
-              {{ '· '.repeat(category.depth) }}{{ category.name }}
-            </option>
-          </select>
-          <button
-            class="primary"
-            type="submit"
-            :disabled="categoryBusy || !categoryName.trim()"
-          >
-            {{
-              categoryBusy
-                ? $t('page.files.savingCategory')
-                : $t('page.files.createCategory')
-            }}
-          </button>
-        </form>
+              {{
+                categoryBusy
+                  ? $t('page.files.savingCategory')
+                  : categoryEditingId
+                    ? $t('page.files.editCategory')
+                    : $t('page.files.createCategory')
+              }}
+            </button>
+          </form>
+        </ManagementDrawer>
       </aside>
 
       <section class="files-content">

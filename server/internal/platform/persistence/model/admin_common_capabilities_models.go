@@ -62,6 +62,7 @@ type NotificationTemplateLocale struct {
 	Locale     string     `gorm:"column:locale;size:32;not null;uniqueIndex:uq_gvba_notify_template_locales,priority:2;comment:语言区域"`
 	Subject    string     `gorm:"column:subject;size:998;not null;comment:邮件主题模板"`
 	Body       string     `gorm:"column:body;type:text;not null;comment:邮件正文模板"`
+	BodyFormat string     `gorm:"column:body_format;size:8;not null;default:text;comment:邮件正文格式"`
 	Status     string     `gorm:"column:status;size:16;not null;default:draft;comment:语言版本状态"`
 	CreatedAt  time.Time  `gorm:"column:created_at;precision:6;not null;comment:创建时间"`
 	UpdatedAt  time.Time  `gorm:"column:updated_at;precision:6;not null;comment:更新时间"`
@@ -77,6 +78,7 @@ type NotificationTemplateVersion struct {
 	Locale         string     `gorm:"column:locale;size:32;not null;index:idx_gvba_notify_template_versions_locale;comment:语言区域"`
 	Subject        string     `gorm:"column:subject;size:998;not null;comment:邮件主题快照"`
 	Body           string     `gorm:"column:body;type:text;not null;comment:邮件正文快照"`
+	BodyFormat     string     `gorm:"column:body_format;size:8;not null;default:text;comment:邮件正文格式快照"`
 	VariableSchema JSONValue  `gorm:"column:variable_schema;not null;comment:变量约束快照"`
 	PublishedBy    *string    `gorm:"column:published_by;size:128;comment:发布者标识"`
 	CreatedAt      time.Time  `gorm:"column:created_at;precision:6;not null;comment:创建时间"`

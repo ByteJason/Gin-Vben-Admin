@@ -940,7 +940,11 @@
     "guideTroubleshootingText": "收件人为空或格式不正确时，页面会在输入框下方即时提示；连接失败请先查看阶段和错误码，再确认主机、端口、TLS 与账号密码。路由与模板保存后立即生效。",
     "guideImmediateEffect": "配置即时生效",
     "guideImmediateEffectText": "账户、调用者、模板和验证码策略均保存最终态，成功响应后新请求直接读取最新配置，无需重启 Go 服务。",
-    "policySaveError": "保存验证码策略失败"
+    "policySaveError": "保存验证码策略失败",
+    "templateBodyFormat": "正文格式",
+    "templateBodyText": "纯文本",
+    "templateBodyHtml": "HTML",
+    "templateBodyFormatHint": "HTML 模式会按 HTML 邮件发送，变量仍使用 {{.variable}}。"
   },
   "monitor": {
     "eyebrow": "运维中心",

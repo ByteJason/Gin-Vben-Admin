@@ -10,7 +10,7 @@ import type {
 import { computed, nextTick, onMounted, reactive, ref } from 'vue';
 
 import { useAccess } from '@vben/access';
-import { ManagementPage, notify } from '@vben/common-ui';
+import { ManagementDrawer, ManagementPage, notify } from '@vben/common-ui';
 
 import {
   createIAMRoleApi,
@@ -477,12 +477,13 @@ onMounted(loadRoles);
       </div>
     </section>
 
-    <section
-      v-if="roleFormOpen && canManage"
-      id="iam-role-form"
-      class="modal-backdrop"
-      :aria-label="$t('page.iam.roleCreateTitle')"
-      @click.self="closeRoleForm"
+    <ManagementDrawer
+      v-if="canManage"
+      :open="roleFormOpen"
+      :title="String($t('page.iam.roleCreateTitle'))"
+      :busy="roleLoading"
+      :wide="false"
+      @close="closeRoleForm"
     >
       <div
         id="iam-role-dialog"
@@ -585,14 +586,15 @@ onMounted(loadRoles);
           </footer>
         </form>
       </div>
-    </section>
+    </ManagementDrawer>
 
-    <section
-      v-if="permissionEditorOpen && canEditPermissions"
-      id="iam-role-permission-editor"
-      class="modal-backdrop rolePermissionEditor"
-      :aria-label="$t('page.iam.rolePermissionTitle')"
-      @click.self="closePermissionEditor"
+    <ManagementDrawer
+      v-if="canEditPermissions"
+      :open="permissionEditorOpen"
+      :title="String($t('page.iam.rolePermissionTitle'))"
+      :busy="permissionSaving"
+      :wide="true"
+      @close="closePermissionEditor"
     >
       <div
         class="role-dialog permission-dialog"
@@ -687,14 +689,15 @@ onMounted(loadRoles);
           </button>
         </footer>
       </div>
-    </section>
+    </ManagementDrawer>
 
-    <section
-      v-if="dataScopeEditorOpen && canEditDataScopes"
-      id="iam-role-data-scope-editor"
-      class="modal-backdrop roleDataScopeEditor"
-      :aria-label="$t('page.iam.roleDataScopeTitle')"
-      @click.self="closeDataScopeEditor"
+    <ManagementDrawer
+      v-if="canEditDataScopes"
+      :open="dataScopeEditorOpen"
+      :title="String($t('page.iam.roleDataScopeTitle'))"
+      :busy="dataScopeSaving"
+      :wide="true"
+      @close="closeDataScopeEditor"
     >
       <div
         class="role-dialog data-scope-dialog"
@@ -845,7 +848,7 @@ onMounted(loadRoles);
           </button>
         </footer>
       </div>
-    </section>
+    </ManagementDrawer>
   </ManagementPage>
 </template>
 

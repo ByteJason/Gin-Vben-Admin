@@ -9,7 +9,7 @@ import type {
 import { computed, onMounted, reactive, ref } from 'vue';
 
 import { useAccess } from '@vben/access';
-import { ManagementPage, notify } from '@vben/common-ui';
+import { ManagementDrawer, ManagementPage, notify } from '@vben/common-ui';
 
 import {
   deleteDictionaryApi,
@@ -66,6 +66,8 @@ const typeForm = reactive<DictionaryTypeInput>(emptyType());
 const itemForm = reactive<DictionaryItemInput>(emptyItem());
 const editingType = ref('');
 const editingItem = ref('');
+const typeEditorOpen = ref(false);
+const itemEditorOpen = ref(false);
 const importText = ref('');
 const hasSelectedType = computed(() => Boolean(selectedCode.value));
 const selectedType = computed(() =>
@@ -79,13 +81,15 @@ const canEditItem = computed(() => {
   return !current?.systemOwned;
 });
 
-function resetTypeForm() {
+function resetTypeForm(open = false) {
   Object.assign(typeForm, emptyType());
   editingType.value = '';
+  typeEditorOpen.value = open;
 }
-function resetItemForm() {
+function resetItemForm(open = false) {
   Object.assign(itemForm, emptyItem());
   editingItem.value = '';
+  itemEditorOpen.value = open;
 }
 function selectType(type: DictionaryType) {
   selectedCode.value = type.code;
@@ -95,6 +99,7 @@ function selectType(type: DictionaryType) {
 function editType(type: DictionaryType) {
   if (!canManage.value) return;
   editingType.value = type.systemOwned ? '' : type.code;
+  typeEditorOpen.value = true;
   Object.assign(typeForm, {
     code: type.code,
     nameZhCN: type.nameZhCN,
@@ -108,6 +113,7 @@ function editItem(item: DictionaryItem) {
   if (!canManage.value) return;
   if (item.systemOwned) return;
   editingItem.value = item.id;
+  itemEditorOpen.value = true;
   Object.assign(itemForm, {
     value: item.value,
     labelZhCN: item.labelZhCN,
@@ -360,58 +366,73 @@ onMounted(async () => {
             v-if="canManage"
             class="secondary"
             type="button"
-            @click="resetTypeForm"
+            @click="resetTypeForm(true)"
           >
             {{ $t('page.dictionary.newType') }}
           </button>
         </div>
-        <form v-if="canManage" class="type-form" @submit.prevent="saveType">
-          <label
-            ><span>{{ $t('page.dictionary.code') }}</span
-            ><input
-              v-model="typeForm.code"
-              :disabled="Boolean(editingType)"
-              required
-          /></label>
-          <label
-            ><span>{{ $t('page.dictionary.nameZhCN') }}</span
-            ><input v-model="typeForm.nameZhCN"
-          /></label>
-          <label
-            ><span>{{ $t('page.dictionary.nameEnUS') }}</span
-            ><input v-model="typeForm.nameEnUS"
-          /></label>
-          <label
-            ><span>{{ $t('page.dictionary.sortOrder') }}</span
-            ><input v-model.number="typeForm.sortOrder" min="0" type="number"
-          /></label>
-          <label class="wide"
-            ><span>{{ $t('page.dictionary.descriptionField') }}</span
-            ><input v-model="typeForm.description"
-          /></label>
-          <div class="form-actions">
-            <button
-              v-if="canEditType || !editingType"
-              class="primary"
-              type="submit"
-              :disabled="saving || Boolean(editingType && !canEditType)"
-            >
-              {{
-                saving
-                  ? $t('page.dictionary.saving')
-                  : $t('page.dictionary.save')
-              }}
-            </button>
-            <button
-              v-if="editingType"
-              class="secondary"
-              type="button"
-              @click="resetTypeForm"
-            >
-              {{ $t('page.dictionary.cancel') }}
-            </button>
-          </div>
-        </form>
+        <ManagementDrawer
+          :open="typeEditorOpen"
+          :title="
+            editingType
+              ? String($t('page.dictionary.edit'))
+              : String($t('page.dictionary.newType'))
+          "
+          :busy="saving"
+          @close="typeEditorOpen = false"
+        >
+          <form
+            id="dictionary-typeEditorOpen"
+            class="type-form"
+            @submit.prevent="saveType"
+          >
+            <label
+              ><span>{{ $t('page.dictionary.code') }}</span
+              ><input
+                v-model="typeForm.code"
+                :disabled="Boolean(editingType)"
+                required
+            /></label>
+            <label
+              ><span>{{ $t('page.dictionary.nameZhCN') }}</span
+              ><input v-model="typeForm.nameZhCN"
+            /></label>
+            <label
+              ><span>{{ $t('page.dictionary.nameEnUS') }}</span
+              ><input v-model="typeForm.nameEnUS"
+            /></label>
+            <label
+              ><span>{{ $t('page.dictionary.sortOrder') }}</span
+              ><input v-model.number="typeForm.sortOrder" min="0" type="number"
+            /></label>
+            <label class="wide"
+              ><span>{{ $t('page.dictionary.descriptionField') }}</span
+              ><input v-model="typeForm.description"
+            /></label>
+            <div class="form-actions">
+              <button
+                v-if="canEditType || !editingType"
+                class="primary"
+                type="submit"
+                :disabled="saving || Boolean(editingType && !canEditType)"
+              >
+                {{
+                  saving
+                    ? $t('page.dictionary.saving')
+                    : $t('page.dictionary.save')
+                }}
+              </button>
+              <button
+                v-if="editingType"
+                class="secondary"
+                type="button"
+                @click="resetTypeForm()"
+              >
+                {{ $t('page.dictionary.cancel') }}
+              </button>
+            </div>
+          </form>
+        </ManagementDrawer>
         <div class="table-scroll">
           <table>
             <caption class="sr-only">
@@ -514,56 +535,74 @@ onMounted(async () => {
           {{ $t('page.dictionary.selectType') }}
         </p>
         <template v-else>
-          <form v-if="canManage" class="item-form" @submit.prevent="saveItem">
-            <label
-              ><span>{{ $t('page.dictionary.value') }}</span
-              ><input
-                v-model="itemForm.value"
-                :disabled="Boolean(editingItem && !canEditItem)"
-                required
-            /></label>
-            <label
-              ><span>{{ $t('page.dictionary.labelZhCN') }}</span
-              ><input v-model="itemForm.labelZhCN"
-            /></label>
-            <label
-              ><span>{{ $t('page.dictionary.labelEnUS') }}</span
-              ><input v-model="itemForm.labelEnUS"
-            /></label>
-            <label
-              ><span>{{ $t('page.dictionary.tag') }}</span
-              ><input v-model="itemForm.tag"
-            /></label>
-            <label
-              ><span>{{ $t('page.dictionary.sortOrder') }}</span
-              ><input v-model.number="itemForm.sortOrder" min="0" type="number"
-            /></label>
-            <label class="toggle"
-              ><input v-model="itemForm.enabled" type="checkbox" /><span>{{
-                $t('page.dictionary.enabled')
-              }}</span></label
+          <ManagementDrawer
+            :open="itemEditorOpen"
+            :title="
+              editingItem
+                ? String($t('page.dictionary.edit'))
+                : String($t('page.dictionary.saveItem'))
+            "
+            :busy="saving"
+            @close="itemEditorOpen = false"
+          >
+            <form
+              id="dictionary-itemEditorOpen"
+              class="item-form"
+              @submit.prevent="saveItem"
             >
-            <div class="form-actions">
-              <button
-                class="primary"
-                type="submit"
-                :disabled="saving || Boolean(editingItem && !canEditItem)"
+              <label
+                ><span>{{ $t('page.dictionary.value') }}</span
+                ><input
+                  v-model="itemForm.value"
+                  :disabled="Boolean(editingItem && !canEditItem)"
+                  required
+              /></label>
+              <label
+                ><span>{{ $t('page.dictionary.labelZhCN') }}</span
+                ><input v-model="itemForm.labelZhCN"
+              /></label>
+              <label
+                ><span>{{ $t('page.dictionary.labelEnUS') }}</span
+                ><input v-model="itemForm.labelEnUS"
+              /></label>
+              <label
+                ><span>{{ $t('page.dictionary.tag') }}</span
+                ><input v-model="itemForm.tag"
+              /></label>
+              <label
+                ><span>{{ $t('page.dictionary.sortOrder') }}</span
+                ><input
+                  v-model.number="itemForm.sortOrder"
+                  min="0"
+                  type="number"
+              /></label>
+              <label class="toggle"
+                ><input v-model="itemForm.enabled" type="checkbox" /><span>{{
+                  $t('page.dictionary.enabled')
+                }}</span></label
               >
-                {{
-                  saving
-                    ? $t('page.dictionary.saving')
-                    : $t('page.dictionary.saveItem')
-                }}</button
-              ><button
-                v-if="editingItem"
-                class="secondary"
-                type="button"
-                @click="resetItemForm"
-              >
-                {{ $t('page.dictionary.cancel') }}
-              </button>
-            </div>
-          </form>
+              <div class="form-actions">
+                <button
+                  class="primary"
+                  type="submit"
+                  :disabled="saving || Boolean(editingItem && !canEditItem)"
+                >
+                  {{
+                    saving
+                      ? $t('page.dictionary.saving')
+                      : $t('page.dictionary.saveItem')
+                  }}</button
+                ><button
+                  v-if="editingItem"
+                  class="secondary"
+                  type="button"
+                  @click="resetItemForm()"
+                >
+                  {{ $t('page.dictionary.cancel') }}
+                </button>
+              </div>
+            </form>
+          </ManagementDrawer>
           <div class="table-scroll">
             <table>
               <caption class="sr-only">

@@ -299,7 +299,7 @@ func messageView(item EmailMessage) (MessageView, error) {
 		ID: item.ID, TenantID: item.TenantID, OrgID: item.OrgID, ScopeType: item.ScopeType,
 		SMTPAccountID: item.SMTPAccountID, SenderID: item.SenderID, CallerKey: item.CallerKey,
 		TemplateKey: item.TemplateKey, TemplateGeneration: item.TemplateGeneration,
-		PolicyGeneration: item.PolicyGeneration, Locale: item.Locale, IsTest: item.IsTest,
+		PolicyGeneration: item.PolicyGeneration, Locale: item.Locale, BodyFormat: normalizeBodyFormat(item.BodyFormat), IsTest: item.IsTest,
 		ChallengeID: item.ChallengeID, RelayStatus: item.RelayStatus, Subject: item.Subject,
 		Recipients: cloneRecipients(item.Recipients), BodyDigest: item.BodyDigest, Status: item.Status,
 		AttemptCount: item.AttemptCount, ProviderMessageID: item.ProviderMessageID,

@@ -321,6 +321,7 @@ type templateDTO struct {
 	Locale        string                                 `json:"locale,omitempty"`
 	Subject       string                                 `json:"subject,omitempty"`
 	Body          string                                 `json:"body,omitempty"`
+	BodyFormat    string                                 `json:"bodyFormat,omitempty"`
 	Enabled       *bool                                  `json:"enabled"`
 	Published     *bool                                  `json:"published"`
 }
@@ -331,15 +332,15 @@ type templateDTO struct {
 // client adopts the same endpoint.
 func (d *templateDTO) UnmarshalJSON(raw []byte) error {
 	var value struct {
-		Key, TemplateKey, Purpose, DefaultLocale, Locale, Subject, Body string
-		Variables                                                       json.RawMessage
-		Locales                                                         map[string]notification.TemplateLocale
-		Enabled, Published                                              *bool
+		Key, TemplateKey, Purpose, DefaultLocale, Locale, Subject, Body, BodyFormat string
+		Variables                                                                   json.RawMessage
+		Locales                                                                     map[string]notification.TemplateLocale
+		Enabled, Published                                                          *bool
 	}
 	if err := json.Unmarshal(raw, &value); err != nil {
 		return err
 	}
-	d.Key, d.TemplateKey, d.Purpose, d.DefaultLocale, d.Locale, d.Subject, d.Body = value.Key, value.TemplateKey, value.Purpose, value.DefaultLocale, value.Locale, value.Subject, value.Body
+	d.Key, d.TemplateKey, d.Purpose, d.DefaultLocale, d.Locale, d.Subject, d.Body, d.BodyFormat = value.Key, value.TemplateKey, value.Purpose, value.DefaultLocale, value.Locale, value.Subject, value.Body, value.BodyFormat
 	d.Locales, d.Enabled, d.Published = value.Locales, value.Enabled, value.Published
 	if len(value.Variables) > 0 {
 		if err := json.Unmarshal(value.Variables, &d.Variables); err != nil {
@@ -363,6 +364,7 @@ type templateView struct {
 	Locale        string                                 `json:"locale,omitempty"`
 	Subject       string                                 `json:"subject,omitempty"`
 	Body          string                                 `json:"body,omitempty"`
+	BodyFormat    string                                 `json:"bodyFormat,omitempty"`
 	Variables     []string                               `json:"variables,omitempty"`
 	Locales       map[string]notification.TemplateLocale `json:"locales,omitempty"`
 	Generation    string                                 `json:"generation,omitempty"`
@@ -374,7 +376,7 @@ func templateToView(value notification.Template) templateView {
 	view := templateView{ID: value.Key, Key: value.Key, TemplateKey: value.Key, Purpose: value.Purpose, DefaultLocale: value.DefaultLocale, Variables: append([]string(nil), value.Variables...), Locales: cloneLocales(value.Locales), Generation: value.Generation, Enabled: value.Enabled, Published: value.Published}
 	view.Locale = value.DefaultLocale
 	if locale, ok := value.Locales[value.DefaultLocale]; ok {
-		view.Subject, view.Body = locale.Subject, locale.Body
+		view.Subject, view.Body, view.BodyFormat = locale.Subject, locale.Body, locale.BodyFormat
 	}
 	return view
 }
@@ -464,7 +466,7 @@ func (h *Handler) putTemplate(c *gin.Context) {
 		if locales == nil {
 			locales = make(map[string]notification.TemplateLocale)
 		}
-		locales[locale] = notification.TemplateLocale{Locale: locale, Subject: in.Subject, Body: in.Body}
+		locales[locale] = notification.TemplateLocale{Locale: locale, Subject: in.Subject, Body: in.Body, BodyFormat: in.BodyFormat}
 	} else if in.Locale != "" || in.Subject != "" || in.Body != "" {
 		locale := in.Locale
 		if locale == "" {
@@ -486,6 +488,9 @@ func (h *Handler) putTemplate(c *gin.Context) {
 		}
 		if in.Body != "" {
 			variant.Body = in.Body
+			if in.BodyFormat != "" {
+				variant.BodyFormat = in.BodyFormat
+			}
 		}
 		locales[locale] = variant
 	}

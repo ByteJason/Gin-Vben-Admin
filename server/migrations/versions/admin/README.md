@@ -48,3 +48,5 @@ go run ./cmd/migrate settings-mail-cleanup --config ./config/server.yaml
 配置中的 Redis 已启用时，还会使用该命名空间的客户端删除旧设置缓存。输出包含
 各类删除计数和 `MIGRATION_CLEANUP_CACHE_CLEANED`，便于审计与重试。Redis 不可用
 时数据库事务不会回滚，修复连接后可安全再次执行清理命令。
+
+`v004_notification_template_html.go` 为模板语言版本和邮件投递记录增加 `body_format`，历史数据默认按 `text` 处理；新部署由模型建表，存量数据库请在发布窗口调用 `admin.UpV004`。
