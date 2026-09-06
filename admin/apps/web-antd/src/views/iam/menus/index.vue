@@ -9,7 +9,7 @@ import type {
 import { computed, nextTick, onMounted, reactive, ref } from 'vue';
 
 import { useAccess } from '@vben/access';
-import { ManagementPage, notify } from '@vben/common-ui';
+import { ManagementDrawer, ManagementPage, notify } from '@vben/common-ui';
 
 import {
   createIAMMenuApi,
@@ -533,11 +533,13 @@ onMounted(async () => {
       </div>
     </section>
 
-    <section
-      v-if="formOpen && canEditMenus"
-      class="menu-dialog-backdrop"
-      role="presentation"
-      @keydown.esc="closeForm"
+    <ManagementDrawer
+      v-if="canEditMenus"
+      :open="formOpen"
+      :title="String($t('page.iam.menuEdit'))"
+      :busy="saving"
+      :wide="true"
+      @close="closeForm"
     >
       <div
         class="menu-dialog"
@@ -711,7 +713,7 @@ onMounted(async () => {
           </div>
         </form>
       </div>
-    </section>
+    </ManagementDrawer>
   </ManagementPage>
 </template>
 

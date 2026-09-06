@@ -9,7 +9,7 @@ import type {
 import { computed, onMounted, reactive, ref } from 'vue';
 
 import { useAccess } from '@vben/access';
-import { ManagementPage, notify } from '@vben/common-ui';
+import { ManagementDrawer, ManagementPage, notify } from '@vben/common-ui';
 
 import {
   cancelTaskRunApi,
@@ -33,6 +33,7 @@ const logs = ref<Record<string, TaskRunLog[]>>({});
 const runAction = ref('');
 const selectedId = ref('');
 const editingId = ref('');
+const taskDrawerOpen = ref(false);
 const loading = ref(false);
 const saving = ref(false);
 const running = ref('');
@@ -116,9 +117,10 @@ function nextExecution(item: TaskDefinition) {
   return String($t('page.tasks.nextUnknown'));
 }
 
-function resetForm() {
+function resetForm(open = true) {
   Object.assign(form, emptyForm());
   editingId.value = '';
+  taskDrawerOpen.value = open;
 }
 function selectTask(item: TaskDefinition) {
   selectedId.value = item.id;
@@ -128,6 +130,7 @@ function editTask(item: TaskDefinition) {
   if (!canManage.value) return;
   selectTask(item);
   editingId.value = item.id;
+  taskDrawerOpen.value = true;
   Object.assign(form, {
     name: item.name,
     type: item.type,
@@ -217,7 +220,7 @@ async function saveTask() {
     else await createTaskApi(input());
     notice.value = String($t('page.tasks.saved'));
     notify('success', notice.value);
-    resetForm();
+    resetForm(false);
     await loadTasks();
   } catch {
     error.value = String($t('page.tasks.saveError'));
@@ -337,7 +340,7 @@ onMounted(() => void loadTasks());
           v-if="canManage"
           class="secondary"
           type="button"
-          @click="resetForm"
+          @click="resetForm()"
         >
           {{ $t('page.tasks.newTask') }}
         </button>
@@ -447,7 +450,17 @@ onMounted(() => void loadTasks());
         </div>
       </article>
 
-      <article class="panel" aria-labelledby="tasks-form-title">
+      <ManagementDrawer
+        :open="taskDrawerOpen"
+        :title="
+          editingId
+            ? String($t('page.tasks.editTitle'))
+            : String($t('page.tasks.newTitle'))
+        "
+        :busy="saving"
+        wide
+        @close="taskDrawerOpen = false"
+      >
         <div class="section-heading">
           <div>
             <p v-if="canManage" class="eyebrow">
@@ -533,7 +546,7 @@ onMounted(() => void loadTasks());
               v-if="editingId"
               class="secondary"
               type="button"
-              @click="resetForm"
+              @click="resetForm()"
             >
               {{ $t('page.tasks.cancel') }}
             </button>
@@ -602,7 +615,7 @@ onMounted(() => void loadTasks());
             </li>
           </ul>
         </section>
-      </article>
+      </ManagementDrawer>
     </section>
   </ManagementPage>
 </template>

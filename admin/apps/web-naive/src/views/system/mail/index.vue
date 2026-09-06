@@ -11,7 +11,7 @@ import type {
 import { computed, nextTick, onMounted, reactive, ref } from 'vue';
 
 import { useAccess } from '@vben/access';
-import { ManagementPage, notify } from '@vben/common-ui';
+import { ManagementDrawer, ManagementPage, notify } from '@vben/common-ui';
 import { preferences } from '@vben/preferences';
 import { commonCapabilitiesGuide } from '@vben/types';
 
@@ -249,6 +249,9 @@ const templateEditingId = ref<string>();
 const policyDrafts = reactive<Record<string, PolicyDraft>>({});
 const callerSaving = ref(false);
 const templateSaving = ref(false);
+const accountEditorOpen = ref(false);
+const callerEditorOpen = ref(false);
+const templateEditorOpen = ref(false);
 const policySaving = ref('');
 const templateTesting = ref('');
 const callerForm = reactive<CallerDraft>({
@@ -435,12 +438,13 @@ function recordRangeBounds() {
   };
 }
 
-function resetForm() {
+function resetForm(open = false) {
   Object.assign(form, emptyForm());
   editingId.value = undefined;
+  accountEditorOpen.value = open;
 }
 
-function resetCallerForm() {
+function resetCallerForm(open = false) {
   Object.assign(callerForm, {
     key: '',
     name: '',
@@ -452,9 +456,10 @@ function resetCallerForm() {
     weights: '',
   });
   callerEditingId.value = undefined;
+  callerEditorOpen.value = open;
 }
 
-function resetTemplateForm() {
+function resetTemplateForm(open = false) {
   Object.assign(templateForm, {
     key: '',
     purpose: '',
@@ -472,6 +477,7 @@ function resetTemplateForm() {
   });
   templateEditingId.value = undefined;
   templateRecipientError.value = '';
+  templateEditorOpen.value = open;
 }
 
 function splitCSV(value: string) {
@@ -502,6 +508,7 @@ function templateKey(value: NotificationTemplate) {
 }
 
 function editCaller(value: NotificationCaller) {
+  callerEditorOpen.value = true;
   callerEditingId.value = value.id;
   Object.assign(callerForm, {
     key: callerKey(value),
@@ -567,6 +574,7 @@ async function removeCaller(value: NotificationCaller) {
 }
 
 function editTemplate(value: NotificationTemplate) {
+  templateEditorOpen.value = true;
   templateRecipientError.value = '';
   const locales = value.locales ?? {};
   const zh = locales['zh-CN'];
@@ -924,6 +932,7 @@ async function savePolicy(value: VerificationPolicy) {
 
 function edit(account: SMTPAccount) {
   if (!canManage.value) return;
+  accountEditorOpen.value = true;
   editingId.value = account.id;
   Object.assign(form, {
     name: account.name,
@@ -1284,7 +1293,7 @@ onMounted(load);
                 v-if="canManage"
                 class="primary"
                 type="button"
-                @click="resetForm"
+                @click="resetForm(true)"
               >
                 {{ $t('page.mail.addSmtpAccount') }}
               </button>
@@ -1414,10 +1423,17 @@ onMounted(load);
           </div>
         </article>
 
-        <article
+        <ManagementDrawer
           v-if="canManage"
-          class="editor-card"
-          aria-labelledby="mail-editor-title"
+          :open="accountEditorOpen"
+          :title="
+            editingId
+              ? String($t('page.mail.editAccount'))
+              : String($t('page.mail.newAccount'))
+          "
+          :busy="saving"
+          wide
+          @close="accountEditorOpen = false"
         >
           <div class="section-heading">
             <div>
@@ -1434,7 +1450,7 @@ onMounted(load);
               v-if="editingId"
               class="secondary"
               type="button"
-              @click="resetForm"
+              @click="resetForm()"
             >
               {{ $t('page.mail.cancelEdit') }}
             </button>
@@ -1507,7 +1523,7 @@ onMounted(load);
               </button>
             </div>
           </form>
-        </article>
+        </ManagementDrawer>
       </section>
 
       <section
@@ -1518,10 +1534,17 @@ onMounted(load);
         aria-labelledby="mail-tab-callers"
       >
         <div class="two-column">
-          <article
+          <ManagementDrawer
             v-if="canManage"
-            class="editor-card"
-            aria-labelledby="caller-editor-title"
+            :open="callerEditorOpen"
+            :title="
+              callerEditingId
+                ? String($t('page.mail.callerEdit'))
+                : String($t('page.mail.callerNew'))
+            "
+            :busy="callerSaving"
+            wide
+            @close="callerEditorOpen = false"
           >
             <div class="section-heading">
               <div>
@@ -1538,7 +1561,7 @@ onMounted(load);
                 v-if="callerEditingId"
                 class="secondary"
                 type="button"
-                @click="resetCallerForm"
+                @click="resetCallerForm()"
               >
                 {{ $t('page.mail.cancelEdit') }}
               </button>
@@ -1607,7 +1630,7 @@ onMounted(load);
                 </button>
               </div>
             </form>
-          </article>
+          </ManagementDrawer>
           <article class="table-card" aria-labelledby="caller-list-title">
             <div class="section-heading">
               <div>
@@ -1617,6 +1640,14 @@ onMounted(load);
                   {{ $t('page.mail.callerCount', { count: callers.length }) }}
                 </p>
               </div>
+              <button
+                v-if="canManage"
+                class="primary"
+                type="button"
+                @click="resetCallerForm(true)"
+              >
+                {{ $t('page.mail.callerNew') }}
+              </button>
               <button
                 class="secondary"
                 type="button"
@@ -1739,10 +1770,17 @@ onMounted(load);
         aria-labelledby="mail-tab-templates"
       >
         <div class="two-column template-layout">
-          <article
+          <ManagementDrawer
             v-if="canManage"
-            class="editor-card"
-            aria-labelledby="template-editor-title"
+            :open="templateEditorOpen"
+            :title="
+              templateEditingId
+                ? String($t('page.mail.templateEdit'))
+                : String($t('page.mail.templateNew'))
+            "
+            :busy="templateSaving"
+            wide
+            @close="templateEditorOpen = false"
           >
             <div class="section-heading">
               <div>
@@ -1759,7 +1797,7 @@ onMounted(load);
                 v-if="templateEditingId"
                 class="secondary"
                 type="button"
-                @click="resetTemplateForm"
+                @click="resetTemplateForm()"
               >
                 {{ $t('page.mail.cancelEdit') }}
               </button>
@@ -1862,7 +1900,7 @@ onMounted(load);
                 <button
                   class="secondary"
                   type="button"
-                  @click="resetTemplateForm"
+                  @click="resetTemplateForm()"
                 >
                   {{ $t('page.mail.reset') }}</button
                 ><button
@@ -1878,7 +1916,7 @@ onMounted(load);
                 </button>
               </div>
             </form>
-          </article>
+          </ManagementDrawer>
 
           <div class="template-side">
             <article
@@ -1979,6 +2017,14 @@ onMounted(load);
                     }}
                   </p>
                 </div>
+                <button
+                  v-if="canManage"
+                  class="primary"
+                  type="button"
+                  @click="resetTemplateForm(true)"
+                >
+                  {{ $t('page.mail.templateNew') }}
+                </button>
                 <button
                   class="secondary"
                   type="button"

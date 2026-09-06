@@ -15,7 +15,7 @@ import type {
 import { computed, nextTick, onMounted, reactive, ref } from 'vue';
 
 import { useAccess } from '@vben/access';
-import { ManagementPage, notify } from '@vben/common-ui';
+import { ManagementDrawer, ManagementPage, notify } from '@vben/common-ui';
 
 import {
   batchUpdateIAMUserStatusApi,
@@ -1004,11 +1004,17 @@ onMounted(async () => {
       </footer>
     </section>
 
-    <section
-      v-if="formOpen && canManage"
-      class="modal-backdrop"
-      :aria-label="$t('page.iam.form')"
-      @click.self="closeForm"
+    <ManagementDrawer
+      v-if="canManage"
+      :open="formOpen"
+      :title="
+        formMode === 'create'
+          ? String($t('page.iam.create'))
+          : String($t('page.iam.edit'))
+      "
+      :busy="formLoading"
+      :wide="false"
+      @close="closeForm"
     >
       <div
         class="user-dialog"
@@ -1139,13 +1145,15 @@ onMounted(async () => {
           </footer>
         </form>
       </div>
-    </section>
+    </ManagementDrawer>
 
-    <section
-      v-if="roleAssignmentOpen && canManageRoleAssignments"
-      class="modal-backdrop"
-      :aria-label="$t('page.iam.roleAssignmentTitle')"
-      @click.self="closeRoleAssignment"
+    <ManagementDrawer
+      v-if="canManageRoleAssignments"
+      :open="roleAssignmentOpen"
+      :title="String($t('page.iam.roleAssignmentTitle'))"
+      :busy="roleAssignmentLoading"
+      :wide="true"
+      @close="closeRoleAssignment"
     >
       <div
         class="user-dialog role-assignment-dialog"
@@ -1241,7 +1249,7 @@ onMounted(async () => {
           </button>
         </footer>
       </div>
-    </section>
+    </ManagementDrawer>
 
     <section
       v-if="resetOpen && canManage"
