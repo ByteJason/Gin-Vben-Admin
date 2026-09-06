@@ -15,7 +15,6 @@ const props = withDefaults(
   { busy: false, wide: false },
 );
 const emit = defineEmits<{ close: [] }>();
-const content = ref<HTMLElement>();
 const panel = ref<HTMLElement>();
 let returnFocus: HTMLElement | null = null;
 
@@ -26,7 +25,7 @@ const { activate, deactivate } = useFocusTrap(panel, {
   escapeDeactivates: false,
   fallbackFocus: () => panel.value!,
   initialFocus: () =>
-    content.value?.querySelector<HTMLElement>(
+    panel.value?.querySelector<HTMLElement>(
       'input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])',
     ) ?? panel.value!,
   returnFocusOnDeactivate: false,
@@ -40,7 +39,9 @@ function releaseFocus() {
 }
 
 const [Drawer, drawerApi] = useVbenDrawer({
-  closeOnClickModal: false,
+  // All management drawers are dismissible by clicking the backdrop. The
+  // drawer API still blocks this while a submission is in progress.
+  closeOnClickModal: true,
   closeOnPressEscape: true,
   destroyOnClose: true,
   openAutoFocus: false,
@@ -68,7 +69,9 @@ watch(
     await nextTick();
     if (!props.open) return;
     panel.value =
-      content.value?.closest<HTMLElement>('[role="dialog"]') ?? undefined;
+      document.querySelector<HTMLElement>(
+        '.management-drawer[role="dialog"][data-state="open"]',
+      ) ?? undefined;
     panel.value?.setAttribute('aria-modal', 'true');
     await nextTick();
     if (props.open && panel.value) activate();
@@ -82,6 +85,7 @@ onBeforeUnmount(releaseFocus);
 <template>
   <Drawer
     :class="['management-drawer', { 'management-drawer-wide': wide }]"
+    :aria-busy="busy"
     :title="title"
     :submitting="busy"
     :footer="Boolean($slots.footer)"
@@ -108,9 +112,7 @@ onBeforeUnmount(releaseFocus);
         </svg>
       </button>
     </template>
-    <div ref="content" class="management-drawer-body" :aria-busy="busy">
-      <slot></slot>
-    </div>
+    <slot></slot>
     <template v-if="$slots.footer" #footer>
       <slot name="footer"></slot>
     </template>
@@ -148,11 +150,6 @@ onBeforeUnmount(releaseFocus);
   min-height: 0;
   overscroll-behavior: contain;
   padding: 24px;
-}
-
-.management-drawer-body {
-  min-width: 0;
-  overflow-wrap: anywhere;
 }
 
 /* Resource pages used to provide their own centred dialog/card chrome. Keep

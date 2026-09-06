@@ -59,5 +59,6 @@ test('the shared drawer exposes mobile width, focus and submit-lock guarantees',
   assert.match(component, /width: 100vw/);
   assert.match(component, /height: 100dvh/);
   assert.match(component, /:submitting="busy"/);
-  assert.match(component, /closeOnClickModal: false/);
+  assert.match(component, /closeOnClickModal: true/);
+  assert.doesNotMatch(component, /management-drawer-body/);
 });
