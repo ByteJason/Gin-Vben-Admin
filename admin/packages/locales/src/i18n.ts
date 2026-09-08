@@ -124,7 +124,7 @@ async function loadLocaleMessages(lang: SupportedLanguagesType) {
   if (unref(i18n.global.locale) === lang) {
     return setI18nLanguage(lang);
   }
-  setSimpleLocale(lang);
+  setSimpleLocale('zh-CN');
 
   const message = await localesMap[lang]?.();
 

@@ -21,7 +21,6 @@ export interface DictionaryType {
 export interface DictionaryTypeInput {
   code: string;
   nameZhCN?: string;
-  nameEnUS?: string;
   description?: string;
   status?: 'active' | 'disabled';
   sortOrder?: number;
@@ -49,7 +48,6 @@ export interface DictionaryItem {
 export interface DictionaryItemInput {
   value: string;
   labelZhCN?: string;
-  labelEnUS?: string;
   description?: string;
   tag?: string;
   status?: 'active' | 'disabled';
@@ -78,7 +76,7 @@ export function deleteDictionaryApi(code: string) {
   return requestClient.delete<void>(replace(ADMIN_ENDPOINTS.deleteDictionary, 'code', code));
 }
 
-export function listDictionaryItemsApi(typeCode: string, params?: { locale?: string; includeDisabled?: boolean }) {
+export function listDictionaryItemsApi(typeCode: string, params?: { includeDisabled?: boolean }) {
   return requestClient.get<DictionaryItem[]>(
     replace(ADMIN_ENDPOINTS.listDictionaryItems, 'type', typeCode),
     { params },

@@ -12,7 +12,6 @@ import { computed, nextTick, onMounted, reactive, ref } from 'vue';
 
 import { useAccess } from '@vben/access';
 import { ManagementDrawer, ManagementPage, notify } from '@vben/common-ui';
-import { preferences } from '@vben/preferences';
 import { commonCapabilitiesGuide } from '@vben/types';
 
 import {
@@ -65,7 +64,7 @@ let guideReturnFocus: HTMLElement | null = null;
 const guide = computed(
   () =>
     commonCapabilitiesGuide.mail.locales?.[
-      preferences.app.locale === 'zh-CN' ? 'zh-CN' : 'en-US'
+      'zh-CN'
     ] ?? commonCapabilitiesGuide.mail,
 );
 async function openGuide() {
@@ -97,7 +96,6 @@ const activeTab = ref<MailTab>('accounts');
 
 const templateRecipientInput = ref<HTMLInputElement | null>(null);
 const templateRecipientError = ref('');
-const templateLocaleEditor = ref<'en-US' | 'zh-CN'>('zh-CN');
 
 type RecordRange = '7d' | '30d' | 'all';
 type RecordSource = 'all' | 'business' | 'system' | 'template_test';
@@ -211,15 +209,11 @@ type CallerDraft = {
   weights: string;
 };
 type TemplateDraft = {
-  defaultLocale: 'en-US' | 'zh-CN';
   enabled: boolean;
-  enBody: string;
-  enBodyFormat: 'text' | 'html';
-  enSubject: string;
   key: string;
   published: boolean;
   purpose: string;
-  testLocale: 'en-US' | 'zh-CN';
+  testLocale: 'zh-CN';
   testRecipient: string;
   testVariables: string;
   variables: string;
@@ -269,13 +263,10 @@ const callerForm = reactive<CallerDraft>({
 const templateForm = reactive<TemplateDraft>({
   key: '',
   purpose: '',
-  defaultLocale: 'zh-CN',
   variables: '',
   zhSubject: '',
   zhBody: '',
-  enSubject: '',
-  enBody: '',
-  enBodyFormat: 'text',
+  zhBodyFormat: 'text',
   enabled: true,
   published: false,
   testRecipient: '',
@@ -345,16 +336,14 @@ const selectedTemplate = computed(() => {
 
 const templatePreview = computed(() => {
   const source = selectedTemplate.value;
-  const locale = templateForm.testLocale;
+  const locale = 'zh-CN';
   const localeContent = source?.locales?.[locale];
-  const subject =
-    locale === 'en-US' ? templateForm.enSubject : templateForm.zhSubject;
-  const body = locale === 'en-US' ? templateForm.enBody : templateForm.zhBody;
+  const subject = templateForm.zhSubject;
+  const body = templateForm.zhBody;
   const variables = source?.variables?.length
     ? completeTemplateVariables(
         source,
         parseVariables(templateForm.testVariables),
-        locale,
       )
     : parseVariables(templateForm.testVariables);
   return {
@@ -466,13 +455,9 @@ function resetTemplateForm(open = false) {
   Object.assign(templateForm, {
     key: '',
     purpose: '',
-    defaultLocale: 'zh-CN',
     variables: '',
     zhSubject: '',
     zhBody: '',
-    enSubject: '',
-    enBody: '',
-    enBodyFormat: 'text',
     enabled: true,
     published: false,
     testRecipient: '',
@@ -582,19 +567,14 @@ function editTemplate(value: NotificationTemplate) {
   templateRecipientError.value = '';
   const locales = value.locales ?? {};
   const zh = locales['zh-CN'];
-  const en = locales['en-US'];
   templateEditingId.value = value.id;
   const testVariables = completeTemplateVariables(
     value,
     parseVariables(templateForm.testVariables),
-    templateForm.testLocale,
   );
   Object.assign(templateForm, {
     key: templateKey(value),
     purpose: value.purpose ?? templateKey(value),
-    defaultLocale: (value.defaultLocale === 'en-US' ? 'en-US' : 'zh-CN') as
-      | 'en-US'
-      | 'zh-CN',
     variables: (value.variables ?? []).join(', '),
     zhSubject:
       zh?.subject ??
@@ -602,12 +582,6 @@ function editTemplate(value: NotificationTemplate) {
     zhBody:
       zh?.body ?? (value.defaultLocale === 'zh-CN' ? (value.body ?? '') : ''),
     zhBodyFormat: zh?.bodyFormat === 'html' ? 'html' : 'text',
-    enSubject:
-      en?.subject ??
-      (value.defaultLocale === 'en-US' ? (value.subject ?? '') : ''),
-    enBody:
-      en?.body ?? (value.defaultLocale === 'en-US' ? (value.body ?? '') : ''),
-    enBodyFormat: en?.bodyFormat === 'html' ? 'html' : 'text',
     enabled: value.enabled !== false,
     published: value.published === true,
     testVariables: serializeVariables(testVariables),
@@ -627,20 +601,11 @@ function templatePayload() {
       bodyFormat: templateForm.zhBodyFormat,
     };
   }
-  if (templateForm.enSubject.trim() || templateForm.enBody.trim()) {
-    locales['en-US'] = {
-      locale: 'en-US',
-      subject: templateForm.enSubject.trim(),
-      body: templateForm.enBody,
-      bodyFormat: templateForm.enBodyFormat,
-    };
-  }
   return {
     key: templateForm.key.trim(),
     templateKey: templateForm.key.trim(),
     purpose: templateForm.purpose.trim() || templateForm.key.trim(),
-    defaultLocale: templateForm.defaultLocale,
-    variables: splitCSV(templateForm.variables),
+      variables: splitCSV(templateForm.variables),
     locales,
     enabled: templateForm.enabled,
     published: templateForm.published,
@@ -705,31 +670,29 @@ function parseVariables(value: string): Record<string, string> {
   return result;
 }
 
-function sampleVariableValue(name: string, locale: string) {
+function sampleVariableValue(name: string) {
   const key = name.trim().toLowerCase();
-  const english = locale.trim().toLowerCase().startsWith('en');
   if (key.includes('code') || key.includes('otp') || key.includes('token'))
     return '123456';
   if (key.includes('expire') || key.includes('ttl'))
-    return english ? '10 minutes' : '10 分钟';
+    return '10 分钟';
   if (key.includes('email')) return 'user@example.test';
   if (key.includes('location') || key.includes('ip'))
-    return english ? 'Sample location' : '示例地点';
-  if (key.includes('name')) return english ? 'Sample User' : '示例用户';
-  return english ? 'Sample value' : '示例值';
+    return '示例地点';
+  if (key.includes('name')) return '示例用户';
+  return '示例值';
 }
 
 function completeTemplateVariables(
   value: NotificationTemplate,
   provided: Record<string, string>,
-  locale: string,
 ) {
   const result: Record<string, string> = {};
   for (const name of value.variables ?? []) {
     if (Object.prototype.hasOwnProperty.call(provided, name)) {
       result[name] = provided[name] ?? '';
     } else {
-      result[name] = sampleVariableValue(name, locale);
+      result[name] = sampleVariableValue(name);
     }
   }
   return result;
@@ -854,7 +817,6 @@ async function testTemplate(value: NotificationTemplate) {
     const variables = completeTemplateVariables(
       value,
       parseVariables(templateForm.testVariables),
-      templateForm.testLocale,
     );
     templateForm.testVariables = serializeVariables(variables);
     const result = await testNotificationTemplateApi(templateKey(value), {
@@ -1824,13 +1786,6 @@ onMounted(load);
                 ><span>{{ $t('page.mail.templatePurpose') }}</span
                 ><input v-model="templateForm.purpose" autocomplete="off"
               /></label>
-              <label
-                ><span>{{ $t('page.mail.templateDefaultLocale') }}</span
-                ><select v-model="templateForm.defaultLocale">
-                  <option value="zh-CN">zh-CN</option>
-                  <option value="en-US">en-US</option>
-                </select></label
-              >
               <label class="wide"
                 ><span>{{ $t('page.mail.templateVariables') }}</span
                 ><input
@@ -1850,55 +1805,21 @@ onMounted(load);
                   >
                 </div></label
               >
-              <div
-                class="locale-tabs wide"
-                role="tablist"
-                :aria-label="$t('page.mail.templateLocale')"
-              >
-                <button
-                  class="locale-tab"
-                  :class="{ active: templateLocaleEditor === 'zh-CN' }"
-                  type="button"
-                  role="tab"
-                  :aria-selected="templateLocaleEditor === 'zh-CN'"
-                  @click="templateLocaleEditor = 'zh-CN'"
-                >
-                  简体中文 zh-CN
-                </button>
-                <button
-                  class="locale-tab"
-                  :class="{ active: templateLocaleEditor === 'en-US' }"
-                  type="button"
-                  role="tab"
-                  :aria-selected="templateLocaleEditor === 'en-US'"
-                  @click="templateLocaleEditor = 'en-US'"
-                >
-                  English en-US
-                </button>
-              </div>
-              <label v-if="templateLocaleEditor === 'zh-CN'" class="wide"
+              <label class="wide"
                 ><span>{{ $t('page.mail.templateSubject') }}</span
                 ><input v-model="templateForm.zhSubject" autocomplete="off"
-              /></label>
-              <label v-else class="wide"
-                ><span>{{ $t('page.mail.templateSubject') }}</span
-                ><input v-model="templateForm.enSubject" autocomplete="off"
               /></label>
               <div class="wide template-format-picker" role="group" :aria-label="$t('page.mail.templateBodyFormat')">
                 <span class="field-label">{{ $t('page.mail.templateBodyFormat') }}</span>
                 <div class="segmented-control">
-                  <button type="button" :class="{ active: (templateLocaleEditor === 'zh-CN' ? templateForm.zhBodyFormat : templateForm.enBodyFormat) === 'text' }" @click="templateLocaleEditor === 'zh-CN' ? (templateForm.zhBodyFormat = 'text') : (templateForm.enBodyFormat = 'text')">{{ $t('page.mail.templateBodyText') }}</button>
-                  <button type="button" :class="{ active: (templateLocaleEditor === 'zh-CN' ? templateForm.zhBodyFormat : templateForm.enBodyFormat) === 'html' }" @click="templateLocaleEditor === 'zh-CN' ? (templateForm.zhBodyFormat = 'html') : (templateForm.enBodyFormat = 'html')">{{ $t('page.mail.templateBodyHtml') }}</button>
+                  <button type="button" :class="{ active: templateForm.zhBodyFormat === 'text' }" @click="templateForm.zhBodyFormat = 'text'">{{ $t('page.mail.templateBodyText') }}</button>
+                  <button type="button" :class="{ active: templateForm.zhBodyFormat === 'html' }" @click="templateForm.zhBodyFormat = 'html'">{{ $t('page.mail.templateBodyHtml') }}</button>
                 </div>
                 <small class="helper">{{ $t('page.mail.templateBodyFormatHint') }}</small>
               </div>
-              <label v-if="templateLocaleEditor === 'zh-CN'" class="wide"
+              <label class="wide"
                 ><span>{{ $t('page.mail.templateBody') }}</span
                 ><textarea v-model="templateForm.zhBody" rows="8" :spellcheck="templateForm.zhBodyFormat !== 'html'"></textarea>
-              </label>
-              <label v-else class="wide"
-                ><span>{{ $t('page.mail.templateBody') }}</span
-                ><textarea v-model="templateForm.enBody" rows="8" :spellcheck="templateForm.enBodyFormat !== 'html'"></textarea>
               </label>
               <label class="toggle"
                 ><input
@@ -1951,13 +1872,6 @@ onMounted(load);
                 <span class="locale-badge">{{ templateForm.testLocale }}</span>
               </div>
               <div class="preview-controls">
-                <label
-                  ><span>{{ $t('page.mail.testLocale') }}</span
-                  ><select v-model="templateForm.testLocale">
-                    <option value="zh-CN">zh-CN</option>
-                    <option value="en-US">en-US</option>
-                  </select></label
-                >
                 <label
                   ><span>{{ $t('page.mail.testVariables') }}</span
                   ><input
@@ -2666,7 +2580,6 @@ small,
 }
 
 .mail-tab,
-.locale-tab,
 .guide-tab {
   min-height: 48px;
   padding: 0 18px;
@@ -2697,8 +2610,6 @@ small,
 
 .mail-tab:hover,
 .mail-tab:focus-visible,
-.locale-tab:hover,
-.locale-tab:focus-visible,
 .guide-tab:hover,
 .guide-tab:focus-visible {
   color: var(--accent);
@@ -2706,7 +2617,6 @@ small,
 }
 
 .mail-tab.active,
-.locale-tab.active,
 .guide-tab.active {
   color: var(--accent);
   border-bottom-color: var(--accent);
@@ -3111,17 +3021,6 @@ button:focus-visible {
   box-shadow: 0 1px 3px rgb(15 23 42 / 12%);
 }
 
-.locale-tabs {
-  display: flex;
-  gap: 2px;
-  border-bottom: 1px solid var(--line);
-}
-
-.locale-tab {
-  min-height: 38px;
-  padding: 0 12px;
-  font-size: 0.82rem;
-}
 
 .preview-card {
   background: #fbfdff;

@@ -61,8 +61,6 @@ const selectionPanel = document.querySelector('#selection-panel');
 const resetUIButton = document.querySelector('#reset-ui-button');
 const planForm = document.querySelector('#plan-form');
 const modeChoice = document.querySelector('#mode-choice');
-const localeChoice = document.querySelector('#locale-choice');
-const localeSuggestion = document.querySelector('#locale-suggestion');
 const planButton = document.querySelector('#plan-button');
 const planMessage = document.querySelector('#plan-message');
 const planPanel = document.querySelector('#plan-panel');
@@ -201,19 +199,7 @@ let uiActionPending = false;
 let uiSelectionLocked = false;
 
 function browserLanguageHeader() {
-  const languages =
-    Array.isArray(navigator.languages) && navigator.languages.length
-      ? navigator.languages
-      : [navigator.language || 'en-US'];
-  return languages.join(',');
-}
-
-function suggestBrowserLocale() {
-  const browserLocale = /^zh(?:-|$)/i.test(navigator.language || '')
-    ? 'zh-CN'
-    : 'en-US';
-  localeChoice.value = browserLocale;
-  localeSuggestion.textContent = `已根据浏览器语言建议 ${browserLocale}，可手动调整。`;
+  return 'zh-CN';
 }
 
 async function fetchInstallationStatus(fetcher = fetch) {
@@ -1343,9 +1329,6 @@ async function requestInstallation(event) {
     const dependencies = dependencyFormValues();
     const payload = {
       mode: modeChoice.value,
-      // The installer only asks for the default locale. The server keeps the
-      // backwards-compatible locale mode default (single) when omitted.
-      locale: localeChoice.value,
       database: dependencies.database,
       redis: dependencies.redis,
       admin: {
@@ -1477,7 +1460,6 @@ async function loadAll() {
 }
 
 retryButton.addEventListener('click', loadAll);
-suggestBrowserLocale();
 uiPrepareForm.addEventListener('submit', requestUIPreparation);
 uiPrepareForm.addEventListener('change', updateUIPrepareButton);
 resetUIButton.addEventListener('click', () => requestUIReset(true));

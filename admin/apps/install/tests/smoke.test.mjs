@@ -38,8 +38,8 @@ test('installation shell is independent and exposes an accessible status region'
   assert.match(html, /id="mode-choice"/);
   assert.match(html, /<option value="dev" selected>开发调试（推荐）<\/option>/);
   assert.doesNotMatch(html, /id="locale-mode"/);
-  assert.match(html, /id="locale-choice"/);
-  assert.match(html, /id="locale-suggestion"/);
+  assert.doesNotMatch(html, /id="locale-choice"/);
+  assert.doesNotMatch(html, /id="locale-suggestion"/);
   assert.match(html, /id="plan-panel"/);
   assert.match(html, /id="connection-panel"/);
   assert.match(html, /id="database-form"/);
@@ -163,7 +163,7 @@ test('installation shell is independent and exposes an accessible status region'
   assert.match(script, /selectedUi\s*:/);
   assert.match(script, /JSON\.stringify\(\{ mode \}\)/);
   assert.doesNotMatch(script, /localeMode/);
-  assert.match(script, /localeChoice/);
+  assert.doesNotMatch(script, /localeChoice|localeSuggestion|suggestBrowserLocale/);
   assert.match(script, /canCleanup/);
   assert.match(script, /databaseDriver/);
   assert.match(script, /redisAddress/);
@@ -263,10 +263,7 @@ test('installation forms expose semantic groups and responsive installation feed
     html,
     /<fieldset class="plan-group plan-group--runtime">[\s\S]*?<legend>界面与运行方式<\/legend>/,
   );
-  assert.match(
-    html,
-    /<fieldset class="plan-group plan-group--locale">[\s\S]*?<legend>语言偏好<\/legend>/,
-  );
+  assert.doesNotMatch(html, /plan-group--locale|语言偏好/);
   assert.match(html, /class="connection-grid"/);
   assert.match(html, /class="connection-form connection-form--database"/);
   assert.match(html, /class="connection-form connection-form--redis"/);
@@ -932,7 +929,7 @@ test('the public installation flow wires immediate and asynchronous completed st
     immediate.events.join(','),
     /announce-failure|render-failure|set-failed-actions/,
   );
-  assert.equal(immediate.submittedPayload.locale, 'zh-CN');
+  assert.equal(Object.hasOwn(immediate.submittedPayload, 'locale'), false);
   assert.equal(Object.hasOwn(immediate.submittedPayload, 'localeMode'), false);
 
   const asynchronous = await run('asynchronous');
@@ -948,7 +945,7 @@ test('the public installation flow wires immediate and asynchronous completed st
     asynchronous.events.join(','),
     /announce-failure|render-failure|set-failed-actions/,
   );
-  assert.equal(asynchronous.submittedPayload.locale, 'zh-CN');
+  assert.equal(Object.hasOwn(asynchronous.submittedPayload, 'locale'), false);
   assert.equal(Object.hasOwn(asynchronous.submittedPayload, 'localeMode'), false);
 });
 

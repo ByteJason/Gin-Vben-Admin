@@ -20,21 +20,16 @@ import {
   saveDictionaryApi,
   saveDictionaryItemApi,
 } from '#/api/core/dictionary';
-import { getSettingApi } from '#/api/core/settings';
 import { $t } from '#/locales';
 
 const { hasAccessByCodes } = useAccess();
 const canManage = computed(() =>
   hasAccessByCodes(['system:dictionary:manage']),
 );
-const canReadSettings = computed(() =>
-  hasAccessByCodes(['system:settings:read']),
-);
 
 const emptyType = (): DictionaryTypeInput => ({
   code: '',
   nameZhCN: '',
-  nameEnUS: '',
   description: '',
   status: 'active',
   sortOrder: 0,
@@ -42,7 +37,6 @@ const emptyType = (): DictionaryTypeInput => ({
 const emptyItem = (): DictionaryItemInput => ({
   value: '',
   labelZhCN: '',
-  labelEnUS: '',
   description: '',
   tag: '',
   status: 'active',
@@ -53,8 +47,6 @@ const emptyItem = (): DictionaryItemInput => ({
 const types = ref<DictionaryType[]>([]);
 const items = ref<DictionaryItem[]>([]);
 const selectedCode = ref('');
-const selectedLocale = ref('zh-CN');
-const localeMode = ref<'multi' | 'single'>('single');
 const includeDisabled = ref(false);
 const loading = ref(false);
 const saving = ref(false);
@@ -103,7 +95,6 @@ function editType(type: DictionaryType) {
   Object.assign(typeForm, {
     code: type.code,
     nameZhCN: type.nameZhCN,
-    nameEnUS: type.nameEnUS,
     description: type.description ?? '',
     status: type.status,
     sortOrder: type.sortOrder,
@@ -117,7 +108,6 @@ function editItem(item: DictionaryItem) {
   Object.assign(itemForm, {
     value: item.value,
     labelZhCN: item.labelZhCN,
-    labelEnUS: item.labelEnUS,
     description: item.description ?? '',
     tag: item.tag ?? '',
     status: item.status,
@@ -132,29 +122,11 @@ async function loadItems() {
   }
   try {
     items.value = await listDictionaryItemsApi(selectedCode.value, {
-      locale: selectedLocale.value,
       includeDisabled: includeDisabled.value,
     });
   } catch {
     error.value = String($t('page.dictionary.itemsLoadError'));
     notify('error', error.value);
-  }
-}
-async function loadLocalePolicy() {
-  if (!canReadSettings.value) return;
-  try {
-    const [mode, defaultLocale] = await Promise.all([
-      getSettingApi('i18n.mode'),
-      getSettingApi('i18n.default_locale'),
-    ]);
-    const parsedMode = JSON.parse(mode.value);
-    const parsedLocale = JSON.parse(defaultLocale.value);
-    if (parsedMode === 'single' || parsedMode === 'multi')
-      localeMode.value = parsedMode;
-    if (parsedLocale === 'zh-CN' || parsedLocale === 'en-US')
-      selectedLocale.value = parsedLocale;
-  } catch {
-    // The dictionary remains usable with the compiled single-language default.
   }
 }
 async function loadTypes() {
@@ -177,10 +149,7 @@ async function loadTypes() {
 }
 async function saveType() {
   if (!canManage.value) return;
-  if (
-    !typeForm.code.trim() ||
-    (!typeForm.nameZhCN?.trim() && !typeForm.nameEnUS?.trim())
-  ) {
+  if (!typeForm.code.trim() || !typeForm.nameZhCN?.trim()) {
     error.value = String($t('page.dictionary.typeRequired'));
     notify('error', error.value);
     return;
@@ -207,7 +176,7 @@ async function saveItem() {
   if (
     !selectedCode.value ||
     !itemForm.value.trim() ||
-    (!itemForm.labelZhCN?.trim() && !itemForm.labelEnUS?.trim())
+    !itemForm.labelZhCN?.trim()
   ) {
     error.value = String($t('page.dictionary.itemRequired'));
     notify('error', error.value);
@@ -313,7 +282,6 @@ async function importItems() {
   }
 }
 onMounted(async () => {
-  await loadLocalePolicy();
   await loadTypes();
 });
 </script>
@@ -331,13 +299,6 @@ onMounted(async () => {
         <p class="description">{{ $t('page.dictionary.description') }}</p>
       </div>
       <div class="toolbar">
-        <label v-if="localeMode === 'multi'" class="compact-field">
-          <span>{{ $t('page.dictionary.locale') }}</span>
-          <select v-model="selectedLocale" @change="loadItems">
-            <option value="zh-CN">zh-CN</option>
-            <option value="en-US">en-US</option>
-          </select>
-        </label>
         <button
           class="secondary"
           type="button"
@@ -396,10 +357,6 @@ onMounted(async () => {
             <label
               ><span>{{ $t('page.dictionary.nameZhCN') }}</span
               ><input v-model="typeForm.nameZhCN"
-            /></label>
-            <label
-              ><span>{{ $t('page.dictionary.nameEnUS') }}</span
-              ><input v-model="typeForm.nameEnUS"
             /></label>
             <label
               ><span>{{ $t('page.dictionary.sortOrder') }}</span
@@ -468,9 +425,7 @@ onMounted(async () => {
                     {{ type.code }}</button
                   ><small
                     >{{
-                      selectedLocale === 'en-US'
-                        ? type.nameEnUS
-                        : type.nameZhCN
+                      type.nameZhCN
                     }}<span v-if="type.systemOwned" class="system-badge">{{
                       $t('page.dictionary.system')
                     }}</span></small
@@ -560,10 +515,6 @@ onMounted(async () => {
               <label
                 ><span>{{ $t('page.dictionary.labelZhCN') }}</span
                 ><input v-model="itemForm.labelZhCN"
-              /></label>
-              <label
-                ><span>{{ $t('page.dictionary.labelEnUS') }}</span
-                ><input v-model="itemForm.labelEnUS"
               /></label>
               <label
                 ><span>{{ $t('page.dictionary.tag') }}</span
