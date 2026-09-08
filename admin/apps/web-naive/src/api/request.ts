@@ -97,9 +97,13 @@ function createRequestClient(baseURL: string, options?: RequestClientOptions) {
       // 服务端错误字段兼容 error 或 message
       const responseData = error?.response?.data ?? {};
       const errorMessage = responseData?.error ?? responseData?.message ?? '';
+      const displayMessage =
+        errorMessage === 'invalid credentials'
+          ? '账号或密码错误'
+          : errorMessage || msg;
       // 如果没有错误信息，则会根据状态码进行提示
       notification.error({
-        content: errorMessage || msg,
+        content: displayMessage,
         duration: 4500,
       });
     }),

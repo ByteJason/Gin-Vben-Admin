@@ -85,15 +85,6 @@ const formSchema = computed((): VbenFormSchema[] => {
     @submit="handleSubmit"
   />
   <p
-    v-if="authStore.loginError"
-    aria-live="assertive"
-    class="login-error"
-    data-testid="login-error"
-    role="alert"
-  >
-    {{ authStore.loginError }}
-  </p>
-  <p
     v-if="authStore.loginSuccess"
     aria-live="polite"
     class="login-success"

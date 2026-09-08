@@ -104,10 +104,12 @@ export const useAuthStore = defineStore('auth', () => {
           loginSuccess.value = false;
           const responseData =
             (error as any)?.response?.data ?? (error as any)?.data ?? error;
+          const rawMessage =
+            (responseData as any)?.message ?? (responseData as any)?.error;
           loginError.value =
-            (responseData as any)?.message ??
-            (responseData as any)?.error ??
-            'Login failed. Check your credentials and try again.';
+            rawMessage === 'invalid credentials'
+              ? '账号或密码错误'
+              : rawMessage || '账号或密码错误';
         },
       });
     } finally {
