@@ -25,7 +25,7 @@ test('installation shell is independent and exposes an accessible status region'
   assert.match(html, /href="#install-main"/);
   assert.match(html, /aria-live="polite"/);
   assert.match(html, /id="capability-list"/);
-  assert.match(html, /id="plan-form"/);
+  assert.doesNotMatch(html, /id="plan-form"/);
   assert.match(html, /id="selected-ui-summary"/);
   assert.doesNotMatch(html, /读取命令行选择/);
   assert.match(
@@ -35,8 +35,8 @@ test('installation shell is independent and exposes an accessible status region'
   for (const ui of ['antd', 'ele', 'naive']) {
     assert.match(html, new RegExp(`name="selectedUi"[^>]*value="${ui}"`));
   }
-  assert.match(html, /id="mode-choice"/);
-  assert.match(html, /<option value="dev" selected>开发调试（推荐）<\/option>/);
+  assert.doesNotMatch(html, /id="mode-choice"/);
+  assert.match(html, /运行方式固定为开发调试/);
   assert.doesNotMatch(html, /id="locale-mode"/);
   assert.doesNotMatch(html, /id="locale-choice"/);
   assert.doesNotMatch(html, /id="locale-suggestion"/);
@@ -47,7 +47,8 @@ test('installation shell is independent and exposes an accessible status region'
   assert.match(html, /value="mysql"/);
   assert.match(html, /value="postgres"/);
   assert.match(html, /id="database-host"[^>]*value="localhost"/);
-  assert.match(html, /id="database-port"[^>]*value="3306"/);
+  assert.match(html, /id="database-port"[^>]*value="5432"/);
+  assert.match(html, /<option value="postgres" selected>PostgreSQL<\/option>/);
   assert.doesNotMatch(html, /id="database-password"[^>]*\svalue=/);
   assert.doesNotMatch(html, /id="database-dsn"[^>]*\svalue=/);
   assert.match(html, /id="redis-form"/);
@@ -154,14 +155,12 @@ test('installation shell is independent and exposes an accessible status region'
   assert.match(script, /pollUIAction/);
   assert.match(script, /requestInstallation/);
   assert.match(script, /applyButton\.disabled\s*=\s*!currentPlan/);
-  assert.match(
-    script,
-    /modeChoice\.addEventListener\('change', invalidatePlanIfModeChanged\)/,
-  );
+  assert.doesNotMatch(script, /modeChoice/);
   assert.match(script, /method:\s*'POST'/);
   assert.match(script, /selectedUi/);
   assert.match(script, /selectedUi\s*:/);
-  assert.match(script, /JSON\.stringify\(\{ mode \}\)/);
+  assert.match(script, /JSON\.stringify\(\{ mode: 'dev' \}\)/);
+  assert.match(script, /renderStatus\(status\)[\s\S]*?requestPlan\(\)/);
   assert.doesNotMatch(script, /localeMode/);
   assert.doesNotMatch(script, /localeChoice|localeSuggestion|suggestBrowserLocale/);
   assert.match(script, /canCleanup/);
@@ -259,10 +258,7 @@ test('installation forms expose semantic groups and responsive installation feed
   const html = readFileSync(join(root, 'src/index.html'), 'utf8');
   const styles = readFileSync(join(root, 'src/styles.css'), 'utf8');
 
-  assert.match(
-    html,
-    /<fieldset class="plan-group plan-group--runtime">[\s\S]*?<legend>界面与运行方式<\/legend>/,
-  );
+  assert.doesNotMatch(html, /界面与运行方式/);
   assert.doesNotMatch(html, /plan-group--locale|语言偏好/);
   assert.match(html, /class="connection-grid"/);
   assert.match(html, /class="connection-form connection-form--database"/);
@@ -288,10 +284,6 @@ test('installation forms expose semantic groups and responsive installation feed
   assert.match(
     styles,
     /\.connection-form--admin\s*\{[\s\S]*?grid-template-columns:\s*repeat\(3,/,
-  );
-  assert.match(
-    styles,
-    /\.plan-form\s*>\s*\.primary-button\s*\{[\s\S]*?grid-column:\s*1\s*\/\s*-1/,
   );
   assert.match(styles, /\.connection-result:not\(:empty\)/);
   assert.match(styles, /\.install-failure-details\s*\{/);
@@ -343,6 +335,94 @@ test('UI preparation announces only backend-supported job steps', () => {
     'failed',
   ]);
   assert.equal(labels.workspace, '暂存模板并写入界面配置');
+});
+
+test('combined UI preparation performs exactly one automatic dev preflight', () => {
+  const script = readFileSync(join(root, 'src/app.js'), 'utf8');
+  const preparation = readFunction(script, 'requestUIPreparation');
+  assert.match(preparation, /await runUIAction\(uiPrepareEndpoint/);
+  assert.doesNotMatch(preparation, /planEndpoint/);
+  const readyBranch = script.match(
+    /selectionPanel\.hidden = false;[\s\S]*?announceMissingUITools\(\);/,
+  )?.[0] ?? '';
+  assert.match(readyBranch, /status\.selectedUi && !currentPlan\) requestPlan\(\)/);
+  assert.match(script, /body: JSON\.stringify\(\{ mode: 'dev' \}\)/);
+});
+
+test('directory preflight rejects duplicate requests and exposes a working retry', async () => {
+  const source = readFileSync(join(root, 'src/app.js'), 'utf8');
+  const create = new Function('transport', `
+    let currentPlan = null, planPending = false;
+    let databaseCheckPassed = true, redisCheckPassed = true;
+    const uiActionPending = false;
+    const retryButton = { hidden: true, disabled: false };
+    const planMessage = { dataset: {}, focus() {} };
+    const planPanel = { hidden: false };
+    const planEndpoint = '/api/system/install/v1/plan';
+    const fetch = transport;
+    function browserLanguageHeader() { return 'zh-CN'; }
+    function clearFailedJobActions() {}
+    function updateApplyButton() {}
+    function updateUIPrepareButton() {}
+    function renderPlan(plan) { currentPlan = plan; retryButton.hidden = true; }
+    ${readFunction(source, 'requestPlan')}
+    return { requestPlan, retryButton, planMessage, state: () => ({ currentPlan, planPending }) };
+  `);
+  let failFirst;
+  const firstResponse = new Promise((_, reject) => { failFirst = reject; });
+  const requests = [];
+  const instance = create((endpoint, options) => {
+    requests.push({ endpoint, payload: JSON.parse(options.body) });
+    return requests.length === 1
+      ? firstResponse
+      : Promise.resolve({ ok: true, json: async () => ({ code: 0, data: { canWriteEnv: true } }) });
+  });
+  const first = instance.requestPlan();
+  await instance.requestPlan();
+  assert.equal(requests.length, 1, 'an in-flight preflight must be shared');
+  assert.equal(instance.retryButton.disabled, true);
+  failFirst(new Error('temporary transport failure'));
+  await first;
+  assert.equal(instance.retryButton.hidden, false);
+  assert.equal(instance.retryButton.disabled, false);
+  assert.equal(instance.planMessage.dataset.tone, 'error');
+  assert.equal(instance.state().planPending, false);
+  await instance.requestPlan();
+  assert.equal(requests.length, 2);
+  assert.deepEqual(requests[1].payload, { mode: 'dev' });
+  assert.equal(instance.state().currentPlan.canWriteEnv, true);
+});
+
+test('unsatisfied directory permissions keep dependency forms hidden and expose retry', () => {
+  const source = readFileSync(join(root, 'src/app.js'), 'utf8');
+  const render = new Function('plan', `
+    let currentPlan, databaseCheckPassed, redisCheckPassed;
+    const planCleanup = {}, planBuild = {}, planEnv = {}, planRestart = {};
+    const planEntries = { replaceChildren() {} };
+    const planMessage = { dataset: {} }, planPanel = {};
+    const connectionPanel = {}, retryButton = {};
+    function clearFailedJobActions() {}
+    function updateApplyButton() {}
+    ${readFunction(source, 'yesNo')}
+    ${readFunction(source, 'renderPlan')}
+    renderPlan(plan);
+    return { connectionPanel, retryButton };
+  `);
+  const failed = render({ canCleanup: true, canBuild: true, canWriteEnv: false, entries: [] });
+  assert.equal(failed.connectionPanel.hidden, true);
+  assert.equal(failed.retryButton.hidden, false);
+  const ready = render({ canCleanup: true, canBuild: true, canWriteEnv: true, entries: [] });
+  assert.equal(ready.connectionPanel.hidden, false);
+  assert.equal(ready.retryButton.hidden, true);
+});
+
+test('combined UI preparation keeps retry path after a failed async job', () => {
+  const script = readFileSync(join(root, 'src/app.js'), 'utf8');
+  const finish = readFunction(script, 'finishUIAction');
+  assert.match(finish, /job\.state === 'failed'/);
+  assert.match(finish, /retryButton\.hidden = false/);
+  assert.match(finish, /setUIActionPending\(false\)/);
+  assert.match(script, /uiPrepareForm\.addEventListener\('submit', requestUIPreparation\)/);
 });
 
 test('installation capabilities wire contract includes version compatibility', () => {

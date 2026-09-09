@@ -127,8 +127,7 @@ pnpm install
 pnpm run dev
 ```
 
-切换只改变活动 profile、派生收据和切换报告；根 `.env` 已存在时只精确更新
-`APP_UI_ACTIVE`，其余键保持不变。三套源码与公共业务层不变，报告中的
+切换只改变活动 profile、派生收据和切换报告；根 `.env` 保持字节不变，不再维护重复的 UI 环境变量。三套源码与公共业务层不变，报告中的
 `sourceAdapter`、`targetAdapter`、`adapterChecks=[route,theme,form,component]` 与
 `uiSpecific=revalidate-adapter` 提醒人工复核 adapter。后端 `.installed` 原文件保持，历史目录保存
 字节一致副本，因此服务端仍为 `installed`，现有数据库、管理员和业务 API 继续可用，无需重跑网页

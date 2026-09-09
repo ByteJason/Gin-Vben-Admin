@@ -135,6 +135,7 @@ func New(cfg config.Config) (*App, error) {
 		if app.files != nil {
 			repository := fileplatform.NewGORMRepository(store)
 			app.files.SetRepository(repository)
+			app.files.SetCategoryRepository(repository)
 			app.files.SetUsageRepository(repository)
 			app.files.SetUsageService(fileplatform.NewGORMUsageService(store, repository))
 		}

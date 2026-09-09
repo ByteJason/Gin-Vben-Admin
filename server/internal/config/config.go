@@ -317,7 +317,7 @@ func Default() Config {
 		},
 		Logging: LoggingConfig{Level: "info"},
 		Database: DatabaseConfig{
-			Driver:          "mysql",
+			Driver:          "postgres",
 			Mode:            "single",
 			ReadPolicy:      "random",
 			MaxOpenConns:    10,

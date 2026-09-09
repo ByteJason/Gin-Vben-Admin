@@ -16,6 +16,17 @@ type FileRepository interface {
 	MarkStatus(context.Context, string, MediaStatus, string, *time.Time) error
 }
 
+// CategoryRepository is the durable authority for media categories. Keeping
+// this seam separate from FileRepository allows category persistence to evolve
+// independently while Service remains usable with in-memory fixtures.
+type CategoryRepository interface {
+	CreateCategory(context.Context, Category) error
+	GetCategory(context.Context, string) (Category, error)
+	ListCategories(context.Context, string, string) ([]Category, error)
+	UpdateCategory(context.Context, Category) error
+	DeleteCategory(context.Context, string, string, string) error
+}
+
 type StatusRepository interface {
 	FileRepository
 	ListByStatus(context.Context, MediaStatus, int) ([]File, error)

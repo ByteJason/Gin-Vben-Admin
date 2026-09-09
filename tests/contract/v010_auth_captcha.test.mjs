@@ -21,11 +21,11 @@ test('0.10 captcha risk configuration and HTTP seam stay explicit and disabled b
   assert.match(config, /CaptchaChallengeTTL\s+time\.Duration/);
   assert.match(config, /CaptchaKeyPrefix\s+string/);
   assert.match(config, /CaptchaEnabled:\s+false/);
-  assert.match(example, /captcha_enabled:\s+false/);
-  assert.match(example, /captcha_risk_threshold:\s+3/);
-  assert.match(example, /captcha_risk_window:\s+15m/);
-  assert.match(example, /captcha_challenge_ttl:\s+2m/);
-  assert.match(example, /captcha_key_prefix:\s+auth-captcha/);
+  assert.doesNotMatch(example, /captcha_/);
+  assert.match(config, /CaptchaRiskThreshold:\s+3/);
+  assert.match(config, /CaptchaRiskWindow:\s+15 \* time.Minute/);
+  assert.match(config, /CaptchaChallengeTTL:\s+2 \* time.Minute/);
+  assert.match(config, /CaptchaKeyPrefix:\s+"auth-captcha"/);
   assert.match(handler, /SetCaptchaRiskStore/);
   assert.match(handler, /captchaRequired/);
   assert.match(risk, /type CaptchaRiskStore interface/);

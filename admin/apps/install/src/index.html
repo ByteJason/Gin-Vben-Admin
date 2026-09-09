@@ -159,7 +159,7 @@
                 type="submit"
                 disabled
               >
-                确认并准备此界面
+                准备界面并预检
               </button>
             </form>
             <button
@@ -234,45 +234,14 @@
             hidden
           >
             <div class="capability-panel__heading">
-              <h3 id="selection-title">确认安装方案</h3>
-              <span>确认选择后检查目录权限</span>
+              <h3 id="selection-title">目录预检</h3>
+              <span>界面准备完成后自动检查</span>
             </div>
-            <form id="plan-form" class="plan-form">
-              <fieldset class="plan-group plan-group--runtime">
-                <legend>界面与运行方式</legend>
-                <div class="plan-group__fields">
-                  <div class="form-field readonly-field">
-                    <span class="field-label">管理界面</span>
-                    <output
-                      id="selected-ui-summary"
-                      class="readonly-summary"
-                      aria-live="polite"
-                      >读取安装页选择中</output
-                    >
-                    <span class="field-help"
-                      >安装页已写入本机 profile，并完成所选工作区闭包的依赖安装。</span
-                    >
-                  </div>
-                  <div class="form-field">
-                    <label for="mode-choice">运行方式</label>
-                    <select id="mode-choice" name="mode" required>
-                      <option value="dev" selected>开发调试（推荐）</option>
-                      <optgroup label="高级部署选项">
-                        <option value="embedded">嵌入式单包</option>
-                        <option value="standalone">静态资源独立部署</option>
-                        <option value="api_only">仅 API</option>
-                      </optgroup>
-                    </select>
-                    <span class="field-help"
-                      >本地首次安装建议保持开发调试，部署时再选择高级模式。</span
-                    >
-                  </div>
-                </div>
-              </fieldset>
-              <button id="plan-button" class="primary-button" type="submit">
-                检查目录权限
-              </button>
-            </form>
+            <div class="form-field readonly-field">
+              <span class="field-label">管理界面</span>
+              <output id="selected-ui-summary" class="readonly-summary" aria-live="polite">读取安装页选择中</output>
+              <span class="field-help">运行方式固定为开发调试；界面选择完成后自动执行目录权限预检。</span>
+            </div>
             <div
               id="plan-message"
               class="plan-message"
@@ -343,7 +312,7 @@
                   <label for="database-driver">类型</label>
                   <select id="database-driver" name="driver" required>
                     <option value="mysql">MySQL</option>
-                    <option value="postgres">PostgreSQL</option>
+                    <option value="postgres" selected>PostgreSQL</option>
                   </select>
                 </div>
                 <div class="form-field">
@@ -364,7 +333,7 @@
                     type="number"
                     min="1"
                     max="65535"
-                    value="3306"
+                    value="5432"
                     inputmode="numeric"
                     required
                   />

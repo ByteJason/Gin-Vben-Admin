@@ -14,7 +14,7 @@ const value = (name, fallback) => {
   return index >= 0 ? process.argv[index + 1] : fallback;
 };
 const ui = value('--ui', 'antd');
-const database = value('--database', 'mysql');
+const database = value('--database', 'postgres');
 const checkOnly = args.has('--check');
 const skipInstall = args.has('--skip-install') || checkOnly;
 

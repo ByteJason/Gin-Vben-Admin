@@ -210,3 +210,65 @@ func TestUploadCategoryScopeAndListFilter(t *testing.T) {
 		t.Fatalf("file-backed delete err=%v", err)
 	}
 }
+
+type categoryRepoFixture struct{ items map[string]Category }
+
+func (r *categoryRepoFixture) CreateCategory(_ context.Context, c Category) error {
+	if r.items == nil {
+		r.items = map[string]Category{}
+	}
+	r.items[c.ID] = c
+	return nil
+}
+func (r *categoryRepoFixture) GetCategory(_ context.Context, id string) (Category, error) {
+	c, ok := r.items[id]
+	if !ok {
+		return Category{}, ErrFileNotFound
+	}
+	return c, nil
+}
+func (r *categoryRepoFixture) ListCategories(_ context.Context, tenantID, orgID string) ([]Category, error) {
+	out := make([]Category, 0)
+	for _, c := range r.items {
+		if (tenantID == "" || c.TenantID == tenantID) && (orgID == "" || c.OrgID == orgID) {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+func (r *categoryRepoFixture) UpdateCategory(_ context.Context, c Category) error {
+	if _, ok := r.items[c.ID]; !ok {
+		return ErrCategoryNotFound
+	}
+	r.items[c.ID] = c
+	return nil
+}
+func (r *categoryRepoFixture) DeleteCategory(_ context.Context, id, _, _ string) error {
+	if _, ok := r.items[id]; !ok {
+		return ErrCategoryNotFound
+	}
+	delete(r.items, id)
+	return nil
+}
+
+func TestServiceUsesDurableCategoryRepository(t *testing.T) {
+	repo := &categoryRepoFixture{items: map[string]Category{}}
+	svc := NewService(&fakeStore{}, Config{CategoryRepository: repo})
+	root, err := svc.CreateCategory(context.Background(), CategoryInput{Name: "Persisted"}, "t1", "o1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A fresh Service with the same repository observes the category, proving
+	// category state no longer depends on the process-local map.
+	fresh := NewService(&fakeStore{}, Config{CategoryRepository: repo})
+	items := fresh.ListCategories(context.Background(), "t1", "o1")
+	if len(items) != 1 || items[0].ID != root.ID {
+		t.Fatalf("persisted categories=%+v", items)
+	}
+	if _, err = fresh.UpdateCategory(context.Background(), root.ID, CategoryInput{Name: "Renamed"}, "t1", "o1"); err != nil {
+		t.Fatal(err)
+	}
+	if err = fresh.DeleteCategory(context.Background(), root.ID, "t1", "o1"); err != nil {
+		t.Fatal(err)
+	}
+}

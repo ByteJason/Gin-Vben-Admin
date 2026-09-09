@@ -8,9 +8,41 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	installer "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/installer"
+	"github.com/ByteJason/Gin-Vben-Admin/server/internal/config"
 )
+
+func TestFreshInstallationEnvironmentUsesCurrentRuntimeDefaults(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, ".env")
+	service := NewEnvironmentInstaller(NewAtomicEnvStore(path), filepath.Join(root, "install"), bytes.NewReader(bytes.Repeat([]byte{0x5a}, 96)))
+	request := installer.ApplyRequest{
+		Mode: "dev",
+		Database: installer.DatabaseConnection{Driver: "postgres", Mode: "single", Host: "127.0.0.1", Port: 5432,
+			Database: "app", Username: "app", Password: "fixture-database-password", TLSMode: "disable"},
+		Redis: installer.RedisConnection{Mode: "single", Addr: "127.0.0.1:6379"},
+	}
+	if _, err := service.Publish(context.Background(), request, installer.Plan{SelectedUI: "antd", Mode: "dev"}); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(root, "server.yaml")
+	if err := os.WriteFile(configPath, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SERVER_ENV_FILE", path)
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatalf("load installed environment: %v", err)
+	}
+	if !cfg.Database.Enabled || cfg.Database.Driver != "postgres" || !cfg.Redis.Enabled || !cfg.Auth.Enabled {
+		t.Fatal("installed environment did not enable its configured dependencies and authentication")
+	}
+	if cfg.Auth.AccessTTL != 24*time.Hour || cfg.Auth.CaptchaEnabled || cfg.I18n.DefaultLocale != "zh-CN" {
+		t.Fatal("fresh installation pins historical authentication or language defaults")
+	}
+}
 
 func TestEnvironmentInstallerPublishesAndRollsBackPrivateRootEnv(t *testing.T) {
 	t.Parallel()
@@ -40,21 +72,17 @@ func TestEnvironmentInstallerPublishesAndRollsBackPrivateRootEnv(t *testing.T) {
 		t.Fatalf("ReadFile(.env) error = %v", err)
 	}
 	for _, required := range []string{
-		`APP_UI_ACTIVE="naive"`, `APP_UI_MODE="embedded"`, `DATABASE_DRIVER="postgres"`,
+		`DATABASE_DRIVER="postgres"`,
 		`DATABASE_DSN="postgres://app-user:database-secret@127.0.0.1:5432/app?sslmode=disable"`,
 		`REDIS_PASSWORD="redis-secret"`, `AUTH_ENABLED="true"`, `INSTALL_STATE_DIR="../install"`,
-		`AUTH_ACCESS_TTL="30m"`,
-		`AUTH_CAPTCHA_ENABLED="false"`,
-		`AUTH_CAPTCHA_RISK_THRESHOLD="3"`,
-		`AUTH_CAPTCHA_RISK_WINDOW="15m"`,
-		`AUTH_CAPTCHA_CHALLENGE_TTL="2m"`,
-		`AUTH_CAPTCHA_KEY_PREFIX="auth-captcha"`,
-		`I18N_MODE="single"`,
-		`I18N_DEFAULT_LOCALE="zh-CN"`,
-		`I18N_SUPPORTED_LOCALES="zh-CN,en-US"`,
 	} {
 		if !strings.Contains(string(contents), required) {
 			t.Fatalf(".env missing required setting %q", required)
+		}
+	}
+	for _, removed := range []string{"APP_UI_", "AUTH_ACCESS_TTL=", "AUTH_CAPTCHA_", "I18N_", "DATABASE_MAX_", "REDIS_PING_TIMEOUT="} {
+		if strings.Contains(string(contents), removed) {
+			t.Fatalf(".env retained a redundant default %q", removed)
 		}
 	}
 	if strings.Contains(string(contents), request.Admin.Password) {

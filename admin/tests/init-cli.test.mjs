@@ -49,7 +49,6 @@ function fixture() {
     'init-state.mjs',
     'pnpm-command.mjs',
     'process-identity.mjs',
-    'profile-gate.mjs',
     'selected-dispatch.mjs',
     'ui-install.mjs',
     'ui-select.mjs',
@@ -3663,7 +3662,7 @@ test('init rejects an unsupported pnpm major before creating local state', () =>
 test('build/dev/preview profile gate requires both a valid profile and future installer marker', () => {
   const root = fixture();
   try {
-    const pristine = run(root, 'profile-gate.mjs', ['--command', 'build']);
+    const pristine = run(root, 'selected-dispatch.mjs', ['--check', '--command', 'build']);
     assert.equal(pristine.status, 2, output(pristine));
     assert.match(output(pristine), /INIT_STATE=pristine/);
     assert.match(output(pristine), /INIT_ERROR=PROFILE_REQUIRED/);
@@ -3671,7 +3670,7 @@ test('build/dev/preview profile gate requires both a valid profile and future in
     const initialized = run(root, 'init.mjs', ['--ui', 'antd', '--confirm-cleanup', '--no-open']);
     assert.equal(initialized.status, 0, output(initialized));
 
-    const blocked = run(root, 'profile-gate.mjs', ['--command', 'build']);
+    const blocked = run(root, 'selected-dispatch.mjs', ['--check', '--command', 'build']);
     assert.equal(blocked.status, 2, output(blocked));
     assert.match(output(blocked), /INIT_STATE=ui_prepared/);
     assert.match(output(blocked), /INIT_ERROR=INSTALL_MARKER_REQUIRED/);
@@ -3686,12 +3685,9 @@ test('build/dev/preview profile gate requires both a valid profile and future in
       manifest_hash: 'b'.repeat(64),
     }));
     for (const command of ['build', 'dev', 'preview']) {
-      const allowed = run(root, 'profile-gate.mjs', ['--command', command]);
+      const allowed = run(root, 'selected-dispatch.mjs', ['--check', '--command', command]);
       assert.equal(allowed.status, 0, output(allowed));
-      assert.match(output(allowed), /INIT_STATE=installed/);
-      assert.match(output(allowed), /INIT_SELECTED_UI=antd/);
-      assert.match(output(allowed), new RegExp(`INIT_NEXT=RUN_${command.toUpperCase()}`));
-      assert.match(output(allowed), /INIT_ERROR=NONE/);
+    assert.equal(output(allowed), '');
     }
   } finally {
     dispose(root);
@@ -3702,7 +3698,7 @@ test('profile gate reports an inconsistent profile and a persistent transaction 
   const root = fixture();
   try {
     writeFileSync(join(root, '.ui-profile.json'), '{"schema":1,"selectedUi":"antd"}\n');
-    const invalid = run(root, 'profile-gate.mjs', ['--command', 'preview']);
+    const invalid = run(root, 'selected-dispatch.mjs', ['--check', '--command', 'preview']);
     assert.equal(invalid.status, 3, output(invalid));
     assert.match(output(invalid), /INIT_STATE=inconsistent/);
     assert.match(output(invalid), /INIT_ERROR=PROFILE_INVALID/);
@@ -3711,7 +3707,7 @@ test('profile gate reports an inconsistent profile and a persistent transaction 
     const transaction = join(root, '..', '.runtime', 'install', 'transaction.json');
     mkdirSync(join(root, '..', '.runtime', 'install'), { recursive: true });
     writeFileSync(transaction, '{"schema":1}\n');
-    const active = run(root, 'profile-gate.mjs', ['--command', 'preview']);
+    const active = run(root, 'selected-dispatch.mjs', ['--check', '--command', 'preview']);
     assert.equal(active.status, 3, output(active));
     assert.match(output(active), /INIT_STATE=inconsistent/);
     assert.match(output(active), /INIT_ERROR=PROFILE_INVALID/);
@@ -3753,7 +3749,7 @@ test('admin initialization journals reject unknown or credential-like fields', (
 test('removed analyze builds are rejected by the public command gate', () => {
   const root = fixture();
   try {
-    const result = run(root, 'profile-gate.mjs', ['--command', 'build:analyze']);
+    const result = run(root, 'selected-dispatch.mjs', ['--check', '--command', 'build:analyze']);
     assert.equal(result.status, 2, output(result));
     assert.match(output(result), /INIT_ERROR=COMMAND_INVALID/);
   } finally {
@@ -3977,13 +3973,13 @@ test('legacy runtime records remain isolated compatibility state', () => {
   try {
     assert.equal(run(root, 'init.mjs', ['--ui', 'antd', '--confirm-cleanup', '--no-open']).status, 0);
     writeFileSync(join(root, '.ui-init-runtime.json'), JSON.stringify({ schema: 1, port: 8080, pid: 12345 }));
-    const active = run(root, 'profile-gate.mjs', ['--command', 'preview']);
+    const active = run(root, 'selected-dispatch.mjs', ['--check', '--command', 'preview']);
     assert.equal(active.status, 3, output(active));
     assert.match(output(active), /INIT_STATE=installing/);
     assert.match(output(active), /INIT_ERROR=INITIALIZATION_IN_PROGRESS/);
 
     writeFileSync(join(root, '.ui-init-runtime.json'), '{"schema":0}\n');
-    const invalid = run(root, 'profile-gate.mjs', ['--command', 'preview']);
+    const invalid = run(root, 'selected-dispatch.mjs', ['--check', '--command', 'preview']);
     assert.equal(invalid.status, 3, output(invalid));
     assert.match(output(invalid), /INIT_STATE=inconsistent/);
     assert.match(output(invalid), /INIT_ERROR=PROFILE_INVALID/);
@@ -4033,7 +4029,7 @@ test('installer marker is schema checked against the selected profile and instal
     assert.equal(run(root, 'init.mjs', ['--ui', 'ele', '--confirm-cleanup', '--no-open']).status, 0);
     const marker = join(root, '..', '.runtime', 'install', '.installed');
     writeFileSync(marker, JSON.stringify({ schema_version: 1, selected_ui: 'naive' }));
-    const mismatch = run(root, 'profile-gate.mjs', ['--command', 'build']);
+    const mismatch = run(root, 'selected-dispatch.mjs', ['--check', '--command', 'build']);
     assert.equal(mismatch.status, 3, output(mismatch));
     assert.match(output(mismatch), /INIT_STATE=inconsistent/);
     assert.match(output(mismatch), /INIT_ERROR=PROFILE_INVALID/);
@@ -4061,7 +4057,7 @@ test('build remains blocked while the installer marker lock exists', () => {
       selected_ui: 'antd', mode: 'dev', artifact_hash: 'a'.repeat(64), manifest_hash: 'b'.repeat(64),
     }));
     writeFileSync(join(stateRoot, '.installed.lock'), '');
-    const result = run(root, 'profile-gate.mjs', ['--command', 'build']);
+    const result = run(root, 'selected-dispatch.mjs', ['--check', '--command', 'build']);
     assert.equal(result.status, 3, output(result));
     assert.match(output(result), /INIT_STATE=installing/);
     assert.match(output(result), /INIT_ERROR=INITIALIZATION_IN_PROGRESS/);
@@ -4110,12 +4106,9 @@ test('an externally installed non-destructive selection can run without an init 
 
     // The documented quick start performs the filtered pnpm install directly,
     // so no init-owned dependency receipt exists at this public CLI seam.
-    const gate = run(root, 'profile-gate.mjs', ['--command', 'dev']);
+    const gate = run(root, 'selected-dispatch.mjs', ['--check', '--command', 'dev']);
     assert.equal(gate.status, 0, output(gate));
-    assert.match(output(gate), /INIT_STATE=ui_prepared/);
-    assert.match(output(gate), /INIT_ACTION=RUN_SELECTED_APP/);
-    assert.match(output(gate), /INIT_NEXT=RUN_DEV/);
-    assert.match(output(gate), /INIT_ERROR=NONE/);
+    assert.equal(output(gate), '');
 
     const runner = join(root, 'scripts', 'record-workspace-dispatch.mjs');
     const log = join(root, 'workspace-dispatch.log');
@@ -4129,6 +4122,7 @@ test('an externally installed non-destructive selection can run without an init 
       INIT_DISPATCH_LOG: log,
     });
     assert.equal(dispatch.status, 0, output(dispatch));
+    assert.equal(output(dispatch), '', 'successful dispatch has no initialization status dump');
     assert.equal(readFileSync(log, 'utf8'), '-F @vben/web-ele run dev');
   } finally {
     dispose(root);
@@ -4145,10 +4139,9 @@ test('an environment UI override treats the durable UI receipt as a cache miss a
     const receipt = join(root, '..', '.runtime', 'install', 'workspace-dependencies.json');
     const receiptBytes = readFileSync(receipt);
 
-    const gate = run(root, 'profile-gate.mjs', ['--command', 'dev'], { ADMIN_UI: 'naive' });
+    const gate = run(root, 'selected-dispatch.mjs', ['--check', '--command', 'dev'], { ADMIN_UI: 'naive' });
     assert.equal(gate.status, 0, output(gate));
-    assert.match(output(gate), /INIT_SELECTED_UI=naive/);
-    assert.match(output(gate), /INIT_ACTION=RUN_SELECTED_APP/);
+    assert.equal(output(gate), '');
 
     const runner = join(root, 'scripts', 'record-override-dispatch.mjs');
     const log = join(root, 'override-dispatch.log');
@@ -4163,6 +4156,7 @@ test('an environment UI override treats the durable UI receipt as a cache miss a
       INIT_DISPATCH_LOG: log,
     });
     assert.equal(dispatch.status, 0, output(dispatch));
+    assert.equal(output(dispatch), '', 'successful dispatch has no initialization status dump');
     assert.equal(readFileSync(log, 'utf8'), '-F @vben/web-naive run dev');
     assert.deepEqual(readFileSync(receipt), receiptBytes);
     assert.equal(JSON.parse(readFileSync(join(root, '.ui-profile.local.json'), 'utf8')).selectedUi, 'ele');
@@ -4630,7 +4624,7 @@ test('profile remains source-controlled while receipts stay local and public scr
     assert.match(ignore, /^\/admin\/\.ui-init-receipt\.json$/m);
     const pkg = JSON.parse(readFileSync(join(sourceRoot, 'package.json'), 'utf8'));
     for (const command of ['build', 'dev', 'preview']) {
-      assert.match(pkg.scripts[command], /profile-gate/);
+      assert.doesNotMatch(pkg.scripts[command], /profile-gate/);
       assert.match(pkg.scripts[command], /selected-dispatch/);
       assert.doesNotMatch(pkg.scripts[command], /turbo-run|turbo build/);
     }
@@ -4675,7 +4669,7 @@ test('a fresh clone profile without local receipt is prepared, while invalid rec
     rmSync(marker);
 
     writeFileSync(join(root, '.ui-init-receipt.json'), '{"schema":0}\n');
-    const corruptReceipt = run(root, 'profile-gate.mjs', ['--command', 'build']);
+    const corruptReceipt = run(root, 'selected-dispatch.mjs', ['--check', '--command', 'build']);
     assert.equal(corruptReceipt.status, 3, output(corruptReceipt));
     assert.match(output(corruptReceipt), /INIT_STATE=inconsistent/);
 
@@ -4688,7 +4682,7 @@ test('a fresh clone profile without local receipt is prepared, while invalid rec
     assert.match(output(extraTemplate), /INIT_SELECTED_UI=antd/);
     assert.match(output(extraTemplate), /INIT_REASON=EXTRA_TEMPLATE_PRESENT/);
 
-    const blocked = run(root, 'profile-gate.mjs', ['--command', 'dev']);
+    const blocked = run(root, 'selected-dispatch.mjs', ['--check', '--command', 'dev']);
     assert.equal(blocked.status, 3, output(blocked));
     assert.match(output(blocked), /INIT_SELECTED_UI=antd/);
     assert.match(output(blocked), /INIT_ACTION=REMOVE_UNSELECTED_UI_WORKSPACE/);
@@ -4725,14 +4719,9 @@ test('an installed selected UI remains runnable when git pull restores partial u
       writeFileSync(join(directory, 'pulled-update.ts'), 'export const pulledUpdate = true;\n');
     }
 
-    const dev = run(root, 'profile-gate.mjs', ['--command', 'dev']);
+    const dev = run(root, 'selected-dispatch.mjs', ['--check', '--command', 'dev']);
     assert.equal(dev.status, 0, output(dev));
-    assert.match(output(dev), /INIT_STATE=installed/);
-    assert.match(output(dev), /INIT_SELECTED_UI=ele/);
-    assert.match(output(dev), /INIT_REASON=NONE/);
-    assert.match(output(dev), /INIT_ACTION=RUN_SELECTED_APP/);
-    assert.match(output(dev), /INIT_NEXT=RUN_DEV/);
-    assert.match(output(dev), /INIT_ERROR=NONE/);
+    assert.equal(output(dev), '');
 
     const runner = join(root, 'scripts', 'record-pulled-layout-dispatch.mjs');
     const log = join(root, 'pulled-layout-dispatch.log');
@@ -4746,6 +4735,7 @@ test('an installed selected UI remains runnable when git pull restores partial u
       INIT_PNPM_LOG: log,
     });
     assert.equal(dispatch.status, 0, output(dispatch));
+    assert.equal(output(dispatch), '', 'successful dispatch has no initialization status dump');
     assert.equal(readFileSync(log, 'utf8'), '-F @vben/web-ele run dev');
   } finally {
     dispose(root);

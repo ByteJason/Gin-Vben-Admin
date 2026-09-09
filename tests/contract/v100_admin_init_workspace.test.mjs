@@ -34,7 +34,7 @@ test('INIT-100 web installer selects UI before exposing it as read-only plan sta
   assert.match(script, /uiPrepareEndpoint/);
   assert.match(script, /selectedUi:\s*selectedUi/);
   assert.match(script, /confirmCleanup:\s*true/);
-  assert.match(script, /JSON\.stringify\(\{\s*mode\s*\}\)/);
+  assert.match(script, /JSON\.stringify\(\{\s*mode:\s*'dev'\s*\}\)/);
   assert.match(script, /重新启动|重启/);
   assert.match(script, /pnpm run dev/);
   assert.match(script, /pnpm install/);

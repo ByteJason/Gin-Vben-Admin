@@ -103,12 +103,13 @@ type OpaqueURLSigner interface {
 }
 
 type Config struct {
-	MaxBytes        int64
-	AllowedMIMEs    []string
-	Clock           func() time.Time
-	Repository      FileRepository
-	UsageRepository UsageRepository
-	UsageService    MediaUsageService
+	MaxBytes           int64
+	AllowedMIMEs       []string
+	Clock              func() time.Time
+	Repository         FileRepository
+	CategoryRepository CategoryRepository
+	UsageRepository    UsageRepository
+	UsageService       MediaUsageService
 }
 
 type File struct {
@@ -195,6 +196,7 @@ type Service struct {
 	repo         FileRepository
 	usageRepo    UsageRepository
 	usageService MediaUsageService
+	categoryRepo CategoryRepository
 	mu           sync.RWMutex
 	files        map[string]File
 	// deleted retains tombstones until the object-store cleanup worker removes
@@ -222,7 +224,7 @@ func NewService(store Store, config Config) *Service {
 			usageRepo = candidate
 		}
 	}
-	return &Service{store: store, repo: config.Repository, usageRepo: usageRepo, usageService: config.UsageService, maxBytes: config.MaxBytes, allowed: allowed, clock: clock, files: make(map[string]File), deleted: make(map[string]time.Time), categories: make(map[string]Category)}
+	return &Service{store: store, repo: config.Repository, usageRepo: usageRepo, usageService: config.UsageService, categoryRepo: config.CategoryRepository, maxBytes: config.MaxBytes, allowed: allowed, clock: clock, files: make(map[string]File), deleted: make(map[string]time.Time), categories: make(map[string]Category)}
 }
 
 // SetRepository installs the durable metadata authority after dependency
@@ -230,6 +232,14 @@ func NewService(store Store, config Config) *Service {
 func (s *Service) SetRepository(repo FileRepository) {
 	if s != nil {
 		s.repo = repo
+	}
+}
+
+// SetCategoryRepository installs the durable category authority after
+// dependency construction (bootstrap opens the database after providers).
+func (s *Service) SetCategoryRepository(repo CategoryRepository) {
+	if s != nil {
+		s.categoryRepo = repo
 	}
 }
 
@@ -745,12 +755,40 @@ func (s *Service) List(ctx context.Context, filter ListFilter) (Page, error) {
 	return Page{Items: items[start:end], Total: total, Limit: filter.Limit, Offset: filter.Offset}, nil
 }
 
-func (s *Service) CreateCategory(_ context.Context, input CategoryInput, tenantID, orgID string) (Category, error) {
+func (s *Service) CreateCategory(ctx context.Context, input CategoryInput, tenantID, orgID string) (Category, error) {
 	name := strings.TrimSpace(input.Name)
 	if name == "" {
 		return Category{}, ErrInvalidCategory
 	}
 	parentID := strings.TrimSpace(input.ParentID)
+	if s.categoryRepo != nil {
+		if parentID != "" {
+			p, err := s.categoryRepo.GetCategory(ctx, parentID)
+			if err != nil {
+				if errors.Is(err, ErrFileNotFound) {
+					return Category{}, ErrCategoryNotFound
+				}
+				return Category{}, err
+			}
+			if p.TenantID != tenantID || p.OrgID != orgID {
+				return Category{}, ErrCategoryAccessDenied
+			}
+		}
+		id, err := newID()
+		if err != nil {
+			return Category{}, err
+		}
+		now := s.clock().UTC()
+		enabled := true
+		if input.Enabled != nil {
+			enabled = *input.Enabled
+		}
+		c := Category{ID: id, Name: name, ParentID: parentID, TenantID: strings.TrimSpace(tenantID), OrgID: strings.TrimSpace(orgID), Enabled: enabled, CreatedAt: now, UpdatedAt: now}
+		if err := s.categoryRepo.CreateCategory(ctx, c); err != nil {
+			return Category{}, err
+		}
+		return c, nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if parentID != "" {
@@ -776,7 +814,14 @@ func (s *Service) CreateCategory(_ context.Context, input CategoryInput, tenantI
 	return c, nil
 }
 
-func (s *Service) ListCategories(_ context.Context, tenantID, orgID string) []Category {
+func (s *Service) ListCategories(ctx context.Context, tenantID, orgID string) []Category {
+	if s.categoryRepo != nil {
+		items, err := s.categoryRepo.ListCategories(ctx, tenantID, orgID)
+		if err == nil {
+			return items
+		}
+		return nil
+	}
 	s.mu.RLock()
 	out := make([]Category, 0)
 	for _, c := range s.categories {
@@ -799,7 +844,16 @@ func (s *Service) ListCategories(_ context.Context, tenantID, orgID string) []Ca
 // semantics for tenant handlers, while the catalog adapter can still inspect
 // every scope when it is building an administrative picker or mutating a
 // cross-scope category.
-func (s *Service) ListAllCategories(_ context.Context) []Category {
+func (s *Service) ListAllCategories(ctx context.Context) []Category {
+	if s.categoryRepo != nil {
+		// Empty scope asks the repository for all visible categories. Platform
+		// callers are already authorized by CatalogAdapter.
+		items, err := s.categoryRepo.ListCategories(ctx, "", "")
+		if err == nil {
+			return items
+		}
+		return nil
+	}
 	s.mu.RLock()
 	out := make([]Category, 0, len(s.categories))
 	for _, category := range s.categories {
@@ -817,14 +871,64 @@ func (s *Service) ListAllCategories(_ context.Context) []Category {
 
 // GetCategory returns a detached category for catalog adapters that have
 // already passed a platform-admin authorization check.
-func (s *Service) GetCategory(_ context.Context, id string) (Category, bool) {
+func (s *Service) GetCategory(ctx context.Context, id string) (Category, bool) {
+	if s.categoryRepo != nil {
+		item, err := s.categoryRepo.GetCategory(ctx, strings.TrimSpace(id))
+		return item, err == nil
+	}
 	s.mu.RLock()
 	category, ok := s.categories[strings.TrimSpace(id)]
 	s.mu.RUnlock()
 	return category, ok
 }
 
-func (s *Service) UpdateCategory(_ context.Context, id string, input CategoryInput, tenantID, orgID string) (Category, error) {
+func (s *Service) UpdateCategory(ctx context.Context, id string, input CategoryInput, tenantID, orgID string) (Category, error) {
+	if s.categoryRepo != nil {
+		c, err := s.categoryRepo.GetCategory(ctx, strings.TrimSpace(id))
+		if err != nil {
+			if errors.Is(err, ErrFileNotFound) {
+				return Category{}, ErrCategoryNotFound
+			}
+			return Category{}, err
+		}
+		if c.TenantID != tenantID || c.OrgID != orgID {
+			return Category{}, ErrCategoryAccessDenied
+		}
+		if strings.TrimSpace(input.Name) != "" {
+			c.Name = strings.TrimSpace(input.Name)
+		}
+		if input.Enabled != nil {
+			c.Enabled = *input.Enabled
+		}
+		if input.ParentID != "" {
+			p, e := s.categoryRepo.GetCategory(ctx, strings.TrimSpace(input.ParentID))
+			if e != nil {
+				return Category{}, ErrCategoryNotFound
+			}
+			if p.TenantID != tenantID || p.OrgID != orgID || p.ID == c.ID {
+				return Category{}, ErrCategoryAccessDenied
+			}
+			// Walk ancestors through the repository to prevent introducing a
+			// cycle when category state is durable (the in-memory path performs
+			// the same check against its map).
+			for ancestor := p; ancestor.ParentID != ""; {
+				if ancestor.ParentID == c.ID {
+					return Category{}, ErrInvalidCategory
+				}
+				next, nextErr := s.categoryRepo.GetCategory(ctx, ancestor.ParentID)
+				if nextErr != nil {
+					break
+				}
+				ancestor = next
+			}
+			c.ParentID = p.ID
+		}
+		c.UpdatedAt = s.clock().UTC()
+		if err := s.categoryRepo.UpdateCategory(ctx, c); err != nil {
+			return Category{}, err
+		}
+		return c, nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	c, ok := s.categories[strings.TrimSpace(id)]
@@ -866,6 +970,37 @@ func (s *Service) UpdateCategory(_ context.Context, id string, input CategoryInp
 }
 
 func (s *Service) DeleteCategory(ctx context.Context, id, tenantID, orgID string) error {
+	if s.categoryRepo != nil {
+		c, err := s.categoryRepo.GetCategory(ctx, strings.TrimSpace(id))
+		if err != nil {
+			if errors.Is(err, ErrFileNotFound) {
+				return ErrCategoryNotFound
+			}
+			return err
+		}
+		if c.TenantID != tenantID || c.OrgID != orgID {
+			return ErrCategoryAccessDenied
+		}
+		children, err := s.categoryRepo.ListCategories(ctx, tenantID, orgID)
+		if err != nil {
+			return err
+		}
+		for _, child := range children {
+			if child.ParentID == c.ID {
+				return ErrCategoryNotEmpty
+			}
+		}
+		if s.repo != nil {
+			page, e := s.repo.List(ctx, ListFilter{TenantID: tenantID, OrgID: orgID, CategoryID: id, Limit: 1})
+			if e != nil {
+				return e
+			}
+			if page.Total > 0 {
+				return ErrCategoryNotEmpty
+			}
+		}
+		return s.categoryRepo.DeleteCategory(ctx, c.ID, tenantID, orgID)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	id = strings.TrimSpace(id)

@@ -61,18 +61,16 @@ test('runtime configuration examples are compact and credential-free', () => {
   );
 
   for (const key of [
-    'APP_UI_ACTIVE',
     'SERVER_ADDR',
     'LOGGING_LEVEL',
     'DATABASE_ENABLED',
     'REDIS_ENABLED',
     'AUTH_ENABLED',
-    'I18N_DEFAULT_LOCALE',
   ]) {
     assert.match(envExample, new RegExp(`^${key}=`, 'm'), key);
   }
   assert.doesNotMatch(envExample, /^(?:DATABASE_DSN|REDIS_PASSWORD|AUTH_JWT_SECRET)=\S+/m);
-  assert.match(serverExample, /^version:\s*0\.2\.0-dev$/m);
+  assert.doesNotMatch(serverExample, /^version:/m);
   assert.match(serverExample, /^database:\s*$/m);
   assert.match(serverExample, /^redis:\s*$/m);
   assert.match(serverExample, /^auth:\s*$/m);

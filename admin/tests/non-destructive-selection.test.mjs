@@ -456,7 +456,7 @@ test('switching an installed workspace preserves and archives the backend marker
     );
     assert.equal(
       readFileSync(repositoryEnvironment, 'utf8'),
-      'DATABASE_DSN="keep-secret"\r\nAPP_UI_ACTIVE="naive"\r\n',
+      'DATABASE_DSN="keep-secret"\r\n  export APP_UI_ACTIVE = "antd"\r\n',
     );
     assert.equal(existsSync(statePaths(root).backupRoot), false);
     assert.equal(inspectWorkspaceState(root).state, 'installed');
@@ -497,7 +497,7 @@ test('a failed installed-workspace switch restores profile, receipt, report, mar
 
     await assert.rejects(
       selectWorkspaceUI(root, 'naive', {
-        afterEnvironmentWrite: () => { throw new Error('fixture failure'); },
+        afterReceiptRemoval: () => { throw new Error('fixture failure'); },
       }),
       /UI_SWITCH_FAILED/,
     );
@@ -551,7 +551,7 @@ test('a killed switch leaves a recovery journal and resumes without a split sele
     writeFileSync(runner, [
       `import { selectWorkspaceUI } from ${JSON.stringify(moduleURL)};`,
       `await selectWorkspaceUI(${JSON.stringify(root)}, 'naive', {`,
-      '  afterEnvironmentWrite: () => process.exit(86),',
+      '  afterReceiptRemoval: () => process.exit(86),',
       '});',
       '',
     ].join('\n'));
@@ -593,7 +593,7 @@ test('a killed switch leaves a recovery journal and resumes without a split sele
   }
 });
 
-test('a killed installed switch resumes the environment and preserves the backend marker', async () => {
+test('a killed installed switch preserves the environment and resumes the selector', async () => {
   const root = fixture();
   try {
     await selectWorkspaceUI(root, 'antd');
@@ -615,7 +615,7 @@ test('a killed installed switch resumes the environment and preserves the backen
     writeFileSync(runner, [
       `import { selectWorkspaceUI } from ${JSON.stringify(moduleURL)};`,
       `await selectWorkspaceUI(${JSON.stringify(root)}, 'naive', {`,
-      '  afterEnvironmentWrite: () => process.exit(88),',
+      '  afterReceiptRemoval: () => process.exit(88),',
       '});',
       '',
     ].join('\n'));
@@ -623,14 +623,14 @@ test('a killed installed switch resumes the environment and preserves the backen
     const crashed = spawnSync(process.execPath, [runner], { encoding: 'utf8' });
     assert.equal(crashed.status, 88);
     assert.equal(JSON.parse(readFileSync(paths.localProfile, 'utf8')).selectedUi, 'antd');
-    assert.equal(readFileSync(repositoryEnvironment, 'utf8'), 'DATABASE_DSN="keep-secret"\nAPP_UI_ACTIVE="naive"\n');
+    assert.equal(readFileSync(repositoryEnvironment, 'utf8'), 'DATABASE_DSN="keep-secret"\nAPP_UI_ACTIVE="antd"\n');
     assert.equal(inspectWorkspaceState(root).reason, 'UI_SWITCH_PENDING');
 
     await selectWorkspaceUI(root, 'naive');
     assert.equal(JSON.parse(readFileSync(paths.localProfile, 'utf8')).selectedUi, 'naive');
     assert.equal(existsSync(paths.workspaceTransaction), false);
     assert.equal(readFileSync(paths.marker, 'utf8'), markerContents);
-    assert.equal(readFileSync(repositoryEnvironment, 'utf8'), 'DATABASE_DSN="keep-secret"\nAPP_UI_ACTIVE="naive"\n');
+    assert.equal(readFileSync(repositoryEnvironment, 'utf8'), 'DATABASE_DSN="keep-secret"\nAPP_UI_ACTIVE="antd"\n');
   } finally {
     rmSync(join(root, '..'), { recursive: true, force: true });
   }

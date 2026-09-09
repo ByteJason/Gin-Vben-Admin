@@ -92,52 +92,31 @@ func (s *EnvironmentInstaller) PublishWithReference(ctx context.Context, request
 	if err != nil {
 		return installer.EnvironmentReceipt{}, ErrEnvironmentInstallation
 	}
+	// Persist installation inputs, not a second copy of compiled defaults.
+	// UI selection belongs to the local profile; run mode belongs to the
+	// installation manifest. Neither has a runtime dotenv consumer.
 	values := map[string]string{
-		"APP_UI_ACTIVE":                string(plan.SelectedUI),
-		"APP_UI_MODE":                  string(plan.Mode),
-		"I18N_MODE":                    localeMode,
-		"I18N_DEFAULT_LOCALE":          locale,
-		"I18N_SUPPORTED_LOCALES":       strings.Join(localeConfig.SupportedLocales, ","),
-		"AUTH_ACCESS_TTL":              "30m",
-		"AUTH_AUDIENCE":                "admin",
-		"AUTH_BCRYPT_COST":             "12",
-		"AUTH_ENABLED":                 "true",
-		"AUTH_ISSUER":                  "gin-vben-admin",
-		"AUTH_JWT_SECRET":              jwtSecret,
-		"AUTH_LOCKOUT_DURATION":        "15m",
-		"AUTH_LOCKOUT_THRESHOLD":       "5",
-		"AUTH_CAPTCHA_ENABLED":         "false",
-		"AUTH_CAPTCHA_RISK_THRESHOLD":  "3",
-		"AUTH_CAPTCHA_RISK_WINDOW":     "15m",
-		"AUTH_CAPTCHA_CHALLENGE_TTL":   "2m",
-		"AUTH_CAPTCHA_KEY_PREFIX":      "auth-captcha",
-		"AUTH_RATE_LIMIT_MAX_ATTEMPTS": "10",
-		"AUTH_RATE_LIMIT_WINDOW":       "1m",
-		"AUTH_REFRESH_COOKIE_NAME":     "refresh_token",
-		"AUTH_REFRESH_TTL":             "168h",
-		"AUTH_REGISTRATION_ENABLED":    "false",
-		"AUTH_SECURE_COOKIE":           "false",
-		"DATABASE_CONN_MAX_IDLE_TIME":  "15m",
-		"DATABASE_CONN_MAX_LIFETIME":   "1h",
-		"DATABASE_DRIVER":              database.Driver,
-		"DATABASE_ENABLED":             "true",
-		"DATABASE_MAX_IDLE_CONNS":      "5",
-		"DATABASE_MAX_OPEN_CONNS":      "10",
-		"DATABASE_MODE":                string(database.Mode),
-		"DATABASE_PING_TIMEOUT":        "5s",
-		"DATABASE_READ_POLICY":         string(database.ReadPolicy),
-		"INSTALL_STATE_DIR":            s.stateDir,
-		"INSTALL_TRANSACTION_ID":       reference,
-		"REDIS_DB":                     strconv.Itoa(redis.DB),
-		"REDIS_DIAL_TIMEOUT":           "5s",
-		"REDIS_ENABLED":                "true",
-		"REDIS_MODE":                   redis.Mode,
-		"REDIS_NAMESPACE":              redis.Namespace,
-		"REDIS_PASSWORD":               redis.Password,
-		"REDIS_PING_TIMEOUT":           "3s",
-		"REDIS_READ_TIMEOUT":           "3s",
-		"REDIS_USERNAME":               redis.Username,
-		"REDIS_WRITE_TIMEOUT":          "3s",
+		"AUTH_ENABLED":           "true",
+		"AUTH_JWT_SECRET":        jwtSecret,
+		"DATABASE_DRIVER":        database.Driver,
+		"DATABASE_ENABLED":       "true",
+		"DATABASE_MODE":          string(database.Mode),
+		"DATABASE_READ_POLICY":   string(database.ReadPolicy),
+		"INSTALL_STATE_DIR":      s.stateDir,
+		"INSTALL_TRANSACTION_ID": reference,
+		"REDIS_DB":               strconv.Itoa(redis.DB),
+		"REDIS_ENABLED":          "true",
+		"REDIS_MODE":             redis.Mode,
+		"REDIS_NAMESPACE":        redis.Namespace,
+		"REDIS_PASSWORD":         redis.Password,
+		"REDIS_USERNAME":         redis.Username,
+	}
+	// Preserve explicit locale policy for existing API clients without pinning
+	// the browser installer's default language into every generated .env.
+	if request.Locale != "" || request.LocaleMode != "" {
+		values["I18N_MODE"] = localeMode
+		values["I18N_DEFAULT_LOCALE"] = locale
+		values["I18N_SUPPORTED_LOCALES"] = strings.Join(localeConfig.SupportedLocales, ",")
 	}
 	if database.Mode == gormdb.ModeReadWrite {
 		values["DATABASE_PRIMARY_DSN"] = database.PrimaryDSN

@@ -1,10 +1,7 @@
-# Gin-Vben-Admin 本地服务端配置模板。
-#
-# 复制为 server/configs/server.yaml 后按需修改，或使用根目录 .env 覆盖同名
-# 环境变量（例如 SERVER_ADDR、DATABASE_DSN、AUTH_JWT_SECRET）。真实密码、
-# DSN 和令牌只放在权限为 0600 的本地文件或环境变量中，不提交到 Git。
-
-version: 0.2.0-dev
+# 可选的服务端部署配置。首次安装直接打开 /install，无需复制此文件。
+# 手工部署时复制为 server/configs/server.yaml；根 .env 与环境变量优先。
+# 这里只列部署输入；业务设置在管理端维护，其他参数使用 typed config 默认值。
+# 真实连接和密钥保存在权限为 0600 的本地文件或环境变量中。
 
 site:
   name: Gin-Vben-Admin
@@ -12,122 +9,34 @@ site:
 
 server:
   addr: ":8080"
-  read_timeout: 10s
-  write_timeout: 10s
-  idle_timeout: 60s
-  shutdown_timeout: 10s
 
 logging:
-  # info 使用精简启动输出；改为 debug 才显示 Gin 路由注册诊断。
+  # debug 才显示路由注册等诊断输出。
   level: info
 
-# 观测默认关闭；打开后可在管理端设置端点与采样策略。
-observability:
-  metrics_enabled: false
-  metrics_endpoint: ""
-  tracing_enabled: false
-  otlp_endpoint: ""
-  otlp_protocol: http/protobuf
-  tls_verify: true
-  sample_rate: 0
-  otlp_api_key: ""
-
-# 安装状态与源码工作区路径均相对于 server/ 进程工作目录。
+# 相对于 server/ 进程工作目录。
 install:
   state_dir: ../.runtime/install
   workspace_root: ..
 
-tenant:
-  enabled: true
-  mode: single
-  default_id: default
-  tenant_header: X-Tenant-ID
-  organization_header: X-Org-ID
-
-i18n:
-  mode: single
-  default_locale: zh-CN
-  supported_locales: [zh-CN, en-US]
-
-# 支持 single、read_write、cluster_endpoint。首次安装在 /install 页面
-# 收集数据库连接信息并写入根 .env；这里保留无连接的安全默认值。
+# single、read_write、cluster_endpoint；/install 默认 PostgreSQL。
 database:
   enabled: false
-  driver: mysql
+  driver: postgres
   mode: single
   dsn: ""
-  primary_dsn: ""
-  replica_dsns: []
-  read_policy: random
-  max_open_conns: 10
-  max_idle_conns: 5
-  conn_max_lifetime: 1h
-  conn_max_idle_time: 15m
-  ping_timeout: 5s
 
-# 支持 single、sentinel、cluster；cluster 模式要求 db 为 0。
+# single、sentinel、cluster；首次安装由 /install 写入实际连接。
 redis:
   enabled: false
   mode: single
   addr: "127.0.0.1:6379"
-  username: ""
-  password: ""
-  db: 0
   namespace: app:v1
-  addrs: []
-  master_name: ""
-  dial_timeout: 5s
-  read_timeout: 3s
-  write_timeout: 3s
-  ping_timeout: 3s
 
-# 启用认证前请通过本地 .env 或密钥管理器设置至少 32 字节的
-# AUTH_JWT_SECRET，并同时打开 database 与 redis。
 auth:
   enabled: false
   jwt_secret: ""
-  issuer: gin-vben-admin
-  audience: admin
-  access_ttl: 24h
-  refresh_ttl: 168h
-  refresh_cookie_name: refresh_token
-  secure_cookie: false
-  bcrypt_cost: 12
-  rate_limit_window: 1m
-  rate_limit_max_attempts: 10
-  lockout_threshold: 5
-  lockout_duration: 15m
-  captcha_enabled: false
-  captcha_type: image
-  captcha_length: 6
-  captcha_charset: alphanumeric
-  captcha_width: 240
-  captcha_height: 80
-  captcha_failure_limit: 0
-  captcha_cloudflare_site_key: ""
-  captcha_cloudflare_secret_key: ""
-  captcha_risk_threshold: 3
-  captcha_risk_window: 15m
-  captcha_challenge_ttl: 2m
-  captcha_key_prefix: auth-captcha
-  registration_enabled: false
 
-# SMTP 默认关闭；本地验收可先生成 .runtime/compose/dev.yaml，再启用 Mailpit。
-mail:
-  enabled: false
-  host: "127.0.0.1"
-  port: 1025
-  username: ""
-  password: ""
-  from: no-reply@example.test
-  start_tls: false
-  selection: weighted_random
-  accounts: []
-
+# 本地存储根目录属于部署配置，不在管理端动态修改。
 file:
-  enabled: true
-  provider: local
   root: ./storage
-  base_url: ""
-  max_bytes: 104857600
-  allowed_mimes: []

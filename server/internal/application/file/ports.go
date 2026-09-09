@@ -2,7 +2,10 @@ package file
 
 import (
 	"context"
+	"errors"
 	"io"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -11,20 +14,77 @@ type CategoryID = string
 type URLPurpose string
 type ScopeType string
 type MediaStatus string
+type MediaSelectionRole string
 
 const (
-	URLPurposePreview  URLPurpose  = "preview"
-	URLPurposeDownload URLPurpose  = "download"
-	ScopeSystem        ScopeType   = "system"
-	ScopeTenant        ScopeType   = "tenant"
-	ScopeOrg           ScopeType   = "org"
-	MediaPending       MediaStatus = "pending"
-	MediaReady         MediaStatus = "ready"
-	MediaFailed        MediaStatus = "failed"
-	MediaDeleting      MediaStatus = "deleting"
-	MediaDeleted       MediaStatus = "deleted"
-	MediaDamaged       MediaStatus = "damaged"
+	URLPurposePreview  URLPurpose         = "preview"
+	URLPurposeDownload URLPurpose         = "download"
+	ScopeSystem        ScopeType          = "system"
+	ScopeTenant        ScopeType          = "tenant"
+	ScopeOrg           ScopeType          = "org"
+	MediaPending       MediaStatus        = "pending"
+	MediaReady         MediaStatus        = "ready"
+	MediaFailed        MediaStatus        = "failed"
+	MediaDeleting      MediaStatus        = "deleting"
+	MediaDeleted       MediaStatus        = "deleted"
+	MediaDamaged       MediaStatus        = "damaged"
+	MediaRoleCover     MediaSelectionRole = "cover"
+	MediaRoleGallery   MediaSelectionRole = "gallery"
 )
+
+// MediaSelection is the provider-neutral value passed from a picker to a
+// business use case. Preview URLs intentionally do not belong here: callers
+// persist the resource ID and resolve a short-lived URL only at read time.
+type MediaSelection struct {
+	ResourceID ResourceID
+	SortOrder  int
+	Role       MediaSelectionRole
+}
+
+// NormalizeMediaSelections validates and canonicalizes an ordered selection
+// before a business module persists it. Ordering ties are stable, IDs are
+// unique, sortOrder is rewritten to a contiguous zero-based sequence, and at
+// most one explicit cover is accepted. The function does not infer a cover;
+// choosing one is a product decision owned by the caller.
+func NormalizeMediaSelections(input []MediaSelection) ([]MediaSelection, error) {
+	if len(input) == 0 {
+		return []MediaSelection{}, nil
+	}
+	items := append([]MediaSelection(nil), input...)
+	seen := make(map[string]struct{}, len(items))
+	coverCount := 0
+	for i := range items {
+		items[i].ResourceID = strings.TrimSpace(items[i].ResourceID)
+		if items[i].ResourceID == "" {
+			return nil, errors.New("media selection resource id is required")
+		}
+		if items[i].SortOrder < 0 {
+			return nil, errors.New("media selection sort order must be non-negative")
+		}
+		if _, exists := seen[items[i].ResourceID]; exists {
+			return nil, errors.New("media selection resource id must be unique")
+		}
+		seen[items[i].ResourceID] = struct{}{}
+		switch items[i].Role {
+		case "", MediaRoleGallery:
+			if items[i].Role == "" {
+				items[i].Role = MediaRoleGallery
+			}
+		case MediaRoleCover:
+			coverCount++
+		default:
+			return nil, errors.New("media selection role is invalid")
+		}
+	}
+	if coverCount > 1 {
+		return nil, errors.New("media selection allows only one cover")
+	}
+	sort.SliceStable(items, func(i, j int) bool { return items[i].SortOrder < items[j].SortOrder })
+	for i := range items {
+		items[i].SortOrder = i
+	}
+	return items, nil
+}
 
 func ValidMediaStatus(status MediaStatus) bool {
 	switch status {

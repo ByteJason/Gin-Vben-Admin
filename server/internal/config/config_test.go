@@ -14,6 +14,9 @@ import (
 func TestDefaultIsUsable(t *testing.T) {
 	cfg := Default()
 
+	if cfg.Database.Driver != "postgres" {
+		t.Fatalf("default database driver = %q, want postgres", cfg.Database.Driver)
+	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Default().Validate() error = %v", err)
 	}
@@ -45,10 +48,30 @@ func TestI18nConfigurationLoadsFromYamlAndEnvironment(t *testing.T) {
 	}
 }
 
-func TestDefaultAuthTokenTTLsMatchV010Contract(t *testing.T) {
+func TestDefaultAuthTokenTTLsMatchCurrentPolicy(t *testing.T) {
 	cfg := Default()
-	if cfg.Auth.AccessTTL != 30*time.Minute || cfg.Auth.RefreshTTL != 7*24*time.Hour {
-		t.Fatalf("default auth TTLs = access:%s refresh:%s, want 30m/168h", cfg.Auth.AccessTTL, cfg.Auth.RefreshTTL)
+	if cfg.Auth.AccessTTL != 24*time.Hour || cfg.Auth.RefreshTTL != 7*24*time.Hour {
+		t.Fatalf("default auth TTLs = access:%s refresh:%s, want 24h/168h", cfg.Auth.AccessTTL, cfg.Auth.RefreshTTL)
+	}
+}
+
+func TestDeploymentExampleKeepsBusinessDefaultsUnpinned(t *testing.T) {
+	contents, err := os.ReadFile("../../configs/server.example.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := writeConfigFile(t, string(contents))
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load(deployment example): %v", err)
+	}
+	if cfg.Database.Driver != "postgres" || cfg.Auth.AccessTTL != 24*time.Hour || cfg.Auth.CaptchaEnabled {
+		t.Fatal("deployment example overrides the current database or authentication defaults")
+	}
+	for key := range dynamicObservabilitySources {
+		if !cfg.DynamicObservabilityAllowed(key) {
+			t.Errorf("example pins %s instead of allowing management settings", key)
+		}
 	}
 }
 

@@ -59,9 +59,6 @@ const uiPrepareLogItem = document.querySelector('#ui-prepare-log-item');
 const uiPrepareLogPath = document.querySelector('#ui-prepare-log-path');
 const selectionPanel = document.querySelector('#selection-panel');
 const resetUIButton = document.querySelector('#reset-ui-button');
-const planForm = document.querySelector('#plan-form');
-const modeChoice = document.querySelector('#mode-choice');
-const planButton = document.querySelector('#plan-button');
 const planMessage = document.querySelector('#plan-message');
 const planPanel = document.querySelector('#plan-panel');
 const planCleanup = document.querySelector('#plan-cleanup');
@@ -188,6 +185,7 @@ const uiFailureOperationLabels = {
 };
 
 let currentPlan = null;
+let planPending = false;
 let databaseCheckPassed = false;
 let redisCheckPassed = false;
 let retryJobId = null;
@@ -374,7 +372,7 @@ function renderStatus(status) {
   selectedUi.textContent =
     uiLabels[status.selectedUi] || status.selectedUi || '—';
   selectedUiSummary.textContent = selectedUi.textContent;
-  selectedMode.textContent = '尚未选择';
+  selectedMode.textContent = '开发调试';
   uiPreparePanel.hidden = true;
   uiPrepareForm.hidden = false;
   resumeUIResetButton.hidden = true;
@@ -386,6 +384,7 @@ function renderStatus(status) {
   clearFailedJobActions();
   updateUIPrepareButton();
   updateApplyButton();
+  if (status.selectedUi && !currentPlan) requestPlan();
   announceMissingUITools();
   title.focus();
 }
@@ -477,7 +476,7 @@ function updateUIPrepareButton() {
     !requiredUIToolsAvailable ||
     !selectedUIChoice() ||
     !confirmCleanup.checked;
-  resetUIButton.disabled = uiActionPending || !requiredUIToolsAvailable;
+  resetUIButton.disabled = uiActionPending || planPending || !requiredUIToolsAvailable;
   resumeUIResetButton.disabled = uiActionPending || !requiredUIToolsAvailable;
 }
 
@@ -490,8 +489,8 @@ function setUIActionPending(pending) {
   prepareUIButton.textContent = uiActionPending
     ? '正在准备管理界面'
     : uiSelectionLocked
-      ? '继续准备此界面'
-      : '确认并准备此界面';
+      ? '继续准备并预检'
+      : '准备界面并预检';
   updateUIPrepareButton();
 }
 
@@ -712,6 +711,8 @@ async function requestUIPreparation(event) {
       selectedUi: selectedUi,
       confirmCleanup: true,
     });
+    // finishUIAction reloads the ready status; renderStatus starts one
+    // automatic read-only preflight for that status.
   } catch {
     renderUIRequestUnavailable('prepare', selectedUi);
     retryButton.hidden = false;
@@ -803,7 +804,7 @@ function renderRecoverableUIPreparation(status) {
     showUIActionMessage(
       recoveringReset
         ? '点击“继续清除本机选择”恢复任务；三套源码保持不变。'
-        : '点击“继续准备此界面”恢复任务。',
+        : '点击“继续准备并预检”恢复任务。',
       'pending',
     );
   }
@@ -811,21 +812,21 @@ function renderRecoverableUIPreparation(status) {
   title.focus();
 }
 
-async function requestPlan(event) {
-  event.preventDefault();
+async function requestPlan() {
+  if (planPending) return;
+  planPending = true;
+  retryButton.disabled = true;
+  updateUIPrepareButton();
   currentPlan = null;
   databaseCheckPassed = false;
   redisCheckPassed = false;
   clearFailedJobActions();
   updateApplyButton();
-  planButton.disabled = true;
-  planButton.textContent = '正在检查';
   planMessage.textContent =
     '正在验证目录的读取、写入、创建、重命名与删除能力。';
   planMessage.dataset.tone = 'pending';
   planPanel.hidden = true;
   try {
-    const mode = modeChoice.value;
     const response = await fetch(planEndpoint, {
       method: 'POST',
       credentials: 'same-origin',
@@ -834,7 +835,7 @@ async function requestPlan(event) {
         'Accept-Language': browserLanguageHeader(),
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ mode }),
+      body: JSON.stringify({ mode: 'dev' }),
     });
     const envelope = await response.json();
     if (!response.ok || envelope.code !== 0 || !envelope.data) {
@@ -844,10 +845,12 @@ async function requestPlan(event) {
   } catch {
     planMessage.textContent = '目录预检未完成，请检查服务与目录权限后重试。';
     planMessage.dataset.tone = 'error';
+    retryButton.hidden = false;
     planMessage.focus();
   } finally {
-    planButton.disabled = false;
-    planButton.textContent = '检查目录权限';
+    planPending = false;
+    retryButton.disabled = uiActionPending;
+    updateUIPrepareButton();
   }
 }
 
@@ -886,6 +889,7 @@ function renderPlan(plan) {
   planMessage.dataset.tone = ready ? 'success' : 'error';
   planPanel.hidden = false;
   connectionPanel.hidden = !ready;
+  retryButton.hidden = ready;
   updateApplyButton();
 }
 
@@ -981,20 +985,6 @@ function setFailedJobActions(job) {
   retryJobId = job.canRetry ? job.id : null;
   rollbackJobId = job.canRollback ? job.id : null;
   rollbackButton.hidden = !rollbackJobId;
-}
-
-function invalidatePlanIfModeChanged() {
-  if (currentPlan && currentPlan.mode !== modeChoice.value) {
-    currentPlan = null;
-    databaseCheckPassed = false;
-    redisCheckPassed = false;
-    clearFailedJobActions();
-    planPanel.hidden = true;
-    connectionPanel.hidden = true;
-    planMessage.textContent = '选择已变更，请重新检查目录权限。';
-    planMessage.dataset.tone = 'pending';
-  }
-  updateApplyButton();
 }
 
 function dependencyFormValues() {
@@ -1328,7 +1318,7 @@ async function requestInstallation(event) {
   try {
     const dependencies = dependencyFormValues();
     const payload = {
-      mode: modeChoice.value,
+      mode: 'dev',
       database: dependencies.database,
       redis: dependencies.redis,
       admin: {
@@ -1464,7 +1454,6 @@ uiPrepareForm.addEventListener('submit', requestUIPreparation);
 uiPrepareForm.addEventListener('change', updateUIPrepareButton);
 resetUIButton.addEventListener('click', () => requestUIReset(true));
 resumeUIResetButton.addEventListener('click', () => requestUIReset(false));
-planForm.addEventListener('submit', requestPlan);
 databaseForm.addEventListener('submit', (event) =>
   requestDependencyCheck(event, databaseCheckEndpoint, databaseResult),
 );
@@ -1479,7 +1468,6 @@ databaseForm.addEventListener('input', () =>
 redisForm.addEventListener('input', () =>
   invalidateDependencyCheck(redisResult),
 );
-modeChoice.addEventListener('change', invalidatePlanIfModeChanged);
 databaseDriver.addEventListener('change', () => {
   databasePort.value = databaseDriver.value === 'postgres' ? '5432' : '3306';
 });

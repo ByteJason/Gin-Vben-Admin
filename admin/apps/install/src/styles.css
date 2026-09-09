@@ -530,33 +530,6 @@ h1 {
   margin-top: 12px;
 }
 
-.plan-form {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-}
-
-.plan-group {
-  min-width: 0;
-  padding: 18px;
-  margin: 0;
-  background: var(--canvas);
-  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
-  border-radius: 14px;
-}
-
-.plan-group legend {
-  padding: 0 7px;
-  font-size: 0.84rem;
-  font-weight: 750;
-  color: var(--ink);
-}
-
-.plan-group__fields {
-  display: grid;
-  gap: 16px;
-}
-
 .form-field {
   display: grid;
   gap: 7px;
@@ -622,10 +595,6 @@ h1 {
   transition:
     filter 160ms ease,
     opacity 160ms ease;
-}
-
-.plan-form > .primary-button {
-  grid-column: 1 / -1;
 }
 
 .primary-button:hover {
@@ -1118,7 +1087,6 @@ footer {
 
 @media (max-width: 720px) {
   .ui-option-grid,
-  .plan-form,
   .connection-grid,
   .connection-form--admin,
   .terminal-grid {
@@ -1173,7 +1141,6 @@ footer {
     grid-template-columns: 1fr 1fr;
   }
 
-  .plan-form,
   .plan-summary,
   .connection-form,
   .ui-prepare-diagnostics,

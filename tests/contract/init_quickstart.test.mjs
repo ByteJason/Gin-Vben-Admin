@@ -21,11 +21,11 @@ test('admin exposes one profile-driven command for each runtime action', () => {
   }
 
   for (const command of ['build', 'dev', 'preview']) {
-    assert.match(pkg.scripts[command], /profile-gate\.mjs/);
+    assert.doesNotMatch(pkg.scripts[command], /profile-gate\.mjs/);
     assert.match(pkg.scripts[command], /selected-dispatch\.mjs/);
   }
   assert.doesNotMatch(read('admin/turbo.json'), /"build:analyze"/);
-  assert.doesNotMatch(read('admin/scripts/profile-gate.mjs'), /build:analyze/);
+  assert.equal(existsSync(join(root, 'admin/scripts/profile-gate.mjs')), false);
   assert.doesNotMatch(read('admin/scripts/selected-dispatch.mjs'), /build:analyze/);
 });
 

@@ -1117,19 +1117,6 @@ async function restoreWorkspaceFile(file, snapshot) {
   }
 }
 
-function workspaceActiveUIEnvironment(contents, selectedUi) {
-  const source = contents.toString('utf8');
-  const pattern = /^[ \t]*(?:export[ \t]+)?APP_UI_ACTIVE[ \t]*=[^\r\n]*$/gm;
-  const matches = source.match(pattern) ?? [];
-  if (matches.length > 1) throw new Error('UI_SWITCH_FAILED');
-  const newline = source.includes('\r\n') ? '\r\n' : '\n';
-  if (matches.length === 1) {
-    return source.replace(/^[ \t]*(?:export[ \t]+)?APP_UI_ACTIVE[ \t]*=[^\r\n]*$/m, `APP_UI_ACTIVE="${selectedUi}"`);
-  }
-  const separator = source === '' || source.endsWith('\n') ? '' : newline;
-  return `${source}${separator}APP_UI_ACTIVE="${selectedUi}"${newline}`;
-}
-
 function workspaceLockfileHash(root) {
   const lockfile = join(root, 'pnpm-lock.yaml');
   if (!plainFile(lockfile)) return '';
@@ -1447,13 +1434,11 @@ function preflightWorkspaceSelection(root, location, profile, selectedUi, change
     }
   }
 
-  const repositoryEnvironment = resolve(root, '..', '.env');
   for (const file of [
     location.localProfile,
     location.workspaceReceipt,
     location.workspaceSwitchReport,
     location.marker,
-    repositoryEnvironment,
   ]) workspaceFileSnapshot(file);
   if (changed && pathPresent(location.marker) && !validWorkspaceMarker(location.marker)) {
     throw new Error('UI_SWITCH_FAILED');
@@ -1533,7 +1518,7 @@ export async function selectWorkspaceUI(root, selectedUi, options = {}) {
   }
   if (existingTransaction?.phase === 'switching_ui' && persistedProfile?.selectedUi === selectedUi) {
     // The local selector is committed last. A matching selector proves that
-    // the report, environment and receipt changes completed before a crash.
+    // the report and receipt changes completed before a crash.
     const recoveredReport = readWorkspaceSelectionReport(location.workspaceSwitchReport, selectedUi);
     if (!recoveredReport) throw new Error('UI_SWITCH_FAILED');
     if (continueToDependencies) {
@@ -1571,12 +1556,10 @@ export async function selectWorkspaceUI(root, selectedUi, options = {}) {
   // selector. A validation failure therefore leaves the active UI untouched.
   await ensureSelectedUIRuntimeEnv(root, profile);
 
-  const repositoryEnvironment = resolve(root, '..', '.env');
   const profileSnapshot = workspaceFileSnapshot(location.localProfile);
   const receiptSnapshot = workspaceFileSnapshot(location.workspaceReceipt);
   const reportSnapshot = workspaceFileSnapshot(location.workspaceSwitchReport);
   const markerSnapshot = workspaceFileSnapshot(location.marker);
-  const environmentSnapshot = workspaceFileSnapshot(repositoryEnvironment);
   const receiptStatus = workspaceReceiptStatus(location.workspaceReceipt, root, profile);
   const historyFile = switchTransaction && markerSnapshot.present
     ? join(location.workspaceHistoryRoot, `${switchTransaction.id}.installed.json`)
@@ -1605,15 +1588,6 @@ export async function selectWorkspaceUI(root, selectedUi, options = {}) {
 
     await atomicWrite(location.workspaceSwitchReport, `${JSON.stringify(report, null, 2)}\n`);
     await options.afterReportWrite?.();
-
-    if (changed && markerSnapshot.present && environmentSnapshot.present) {
-      await atomicWrite(
-        repositoryEnvironment,
-        workspaceActiveUIEnvironment(environmentSnapshot.contents, selectedUi),
-      );
-      result.runtimeEnvironmentUpdated = true;
-    }
-    await options.afterEnvironmentWrite?.();
 
     if (receiptSnapshot.present && (changed || receiptStatus.state !== 'ready')) {
       await rm(location.workspaceReceipt, { force: true });
@@ -1650,7 +1624,6 @@ export async function selectWorkspaceUI(root, selectedUi, options = {}) {
       [location.localProfile, profileSnapshot],
       [location.workspaceReceipt, receiptSnapshot],
       [location.workspaceSwitchReport, reportSnapshot],
-      [repositoryEnvironment, environmentSnapshot],
       [location.marker, markerSnapshot],
     ]) {
       try {

@@ -19,7 +19,142 @@ import (
 // (list/get/status) is resolved from this repository.
 type GORMRepository struct{ db *gormdb.Store }
 
+var _ fileapp.CategoryRepository = (*GORMRepository)(nil)
+
 func NewGORMRepository(db *gormdb.Store) *GORMRepository { return &GORMRepository{db: db} }
+
+func (r *GORMRepository) CreateCategory(ctx context.Context, c fileapp.Category) error {
+	if r == nil || r.db == nil {
+		return errors.New("file repository is not initialized")
+	}
+	tenant, org, parent := nullable(c.TenantID), nullable(c.OrgID), nullable(c.ParentID)
+	scope := "system"
+	if c.TenantID != "" {
+		scope = "tenant"
+	}
+	if c.OrgID != "" {
+		scope = "org"
+	}
+	path, depth := c.ID, int32(0)
+	if c.ParentID != "" {
+		var parentRow model.MediaCategory
+		if err := r.db.Write(ctx).Where("id = ? AND deleted_at IS NULL", strings.TrimSpace(c.ParentID)).First(&parentRow).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fileapp.ErrCategoryNotFound
+			}
+			return err
+		}
+		path = strings.Trim(parentRow.Path, "/") + "/" + c.ID
+		depth = parentRow.Depth + 1
+	}
+	row := model.MediaCategory{ID: c.ID, ScopeType: scope, TenantID: tenant, OrgID: org, ParentID: parent, Path: path, Depth: depth, Name: c.Name, Enabled: c.Enabled, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt}
+	if row.CreatedAt.IsZero() {
+		row.CreatedAt = time.Now().UTC()
+	}
+	if row.UpdatedAt.IsZero() {
+		row.UpdatedAt = row.CreatedAt
+	}
+	return r.db.Write(ctx).Create(&row).Error
+}
+
+func (r *GORMRepository) GetCategory(ctx context.Context, id string) (fileapp.Category, error) {
+	if r == nil || r.db == nil {
+		return fileapp.Category{}, fileapp.ErrFileNotFound
+	}
+	var row model.MediaCategory
+	err := r.db.Write(ctx).Where("id = ? AND deleted_at IS NULL", strings.TrimSpace(id)).First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return fileapp.Category{}, fileapp.ErrFileNotFound
+	}
+	if err != nil {
+		return fileapp.Category{}, err
+	}
+	return toCategory(row), nil
+}
+
+func (r *GORMRepository) ListCategories(ctx context.Context, tenantID, orgID string) ([]fileapp.Category, error) {
+	if r == nil || r.db == nil {
+		return nil, fileapp.ErrFileNotFound
+	}
+	q := r.db.Write(ctx).Where("deleted_at IS NULL")
+	if tenantID != "" {
+		q = q.Where("tenant_id = ?", tenantID)
+	}
+	if orgID != "" {
+		q = q.Where("org_id = ?", orgID)
+	}
+	var rows []model.MediaCategory
+	if err := q.Order("parent_id ASC").Order("name ASC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]fileapp.Category, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, toCategory(row))
+	}
+	return out, nil
+}
+
+func (r *GORMRepository) UpdateCategory(ctx context.Context, c fileapp.Category) error {
+	if r == nil || r.db == nil {
+		return fileapp.ErrFileNotFound
+	}
+	result := r.db.Write(ctx).Model(&model.MediaCategory{}).Where("id = ? AND deleted_at IS NULL", c.ID).Updates(map[string]any{"name": c.Name, "enabled": c.Enabled, "parent_id": nullable(c.ParentID), "updated_at": c.UpdatedAt})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fileapp.ErrCategoryNotFound
+	}
+	return nil
+}
+
+func (r *GORMRepository) DeleteCategory(ctx context.Context, id, tenantID, orgID string) error {
+	if r == nil || r.db == nil {
+		return fileapp.ErrFileNotFound
+	}
+	at := time.Now().UTC()
+	q := r.db.Write(ctx).Model(&model.MediaCategory{}).Where("id = ? AND deleted_at IS NULL", strings.TrimSpace(id))
+	if strings.TrimSpace(tenantID) == "" {
+		q = q.Where("tenant_id IS NULL")
+	} else {
+		q = q.Where("tenant_id = ?", strings.TrimSpace(tenantID))
+	}
+	if strings.TrimSpace(orgID) == "" {
+		q = q.Where("org_id IS NULL")
+	} else {
+		q = q.Where("org_id = ?", strings.TrimSpace(orgID))
+	}
+	result := q.Updates(map[string]any{"deleted_at": &at, "updated_at": at})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fileapp.ErrCategoryNotFound
+	}
+	return nil
+}
+
+func nullable(v string) *string {
+	if strings.TrimSpace(v) == "" {
+		return nil
+	}
+	x := strings.TrimSpace(v)
+	return &x
+}
+
+func toCategory(row model.MediaCategory) fileapp.Category {
+	c := fileapp.Category{ID: row.ID, Name: row.Name, Enabled: row.Enabled, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}
+	if row.TenantID != nil {
+		c.TenantID = *row.TenantID
+	}
+	if row.OrgID != nil {
+		c.OrgID = *row.OrgID
+	}
+	if row.ParentID != nil {
+		c.ParentID = *row.ParentID
+	}
+	return c
+}
 
 func (r *GORMRepository) Create(ctx context.Context, f fileapp.File) error {
 	if r == nil || r.db == nil {

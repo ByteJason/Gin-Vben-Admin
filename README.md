@@ -298,8 +298,7 @@ pnpm run dev
 `previousUi`、`selectedUi`、`changedBranch=selectedUi`、`commonLayer=preserved` 和
 `sourceAdapter`、`targetAdapter`、`uiSpecific=revalidate-adapter`，以及
 `adapterChecks=[route,theme,form,component]`。这些字段表示需要人工复核新 UI adapter；报告不会
-伪造自动迁移结果。选择器原子更新活动 profile；若根 `.env` 已存在，则只精确
-更新 `APP_UI_ACTIVE`，其余配置保持不变。
+伪造自动迁移结果。选择器原子更新活动 profile；根 `.env` 保持字节不变，不再维护重复的 UI 环境变量。
 
 已完成网页安装的工作区会保留原 `.runtime/install/.installed`，并在
 `.runtime/install/ui-switch-history/` 保存字节一致的历史副本作为审计证据。服务端继续报告
@@ -342,9 +341,9 @@ go -C server run ./cmd/migrate down --steps 1
 
 配置按“示例可提交、运行时本地化”管理：
 
-- `server/configs/server.example.yaml`：服务端完整默认模板，保持数据库、Redis 和认证关闭，适合复制后再按部署需要修改。
+- `server/configs/server.example.yaml`：精简的部署输入模板，默认 PostgreSQL；未列出的超时、连接池、语言和业务策略使用 typed config 默认值，不再复制过时默认值。
 - `server/configs/server.yaml`：本机服务端配置（Git ignored），从示例复制或由初始化脚本生成；运行服务端时从 `server/` 目录读取。
-- `.env.example`：根目录环境变量最小模板；复制为 `.env` 后设置 `0600` 权限。环境变量优先于 YAML，安装页会在提交时原子写入实际连接和认证参数。
+- `.env.example`：可选的根目录部署环境模板；全新安装无需复制。手工创建 `.env` 时设置 `0600` 权限。环境变量优先于 YAML，安装页只写入实际连接和认证必需参数。
 - `admin/apps/web-*/.env.*.example`：各管理端的公开 Vite 默认值；初始化会为当前 UI 生成被忽略的本地文件，不要在其中写入服务端密钥。
 
 常用本地准备命令：
@@ -355,7 +354,9 @@ cp .env.example .env
 chmod 600 .env server/configs/server.yaml
 ```
 
-全新安装优先使用 `/install` 页面填写数据库、Redis 和管理员信息；页面会安全更新根 `.env`，无需手工拼接 DSN 或密码。
+全新安装直接打开 `/install`，选择管理界面并勾选确认后，点击“准备界面并预检”，自动完成依赖准备与目录检查；不再选择运行方式或语言。数据库默认 PostgreSQL，然后填写数据库、Redis 和管理员信息。页面会安全更新根 `.env`，无需手工拼接 DSN 或密码。
+
+`pnpm run dev`、`build`、`preview` 各只执行一次选择检查与分发；成功时不打印 `INIT_*` 状态块，异常仍返回诊断与非零退出码。需要安装状态详情时使用 `pnpm run init -- --check`。登录态默认沿用当前策略 `24h`，安装器不再写入历史 `30m` 覆盖。验证码、邮件、语言和观测等业务默认值不再复制到示例文件中；现有显式部署配置仍受支持。
 
 #### 初始化状态文件
 
@@ -370,7 +371,7 @@ chmod 600 .env server/configs/server.yaml
 | `admin/.ui-profile.local.json` | 本机 UI 选择（已忽略）；优先级高于旧版 tracked profile |
 | `admin/.ui-profile.json` | 旧版兼容读取入口；新选择流程不会改写它 |
 | `.runtime/install/` | 初始化事务根目录；租约、依赖收据、切换报告等由程序维护，请勿删除或编辑 |
-| `.runtime/install/workspace-transaction.json` | 非破坏 journal；`switching_ui` 保护 selector/`APP_UI_ACTIVE` 的原子切换，`dependencies_pending` 保护依赖准备，`moves` 始终为空。中断后用同一目标重跑；journal 存在时 dev/build 门禁保持关闭 |
+| `.runtime/install/workspace-transaction.json` | 非破坏 journal；`switching_ui` 保护 selector 与派生元数据的原子切换，`dependencies_pending` 保护依赖准备，`moves` 始终为空。中断后用同一目标重跑；journal 存在时 dev/build 门禁保持关闭 |
 | `.runtime/install/workspace-dependencies.json` | 当前 UI 与 lockfile 摘要；过滤安装入口成功后刷新 |
 | `.runtime/install/ui-switch-report.json` | 切换前后 UI、公共层保留与 adapter 复核提示 |
 | `.runtime/install/ui-switch-history/` | 已安装工作区切换时保存的后端安装标记只读历史副本；原标记保持不变 |

@@ -47,7 +47,7 @@ test('workspace has the expected package layout', () => {
     assert.equal(Object.hasOwn(pkg.scripts, command), false, command);
   }
   for (const command of ['build', 'dev', 'preview']) {
-    assert.match(pkg.scripts[command], /profile-gate\.mjs/);
+    assert.doesNotMatch(pkg.scripts[command], /profile-gate\.mjs/);
     assert.match(pkg.scripts[command], /selected-dispatch\.mjs/);
   }
   assert.doesNotMatch(pkg.scripts['test:e2e:a11y'], /pnpm run build/);
@@ -199,11 +199,9 @@ test('management templates expose Gin Vben Admin branding and the supplied logo'
       resolve(root, 'apps', app, 'src/router/routes/modules/vben.ts'),
       'utf8',
     );
-    const englishDemos = JSON.parse(
-      readFileSync(
-        resolve(root, 'apps', app, 'src/locales/langs/en-US/demos.json'),
-        'utf8',
-      ),
+    const localeSetup = readFileSync(
+      resolve(root, 'apps', app, 'src/locales/index.ts'),
+      'utf8',
     );
     const chineseDemos = JSON.parse(
       readFileSync(
@@ -242,7 +240,7 @@ test('management templates expose Gin Vben Admin branding and the supplied logo'
     assert.match(routeModule, /import\.meta\.env\.DEV/);
     assert.match(routeModule, /name: 'Profile'/);
     assert.doesNotMatch(routeModule, /gin-vben-admin\/about|vben-admin\/about/);
-    assert.equal(englishDemos.vben.title, 'Vue Vben Admin (Upstream)');
+    assert.match(localeSetup, /defaultLocale: 'zh-CN'/, `${app} Chinese default locale`);
     assert.equal(chineseDemos.vben.title, 'Vue Vben Admin（上游）');
 
     for (const size of [192, 512]) {

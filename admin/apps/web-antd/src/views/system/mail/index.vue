@@ -91,7 +91,7 @@ const accountTestFeedback = reactive<Record<string, TestFeedback>>({});
 const templateTestFeedback = reactive<Record<string, TestFeedback>>({});
 const accountTestAt = reactive<Record<string, string>>({});
 
-type MailTab = 'accounts' | 'callers' | 'templates' | 'policies' | 'records';
+type MailTab = 'accounts' | 'verification' | 'templates' | 'records';
 const activeTab = ref<MailTab>('accounts');
 
 const templateRecipientInput = ref<HTMLInputElement | null>(null);
@@ -291,19 +291,14 @@ const mailTabs = computed<
     count: accounts.value.length,
   },
   {
-    key: 'callers',
-    label: String($t('page.mail.tabCallers')),
-    count: callers.value.length,
+    key: 'verification',
+    label: String($t('page.mail.tabVerification')),
+    count: callers.value.length + policies.value.length,
   },
   {
     key: 'templates',
     label: String($t('page.mail.tabTemplates')),
     count: templates.value.length,
-  },
-  {
-    key: 'policies',
-    label: String($t('page.mail.tabPolicies')),
-    count: policies.value.length,
   },
   {
     key: 'records',
@@ -1223,7 +1218,7 @@ onMounted(load);
         type="button"
         role="tab"
         :aria-selected="activeTab === tab.key"
-        :aria-controls="'mail-panel-' + tab.key"
+        :aria-controls="tab.key === 'verification' ? 'mail-panel-callers mail-panel-policies' : 'mail-panel-' + tab.key"
         :tabindex="activeTab === tab.key ? 0 : -1"
         @click="selectTab(tab.key)"
         @keydown="onTabKeydown($event, index)"
@@ -1498,11 +1493,11 @@ onMounted(load);
       </section>
 
       <section
-        v-else-if="activeTab === 'callers'"
+        v-else-if="activeTab === 'verification'"
         id="mail-panel-callers"
         class="tab-content"
         role="tabpanel"
-        aria-labelledby="mail-tab-callers"
+        aria-labelledby="mail-tab-verification"
       >
         <div class="two-column">
           <ManagementDrawer
@@ -2049,11 +2044,11 @@ onMounted(load);
       </section>
 
       <section
-        v-else-if="activeTab === 'policies'"
+        v-if="activeTab === 'verification'"
         id="mail-panel-policies"
         class="tab-content"
         role="tabpanel"
-        aria-labelledby="mail-tab-policies"
+        aria-labelledby="mail-tab-verification"
       >
         <article class="table-card">
           <div class="section-heading">
