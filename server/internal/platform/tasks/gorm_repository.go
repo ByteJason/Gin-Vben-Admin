@@ -3,6 +3,7 @@ package tasksplatform
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -38,7 +39,7 @@ func (r *GORMRepository) Save(ctx context.Context, definition tasksapp.TaskDefin
 		return err
 	}
 	rows, updateErr := gorm.G[taskDefinitionRecord](r.db.Write(ctx)).Where("id = ? AND tenant_id = ? AND org_id = ? AND deleted_at IS NULL", record.ID, record.TenantID, record.OrgID).Set(clause.Assignments(map[string]any{
-		"name": record.Name, "type": record.Type, "payload_schema": record.PayloadSchema, "cron": record.Cron,
+		"name": record.Name, "description": record.Description, "payload": record.Payload, "type": record.Type, "executor_type": record.ExecutorType, "method_key": record.MethodKey, "http_config": record.HTTPConfig, "payload_schema": record.PayloadSchema, "cron": record.Cron,
 		"timezone": record.Timezone, "enabled": record.Enabled, "concurrency": record.Concurrency,
 		"concurrency_policy": record.ConcurrencyPolicy, "timeout_ms": record.TimeoutMS, "max_attempts": record.MaxAttempts,
 		"idempotency_key": record.IdempotencyKey, "updated_at": record.UpdatedAt,
@@ -116,7 +117,7 @@ func fromDefinition(definition tasksapp.TaskDefinition) taskDefinitionRecord {
 	}
 	return taskDefinitionRecord{
 		ID: definition.ID, TenantID: definition.TenantID, OrgID: definition.OrgID, Name: definition.Name,
-		Type: definition.Type, PayloadSchema: append([]byte(nil), definition.PayloadSchema...), Cron: definition.Cron,
+		Description: definition.Description, Payload: append([]byte(nil), definition.Payload...), Type: definition.Type, ExecutorType: definition.ExecutorType, MethodKey: definition.MethodKey, HTTPConfig: append([]byte(nil), definition.HTTPConfig...), PayloadSchema: append([]byte(nil), definition.PayloadSchema...), Cron: definition.Cron,
 		Timezone: definition.Timezone, Enabled: definition.Enabled, Concurrency: int32(definition.Concurrency),
 		ConcurrencyPolicy: definition.ConcurrencyPolicy, TimeoutMS: timeout.Milliseconds(), MaxAttempts: int32(definition.MaxAttempts),
 		IdempotencyKey: definition.IdempotencyKey, DeletedAt: definition.DeletedAt, CreatedAt: definition.CreatedAt, UpdatedAt: definition.UpdatedAt,
@@ -125,7 +126,7 @@ func fromDefinition(definition tasksapp.TaskDefinition) taskDefinitionRecord {
 
 func toDefinition(record taskDefinitionRecord) tasksapp.TaskDefinition {
 	return tasksapp.TaskDefinition{
-		ID: record.ID, TenantID: record.TenantID, OrgID: record.OrgID, Name: record.Name, Type: record.Type,
+		ID: record.ID, TenantID: record.TenantID, OrgID: record.OrgID, Name: record.Name, Description: record.Description, Payload: append([]byte(nil), record.Payload...), Type: record.Type, ExecutorType: record.ExecutorType, MethodKey: record.MethodKey, HTTPConfig: append([]byte(nil), record.HTTPConfig...),
 		PayloadSchema: append([]byte(nil), record.PayloadSchema...), Cron: record.Cron, Timezone: record.Timezone,
 		Enabled: record.Enabled, Concurrency: int(record.Concurrency), ConcurrencyPolicy: record.ConcurrencyPolicy,
 		Timeout: time.Duration(record.TimeoutMS) * time.Millisecond, TimeoutSeconds: int(record.TimeoutMS / 1000),
@@ -227,7 +228,10 @@ func (r *GORMRunRepository) List(ctx context.Context, taskID, tenantID, orgID st
 	if r == nil || r.db == nil {
 		return nil, tasksapp.ErrRunQueueUnavailable
 	}
-	query := gorm.G[taskRunRecord](r.db.Read(ctx)).Where("task_id = ? AND tenant_id = ? AND deleted_at IS NULL", strings.TrimSpace(taskID), tenantID)
+	query := gorm.G[taskRunRecord](r.db.Read(ctx)).Where("tenant_id = ? AND deleted_at IS NULL", tenantID)
+	if strings.TrimSpace(taskID) != "" {
+		query = query.Where("task_id = ?", strings.TrimSpace(taskID))
+	}
 	if strings.TrimSpace(orgID) != "" {
 		query = query.Where("org_id = ?", orgID)
 	}
@@ -248,7 +252,7 @@ func (r *GORMRunRepository) ListLogs(ctx context.Context, runID, tenantID, orgID
 	}
 	// The join is a dedicated projection: logs are tenant-scoped through their
 	// parent run, while the returned shape remains the persistence model.
-	sql := "SELECT l.id, l.run_id, l.attempt, l.status, l.error_code, l.message, l.deleted_at, l.created_at, l.updated_at FROM gvba_task_run_logs AS l JOIN gvba_task_runs AS r ON r.id = l.run_id WHERE l.run_id = ? AND r.tenant_id = ? AND r.deleted_at IS NULL AND l.deleted_at IS NULL"
+	sql := "SELECT l.id, l.run_id, l.attempt, l.status, l.trigger_source, l.executor_type, l.error_code, l.message, l.started_at, l.finished_at, l.duration_ms, l.result_summary, l.redacted_output, l.deleted_at, l.created_at, l.updated_at FROM gvba_task_run_logs AS l JOIN gvba_task_runs AS r ON r.id = l.run_id WHERE l.run_id = ? AND r.tenant_id = ? AND r.deleted_at IS NULL AND l.deleted_at IS NULL"
 	args := []any{strings.TrimSpace(runID), tenantID}
 	if strings.TrimSpace(orgID) != "" {
 		sql += " AND r.org_id = ?"
@@ -274,7 +278,7 @@ func (r *GORMRunRepository) Update(ctx context.Context, run tasksapp.TaskRun) (t
 	rows, updateErr := gorm.G[taskRunRecord](r.db.Write(ctx)).Where("id = ? AND tenant_id = ? AND org_id = ? AND deleted_at IS NULL", record.ID, record.TenantID, record.OrgID).Set(clause.Assignments(map[string]any{
 		"queue_task_id": record.QueueTaskID, "idempotency_key": record.IdempotencyKey, "status": record.Status,
 		"payload_digest": record.PayloadDigest, "attempt_count": record.AttemptCount, "max_attempts": record.MaxAttempts,
-		"last_error_code": record.LastErrorCode, "started_at": record.StartedAt, "finished_at": record.FinishedAt, "updated_at": record.UpdatedAt,
+		"last_error_code": record.LastErrorCode, "error_code": record.ErrorCode, "trigger_source": record.TriggerSource, "executor_type": record.ExecutorType, "started_at": record.StartedAt, "finished_at": record.FinishedAt, "duration_ms": record.DurationMS, "result_summary": record.ResultSummary, "redacted_output": record.RedactedOutput, "updated_at": record.UpdatedAt,
 	})).Update(ctx)
 	if updateErr != nil {
 		return tasksapp.TaskRun{}, updateErr
@@ -289,7 +293,7 @@ func (r *GORMRunRepository) AppendLog(ctx context.Context, log tasksapp.TaskRunL
 	if r == nil || r.db == nil {
 		return tasksapp.ErrRunQueueUnavailable
 	}
-	row := taskRunLogRecord{ID: log.ID, RunID: log.RunID, Attempt: int32(log.Attempt), Status: string(log.Status), ErrorCode: log.ErrorCode, Message: log.Message, DeletedAt: log.DeletedAt, CreatedAt: log.CreatedAt, UpdatedAt: log.UpdatedAt}
+	row := taskRunLogRecord{ID: log.ID, RunID: log.RunID, Attempt: int32(log.Attempt), Status: string(log.Status), TriggerSource: log.TriggerSource, ExecutorType: log.ExecutorType, ErrorCode: log.ErrorCode, Message: log.Message, StartedAt: log.StartedAt, FinishedAt: log.FinishedAt, DurationMS: log.DurationMS, ResultSummary: log.ResultSummary, RedactedOutput: log.RedactedOutput, DeletedAt: log.DeletedAt, CreatedAt: log.CreatedAt, UpdatedAt: log.UpdatedAt}
 	return createRunLog(ctx, r.db.Write(ctx), row)
 }
 
@@ -300,7 +304,7 @@ func (r *GORMRunRepository) AppendLog(ctx context.Context, log tasksapp.TaskRunL
 func createDefinition(ctx context.Context, db *gorm.DB, record taskDefinitionRecord) error {
 	values := map[string]any{
 		"id": record.ID, "tenant_id": record.TenantID, "org_id": record.OrgID, "name": record.Name,
-		"type": record.Type, "payload_schema": record.PayloadSchema, "cron": record.Cron,
+		"type": record.Type, "description": record.Description, "payload": record.Payload, "executor_type": record.ExecutorType, "method_key": record.MethodKey, "http_config": record.HTTPConfig, "payload_schema": record.PayloadSchema, "cron": record.Cron,
 		"timezone": record.Timezone, "enabled": record.Enabled, "concurrency": record.Concurrency,
 		"concurrency_policy": record.ConcurrencyPolicy, "timeout_ms": record.TimeoutMS,
 		"max_attempts": record.MaxAttempts, "idempotency_key": record.IdempotencyKey,
@@ -320,10 +324,10 @@ func createDefinition(ctx context.Context, db *gorm.DB, record taskDefinitionRec
 
 func createRun(ctx context.Context, db *gorm.DB, record taskRunRecord) error {
 	return gormquery.CreateValues[taskRunRecord](ctx, db, map[string]any{
-		"id": record.ID, "task_id": record.TaskID, "tenant_id": record.TenantID, "org_id": record.OrgID,
+		"id": record.ID, "task_id": record.TaskID, "task_name": record.TaskName, "task_description": record.TaskDescription, "config_snapshot": record.ConfigSnapshot, "tenant_id": record.TenantID, "org_id": record.OrgID,
 		"queue_task_id": record.QueueTaskID, "idempotency_key": record.IdempotencyKey, "status": record.Status,
 		"payload_digest": record.PayloadDigest, "attempt_count": record.AttemptCount, "max_attempts": record.MaxAttempts,
-		"last_error_code": record.LastErrorCode, "started_at": record.StartedAt, "finished_at": record.FinishedAt,
+		"last_error_code": record.LastErrorCode, "trigger_source": record.TriggerSource, "executor_type": record.ExecutorType, "error_code": record.ErrorCode, "duration_ms": record.DurationMS, "result_summary": record.ResultSummary, "redacted_output": record.RedactedOutput, "started_at": record.StartedAt, "finished_at": record.FinishedAt,
 		"deleted_at": record.DeletedAt, "created_at": record.CreatedAt, "updated_at": record.UpdatedAt,
 	})
 }
@@ -331,21 +335,21 @@ func createRun(ctx context.Context, db *gorm.DB, record taskRunRecord) error {
 func createRunLog(ctx context.Context, db *gorm.DB, record taskRunLogRecord) error {
 	return gormquery.CreateValues[taskRunLogRecord](ctx, db, map[string]any{
 		"id": record.ID, "run_id": record.RunID, "attempt": record.Attempt, "status": record.Status,
-		"error_code": record.ErrorCode, "message": record.Message, "deleted_at": record.DeletedAt,
+		"trigger_source": record.TriggerSource, "executor_type": record.ExecutorType, "error_code": record.ErrorCode, "message": record.Message, "started_at": record.StartedAt, "finished_at": record.FinishedAt, "duration_ms": record.DurationMS, "result_summary": record.ResultSummary, "redacted_output": record.RedactedOutput, "deleted_at": record.DeletedAt,
 		"created_at": record.CreatedAt, "updated_at": record.UpdatedAt,
 	})
 }
 
 func toRunLog(row taskRunLogRecord) tasksapp.TaskRunLog {
-	return tasksapp.TaskRunLog{ID: row.ID, RunID: row.RunID, Attempt: int(row.Attempt), Status: tasksapp.RunStatus(row.Status), ErrorCode: row.ErrorCode, Message: row.Message, DeletedAt: row.DeletedAt, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}
+	return tasksapp.TaskRunLog{ID: row.ID, RunID: row.RunID, Attempt: int(row.Attempt), Status: tasksapp.RunStatus(row.Status), TriggerSource: row.TriggerSource, ExecutorType: row.ExecutorType, ErrorCode: row.ErrorCode, Message: row.Message, StartedAt: row.StartedAt, FinishedAt: row.FinishedAt, DurationMS: row.DurationMS, ResultSummary: row.ResultSummary, RedactedOutput: row.RedactedOutput, DeletedAt: row.DeletedAt, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}
 }
 
 func fromRun(run tasksapp.TaskRun) taskRunRecord {
-	return taskRunRecord{ID: run.ID, TaskID: run.TaskID, TenantID: run.TenantID, OrgID: run.OrgID, QueueTaskID: run.QueueTaskID, IdempotencyKey: run.IdempotencyKey, Status: string(run.Status), PayloadDigest: run.PayloadDigest, AttemptCount: int32(run.AttemptCount), MaxAttempts: int32(run.MaxAttempts), LastErrorCode: run.LastErrorCode, StartedAt: run.StartedAt, FinishedAt: run.FinishedAt, DeletedAt: run.DeletedAt, CreatedAt: run.CreatedAt, UpdatedAt: run.UpdatedAt}
+	return taskRunRecord{ID: run.ID, TaskID: run.TaskID, TaskName: run.TaskName, TaskDescription: run.TaskDescription, ConfigSnapshot: model.JSONValue(run.ConfigSnapshot), TenantID: run.TenantID, OrgID: run.OrgID, QueueTaskID: run.QueueTaskID, IdempotencyKey: run.IdempotencyKey, Status: string(run.Status), PayloadDigest: run.PayloadDigest, AttemptCount: int32(run.AttemptCount), MaxAttempts: int32(run.MaxAttempts), LastErrorCode: run.LastErrorCode, ErrorCode: run.ErrorCode, TriggerSource: run.TriggerSource, ExecutorType: run.ExecutorType, StartedAt: run.StartedAt, FinishedAt: run.FinishedAt, DurationMS: run.DurationMS, ResultSummary: run.ResultSummary, RedactedOutput: run.RedactedOutput, DeletedAt: run.DeletedAt, CreatedAt: run.CreatedAt, UpdatedAt: run.UpdatedAt}
 }
 
 func toRun(row taskRunRecord) tasksapp.TaskRun {
-	return tasksapp.TaskRun{ID: row.ID, TaskID: row.TaskID, TenantID: row.TenantID, OrgID: row.OrgID, QueueTaskID: row.QueueTaskID, IdempotencyKey: row.IdempotencyKey, Status: tasksapp.RunStatus(row.Status), PayloadDigest: row.PayloadDigest, AttemptCount: int(row.AttemptCount), MaxAttempts: int(row.MaxAttempts), LastErrorCode: row.LastErrorCode, StartedAt: row.StartedAt, FinishedAt: row.FinishedAt, DeletedAt: row.DeletedAt, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}
+	return tasksapp.TaskRun{ID: row.ID, TaskID: row.TaskID, TaskName: row.TaskName, TaskDescription: row.TaskDescription, ConfigSnapshot: json.RawMessage(row.ConfigSnapshot), TenantID: row.TenantID, OrgID: row.OrgID, QueueTaskID: row.QueueTaskID, IdempotencyKey: row.IdempotencyKey, Status: tasksapp.RunStatus(row.Status), PayloadDigest: row.PayloadDigest, AttemptCount: int(row.AttemptCount), MaxAttempts: int(row.MaxAttempts), LastErrorCode: row.LastErrorCode, ErrorCode: row.ErrorCode, TriggerSource: row.TriggerSource, ExecutorType: row.ExecutorType, StartedAt: row.StartedAt, FinishedAt: row.FinishedAt, DurationMS: row.DurationMS, ResultSummary: row.ResultSummary, RedactedOutput: row.RedactedOutput, DeletedAt: row.DeletedAt, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}
 }
 
 var _ tasksapp.RunRepository = (*GORMRunRepository)(nil)

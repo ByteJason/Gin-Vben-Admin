@@ -377,10 +377,19 @@ export interface TaskDefinition {
   tenantId: string;
   orgId?: string;
   name: string;
+  description?: string;
   type: 'manual' | 'http' | 'webhook';
   payloadSchema: Record<string, unknown>;
+  payload?: Record<string, unknown>;
   cron?: string;
   timezone: string;
+  nextRunAt?: string;
+  lastRunAt?: string;
+  lastRunStatus?: TaskRun['status'];
+  lastRunErrorCode?: string;
+  executorType?: 'registered' | 'http';
+  methodKey?: string;
+  http?: TaskHTTPConfig;
   enabled: boolean;
   concurrency: number;
   concurrencyPolicy: 'allow' | 'forbid' | 'replace';
@@ -393,10 +402,15 @@ export interface TaskDefinition {
 }
 export interface TaskDefinitionInput {
   name: string;
+  description?: string;
   type: 'manual' | 'http' | 'webhook';
   payloadSchema: Record<string, unknown>;
+  payload?: Record<string, unknown>;
   cron?: string;
   timezone?: string;
+  executorType?: 'registered' | 'http';
+  methodKey?: string;
+  http?: TaskHTTPConfig;
   enabled?: boolean;
   concurrency?: number;
   concurrencyPolicy?: 'allow' | 'forbid' | 'replace';
@@ -404,9 +418,20 @@ export interface TaskDefinitionInput {
   maxAttempts?: number;
   idempotencyKey?: string;
 }
+export interface TaskHTTPConfig {
+  url: string;
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS';
+  headers?: Record<string, string>;
+  body?: string | Record<string, unknown>;
+  allowInternal?: boolean;
+  timeoutSeconds?: number;
+}
 export interface TaskRun {
   id: string;
   taskId: string;
+  taskName?: string;
+  taskDescription?: string;
+  configSnapshot?: Record<string, unknown>;
   tenantId: string;
   orgId?: string;
   queueTaskId?: string;
@@ -416,8 +441,15 @@ export interface TaskRun {
   attemptCount: number;
   maxAttempts: number;
   lastErrorCode?: string;
+  errorCode?: string;
+  triggerSource?: 'manual' | 'schedule' | 'retry' | 'system' | string;
+  executorType?: 'manual' | 'http' | 'webhook' | 'registered' | string;
   startedAt?: string;
   finishedAt?: string;
+  durationMs?: number;
+  resultSummary?: string;
+  redactedOutput?: string;
+  deletedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -426,11 +458,24 @@ export interface TaskRunLog {
   runId: string;
   attempt: number;
   status: 'pending' | 'running' | 'succeeded' | 'failed' | 'dead_letter' | 'cancelled';
+  triggerSource?: 'manual' | 'schedule' | 'retry' | 'system' | string;
+  executorType?: 'manual' | 'http' | 'webhook' | 'registered' | string;
   errorCode?: string;
   message?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  durationMs?: number;
+  resultSummary?: string;
+  redactedOutput?: string;
+  deletedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
+export interface TaskDefinitionPage { items: TaskDefinition[]; total: number; page: number; pageSize: number; }
+export interface TaskRunPage { items: TaskRun[]; total: number; page: number; pageSize: number; }
+export interface TaskRunLogPage { items: TaskRunLog[]; total: number; page: number; pageSize: number; }
+export interface TaskListQuery { page?: number; pageSize?: number; name?: string; executorType?: 'registered' | 'http'; enabled?: boolean; }
+export interface TaskRunListQuery { taskId?: string; taskName?: string; status?: TaskRun['status'] | 'timeout' | 'skipped'; triggerSource?: 'manual' | 'schedule' | 'retry' | 'system'; from?: string; to?: string; page?: number; pageSize?: number; }
 
 export namespace AuthApi {\n  export interface LoginParams {\n    captcha?: string;\n    captchaId?: string;\n    identifier?: string;\n    identifierType?: "username" | "email";\n    password: string;\n    username?: string;\n  }\n\n  export interface RegisterParams {\n    password: string;\n    username: string;\n  }\n\n  export interface PasswordResetRequestParams {\n    password?: string;\n    token?: string;\n    username?: string;\n  }\n\n  export interface SessionInfo {\n    createdAt: string;\n    deviceId: string;\n    deviceName: string;\n    expiresAt: string;\n    id: string;\n    ipAddress: string;\n    lastSeenAt: string;\n    revoked: boolean;\n    userAgent: string;\n  }\n\n  export interface LoginResult {\n    accessToken: string;\n    expiresIn: number;\n    tokenType: 'Bearer';\n  }\n\n  export type RefreshTokenResult = LoginResult;\n\n  export interface ApiEnvelope<T> {\n    code: number;\n    data: T;\n    message: string;\n    meta?: { requestId?: string };\n    traceId?: string;\n  }\n\n  export interface WireTokenData {\n    accessToken?: string;\n    access_token?: string;\n    expiresIn?: number;\n    expires_in?: number;\n    tokenType?: 'Bearer' | string;\n    token_type?: 'Bearer' | string;\n  }\n}\n`;
 

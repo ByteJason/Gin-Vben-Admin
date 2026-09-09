@@ -34,12 +34,21 @@ const routes: RouteRecordRaw[] = [
         'system:dictionary:read',
         'system:settings:read',
         'system:mail:read',
+        'ops:tasks:read',
       ],
       icon: 'lucide:settings',
       order: 30,
       title: $t('page.navigation.system'),
     },
     children: [
+      page(
+        'menu-operations-tasks',
+        'tasks',
+        () => import('#/views/system/tasks/index.vue'),
+        'ops:tasks:read',
+        'page.navigation.tasks',
+        'lucide:clock-3',
+      ),
       page(
         'menu-system-dictionary',
         'dictionary',
@@ -91,7 +100,6 @@ const routes: RouteRecordRaw[] = [
         'ops:audit:read',
         'ops:operation-history:read',
         'ops:login-logs:read',
-        'ops:tasks:read',
         'ops:data-jobs:read',
       ],
       icon: 'lucide:activity',
@@ -122,14 +130,6 @@ const routes: RouteRecordRaw[] = [
         ['ops:audit:read', 'ops:login-logs:read'],
         'page.navigation.loginLogs',
         'lucide:log-in',
-      ),
-      page(
-        'menu-operations-tasks',
-        'tasks',
-        () => import('#/views/system/tasks/index.vue'),
-        'ops:tasks:read',
-        'page.navigation.tasks',
-        'lucide:workflow',
       ),
       page(
         'menu-operations-data-jobs',
@@ -178,7 +178,7 @@ const routes: RouteRecordRaw[] = [
   },
   ...[
     ['/system/monitor', '/ops/server-status', 'LegacySystemMonitor'],
-    ['/system/tasks', '/ops/tasks', 'LegacySystemTasks'],
+    ['/ops/tasks', '/system/tasks', 'LegacySystemTasks'],
     ['/system/import-export', '/ops/data-jobs', 'LegacySystemDataJobs'],
   ].map(
     ([path, redirect, name]) =>

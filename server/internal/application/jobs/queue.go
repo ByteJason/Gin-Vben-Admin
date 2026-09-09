@@ -17,6 +17,8 @@ var (
 	ErrInvalidTask  = errors.New("invalid task")
 	ErrTaskNotFound = errors.New("task not found")
 	ErrTaskConflict = errors.New("task idempotency conflict")
+	ErrQueueEmpty   = errors.New("task queue is empty")
+	ErrClaimLost    = errors.New("task claim lease lost")
 )
 
 type Status string
@@ -51,6 +53,19 @@ type Queue interface {
 	Cancel(context.Context, string) error
 }
 
+// PendingQueue is the optional worker-facing dequeue capability. ClaimPending
+// atomically reserves one pending/retryable task so multiple workers cannot
+// execute the same queue item concurrently.
+type PendingQueue interface {
+	ClaimPending(context.Context) (Task, error)
+}
+
+// RunningLeaseQueue renews a distributed claim while a handler is executing.
+// A failed renewal means ownership was lost and the handler context must stop.
+type RunningLeaseQueue interface {
+	RenewClaim(context.Context, string) error
+}
+
 // RunningQueue is an optional capability used by workers that expose an
 // explicit in-progress state. Queue adapters that do not implement it remain
 // compatible with the base contract.
@@ -81,20 +96,44 @@ func (q *MemoryQueue) Enqueue(_ context.Context, task Task) (Task, error) {
 	if existingID, ok := q.byIdempotency[task.IdempotencyKey]; ok {
 		return clone(q.tasks[existingID]), nil
 	}
-	id, err := taskID()
-	if err != nil {
-		return Task{}, err
+	if strings.TrimSpace(task.ID) == "" {
+		id, err := taskID()
+		if err != nil {
+			return Task{}, err
+		}
+		task.ID = id
+	} else if existing, exists := q.tasks[task.ID]; exists {
+		if existing.IdempotencyKey == task.IdempotencyKey {
+			return clone(existing), nil
+		}
+		return Task{}, ErrTaskConflict
 	}
-	task.ID = id
 	task.Payload = append([]byte(nil), task.Payload...)
 	if task.MaxAttempts <= 0 {
 		task.MaxAttempts = q.maxAttempts
 	}
 	task.Status = StatusPending
 	task.CreatedAt = time.Now().UTC()
-	q.tasks[id] = task
-	q.byIdempotency[task.IdempotencyKey] = id
+	q.tasks[task.ID] = task
+	q.byIdempotency[task.IdempotencyKey] = task.ID
 	return clone(task), nil
+}
+
+func (q *MemoryQueue) ClaimPending(_ context.Context) (Task, error) {
+	if q == nil {
+		return Task{}, ErrQueueEmpty
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for id, task := range q.tasks {
+		if task.Status != StatusPending && task.Status != StatusFailed {
+			continue
+		}
+		task.Status = StatusRunning
+		q.tasks[id] = task
+		return clone(task), nil
+	}
+	return Task{}, ErrQueueEmpty
 }
 
 func (q *MemoryQueue) Get(_ context.Context, id string) (Task, error) {
@@ -201,3 +240,4 @@ func taskID() (string, error) {
 }
 
 var _ Queue = (*MemoryQueue)(nil)
+var _ PendingQueue = (*MemoryQueue)(nil)

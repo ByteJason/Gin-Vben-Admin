@@ -136,8 +136,11 @@ func (r *MemoryRepository) Delete(ctx context.Context, id, tenantID, orgID strin
 }
 
 type Service struct {
-	repo  Repository
-	clock func() time.Time
+	repo    Repository
+	clock   func() time.Time
+	methods *MethodExecutor
+	audit   AuditSink
+	runs    RunRepository
 }
 
 func NewService(repo Repository) *Service { return &Service{repo: repo, clock: time.Now} }
@@ -179,10 +182,16 @@ func (s *Service) Create(ctx context.Context, d TaskDefinition) (TaskDefinition,
 	if d.Timezone == "" {
 		d.Timezone = "UTC"
 	}
+	if err := s.normalize(&d); err != nil {
+		return TaskDefinition{}, err
+	}
 	if err := d.Validate(); err != nil {
 		return TaskDefinition{}, err
 	}
 	if err := s.repo.Save(ctx, d); err != nil {
+		return TaskDefinition{}, err
+	}
+	if err := s.record(ctx, "tasks.create", d); err != nil {
 		return TaskDefinition{}, err
 	}
 	return s.Get(ctx, d.ID)
@@ -199,6 +208,11 @@ func (s *Service) Update(ctx context.Context, id string, d TaskDefinition) (Task
 	existing, err := s.repo.Get(ctx, id, scope.TenantID, scope.Organization)
 	if err != nil {
 		return TaskDefinition{}, err
+	}
+	d.HTTPConfig = mergeRedacted(d.HTTPConfig, existing.HTTPConfig)
+	d.Payload = mergeRedacted(d.Payload, existing.Payload)
+	if d.TimeoutSeconds > 0 {
+		d.Timeout = time.Duration(d.TimeoutSeconds) * time.Second
 	}
 	d.ID, d.TenantID, d.OrgID = existing.ID, existing.TenantID, existing.OrgID
 	d.CreatedAt = existing.CreatedAt
@@ -229,10 +243,16 @@ func (s *Service) Update(ctx context.Context, id string, d TaskDefinition) (Task
 	if d.ConcurrencyPolicy == "" {
 		d.ConcurrencyPolicy = existing.ConcurrencyPolicy
 	}
+	if err := s.normalize(&d); err != nil {
+		return TaskDefinition{}, err
+	}
 	if err := d.Validate(); err != nil {
 		return TaskDefinition{}, err
 	}
 	if err := s.repo.Save(ctx, d); err != nil {
+		return TaskDefinition{}, err
+	}
+	if err := s.record(ctx, "tasks.update", d); err != nil {
 		return TaskDefinition{}, err
 	}
 	return s.Get(ctx, id)
@@ -268,7 +288,14 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	if s == nil || s.repo == nil {
 		return ErrRepositoryMissing
 	}
-	return s.repo.Delete(ctx, id, scope.TenantID, scope.Organization)
+	existing, err := s.repo.Get(ctx, id, scope.TenantID, scope.Organization)
+	if err != nil {
+		return err
+	}
+	if err := s.repo.Delete(ctx, id, scope.TenantID, scope.Organization); err != nil {
+		return err
+	}
+	return s.record(ctx, "tasks.delete", existing)
 }
 
 func normalizedPolicy(value string) string {
@@ -288,6 +315,8 @@ func contextErr(ctx context.Context) error {
 
 func cloneDefinition(d TaskDefinition) TaskDefinition {
 	d.PayloadSchema = append([]byte(nil), d.PayloadSchema...)
+	d.Payload = append([]byte(nil), d.Payload...)
+	d.HTTPConfig = append([]byte(nil), d.HTTPConfig...)
 	return d
 }
 

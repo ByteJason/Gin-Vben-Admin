@@ -17,6 +17,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
+	"net"
+	"net/http"
+	"net/url"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -37,6 +42,11 @@ var (
 )
 
 const maxMediaURLTTL = time.Hour
+
+const (
+	maxRemoteMediaBytes = int64(100 << 20)
+	remoteMediaTimeout  = 15 * time.Second
+)
 
 // CatalogAdapter holds only metadata that the legacy in-memory service does
 // not yet persist (scope/status/metadata). A future database-backed catalog
@@ -211,6 +221,162 @@ func (c *CatalogAdapter) Upload(ctx context.Context, input UploadInput) (Resourc
 		c.mu.Unlock()
 	}
 	return ref, nil
+}
+
+// ImportURLs downloads and stores remote media through the same Upload path as
+// local files. Each row is isolated so one bad URL does not hide successful
+// imports. The downloader rejects non-HTTP schemes, private/link-local
+// destinations, redirects to private destinations, oversized responses and
+// non-media MIME types before bytes reach the storage provider.
+func (c *CatalogAdapter) ImportURLs(ctx context.Context, urls []string, categoryID, note, idemKey string) []URLImportResult {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	out := make([]URLImportResult, len(urls))
+	if c == nil || c.service == nil {
+		for i, raw := range urls {
+			out[i] = URLImportResult{Index: i + 1, SourceURL: strings.TrimSpace(raw), Error: "media catalog unavailable"}
+		}
+		return out
+	}
+	for i, raw := range urls {
+		result := URLImportResult{Index: i + 1, SourceURL: strings.TrimSpace(raw)}
+		if result.SourceURL == "" {
+			result.Error = "URL is required"
+			out[i] = result
+			continue
+		}
+		ref, name, err := c.importOneURL(ctx, result.SourceURL, categoryID, note, idemKey, i)
+		if err != nil {
+			result.Error = err.Error()
+			out[i] = result
+			continue
+		}
+		result.Name, result.Resource, result.Success = name, &ref, true
+		out[i] = result
+	}
+	return out
+}
+
+func (c *CatalogAdapter) importOneURL(ctx context.Context, raw, categoryID, note, idemKey string, index int) (ResourceRef, string, error) {
+	remoteLimit := maxRemoteMediaBytes
+	if c != nil && c.service != nil && c.service.maxBytes > 0 {
+		remoteLimit = c.service.maxBytes
+	}
+	u, err := url.ParseRequestURI(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil {
+		return ResourceRef{}, "", errors.New("URL must be an http(s) address")
+	}
+	if err := rejectRemoteHost(u.Hostname()); err != nil {
+		return ResourceRef{}, "", err
+	}
+	client := &http.Client{Timeout: remoteMediaTimeout, Transport: &http.Transport{
+		Proxy: nil,
+		DialContext: func(dialCtx context.Context, network, address string) (net.Conn, error) {
+			host, port, splitErr := net.SplitHostPort(address)
+			if splitErr != nil {
+				return nil, errors.New("invalid remote address")
+			}
+			ips, lookupErr := net.DefaultResolver.LookupIPAddr(dialCtx, host)
+			if lookupErr != nil {
+				return nil, errors.New("remote host could not be resolved")
+			}
+			dialer := &net.Dialer{Timeout: 5 * time.Second}
+			for _, candidate := range ips {
+				if isPrivateRemoteIP(candidate.IP) {
+					continue
+				}
+				conn, dialErr := dialer.DialContext(dialCtx, network, net.JoinHostPort(candidate.IP.String(), port))
+				if dialErr == nil {
+					return conn, nil
+				}
+			}
+			return nil, errors.New("remote host is not publicly routable")
+		},
+	}}
+	client.CheckRedirect = func(req *http.Request, _ []*http.Request) error {
+		if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
+			return errors.New("redirect scheme is not allowed")
+		}
+		return rejectRemoteHost(req.URL.Hostname())
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, raw, nil)
+	if err != nil {
+		return ResourceRef{}, "", errors.New("invalid remote URL")
+	}
+	request.Header.Set("Accept", "image/*,audio/*,video/*,application/pdf,application/octet-stream;q=0.5")
+	resp, err := client.Do(request)
+	if err != nil {
+		return ResourceRef{}, "", errors.New("remote download failed")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return ResourceRef{}, "", fmt.Errorf("remote server returned %d", resp.StatusCode)
+	}
+	if resp.ContentLength > remoteLimit {
+		return ResourceRef{}, "", ErrFileTooLarge
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, remoteLimit+1))
+	if err != nil {
+		return ResourceRef{}, "", errors.New("remote download failed")
+	}
+	if int64(len(data)) > remoteLimit {
+		return ResourceRef{}, "", ErrFileTooLarge
+	}
+	mimeType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	if !isRemoteMediaMIME(mimeType, data) {
+		return ResourceRef{}, "", ErrMediaTypeNotAllowed
+	}
+	name := filepath.Base(u.Path)
+	if name == "." || name == "/" || name == "" {
+		name = "remote-media"
+	}
+	metadata := map[string]string{}
+	if strings.TrimSpace(note) != "" {
+		metadata["note"] = strings.TrimSpace(note)
+	}
+	key := strings.TrimSpace(idemKey)
+	if key != "" {
+		key = fmt.Sprintf("%s:%d", key, index)
+	}
+	ref, err := c.Upload(ctx, UploadInput{Data: data, Size: int64(len(data)), Name: name, MIME: mimeType, CategoryID: categoryID, Metadata: metadata, IdempotencyKey: key})
+	return ref, name, err
+}
+
+func isRemoteMediaMIME(header string, data []byte) bool {
+	detected := detectedMIME(data, "")
+	if strings.HasPrefix(strings.ToLower(header), "image/") || strings.HasPrefix(strings.ToLower(header), "audio/") || strings.HasPrefix(strings.ToLower(header), "video/") || strings.EqualFold(header, "application/pdf") {
+		return true
+	}
+	return strings.HasPrefix(detected, "image/") || strings.HasPrefix(detected, "audio/") || strings.HasPrefix(detected, "video/") || detected == "application/pdf"
+}
+
+func rejectRemoteHost(host string) error {
+	if strings.TrimSpace(host) == "" {
+		return errors.New("remote host is required")
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if isPrivateRemoteIP(ip) {
+			return errors.New("remote host is not publicly routable")
+		}
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil || len(addrs) == 0 {
+		return errors.New("remote host could not be resolved")
+	}
+	for _, addr := range addrs {
+		if isPrivateRemoteIP(addr.IP) {
+			return errors.New("remote host is not publicly routable")
+		}
+	}
+	return nil
+}
+
+func isPrivateRemoteIP(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() || ip.IsLinkLocalMulticast()
 }
 
 // hashReaderForIdempotency computes a retry digest in bounded chunks.  It is

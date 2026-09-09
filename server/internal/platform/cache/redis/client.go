@@ -269,6 +269,172 @@ func (c *Client) Delete(ctx context.Context, key string) error {
 	return c.client.Del(ctx, key).Err()
 }
 
+// PushString appends a short queue token to a namespaced Redis list. It is a
+// narrow primitive for durable worker queues; callers must persist the full
+// payload separately under their own key.
+func (c *Client) PushString(ctx context.Context, key, value string, ttl time.Duration) error {
+	if !c.isPhysicalKey(key) || strings.TrimSpace(value) == "" {
+		return ErrInvalidKey
+	}
+	if ttl <= 0 {
+		return ErrInvalidTTL
+	}
+	if err := c.client.LPush(ctx, key, value).Err(); err != nil {
+		return err
+	}
+	return c.client.Expire(ctx, key, ttl).Err()
+}
+
+func (c *Client) SetString(ctx context.Context, key, value string, ttl time.Duration) error {
+	if !c.isPhysicalKey(key) || strings.TrimSpace(value) == "" {
+		return ErrInvalidKey
+	}
+	if ttl <= 0 {
+		return ErrInvalidTTL
+	}
+	return c.client.Set(ctx, key, value, ttl).Err()
+}
+
+func (c *Client) GetString(ctx context.Context, key string) (string, error) {
+	if !c.isPhysicalKey(key) {
+		return "", ErrInvalidKey
+	}
+	value, err := c.client.Get(ctx, key).Result()
+	if errors.Is(err, redis.Nil) {
+		return "", ErrCacheMiss
+	}
+	return value, err
+}
+
+// PopString removes and returns the oldest token from a namespaced Redis list.
+// Missing lists map to ErrCacheMiss so queue adapters can represent emptiness
+// without depending on go-redis sentinel values.
+func (c *Client) PopString(ctx context.Context, key string) (string, error) {
+	if !c.isPhysicalKey(key) {
+		return "", ErrInvalidKey
+	}
+	value, err := c.client.RPop(ctx, key).Result()
+	if errors.Is(err, redis.Nil) {
+		return "", ErrCacheMiss
+	}
+	return value, err
+}
+
+// MoveList atomically moves the oldest list item from source to destination.
+// It is used to retain a processing candidate until the worker acknowledges
+// completion, so a process crash cannot silently lose a task after dequeue.
+func (c *Client) MoveList(ctx context.Context, source, destination string) (string, error) {
+	if !c.isPhysicalKey(source) || !c.isPhysicalKey(destination) {
+		return "", ErrInvalidKey
+	}
+	value, err := c.client.RPopLPush(ctx, source, destination).Result()
+	if errors.Is(err, redis.Nil) {
+		return "", ErrCacheMiss
+	}
+	return value, err
+}
+
+// RemoveString removes all matching values from a namespaced Redis list.
+func (c *Client) RemoveString(ctx context.Context, key, value string) error {
+	if !c.isPhysicalKey(key) || strings.TrimSpace(value) == "" {
+		return ErrInvalidKey
+	}
+	return c.client.LRem(ctx, key, 0, value).Err()
+}
+
+var renewStringLease = redis.NewScript(`
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call("PEXPIRE", KEYS[1], ARGV[2])
+return 1
+`)
+
+func (c *Client) RenewString(ctx context.Context, key, value string, ttl time.Duration) error {
+	if !c.isPhysicalKey(key) || strings.TrimSpace(value) == "" {
+		return ErrInvalidKey
+	}
+	if ttl <= 0 {
+		return ErrInvalidTTL
+	}
+	ok, err := renewStringLease.Run(ctx, c.client, []string{key}, value, ttl.Milliseconds()).Int()
+	if err != nil {
+		return err
+	}
+	if ok != 1 {
+		return ErrLockNotAcquired
+	}
+	return nil
+}
+
+var deleteStringIfValue = redis.NewScript(`
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+return redis.call("DEL", KEYS[1])
+`)
+
+func (c *Client) DeleteStringIfValue(ctx context.Context, key, value string) error {
+	if !c.isPhysicalKey(key) || strings.TrimSpace(value) == "" {
+		return ErrInvalidKey
+	}
+	deleted, err := deleteStringIfValue.Run(ctx, c.client, []string{key}, value).Int()
+	if err != nil {
+		return err
+	}
+	if deleted != 1 {
+		return ErrLockNotAcquired
+	}
+	return nil
+}
+
+var setJSONIfLease = redis.NewScript(`
+if redis.call("GET", KEYS[2]) ~= ARGV[1] then return 0 end
+redis.call("SET", KEYS[1], ARGV[2], "PX", ARGV[3])
+return 1
+`)
+
+// SetJSONIfValue atomically verifies an owner value in leaseKey before
+// replacing dataKey. It closes the owner-check/status-write race for queue
+// completion and failure transitions.
+func (c *Client) SetJSONIfValue(ctx context.Context, dataKey, leaseKey, owner string, value any, ttl time.Duration) error {
+	if !c.isPhysicalKey(dataKey) || !c.isPhysicalKey(leaseKey) || strings.TrimSpace(owner) == "" {
+		return ErrInvalidKey
+	}
+	if ttl <= 0 {
+		return ErrInvalidTTL
+	}
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	ok, err := setJSONIfLease.Run(ctx, c.client, []string{dataKey, leaseKey}, owner, payload, ttl.Milliseconds()).Int()
+	if err != nil {
+		return err
+	}
+	if ok != 1 {
+		return ErrLockNotAcquired
+	}
+	return nil
+}
+
+var releaseListClaim = redis.NewScript(`
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call("DEL", KEYS[1])
+redis.call("LREM", KEYS[2], 0, ARGV[2])
+return 1
+`)
+
+func (c *Client) ReleaseListClaim(ctx context.Context, leaseKey, listKey, owner, item string) error {
+	if !c.isPhysicalKey(leaseKey) || !c.isPhysicalKey(listKey) || strings.TrimSpace(owner) == "" || strings.TrimSpace(item) == "" {
+		return ErrInvalidKey
+	}
+	result, err := releaseListClaim.Run(ctx, c.client, []string{leaseKey, listKey}, owner, item).Int()
+	if err != nil {
+		return err
+	}
+	if result != 1 {
+		return ErrLockNotAcquired
+	}
+	return nil
+}
+
 const settingsRevisionTTL = 24 * time.Hour
 
 // setRevisionIfGreaterScript makes the advisory revision monotonic even when

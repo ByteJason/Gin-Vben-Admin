@@ -39,3 +39,12 @@ func TestParseCommandRejectsInvalidMigrationAction(t *testing.T) {
 		}
 	}
 }
+
+func TestParseTaskUpgradeCommands(t *testing.T) {
+	for _, name := range []string{"tasks-upgrade", "tasks-rollback"} {
+		got, err := parseCommand([]string{name, "--config", "deployment.yaml"})
+		if err != nil || string(got.action) != name || got.configPath != "deployment.yaml" {
+			t.Fatalf("%s: %+v %v", name, got, err)
+		}
+	}
+}

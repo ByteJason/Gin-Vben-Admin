@@ -87,6 +87,8 @@ func mountMedia(g gin.IRouter, h *Handler) {
 	library := g.Group("/library")
 	library.GET("", h.listMedia)
 	library.POST("", h.uploadMedia)
+	library.POST("/url-import", h.importMediaURLs)
+	library.POST("/crop-upload", h.uploadCroppedMedia)
 	library.PATCH("/:id", h.patchMedia)
 	library.PUT("/:id", h.patchMedia)
 	library.GET("/:id", h.getMedia)
@@ -1061,6 +1063,44 @@ func (h *Handler) uploadMedia(c *gin.Context) {
 		return
 	}
 	response.OK(c, out)
+}
+
+func (h *Handler) importMediaURLs(c *gin.Context) {
+	if h == nil || h.Catalog == nil {
+		h.unsupported(c)
+		return
+	}
+	if _, ok := scope(c); !ok {
+		return
+	}
+	var in struct {
+		URLs       []string `json:"urls"`
+		CategoryID string   `json:"categoryId"`
+		Note       string   `json:"note"`
+	}
+	if c.ShouldBindJSON(&in) != nil || len(in.URLs) == 0 || len(in.URLs) > 50 || len([]rune(in.Note)) > 200 {
+		response.Error(c, http.StatusBadRequest, 10000, "urls must contain 1 to 50 items")
+		return
+	}
+	for _, rawURL := range in.URLs {
+		if len([]rune(strings.TrimSpace(rawURL))) > 2048 {
+			response.Error(c, http.StatusBadRequest, 10000, "url is too long")
+			return
+		}
+	}
+	importer, ok := h.Catalog.(fileapp.MediaURLImporter)
+	if !ok {
+		h.unsupported(c)
+		return
+	}
+	response.OK(c, importer.ImportURLs(c.Request.Context(), in.URLs, strings.TrimSpace(in.CategoryID), strings.TrimSpace(in.Note), idem(c)))
+}
+
+func (h *Handler) uploadCroppedMedia(c *gin.Context) {
+	// Cropped uploads intentionally use the same multipart contract and server
+	// side MIME/size validation as ordinary uploads. The browser is responsible
+	// for producing the crop; bytes are never trusted based on crop metadata.
+	h.uploadMedia(c)
 }
 func (h *Handler) getMedia(c *gin.Context) {
 	if h == nil || h.Catalog == nil {

@@ -6,7 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
+	"strconv"
+	"time"
 
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/application/tasks"
 	taskdomain "github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/task"
@@ -38,7 +39,12 @@ func RegisterRoutesOn(group gin.IRouter, handler *Handler) {
 
 type input struct {
 	Name              string          `json:"name"`
+	Description       string          `json:"description"`
+	Payload           json.RawMessage `json:"payload"`
 	Type              string          `json:"type"`
+	ExecutorType      string          `json:"executorType"`
+	MethodKey         string          `json:"methodKey"`
+	HTTPConfig        json.RawMessage `json:"http"`
 	PayloadSchema     json.RawMessage `json:"payloadSchema"`
 	Cron              string          `json:"cron"`
 	Timezone          string          `json:"timezone"`
@@ -66,6 +72,9 @@ func registerRoutes(group gin.IRouter, handler *Handler) {
 	group.GET("", handler.list)
 	group.GET("/", handler.list)
 	group.POST("", handler.create)
+	group.GET("/runs", handler.allRuns)
+	group.GET("/methods", handler.methods)
+	group.GET("/preview", handler.preview)
 	group.PATCH("/:id", handler.update)
 	group.DELETE("/:id", handler.delete)
 	group.POST("/:id/run", handler.run)
@@ -79,12 +88,28 @@ func (h *Handler) list(c *gin.Context) {
 	if !scopeOK(c) {
 		return
 	}
-	items, err := h.service.List(c.Request.Context())
+	page, size, ok := pagination(c)
+	if !ok {
+		return
+	}
+	query := tasks.DefinitionQuery{Page: page, PageSize: size, Name: c.Query("name"), ExecutorType: c.Query("executorType")}
+	if value, present := c.GetQuery("enabled"); present {
+		enabled, err := strconv.ParseBool(value)
+		if err != nil {
+			writeError(c, tasks.ErrInvalidDefinition)
+			return
+		}
+		query.Enabled = &enabled
+	}
+	result, err := h.service.ListPage(c.Request.Context(), query)
 	if err != nil {
 		writeError(c, err)
 		return
 	}
-	response.OK(c, items)
+	for i := range result.Items {
+		result.Items[i] = tasks.PublicDefinition(result.Items[i])
+	}
+	response.OK(c, result)
 }
 
 func (h *Handler) create(c *gin.Context) {
@@ -101,7 +126,7 @@ func (h *Handler) create(c *gin.Context) {
 		writeError(c, err)
 		return
 	}
-	response.Write(c, http.StatusCreated, 0, "created", created)
+	response.Write(c, http.StatusCreated, 0, "created", tasks.PublicDefinition(created))
 }
 
 func (h *Handler) update(c *gin.Context) {
@@ -118,7 +143,7 @@ func (h *Handler) update(c *gin.Context) {
 		writeError(c, err)
 		return
 	}
-	response.OK(c, updated)
+	response.OK(c, tasks.PublicDefinition(updated))
 }
 
 func (h *Handler) delete(c *gin.Context) {
@@ -147,7 +172,7 @@ func (h *Handler) run(c *gin.Context) {
 		return
 	}
 	if h.runService == nil {
-		response.Write(c, http.StatusAccepted, 0, "accepted", gin.H{"taskId": definition.ID, "status": "pending", "idempotencyKey": strings.TrimSpace(request.IdempotencyKey)})
+		writeError(c, tasks.ErrRunQueueUnavailable)
 		return
 	}
 	run, err := h.runService.Enqueue(c.Request.Context(), definition.ID, request.Payload, request.IdempotencyKey)
@@ -167,10 +192,14 @@ func (h *Handler) listRuns(c *gin.Context) {
 		return
 	}
 	if h.runService == nil {
-		response.OK(c, []any{})
+		writeError(c, tasks.ErrRunQueueUnavailable)
 		return
 	}
-	items, err := h.runService.List(c.Request.Context(), c.Param("id"))
+	page, size, ok := pagination(c)
+	if !ok {
+		return
+	}
+	items, err := h.runService.ListPage(c.Request.Context(), tasks.RunQuery{Page: page, PageSize: size, TaskID: c.Param("id")})
 	if err != nil {
 		writeError(c, err)
 		return
@@ -232,7 +261,7 @@ func (in input) definition() tasks.TaskDefinition {
 		enabled = *in.Enabled
 	}
 	return tasks.TaskDefinition{
-		Name: in.Name, Type: in.Type, PayloadSchema: in.PayloadSchema, Cron: in.Cron,
+		Name: in.Name, Description: in.Description, Payload: in.Payload, Type: in.Type, ExecutorType: in.ExecutorType, MethodKey: in.MethodKey, HTTPConfig: in.HTTPConfig, PayloadSchema: in.PayloadSchema, Cron: in.Cron,
 		Timezone: in.Timezone, Enabled: enabled, Concurrency: in.Concurrency,
 		ConcurrencyPolicy: in.ConcurrencyPolicy, TimeoutSeconds: in.TimeoutSeconds,
 		MaxAttempts: in.MaxAttempts, IdempotencyKey: in.IdempotencyKey,
@@ -251,6 +280,12 @@ func writeError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, taskdomain.ErrInvalidType), errors.Is(err, taskdomain.ErrInvalidPayloadSchema), errors.Is(err, taskdomain.ErrInvalidCron), errors.Is(err, taskdomain.ErrInvalidTimezone), errors.Is(err, taskdomain.ErrInvalidConcurrency):
 		response.ErrorWithMessageKey(c, http.StatusBadRequest, 10000, "invalid task request", "tasks.request.invalid", nil)
+	case errors.Is(err, tasks.ErrInvalidDefinition), errors.Is(err, tasks.ErrInvalidHTTPPayload), errors.Is(err, taskdomain.ErrInvalidCronExpression):
+		response.ErrorWithMessageKey(c, http.StatusBadRequest, 10000, "invalid task configuration", "tasks.request.invalid", nil)
+	case errors.Is(err, tasks.ErrExecutorNotRegistered):
+		response.ErrorWithMessageKey(c, http.StatusBadRequest, 10000, "task method is not registered", "tasks.executor.notFound", nil)
+	case errors.Is(err, tasks.ErrRunConflict):
+		response.ErrorWithMessageKey(c, http.StatusConflict, 10010, "task idempotency conflict", "tasks.run.conflict", nil)
 	case errors.Is(err, tasks.ErrConflict):
 		response.ErrorWithMessageKey(c, http.StatusConflict, 10010, "task definition already exists", "tasks.definition.conflict", nil)
 	case errors.Is(err, tasks.ErrNotFound):
@@ -272,4 +307,75 @@ func writeError(c *gin.Context, err error) {
 
 func disabled(c *gin.Context) {
 	response.ErrorWithMessageKey(c, http.StatusServiceUnavailable, 40001, "task capability unavailable", "tasks.capability.unavailable", nil)
+}
+
+func pagination(c *gin.Context) (int, int, bool) {
+	page, size := 1, 20
+	var err error
+	if v := c.Query("page"); v != "" {
+		page, err = strconv.Atoi(v)
+		if err != nil || page < 1 || page > 100000 {
+			writeError(c, tasks.ErrInvalidDefinition)
+			return 0, 0, false
+		}
+	}
+	if v := c.Query("pageSize"); v != "" {
+		size, err = strconv.Atoi(v)
+		if err != nil || size < 1 || size > 100 {
+			writeError(c, tasks.ErrInvalidDefinition)
+			return 0, 0, false
+		}
+	}
+	return page, size, true
+}
+func (h *Handler) allRuns(c *gin.Context) {
+	if !scopeOK(c) {
+		return
+	}
+	if h.runService == nil {
+		writeError(c, tasks.ErrRunQueueUnavailable)
+		return
+	}
+	page, size, ok := pagination(c)
+	if !ok {
+		return
+	}
+	q := tasks.RunQuery{Page: page, PageSize: size, TaskID: c.Query("taskId"), TaskName: c.Query("taskName"), Status: c.Query("status"), TriggerSource: c.Query("triggerSource")}
+	for key, target := range map[string]**time.Time{"from": &q.From, "to": &q.To} {
+		if value := c.Query(key); value != "" {
+			at, err := time.Parse(time.RFC3339, value)
+			if err != nil {
+				writeError(c, tasks.ErrInvalidDefinition)
+				return
+			}
+			*target = &at
+		}
+	}
+	if q.From != nil && q.To != nil && q.From.After(*q.To) {
+		writeError(c, tasks.ErrInvalidDefinition)
+		return
+	}
+	result, err := h.runService.ListPage(c.Request.Context(), q)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	response.OK(c, result)
+}
+func (h *Handler) methods(c *gin.Context) {
+	if scopeOK(c) {
+		response.OK(c, h.service.Methods())
+	}
+}
+func (h *Handler) preview(c *gin.Context) {
+	if !scopeOK(c) {
+		return
+	}
+	zone := c.DefaultQuery("timezone", "UTC")
+	dates, err := taskdomain.NextExecutions(c.Query("cron"), zone, time.Now(), 5)
+	if err != nil {
+		writeError(c, taskdomain.ErrInvalidCron)
+		return
+	}
+	response.OK(c, dates)
 }

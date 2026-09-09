@@ -139,3 +139,38 @@ func TestTaskHandlerEnqueuesListsAndCancelsRun(t *testing.T) {
 		t.Fatalf("logs status=%d body=%s", w.Code, w.Body.String())
 	}
 }
+
+func TestTaskPagesPreviewAndUnavailableRun(t *testing.T) {
+	service := tasksapp.NewService(tasksapp.NewMemoryRepository())
+	ctx := taskContext(t, "page-tenant", "")
+	created, err := service.Create(ctx, tasksapp.TaskDefinition{Name: "Paged", Type: "manual", PayloadSchema: json.RawMessage(`{}`), Cron: "@hourly", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := gin.New()
+	RegisterRoutes(r, NewHandler(service))
+	for _, path := range []string{"/api/admin/v1/tasks?page=1&pageSize=10", "/api/admin/v1/tasks/preview?cron=%40hourly&timezone=UTC", "/api/admin/v1/tasks/methods"} {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest("GET", path, nil).WithContext(ctx))
+		if w.Code != 200 {
+			t.Fatalf("%s: %d %s", path, w.Code, w.Body.String())
+		}
+		if strings.Contains(path, "page=") && !strings.Contains(w.Body.String(), `"total":1`) {
+			t.Fatal(w.Body.String())
+		}
+	}
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest("POST", "/api/admin/v1/tasks/"+created.ID+"/run", strings.NewReader(`{"confirm":true}`)).WithContext(ctx))
+	if w.Code != 503 {
+		t.Fatalf("missing worker falsely accepted: %d", w.Code)
+	}
+	runs := tasksapp.NewRunService(service, tasksapp.NewMemoryRunRepository(), jobs.NewMemoryQueue(1))
+	_, _ = runs.Enqueue(ctx, created.ID, nil, "log-key")
+	r2 := gin.New()
+	RegisterRoutes(r2, NewHandler(service, runs))
+	w = httptest.NewRecorder()
+	r2.ServeHTTP(w, httptest.NewRequest("GET", "/api/admin/v1/tasks/runs?page=1&pageSize=10", nil).WithContext(ctx))
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"total":1`) {
+		t.Fatalf("global runs %d %s", w.Code, w.Body.String())
+	}
+}

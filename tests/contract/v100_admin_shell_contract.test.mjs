@@ -39,7 +39,7 @@ test('public information architecture freezes the five production groups', () =>
       'ops:operation-history:read',
     ],
     ['运维监控', '登录日志', '/ops/login-logs', 'ops:login-logs:read'],
-    ['运维监控', '定时任务', '/ops/tasks', 'ops:tasks:read'],
+    ['系统管理', '定时任务', '/system/tasks', 'ops:tasks:read'],
     ['运维监控', '数据作业', '/ops/data-jobs', 'ops:data-jobs:read'],
     ['媒体管理', '媒体库', '/media/library', 'media:library:read'],
   ];

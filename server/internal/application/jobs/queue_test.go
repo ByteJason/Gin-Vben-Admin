@@ -48,6 +48,22 @@ func TestMemoryQueueHonorsPerTaskAttemptLimit(t *testing.T) {
 	}
 }
 
+func TestMemoryQueuePreservesCallerIDAndClaimsPendingTask(t *testing.T) {
+	q := NewMemoryQueue(2)
+	task, err := q.Enqueue(context.Background(), Task{ID: "run-123", Type: "manual", PayloadVersion: 1, IdempotencyKey: "preserve-id"})
+	if err != nil || task.ID != "run-123" {
+		t.Fatalf("task=%+v err=%v", task, err)
+	}
+	claimed, err := q.ClaimPending(context.Background())
+	if err != nil || claimed.ID != task.ID || claimed.Status != StatusRunning {
+		t.Fatalf("claimed=%+v err=%v", claimed, err)
+	}
+	duplicate, err := q.Enqueue(context.Background(), Task{ID: "other", Type: "manual", PayloadVersion: 1, IdempotencyKey: "preserve-id"})
+	if err != nil || duplicate.ID != task.ID {
+		t.Fatalf("duplicate=%+v err=%v", duplicate, err)
+	}
+}
+
 func TestWorkerExecutesRegisteredHandlerWithTimeoutAndRetries(t *testing.T) {
 	q := NewMemoryQueue(2)
 	task, _ := q.Enqueue(context.Background(), Task{Type: "email.send", PayloadVersion: 1, IdempotencyKey: "w-1"})
@@ -128,5 +144,28 @@ func TestWorkerTimeoutRecordsFailure(t *testing.T) {
 	got, _ := q.Get(context.Background(), task.ID)
 	if got.Status != StatusFailed || got.Attempts != 1 {
 		t.Fatalf("got=%+v", got)
+	}
+}
+
+func TestWorkerRunOnceClaimsPendingQueue(t *testing.T) {
+	q := NewMemoryQueue(1)
+	task, err := q.Enqueue(context.Background(), Task{Type: "once", PayloadVersion: 1, IdempotencyKey: "run-once"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := NewWorker(q, WorkerOptions{})
+	called := 0
+	if err := w.Register("once", func(context.Context, Task) error { called++; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if called != 1 {
+		t.Fatalf("handler calls=%d", called)
+	}
+	got, _ := q.Get(context.Background(), task.ID)
+	if got.Status != StatusSucceeded {
+		t.Fatalf("task=%+v", got)
 	}
 }

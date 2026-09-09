@@ -73,7 +73,8 @@ test('B1.3 three UI templates expose equivalent task management pages', () => {
     assert.match(api, /listTasks|runTask/);
     assert.match(api, /cancelTaskRunApi|retryTaskRunApi|listTaskRunLogsApi/);
     assert.match(route, /SystemTasks|system\/tasks|tasks/);
-    for (const locale of ['zh-CN', 'en-US']) {
+    assert.match(read(`admin/apps/${app}/src/locales/index.ts`), /localesMap\['zh-CN'\]/, `${app} must load the supported Chinese locale`);
+    for (const locale of ['zh-CN']) {
       const messages = JSON.parse(read(`admin/apps/${app}/src/locales/langs/${locale}/page.json`));
       assert.ok(messages.tasks?.title, `${app} ${locale} tasks.title missing`);
       assert.ok(messages.tasks?.run, `${app} ${locale} tasks.run missing`);

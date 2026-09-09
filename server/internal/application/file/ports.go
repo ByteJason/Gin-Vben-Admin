@@ -111,6 +111,18 @@ type UploadInput struct {
 	Metadata       map[string]string
 	IdempotencyKey string
 }
+
+// URLImportResult is the per-item outcome of a remote media import. Partial
+// success is intentional: callers can retry only failed rows without
+// duplicating successful resources.
+type URLImportResult struct {
+	Index     int          `json:"index"`
+	SourceURL string       `json:"sourceUrl"`
+	Name      string       `json:"name,omitempty"`
+	Resource  *ResourceRef `json:"resource,omitempty"`
+	Success   bool         `json:"success"`
+	Error     string       `json:"error,omitempty"`
+}
 type OpenOptions struct{ RangeStart, RangeEnd *int64 }
 type URLRequest struct {
 	Purpose URLPurpose
@@ -239,6 +251,14 @@ type MediaCatalog interface {
 	CreateCategory(context.Context, CategoryInput) (CategoryRef, error)
 	UpdateCategory(context.Context, CategoryID, CategoryPatch) (CategoryRef, error)
 	DeleteCategory(context.Context, CategoryDeleteRequest) error
+}
+
+// MediaURLImporter is an optional capability implemented by catalog adapters
+// that support server-side remote ingestion. Keeping it separate preserves the
+// provider-neutral catalog port for stores that intentionally disable remote
+// fetching.
+type MediaURLImporter interface {
+	ImportURLs(context.Context, []string, string, string, string) []URLImportResult
 }
 
 type MediaUsageService interface {

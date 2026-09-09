@@ -48,6 +48,10 @@ func run(args []string, output io.Writer) int {
 	var cleanupReport *adminmigrations.CleanupReport
 	var redisClient *rediscache.Client
 	switch command.action {
+	case actionTasksUpgrade:
+		err = runner.ApplyTaskRunExecutionMetadata()
+	case actionTasksRollback:
+		err = runner.RevertTaskRunExecutionMetadata()
 	case actionUp:
 		err = runner.Up()
 	case actionDown:

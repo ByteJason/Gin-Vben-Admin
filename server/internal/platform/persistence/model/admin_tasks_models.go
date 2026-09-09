@@ -9,11 +9,16 @@ package model
 import "time"
 
 type TaskDefinition struct {
+	Description       string     `gorm:"column:description;size:2000;not null;default:'';comment:任务说明"`
+	Payload           JSONValue  `gorm:"column:payload;comment:默认业务参数"`
 	ID                string     `gorm:"column:id;size:64;primaryKey;comment:任务标识"`
 	TenantID          string     `gorm:"column:tenant_id;size:128;not null;uniqueIndex:uq_gvba_task_definitions_scope_name,priority:1;index:idx_gvba_task_definitions_scope_enabled,priority:1;comment:租户标识"`
 	OrgID             string     `gorm:"column:org_id;size:128;not null;default:'';uniqueIndex:uq_gvba_task_definitions_scope_name,priority:2;index:idx_gvba_task_definitions_scope_enabled,priority:2;comment:组织标识"`
 	Name              string     `gorm:"column:name;size:191;not null;uniqueIndex:uq_gvba_task_definitions_scope_name,priority:3;comment:任务名称"`
 	Type              string     `gorm:"column:type;size:32;not null;check:chk_gvba_task_definitions_type,type IN ('manual','http','webhook');comment:任务类型"`
+	ExecutorType      string     `gorm:"column:executor_type;size:64;not null;default:registered;comment:执行器类型"`
+	MethodKey         string     `gorm:"column:method_key;size:191;not null;default:;comment:注册方法键"`
+	HTTPConfig        JSONValue  `gorm:"column:http_config;comment:HTTP执行器配置"`
 	PayloadSchema     JSONValue  `gorm:"column:payload_schema;not null;comment:负载定义"`
 	Cron              string     `gorm:"column:cron;size:128;not null;default:'';comment:定时表达式"`
 	Timezone          string     `gorm:"column:timezone;size:64;not null;default:UTC;comment:时区"`
@@ -31,36 +36,52 @@ type TaskDefinition struct {
 func (TaskDefinition) TableName() string { return "gvba_task_definitions" }
 
 type TaskRun struct {
-	ID             string     `gorm:"column:id;size:64;primaryKey;comment:运行标识"`
-	TaskID         string     `gorm:"column:task_id;size:64;not null;index:idx_gvba_task_runs_scope_task_status,priority:3;comment:任务标识"`
-	TenantID       string     `gorm:"column:tenant_id;size:128;not null;uniqueIndex:uq_gvba_task_runs_scope_idempotency,priority:1;index:idx_gvba_task_runs_scope_task_status,priority:1;comment:租户标识"`
-	OrgID          string     `gorm:"column:org_id;size:128;not null;default:'';uniqueIndex:uq_gvba_task_runs_scope_idempotency,priority:2;index:idx_gvba_task_runs_scope_task_status,priority:2;comment:组织标识"`
-	QueueTaskID    string     `gorm:"column:queue_task_id;size:64;not null;default:'';index:idx_gvba_task_runs_queue_task;comment:队列任务标识"`
-	IdempotencyKey string     `gorm:"column:idempotency_key;size:191;not null;uniqueIndex:uq_gvba_task_runs_scope_idempotency,priority:3;comment:幂等键"`
-	Status         string     `gorm:"column:status;size:32;not null;default:pending;index:idx_gvba_task_runs_scope_task_status,priority:4;check:chk_gvba_task_runs_status,status IN ('pending','running','succeeded','failed','dead_letter','cancelled');comment:运行状态"`
-	PayloadDigest  string     `gorm:"column:payload_digest;type:char(64);not null;comment:负载摘要"`
-	AttemptCount   int32      `gorm:"column:attempt_count;not null;default:0;check:chk_gvba_task_runs_attempts,attempt_count >= 0 AND max_attempts > 0;comment:尝试次数"`
-	MaxAttempts    int32      `gorm:"column:max_attempts;not null;default:1;comment:最大尝试次数"`
-	LastErrorCode  string     `gorm:"column:last_error_code;size:128;not null;default:'';comment:最近错误码"`
-	StartedAt      *time.Time `gorm:"column:started_at;precision:6;comment:开始时间"`
-	FinishedAt     *time.Time `gorm:"column:finished_at;precision:6;comment:完成时间"`
-	DeletedAt      *time.Time `gorm:"column:deleted_at;precision:6;comment:删除时间"`
-	CreatedAt      time.Time  `gorm:"column:created_at;precision:6;not null;default:CURRENT_TIMESTAMP(6);index:idx_gvba_task_runs_scope_task_status,priority:5;comment:创建时间"`
-	UpdatedAt      time.Time  `gorm:"column:updated_at;precision:6;not null;default:CURRENT_TIMESTAMP(6);comment:更新时间"`
+	TaskName        string     `gorm:"column:task_name;size:191;not null;default:'';comment:执行时任务名称"`
+	TaskDescription string     `gorm:"column:task_description;size:2000;not null;default:'';comment:执行时任务说明"`
+	ConfigSnapshot  JSONValue  `gorm:"column:config_snapshot;comment:脱敏执行配置快照"`
+	ID              string     `gorm:"column:id;size:64;primaryKey;comment:运行标识"`
+	TaskID          string     `gorm:"column:task_id;size:64;not null;index:idx_gvba_task_runs_scope_task_status,priority:3;comment:任务标识"`
+	TenantID        string     `gorm:"column:tenant_id;size:128;not null;uniqueIndex:uq_gvba_task_runs_scope_idempotency,priority:1;index:idx_gvba_task_runs_scope_task_status,priority:1;comment:租户标识"`
+	OrgID           string     `gorm:"column:org_id;size:128;not null;default:'';uniqueIndex:uq_gvba_task_runs_scope_idempotency,priority:2;index:idx_gvba_task_runs_scope_task_status,priority:2;comment:组织标识"`
+	QueueTaskID     string     `gorm:"column:queue_task_id;size:64;not null;default:'';index:idx_gvba_task_runs_queue_task;comment:队列任务标识"`
+	IdempotencyKey  string     `gorm:"column:idempotency_key;size:191;not null;uniqueIndex:uq_gvba_task_runs_scope_idempotency,priority:3;comment:幂等键"`
+	Status          string     `gorm:"column:status;size:32;not null;default:pending;index:idx_gvba_task_runs_scope_task_status,priority:4;check:chk_gvba_task_runs_status,status IN ('pending','running','succeeded','failed','dead_letter','cancelled');comment:运行状态"`
+	PayloadDigest   string     `gorm:"column:payload_digest;type:char(64);not null;comment:负载摘要"`
+	AttemptCount    int32      `gorm:"column:attempt_count;not null;default:0;check:chk_gvba_task_runs_attempts,attempt_count >= 0 AND max_attempts > 0;comment:尝试次数"`
+	MaxAttempts     int32      `gorm:"column:max_attempts;not null;default:1;comment:最大尝试次数"`
+	LastErrorCode   string     `gorm:"column:last_error_code;size:128;not null;default:'';comment:最近错误码"`
+	ErrorCode       string     `gorm:"column:error_code;size:128;not null;default:'';comment:错误码"`
+	TriggerSource   string     `gorm:"column:trigger_source;size:32;not null;default:manual;comment:触发来源"`
+	ExecutorType    string     `gorm:"column:executor_type;size:64;not null;default:registered;comment:执行器类型"`
+	StartedAt       *time.Time `gorm:"column:started_at;precision:6;comment:开始时间"`
+	FinishedAt      *time.Time `gorm:"column:finished_at;precision:6;comment:完成时间"`
+	DurationMS      int64      `gorm:"column:duration_ms;not null;default:0;comment:执行耗时毫秒"`
+	ResultSummary   string     `gorm:"column:result_summary;size:512;not null;default:'';comment:结果摘要"`
+	RedactedOutput  string     `gorm:"column:redacted_output;type:text;comment:脱敏输出"`
+	DeletedAt       *time.Time `gorm:"column:deleted_at;precision:6;comment:删除时间"`
+	CreatedAt       time.Time  `gorm:"column:created_at;precision:6;not null;default:CURRENT_TIMESTAMP(6);index:idx_gvba_task_runs_scope_task_status,priority:5;comment:创建时间"`
+	UpdatedAt       time.Time  `gorm:"column:updated_at;precision:6;not null;default:CURRENT_TIMESTAMP(6);comment:更新时间"`
 }
 
 func (TaskRun) TableName() string { return "gvba_task_runs" }
 
 type TaskRunLog struct {
-	ID        string     `gorm:"column:id;size:64;primaryKey;comment:日志标识"`
-	RunID     string     `gorm:"column:run_id;size:64;not null;index:idx_gvba_task_run_logs_run_created,priority:1;comment:运行标识"`
-	Attempt   int32      `gorm:"column:attempt;not null;default:0;comment:尝试序号"`
-	Status    string     `gorm:"column:status;size:32;not null;check:chk_gvba_task_run_logs_status,status IN ('pending','running','succeeded','failed','dead_letter','cancelled');comment:运行状态"`
-	ErrorCode string     `gorm:"column:error_code;size:128;not null;default:'';comment:错误码"`
-	Message   string     `gorm:"column:message;size:512;not null;default:'';comment:日志消息"`
-	DeletedAt *time.Time `gorm:"column:deleted_at;precision:6;comment:删除时间"`
-	CreatedAt time.Time  `gorm:"column:created_at;precision:6;not null;default:CURRENT_TIMESTAMP(6);index:idx_gvba_task_run_logs_run_created,priority:2;comment:创建时间"`
-	UpdatedAt time.Time  `gorm:"column:updated_at;precision:6;not null;default:CURRENT_TIMESTAMP(6);comment:更新时间"`
+	ID             string     `gorm:"column:id;size:64;primaryKey;comment:日志标识"`
+	RunID          string     `gorm:"column:run_id;size:64;not null;index:idx_gvba_task_run_logs_run_created,priority:1;comment:运行标识"`
+	Attempt        int32      `gorm:"column:attempt;not null;default:0;comment:尝试序号"`
+	Status         string     `gorm:"column:status;size:32;not null;check:chk_gvba_task_run_logs_status,status IN ('pending','running','succeeded','failed','dead_letter','cancelled');comment:运行状态"`
+	TriggerSource  string     `gorm:"column:trigger_source;size:32;not null;default:manual;comment:触发来源"`
+	ExecutorType   string     `gorm:"column:executor_type;size:64;not null;default:registered;comment:执行器类型"`
+	ErrorCode      string     `gorm:"column:error_code;size:128;not null;default:'';comment:错误码"`
+	Message        string     `gorm:"column:message;size:512;not null;default:'';comment:日志消息"`
+	StartedAt      *time.Time `gorm:"column:started_at;precision:6;comment:开始时间"`
+	FinishedAt     *time.Time `gorm:"column:finished_at;precision:6;comment:完成时间"`
+	DurationMS     int64      `gorm:"column:duration_ms;not null;default:0;comment:执行耗时毫秒"`
+	ResultSummary  string     `gorm:"column:result_summary;size:512;not null;default:'';comment:结果摘要"`
+	RedactedOutput string     `gorm:"column:redacted_output;type:text;comment:脱敏输出"`
+	DeletedAt      *time.Time `gorm:"column:deleted_at;precision:6;comment:删除时间"`
+	CreatedAt      time.Time  `gorm:"column:created_at;precision:6;not null;default:CURRENT_TIMESTAMP(6);index:idx_gvba_task_run_logs_run_created,priority:2;comment:创建时间"`
+	UpdatedAt      time.Time  `gorm:"column:updated_at;precision:6;not null;default:CURRENT_TIMESTAMP(6);comment:更新时间"`
 }
 
 func (TaskRunLog) TableName() string { return "gvba_task_run_logs" }

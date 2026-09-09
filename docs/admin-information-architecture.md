@@ -27,7 +27,7 @@
 | 运维监控 | 服务器状态 | `/ops/server-status` | `ops:server-status:read` | 实例/build/runtime；CPU、内存、文件系统；数据库与 Redis 健康、延迟、连接池及非敏感计数；实时会话趋势和局部降级 |
 | 运维监控 | 操作历史 | `/ops/operation-history` | `ops:operation-history:read` | 登录、授权、配置和数据操作审计的筛选、详情与导出 |
 | 运维监控 | 登录日志 | `/ops/login-logs` | `ops:login-logs:read` | 登录事件、设备、IP、时间和撤销状态查询 |
-| 运维监控 | 定时任务 | `/ops/tasks` | `ops:tasks:read` | 调度、手动运行、取消、重试、日志、并发和失败状态 |
+| 系统管理 | 定时任务 | `/system/tasks` | `ops:tasks:read` | 调度、手动运行、取消、重试、日志、并发和失败状态 |
 | 运维监控 | 数据作业 | `/ops/data-jobs` | `ops:data-jobs:read` | 模板、导入预检、异步导入导出、进度、错误行与下载状态 |
 | 媒体管理 | 媒体库 | `/media/library` | `media:library:read` | 当前本地 provider 的对象元数据、上传下载、签名 URL、访问控制、删除和清理预检；新对象按 `YYYY/MMDD/<id>[.ext]` 分区，远程对象存储尚未交付 |
 
@@ -121,7 +121,7 @@ Ant Design Vue、Element Plus 与 Naive UI 必须共享相同的路由、权限�
 | 2 | 运维监控 | 服务器状态 | `/ops/server-status` | `/system/monitor` |
 | 2 | 运维监控 | 操作历史 | `/ops/operation-history` | `/system/audit` |
 | 2 | 运维监控 | 登录日志 | `/ops/login-logs` | `/iam/users/:id/login-events` 查询投影 |
-| 2 | 运维监控 | 定时任务 | `/ops/tasks` | `/system/tasks` |
+| 4 | 系统管理 | 定时任务 | `/system/tasks` | `/ops/tasks` |
 | 3 | 后台权限 | 角色管理 | `/iam/roles` | 原路径 |
 | 3 | 后台权限 | 菜单管理 | `/iam/menus` | 原路径 |
 | 3 | 后台权限 | 权限管理 | `/iam/permissions` | 原路径 |

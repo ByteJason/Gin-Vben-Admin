@@ -24,7 +24,16 @@ type TaskDefinition struct {
 	TenantID          string          `json:"tenantId"`
 	OrgID             string          `json:"orgId,omitempty"`
 	Name              string          `json:"name"`
+	Description       string          `json:"description"`
+	Payload           json.RawMessage `json:"payload"`
+	NextRunAt         *time.Time      `json:"nextRunAt,omitempty"`
+	LastRunAt         *time.Time      `json:"lastRunAt,omitempty"`
+	LastRunStatus     string          `json:"lastRunStatus,omitempty"`
+	LastRunErrorCode  string          `json:"lastRunErrorCode,omitempty"`
 	Type              string          `json:"type"`
+	ExecutorType      string          `json:"executorType,omitempty"`
+	MethodKey         string          `json:"methodKey,omitempty"`
+	HTTPConfig        json.RawMessage `json:"http,omitempty"`
 	PayloadSchema     json.RawMessage `json:"payloadSchema"`
 	Cron              string          `json:"cron,omitempty"`
 	Timezone          string          `json:"timezone"`
@@ -57,10 +66,11 @@ func (d TaskDefinition) Validate() error {
 		return ErrInvalidPayloadSchema
 	}
 	if strings.TrimSpace(d.Cron) != "" {
-		if n := len(strings.Fields(d.Cron)); n < 5 || n > 7 {
-			return fmt.Errorf("%w: expected 5-7 fields", ErrInvalidCron)
+		if err := ValidateCron(d.Cron); err != nil {
+			return ErrInvalidCron
 		}
 	}
+
 	if strings.TrimSpace(d.Timezone) == "" {
 		return ErrInvalidTimezone
 	}

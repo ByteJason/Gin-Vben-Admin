@@ -1551,6 +1551,12 @@ paths:
       operationId: listTasks
       summary: 查询当前租户的持久化任务定义
       security: [{BearerAuth: []}]
+      parameters:
+        - { name: name, in: query, schema: { type: string, maxLength: 160 } }
+        - { name: executorType, in: query, schema: { type: string, enum: [registered, http] } }
+        - { name: enabled, in: query, schema: { type: boolean } }
+        - { name: page, in: query, required: false, description: 页码（从 1 开始，缺省为 1）, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, required: false, description: 每页条数，缺省为 20，最大 100, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
       responses:
         '200':
           description: 任务定义列表
@@ -1562,8 +1568,7 @@ paths:
                   - type: object
                     properties:
                       data:
-                        type: array
-                        items: { $ref: '#/components/schemas/TaskDefinition' }
+                        $ref: '#/components/schemas/TaskDefinitionPage'
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -1583,6 +1588,72 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
+  /api/admin/v1/tasks/runs:
+    get:
+      tags: [Tasks]
+      operationId: listAllTaskRuns
+      summary: 跨任务分页查询执行记录
+      security: [{BearerAuth: []}]
+      parameters:
+        - { name: taskId, in: query, required: false, schema: { type: string, maxLength: 128 } }
+        - { name: taskName, in: query, required: false, schema: { type: string, maxLength: 191 } }
+        - { name: triggerSource, in: query, schema: { type: string, enum: [manual, schedule, retry, system] } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: status, in: query, required: false, schema: { type: string, enum: [pending, running, succeeded, failed, dead_letter, cancelled, timeout, skipped] } }
+        - { name: page, in: query, required: false, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200':
+          description: 跨任务执行记录分页
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/TaskRunPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/admin/v1/tasks/methods:
+    get:
+      tags: [Tasks]
+      security: [{BearerAuth: []}]
+      operationId: listTaskMethods
+      summary: List compiled-in registered task methods
+      responses:
+        '200':
+          description: Registered method keys
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { type: array, items: { type: string } }
+  /api/admin/v1/tasks/preview:
+    get:
+      tags: [Tasks]
+      security: [{BearerAuth: []}]
+      operationId: previewTaskSchedule
+      summary: Preview the next five execution timestamps using the server cron parser
+      parameters:
+        - { in: query, name: cron, required: true, schema: { type: string } }
+        - { in: query, name: timezone, schema: { type: string, default: UTC } }
+      responses:
+        '200':
+          description: Computed execution timestamps
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { type: array, items: { type: string, format: date-time } }
+        '400': { $ref: '#/components/responses/BadRequest' }
   /api/admin/v1/tasks/{id}:
     patch:
       tags: [Tasks]
@@ -1642,6 +1713,8 @@ paths:
       security: [{BearerAuth: []}]
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+        - { name: page, in: query, required: false, description: 页码（从 1 开始，缺省为 1）, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, required: false, description: 每页条数，缺省为 20，最大 100, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
       responses:
         '200':
           description: 执行记录列表
@@ -1653,8 +1726,7 @@ paths:
                   - type: object
                     properties:
                       data:
-                        type: array
-                        items: { $ref: '#/components/schemas/TaskRun' }
+                        $ref: '#/components/schemas/TaskRunPage'
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -1667,6 +1739,8 @@ paths:
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
         - { name: runId, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+        - { name: page, in: query, required: false, description: 页码（从 1 开始，缺省为 1）, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, required: false, description: 每页条数，缺省为 100，最大 200, schema: { type: integer, minimum: 1, maximum: 200, default: 100 } }
       responses:
         '200': { $ref: '#/components/responses/SuccessResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
@@ -2355,6 +2429,42 @@ paths:
       responses:
         '200': { $ref: '#/components/responses/MediaResourceResponse' }
         '400': { $ref: '#/components/responses/BadRequest' }
+  /api/admin/v1/media/library/url-import:
+    post:
+      tags: [Media]
+      operationId: importMediaLibraryURLs
+      summary: 从远程 URL 下载并导入媒体（逐条结果）
+      security: [{BearerAuth: []}]
+      parameters:
+        - { name: Idempotency-Key, in: header, required: false, schema: { type: string, maxLength: 191 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [urls]
+              properties:
+                urls: { type: array, minItems: 1, maxItems: 50, items: { type: string, format: uri } }
+                categoryId: { type: string }
+                note: { type: string, maxLength: 200 }
+      responses:
+        '200': { $ref: '#/components/responses/MediaURLImportResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /api/admin/v1/media/library/crop-upload:
+    post:
+      tags: [Media]
+      operationId: uploadCroppedMediaResource
+      summary: 上传浏览器裁剪后的媒体文件
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { $ref: '#/components/schemas/MediaUploadRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/MediaResourceResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
   /api/admin/v1/media/library/{id}:
     patch:
       tags: [Media]
@@ -2951,6 +3061,16 @@ components:
         acl: { type: string, enum: [private, public-read] }
         categoryId: { type: string }
         metadata: { type: object, additionalProperties: { type: string } }
+    MediaURLImportResult:
+      type: object
+      required: [index, sourceUrl, success]
+      properties:
+        index: { type: integer, minimum: 1 }
+        sourceUrl: { type: string, format: uri }
+        name: { type: string }
+        success: { type: boolean }
+        error: { type: string }
+        resource: { $ref: '#/components/schemas/MediaResource' }
     MediaResourcePatch:
       type: object
       properties:
@@ -3089,10 +3209,19 @@ components:
         tenantId: { type: string }
         orgId: { type: string }
         name: { type: string }
+        description: { type: string, maxLength: 2000 }
         type: { type: string, enum: [manual, http, webhook] }
         payloadSchema: { type: object, additionalProperties: true }
+        payload: { type: object, additionalProperties: true }
         cron: { type: string }
         timezone: { type: string }
+        lastRunAt: { type: string, format: date-time }
+        lastRunStatus: { type: string, enum: [pending, running, succeeded, failed, dead_letter, cancelled] }
+        lastRunErrorCode: { type: string }
+        nextRunAt: { type: string, format: date-time, nullable: true, description: 调度器计算的下一次执行时间 }
+        executorType: { type: string, enum: [registered, http] }
+        methodKey: { type: string, maxLength: 191, description: 注册执行器的方法键 }
+        http: { $ref: '#/components/schemas/TaskHTTPConfig' }
         enabled: { type: boolean }
         concurrency: { type: integer, minimum: 1 }
         concurrencyPolicy: { type: string, enum: [allow, forbid, replace] }
@@ -3107,17 +3236,33 @@ components:
       additionalProperties: false
       required: [name, type, payloadSchema]
       properties:
-        name: { type: string, minLength: 1, maxLength: 191 }
+        name: { type: string, minLength: 1, maxLength: 160 }
+        description: { type: string, maxLength: 2000 }
         type: { type: string, enum: [manual, http, webhook] }
         payloadSchema: { type: object, additionalProperties: true }
+        payload: { type: object, additionalProperties: true }
         cron: { type: string, maxLength: 128 }
         timezone: { type: string, default: UTC }
+        executorType: { type: string, enum: [registered, http] }
+        methodKey: { type: string, maxLength: 191 }
+        http: { $ref: '#/components/schemas/TaskHTTPConfig' }
         enabled: { type: boolean, default: true }
         concurrency: { type: integer, minimum: 1, default: 1 }
         concurrencyPolicy: { type: string, enum: [allow, forbid, replace], default: forbid }
         timeoutSeconds: { type: integer, minimum: 1, default: 30 }
         maxAttempts: { type: integer, minimum: 1, maximum: 10, default: 3 }
         idempotencyKey: { type: string, maxLength: 191 }
+    TaskHTTPConfig:
+      type: object
+      additionalProperties: false
+      required: [url, method]
+      properties:
+        url: { type: string, maxLength: 2048, description: "HTTP(S) URL; credential-bearing values are returned as [REDACTED]" }
+        method: { type: string, enum: [GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS] }
+        headers: { type: object, additionalProperties: { type: string, maxLength: 4096 } }
+        body: { oneOf: [{ type: string, maxLength: 1048576 }, { type: object, additionalProperties: true }] }
+        allowInternal: { type: boolean, default: false }
+        timeoutSeconds: { type: integer, minimum: 1, maximum: 3600, default: 30 }
     TaskRunRequest:
       type: object
       additionalProperties: false
@@ -3132,6 +3277,9 @@ components:
       properties:
         id: { type: string }
         taskId: { type: string }
+        taskName: { type: string }
+        taskDescription: { type: string }
+        configSnapshot: { type: object, additionalProperties: true, description: Redacted immutable execution configuration }
         tenantId: { type: string }
         orgId: { type: string }
         queueTaskId: { type: string }
@@ -3141,8 +3289,15 @@ components:
         attemptCount: { type: integer, minimum: 0 }
         maxAttempts: { type: integer, minimum: 1 }
         lastErrorCode: { type: string }
+        errorCode: { type: string }
+        triggerSource: { type: string, enum: [manual, schedule, retry, system] }
+        executorType: { type: string, enum: [manual, http, webhook, registered] }
         startedAt: { type: string, format: date-time }
         finishedAt: { type: string, format: date-time }
+        durationMs: { type: integer, format: int64, minimum: 0 }
+        resultSummary: { type: string, maxLength: 512 }
+        redactedOutput: { type: string, maxLength: 32800 }
+        deletedAt: { type: string, format: date-time, nullable: true }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
     TaskRunLog:
@@ -3153,10 +3308,63 @@ components:
         runId: { type: string }
         attempt: { type: integer, minimum: 0 }
         status: { type: string, enum: [pending, running, succeeded, failed, dead_letter, cancelled] }
+        triggerSource: { type: string, enum: [manual, schedule, retry, system] }
+        executorType: { type: string, enum: [manual, http, webhook, registered] }
         errorCode: { type: string }
         message: { type: string }
+        startedAt: { type: string, format: date-time, nullable: true }
+        finishedAt: { type: string, format: date-time, nullable: true }
+        durationMs: { type: integer, format: int64, minimum: 0 }
+        resultSummary: { type: string, maxLength: 512 }
+        redactedOutput: { type: string, maxLength: 32800 }
+        deletedAt: { type: string, format: date-time, nullable: true }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+    TaskDefinitionPage:
+      type: object
+      required: [items, total, page, pageSize]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/TaskDefinition' } }
+        total: { type: integer, format: int64, minimum: 0 }
+        page: { type: integer, minimum: 1 }
+        pageSize: { type: integer, minimum: 1, maximum: 100 }
+    TaskRunPage:
+      type: object
+      required: [items, total, page, pageSize]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/TaskRun' } }
+        total: { type: integer, format: int64, minimum: 0 }
+        page: { type: integer, minimum: 1 }
+        pageSize: { type: integer, minimum: 1, maximum: 100 }
+    TaskRunLogPage:
+      type: object
+      required: [items, total, page, pageSize]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/TaskRunLog' } }
+        total: { type: integer, format: int64, minimum: 0 }
+        page: { type: integer, minimum: 1 }
+        pageSize: { type: integer, minimum: 1, maximum: 100 }
+    TaskListQuery:
+      type: object
+      additionalProperties: false
+      properties:
+        page: { type: integer, minimum: 1, default: 1 }
+        pageSize: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        name: { type: string, maxLength: 191 }
+        executorType: { type: string, enum: [registered, http] }
+        enabled: { type: boolean }
+    TaskRunListQuery:
+      type: object
+      additionalProperties: false
+      properties:
+        taskId: { type: string, maxLength: 128 }
+        taskName: { type: string, maxLength: 191 }
+        status: { type: string, enum: [pending, running, succeeded, failed, dead_letter, cancelled, timeout, skipped] }
+        triggerSource: { type: string, enum: [manual, schedule, retry, system] }
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        page: { type: integer, minimum: 1, default: 1 }
+        pageSize: { type: integer, minimum: 1, maximum: 100, default: 20 }
     ImportRowError:
       type: object
       required: [row, code, messageKey]
@@ -4630,6 +4838,11 @@ components:
       content:
         application/json:
           schema: { allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, properties: { data: { $ref: '#/components/schemas/MediaResource' } } }] }
+    MediaURLImportResponse:
+      description: 远程媒体导入逐条结果
+      content:
+        application/json:
+          schema: { allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, properties: { data: { type: array, items: { $ref: '#/components/schemas/MediaURLImportResult' } } } }] }
     MediaCategoryListResponse:
       description: 媒体分类列表
       content:

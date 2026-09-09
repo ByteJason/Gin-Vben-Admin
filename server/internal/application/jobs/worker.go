@@ -70,6 +70,7 @@ func (w *Worker) Execute(ctx context.Context, id string) error {
 	handler, ok := w.handlers[task.Type]
 	w.mu.RUnlock()
 	if !ok {
+		_ = w.queue.Fail(context.Background(), id, ErrHandlerNotFound)
 		return ErrHandlerNotFound
 	}
 	w.mu.Lock()
@@ -98,13 +99,43 @@ func (w *Worker) Execute(ctx context.Context, id string) error {
 			return err
 		}
 	}
-	callCtx := ctx
-	var cancel context.CancelFunc
+	callCtx, cancelCause := context.WithCancelCause(ctx)
+	defer cancelCause(nil)
 	if w.timeout > 0 {
-		callCtx, cancel = context.WithTimeout(ctx, w.timeout)
-		defer cancel()
+		var timeoutCancel context.CancelFunc
+		callCtx, timeoutCancel = context.WithTimeout(callCtx, w.timeout)
+		defer timeoutCancel()
+	}
+	var renewErr error
+	stopHeartbeat := make(chan struct{})
+	heartbeatDone := make(chan struct{})
+	if leaseQueue, ok := w.queue.(RunningLeaseQueue); ok {
+		go func() {
+			defer close(heartbeatDone)
+			ticker := time.NewTicker(10 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					if err := leaseQueue.RenewClaim(context.Background(), id); err != nil {
+						renewErr = err
+						cancelCause(ErrClaimLost)
+						return
+					}
+				case <-stopHeartbeat:
+					return
+				}
+			}
+		}()
 	}
 	err = handler(callCtx, task)
+	close(stopHeartbeat)
+	if _, ok := w.queue.(RunningLeaseQueue); ok {
+		<-heartbeatDone
+	}
+	if err == nil && renewErr != nil {
+		err = renewErr
+	}
 	if err == nil {
 		return w.queue.Complete(context.Background(), id)
 	}
@@ -119,18 +150,22 @@ func (w *Worker) Execute(ctx context.Context, id string) error {
 	return err
 }
 
-// RunOnce executes the first pending or retryable task available in MemoryQueue.
+// RunOnce claims and executes one pending or retryable task from any queue
+// adapter implementing PendingQueue. Adapters that do not expose dequeue
+// semantics remain enqueue/get-only and are intentionally not polled.
 func (w *Worker) RunOnce(ctx context.Context) error {
 	if w == nil || w.queue == nil {
 		return ErrWorkerUnavailable
 	}
-	if q, ok := w.queue.(*MemoryQueue); ok {
-		for _, task := range q.snapshot() {
-			if task.Status == StatusPending || task.Status == StatusFailed {
-				return w.Execute(ctx, task.ID)
-			}
+	if q, ok := w.queue.(PendingQueue); ok {
+		task, err := q.ClaimPending(ctx)
+		if errors.Is(err, ErrQueueEmpty) {
+			return nil
 		}
-		return nil
+		if err != nil {
+			return err
+		}
+		return w.Execute(ctx, task.ID)
 	}
 	return nil
 }

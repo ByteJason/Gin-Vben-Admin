@@ -15,6 +15,8 @@ const (
 	actionDown                action = "down"
 	actionStatus              action = "status"
 	actionSettingsMailCleanup action = "settings-mail-cleanup"
+	actionTasksUpgrade        action = "tasks-upgrade"
+	actionTasksRollback       action = "tasks-rollback"
 )
 
 type command struct {
@@ -67,9 +69,9 @@ func splitAction(args []string) (action, []string, error) {
 		}
 	}
 	if len(args) == 0 {
-		return "", nil, errors.New("migration action is required: up, down, status, or settings-mail-cleanup")
+		return "", nil, errors.New("migration action is required: up, down, status, settings-mail-cleanup, tasks-upgrade, or tasks-rollback")
 	}
-	return "", nil, fmt.Errorf("invalid migration action %q: use up, down, status, or settings-mail-cleanup", args[0])
+	return "", nil, fmt.Errorf("invalid migration action %q: use up, down, status, settings-mail-cleanup, tasks-upgrade, or tasks-rollback", args[0])
 }
 
 // parseAction accepts the canonical cleanup command plus short aliases used by
@@ -77,6 +79,10 @@ func splitAction(args []string) (action, []string, error) {
 // stable while still exposing the immutable v003 migration name.
 func parseAction(value string) (action, bool) {
 	switch action(strings.ToLower(strings.TrimSpace(value))) {
+	case actionTasksUpgrade:
+		return actionTasksUpgrade, true
+	case actionTasksRollback:
+		return actionTasksRollback, true
 	case actionUp:
 		return actionUp, true
 	case actionDown:

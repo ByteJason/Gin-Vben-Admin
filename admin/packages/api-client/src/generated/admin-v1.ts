@@ -1,5 +1,5 @@
 // Generated from contracts/openapi/admin-v1.yaml; DO NOT EDIT.
-// CONTRACT_SHA256=5488e4377160d37eb5c3d4fbc32bd6bea4cea2b7ab3da808500cf277837f7646
+// CONTRACT_SHA256=893fca89af0f41556aca38b35ecfaeef784b9d9776c1184338af5516180658ed
 
 export const ADMIN_API_PREFIX = '/admin/v1' as const;
 
@@ -85,6 +85,9 @@ export const ADMIN_ENDPOINTS = {
   deleteDictionaryItem: '/admin/v1/dictionaries/{type}/items/{id}',
   listTasks: '/admin/v1/tasks',
   createTask: '/admin/v1/tasks',
+  listAllTaskRuns: '/admin/v1/tasks/runs',
+  listTaskMethods: '/admin/v1/tasks/methods',
+  previewTaskSchedule: '/admin/v1/tasks/preview',
   updateTask: '/admin/v1/tasks/{id}',
   deleteTask: '/admin/v1/tasks/{id}',
   runTask: '/admin/v1/tasks/{id}/run',
@@ -136,6 +139,8 @@ export const ADMIN_ENDPOINTS = {
   verifyVerificationChallenge: '/admin/v1/notification/verification/challenges/{id}/verify',
   listMediaLibrary: '/admin/v1/media/library',
   uploadMediaResource: '/admin/v1/media/library',
+  importMediaLibraryURLs: '/admin/v1/media/library/url-import',
+  uploadCroppedMediaResource: '/admin/v1/media/library/crop-upload',
   updateMediaResource: '/admin/v1/media/library/{id}',
   replaceMediaResource: '/admin/v1/media/library/{id}',
   deleteMediaResource: '/admin/v1/media/library/{id}',
@@ -503,10 +508,19 @@ export interface TaskDefinition {
   tenantId: string;
   orgId?: string;
   name: string;
+  description?: string;
   type: 'manual' | 'http' | 'webhook';
   payloadSchema: Record<string, unknown>;
+  payload?: Record<string, unknown>;
   cron?: string;
   timezone: string;
+  nextRunAt?: string;
+  lastRunAt?: string;
+  lastRunStatus?: TaskRun['status'];
+  lastRunErrorCode?: string;
+  executorType?: 'registered' | 'http';
+  methodKey?: string;
+  http?: TaskHTTPConfig;
   enabled: boolean;
   concurrency: number;
   concurrencyPolicy: 'allow' | 'forbid' | 'replace';
@@ -519,10 +533,15 @@ export interface TaskDefinition {
 }
 export interface TaskDefinitionInput {
   name: string;
+  description?: string;
   type: 'manual' | 'http' | 'webhook';
   payloadSchema: Record<string, unknown>;
+  payload?: Record<string, unknown>;
   cron?: string;
   timezone?: string;
+  executorType?: 'registered' | 'http';
+  methodKey?: string;
+  http?: TaskHTTPConfig;
   enabled?: boolean;
   concurrency?: number;
   concurrencyPolicy?: 'allow' | 'forbid' | 'replace';
@@ -530,9 +549,20 @@ export interface TaskDefinitionInput {
   maxAttempts?: number;
   idempotencyKey?: string;
 }
+export interface TaskHTTPConfig {
+  url: string;
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS';
+  headers?: Record<string, string>;
+  body?: string | Record<string, unknown>;
+  allowInternal?: boolean;
+  timeoutSeconds?: number;
+}
 export interface TaskRun {
   id: string;
   taskId: string;
+  taskName?: string;
+  taskDescription?: string;
+  configSnapshot?: Record<string, unknown>;
   tenantId: string;
   orgId?: string;
   queueTaskId?: string;
@@ -542,8 +572,15 @@ export interface TaskRun {
   attemptCount: number;
   maxAttempts: number;
   lastErrorCode?: string;
+  errorCode?: string;
+  triggerSource?: 'manual' | 'schedule' | 'retry' | 'system' | string;
+  executorType?: 'manual' | 'http' | 'webhook' | 'registered' | string;
   startedAt?: string;
   finishedAt?: string;
+  durationMs?: number;
+  resultSummary?: string;
+  redactedOutput?: string;
+  deletedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -552,11 +589,24 @@ export interface TaskRunLog {
   runId: string;
   attempt: number;
   status: 'pending' | 'running' | 'succeeded' | 'failed' | 'dead_letter' | 'cancelled';
+  triggerSource?: 'manual' | 'schedule' | 'retry' | 'system' | string;
+  executorType?: 'manual' | 'http' | 'webhook' | 'registered' | string;
   errorCode?: string;
   message?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  durationMs?: number;
+  resultSummary?: string;
+  redactedOutput?: string;
+  deletedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
+export interface TaskDefinitionPage { items: TaskDefinition[]; total: number; page: number; pageSize: number; }
+export interface TaskRunPage { items: TaskRun[]; total: number; page: number; pageSize: number; }
+export interface TaskRunLogPage { items: TaskRunLog[]; total: number; page: number; pageSize: number; }
+export interface TaskListQuery { page?: number; pageSize?: number; name?: string; executorType?: 'registered' | 'http'; enabled?: boolean; }
+export interface TaskRunListQuery { taskId?: string; taskName?: string; status?: TaskRun['status'] | 'timeout' | 'skipped'; triggerSource?: 'manual' | 'schedule' | 'retry' | 'system'; from?: string; to?: string; page?: number; pageSize?: number; }
 
 export namespace AuthApi {
   export interface LoginParams {

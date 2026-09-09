@@ -115,6 +115,22 @@ func (r *Runner) UpSettingsMailCleanup(ctx context.Context, cache adminmigration
 	return r.ApplySettingsMailCleanup(ctx, cache)
 }
 
+// ApplyTaskRunExecutionMetadata upgrades existing task run/log tables with execution provenance and result fields.
+func (r *Runner) ApplyTaskRunExecutionMetadata() error {
+	if err := r.validate(); err != nil {
+		return err
+	}
+	return adminmigrations.UpV005(r.db)
+}
+
+// RevertTaskRunExecutionMetadata rolls back the explicit task execution metadata upgrade.
+func (r *Runner) RevertTaskRunExecutionMetadata() error {
+	if err := r.validate(); err != nil {
+		return err
+	}
+	return adminmigrations.DownV005(r.db)
+}
+
 // Down removes the one schema as a reversible local-install operation. There
 // is only one schema version, therefore steps must be exactly one.
 func (r *Runner) Down(steps uint) error {

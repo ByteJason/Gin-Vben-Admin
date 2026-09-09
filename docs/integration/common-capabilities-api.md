@@ -11,6 +11,9 @@
 状态机、迁移、热更新、测试与回滚细节见
 [`docs/development/common-capabilities.md`](../development/common-capabilities.md)。
 
+定时任务的完整接入、执行器注册、HTTP 目标限制、迁移和多实例部署说明见
+[`定时任务接入与运维指南`](../development/scheduled-tasks.md)。
+
 ## 1. 文件与导出符号
 
 | 能力 | 实现文件 | 主要导出符号 | 用途 |
@@ -310,6 +313,14 @@ type MediaUsageService interface {
     ListByResource(context.Context, ResourceID) ([]UsageRef, error)
 }
 ```
+
+### 媒体上传入口
+
+- `POST /api/admin/v1/media/library`：multipart 普通上传。
+- `POST /api/admin/v1/media/library/crop-upload`：上传浏览器裁剪后生成的新文件；服务端重新检测内容，永远不会覆盖原资源。
+- `POST /api/admin/v1/media/library/url-import`：JSON `{urls, categoryId?, note?}`。服务端执行 HTTP(S)、DNS/私网、重定向、超时、大小和 MIME 校验，响应按输入顺序返回 `success/resource/error`，支持 `Idempotency-Key`。
+
+URL 导入必须走服务端端点，业务模块不要自行抓取远程地址。默认存储是可运行的 Local provider；替换为对象存储时只替换 `StorageProvider` 装配，业务仍只保存 opaque `resource_id`。
 
 | 方法 | 入参 | 返回/语义 |
 | --- | --- | --- |

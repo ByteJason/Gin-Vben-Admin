@@ -34,34 +34,50 @@ var (
 )
 
 type TaskRun struct {
-	ID             string     `json:"id"`
-	TaskID         string     `json:"taskId"`
-	TenantID       string     `json:"tenantId"`
-	OrgID          string     `json:"orgId,omitempty"`
-	QueueTaskID    string     `json:"queueTaskId,omitempty"`
-	IdempotencyKey string     `json:"idempotencyKey"`
-	Status         RunStatus  `json:"status"`
-	PayloadDigest  string     `json:"payloadDigest"`
-	AttemptCount   int        `json:"attemptCount"`
-	MaxAttempts    int        `json:"maxAttempts"`
-	LastErrorCode  string     `json:"lastErrorCode,omitempty"`
-	StartedAt      *time.Time `json:"startedAt,omitempty"`
-	FinishedAt     *time.Time `json:"finishedAt,omitempty"`
-	DeletedAt      *time.Time `json:"deletedAt,omitempty"`
-	CreatedAt      time.Time  `json:"createdAt"`
-	UpdatedAt      time.Time  `json:"updatedAt"`
+	ID              string          `json:"id"`
+	TaskID          string          `json:"taskId"`
+	TaskName        string          `json:"taskName,omitempty"`
+	TaskDescription string          `json:"taskDescription,omitempty"`
+	ConfigSnapshot  json.RawMessage `json:"configSnapshot,omitempty"`
+	TenantID        string          `json:"tenantId"`
+	OrgID           string          `json:"orgId,omitempty"`
+	QueueTaskID     string          `json:"queueTaskId,omitempty"`
+	IdempotencyKey  string          `json:"idempotencyKey"`
+	Status          RunStatus       `json:"status"`
+	PayloadDigest   string          `json:"payloadDigest"`
+	AttemptCount    int             `json:"attemptCount"`
+	MaxAttempts     int             `json:"maxAttempts"`
+	LastErrorCode   string          `json:"lastErrorCode,omitempty"`
+	ErrorCode       string          `json:"errorCode,omitempty"`
+	TriggerSource   string          `json:"triggerSource,omitempty"`
+	ExecutorType    string          `json:"executorType,omitempty"`
+	StartedAt       *time.Time      `json:"startedAt,omitempty"`
+	FinishedAt      *time.Time      `json:"finishedAt,omitempty"`
+	DurationMS      int64           `json:"durationMs,omitempty"`
+	ResultSummary   string          `json:"resultSummary,omitempty"`
+	RedactedOutput  string          `json:"redactedOutput,omitempty"`
+	DeletedAt       *time.Time      `json:"deletedAt,omitempty"`
+	CreatedAt       time.Time       `json:"createdAt"`
+	UpdatedAt       time.Time       `json:"updatedAt"`
 }
 
 type TaskRunLog struct {
-	ID        string     `json:"id"`
-	RunID     string     `json:"runId"`
-	Attempt   int        `json:"attempt"`
-	Status    RunStatus  `json:"status"`
-	ErrorCode string     `json:"errorCode,omitempty"`
-	Message   string     `json:"message,omitempty"`
-	CreatedAt time.Time  `json:"createdAt"`
-	UpdatedAt time.Time  `json:"updatedAt"`
-	DeletedAt *time.Time `json:"deletedAt,omitempty"`
+	ID             string     `json:"id"`
+	RunID          string     `json:"runId"`
+	Attempt        int        `json:"attempt"`
+	Status         RunStatus  `json:"status"`
+	TriggerSource  string     `json:"triggerSource,omitempty"`
+	ExecutorType   string     `json:"executorType,omitempty"`
+	ErrorCode      string     `json:"errorCode,omitempty"`
+	Message        string     `json:"message,omitempty"`
+	StartedAt      *time.Time `json:"startedAt,omitempty"`
+	FinishedAt     *time.Time `json:"finishedAt,omitempty"`
+	DurationMS     int64      `json:"durationMs,omitempty"`
+	ResultSummary  string     `json:"resultSummary,omitempty"`
+	RedactedOutput string     `json:"redactedOutput,omitempty"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	UpdatedAt      time.Time  `json:"updatedAt"`
+	DeletedAt      *time.Time `json:"deletedAt,omitempty"`
 }
 
 type RunRepository interface {
@@ -155,7 +171,7 @@ func (r *MemoryRunRepository) List(ctx context.Context, taskID, tenantID, orgID 
 	defer r.mu.RUnlock()
 	out := make([]TaskRun, 0)
 	for _, run := range r.runs {
-		if run.DeletedAt == nil && run.TaskID == taskID && runInScope(run, tenantID, orgID) {
+		if run.DeletedAt == nil && (taskID == "" || run.TaskID == taskID) && runInScope(run, tenantID, orgID) {
 			out = append(out, cloneRun(run))
 		}
 	}
@@ -207,6 +223,7 @@ type RunService struct {
 	repo        RunRepository
 	queue       jobs.Queue
 	clock       func() time.Time
+	admissionMu sync.Mutex
 }
 
 func NewRunService(definitions *Service, repo RunRepository, queue jobs.Queue) *RunService {
@@ -215,6 +232,9 @@ func NewRunService(definitions *Service, repo RunRepository, queue jobs.Queue) *
 	}
 	if queue == nil {
 		queue = jobs.NewMemoryQueue(3)
+	}
+	if definitions != nil {
+		definitions.runs = repo
 	}
 	return &RunService{definitions: definitions, repo: repo, queue: queue, clock: time.Now}
 }
@@ -225,7 +245,12 @@ func (s *RunService) SetClock(clock func() time.Time) {
 	}
 }
 
+// Enqueue snapshots the persisted executor configuration. Request payloads are
+// business parameters only and cannot replace the configured destination.
 func (s *RunService) Enqueue(ctx context.Context, taskID string, payload []byte, idempotencyKey string) (TaskRun, error) {
+	return s.EnqueueWithSource(ctx, taskID, payload, idempotencyKey, "manual")
+}
+func (s *RunService) EnqueueWithSource(ctx context.Context, taskID string, payload []byte, key, source string) (TaskRun, error) {
 	scope, err := tenant.RequireContext(ctx)
 	if err != nil {
 		return TaskRun{}, err
@@ -233,37 +258,103 @@ func (s *RunService) Enqueue(ctx context.Context, taskID string, payload []byte,
 	if s == nil || s.definitions == nil || s.repo == nil || s.queue == nil {
 		return TaskRun{}, ErrRunQueueUnavailable
 	}
+	s.admissionMu.Lock()
+	defer s.admissionMu.Unlock()
 	definition, err := s.definitions.Get(ctx, taskID)
 	if err != nil {
 		return TaskRun{}, err
+	}
+	if len(payload) == 0 {
+		payload = definition.Payload
 	}
 	payload = normalizePayload(payload)
 	if !isJSONObject(payload) {
 		return TaskRun{}, ErrInvalidRunPayload
 	}
-	key := strings.TrimSpace(idempotencyKey)
-	if key == "" {
-		key = strings.TrimSpace(definition.IdempotencyKey)
-	}
+	key = strings.TrimSpace(key)
 	if key == "" {
 		key = newID("run-key")
 	}
-	if existing, getErr := s.repo.GetByIdempotency(ctx, key, scope.TenantID, scope.Organization); getErr == nil {
+	if len(key) > 180 {
+		return TaskRun{}, ErrInvalidRunPayload
+	}
+	if existing, e := s.repo.GetByIdempotency(ctx, key, scope.TenantID, scope.Organization); e == nil {
+		if existing.TaskID != taskID || existing.PayloadDigest != digest(payload) {
+			return TaskRun{}, ErrRunConflict
+		}
 		return existing, nil
+	} else if !errors.Is(e, ErrRunNotFound) {
+		return TaskRun{}, e
 	}
-	queued, err := s.queue.Enqueue(ctx, jobs.Task{Type: definition.Type, PayloadVersion: 1, IdempotencyKey: key, Payload: payload, MaxAttempts: definition.MaxAttempts})
+	active, err := s.repo.List(ctx, taskID, scope.TenantID, scope.Organization)
 	if err != nil {
-		return TaskRun{}, ErrRunQueueUnavailable
+		return TaskRun{}, err
 	}
-	now := s.now()
-	run := TaskRun{ID: newID("run"), TaskID: definition.ID, TenantID: scope.TenantID, OrgID: scope.Organization, QueueTaskID: queued.ID, IdempotencyKey: key, Status: RunPending, PayloadDigest: digest(payload), MaxAttempts: definition.MaxAttempts, CreatedAt: now, UpdatedAt: now}
-	created, err := s.repo.Create(ctx, run)
-	if errors.Is(err, ErrRunConflict) {
-		if existing, getErr := s.repo.GetByIdempotency(ctx, key, scope.TenantID, scope.Organization); getErr == nil {
-			return existing, nil
+	activeCount := 0
+	for _, other := range active {
+		if other.Status == RunPending || other.Status == RunRunning || other.Status == RunFailed {
+			if definition.ConcurrencyPolicy == "replace" {
+				if _, err := s.Cancel(ctx, taskID, other.ID); err != nil {
+					return TaskRun{}, err
+				}
+			} else {
+				activeCount++
+			}
 		}
 	}
-	return created, err
+	skip := activeCount > 0 && (definition.ConcurrencyPolicy != "allow" || activeCount >= definition.Concurrency)
+	now := s.now()
+	executor := definition.ExecutorType
+	if executor == "" {
+		executor = "registered"
+		if definition.Type != "manual" {
+			executor = "http"
+		}
+	}
+	snapshotDefinition := cloneDefinition(definition)
+	snapshotDefinition.Payload = payload
+	safe := PublicDefinition(snapshotDefinition)
+	snapshot, _ := json.Marshal(map[string]any{"cron": safe.Cron, "timezone": safe.Timezone, "executorType": executor, "methodKey": safe.MethodKey, "http": safe.HTTPConfig, "payload": safe.Payload, "timeoutSeconds": safe.TimeoutSeconds, "maxAttempts": safe.MaxAttempts, "concurrencyPolicy": safe.ConcurrencyPolicy})
+	run := TaskRun{ID: newID("run"), TaskID: taskID, TaskName: definition.Name, TaskDescription: definition.Description, ConfigSnapshot: snapshot, TenantID: scope.TenantID, OrgID: scope.Organization, QueueTaskID: newID("queue"), IdempotencyKey: key, Status: RunPending, PayloadDigest: digest(payload), MaxAttempts: definition.MaxAttempts, TriggerSource: source, ExecutorType: executor, CreatedAt: now, UpdatedAt: now}
+	if skip {
+		run.Status = RunCancelled
+		run.QueueTaskID = ""
+		run.ErrorCode = "concurrency.skipped"
+		run.LastErrorCode = run.ErrorCode
+		run.ResultSummary = "Previous execution is still active; this trigger was skipped"
+		run.FinishedAt = &now
+	}
+	created, err := s.repo.Create(ctx, run)
+	if errors.Is(err, ErrRunConflict) {
+		return s.repo.GetByIdempotency(ctx, key, scope.TenantID, scope.Organization)
+	}
+	if err != nil {
+		return TaskRun{}, err
+	}
+	if skip {
+		err = s.repo.AppendLog(ctx, TaskRunLog{ID: newID("run-log"), RunID: created.ID, Status: created.Status, TriggerSource: source, ExecutorType: executor, ErrorCode: created.ErrorCode, ResultSummary: created.ResultSummary, CreatedAt: now, UpdatedAt: now})
+		return created, err
+	}
+	spec := ExecutionSpec{RunID: created.ID, MethodKey: definition.MethodKey, ExecutorType: executor, HTTP: definition.HTTPConfig, Payload: payload, TimeoutSeconds: definition.TimeoutSeconds}
+	raw, err := json.Marshal(spec)
+	if err != nil {
+		return TaskRun{}, err
+	}
+	queued, err := s.queue.Enqueue(ctx, jobs.Task{ID: created.QueueTaskID, Type: definition.Type, PayloadVersion: 1, IdempotencyKey: scope.TenantID + ":" + scope.Organization + ":" + key, Payload: raw, MaxAttempts: definition.MaxAttempts})
+	if err != nil {
+		created.Status = RunFailed
+		created.LastErrorCode = "queue.unavailable"
+		created.ErrorCode = created.LastErrorCode
+		created.ResultSummary = "Queue enqueue failed"
+		created.UpdatedAt = s.now()
+		_, updateErr := s.repo.Update(ctx, created)
+		return created, errors.Join(ErrRunQueueUnavailable, updateErr)
+	}
+	if queued.ID != created.QueueTaskID {
+		created.QueueTaskID = queued.ID
+		return s.repo.Update(ctx, created)
+	}
+	return created, nil
 }
 
 func (s *RunService) List(ctx context.Context, taskID string) ([]TaskRun, error) {
@@ -324,10 +415,17 @@ func (s *RunService) Cancel(ctx context.Context, taskID, runID string) (TaskRun,
 		return TaskRun{}, ErrRunStateConflict
 	}
 	if run.QueueTaskID != "" {
-		_ = s.queue.Cancel(ctx, run.QueueTaskID)
+		if err := s.queue.Cancel(ctx, run.QueueTaskID); err != nil && !errors.Is(err, jobs.ErrTaskConflict) {
+			return TaskRun{}, ErrRunQueueUnavailable
+		}
 	}
 	now := s.now()
 	run.Status, run.FinishedAt, run.UpdatedAt = RunCancelled, &now, now
+	run.LastErrorCode = "worker.cancelled"
+	run.ErrorCode = run.LastErrorCode
+	if run.StartedAt != nil {
+		run.DurationMS = now.Sub(*run.StartedAt).Milliseconds()
+	}
 	return s.repo.Update(ctx, run)
 }
 
@@ -347,14 +445,30 @@ func (s *RunService) Retry(ctx context.Context, taskID, runID string) (TaskRun, 
 	if getErr != nil {
 		return TaskRun{}, ErrRunQueueUnavailable
 	}
-	newKey := run.IdempotencyKey + ":retry:" + s.now().UTC().Format("20060102150405.000000000")
-	queued, queueErr := s.queue.Enqueue(ctx, jobs.Task{Type: old.Type, PayloadVersion: old.PayloadVersion, IdempotencyKey: newKey, Payload: old.Payload, MaxAttempts: run.MaxAttempts})
+	newKey := newID("retry-key")
+	now := s.now()
+	run.QueueTaskID = newID("queue")
+	run.IdempotencyKey = newKey
+	run.Status = RunPending
+	run.TriggerSource = "retry"
+	run.FinishedAt = nil
+	run.StartedAt = nil
+	run.LastErrorCode = ""
+	run.ErrorCode = ""
+	run.UpdatedAt = now
+	if _, err := s.repo.Update(ctx, run); err != nil {
+		return TaskRun{}, err
+	}
+	_, queueErr := s.queue.Enqueue(ctx, jobs.Task{ID: run.QueueTaskID, Type: old.Type, PayloadVersion: old.PayloadVersion, IdempotencyKey: run.TenantID + ":" + run.OrgID + ":" + newKey, Payload: old.Payload, MaxAttempts: run.MaxAttempts})
 	if queueErr != nil {
+		run.Status = RunFailed
+		run.LastErrorCode = "queue.unavailable"
+		run.ErrorCode = run.LastErrorCode
+		_, _ = s.repo.Update(ctx, run)
 		return TaskRun{}, ErrRunQueueUnavailable
 	}
-	now := s.now()
-	run.QueueTaskID, run.IdempotencyKey, run.Status, run.FinishedAt, run.UpdatedAt = queued.ID, newKey, RunPending, nil, now
-	return s.repo.Update(ctx, run)
+	return run, nil
+
 }
 
 func (s *RunService) MarkRunning(ctx context.Context, runID string) (TaskRun, error) {
@@ -378,8 +492,12 @@ func (s *RunService) MarkFailed(ctx context.Context, runID, errorCode string) (T
 	if err != nil {
 		return TaskRun{}, err
 	}
+	if run.Status == RunCancelled || run.Status == RunSucceeded || run.Status == RunDeadLetter {
+		return TaskRun{}, ErrRunStateConflict
+	}
 	run.AttemptCount++
 	run.LastErrorCode = strings.TrimSpace(errorCode)
+	run.ErrorCode = run.LastErrorCode
 	if run.AttemptCount >= run.MaxAttempts {
 		run.Status = RunDeadLetter
 	} else {
@@ -387,14 +505,14 @@ func (s *RunService) MarkFailed(ctx context.Context, runID, errorCode string) (T
 	}
 	now := s.now()
 	run.UpdatedAt = now
-	if run.Status == RunDeadLetter {
-		run.FinishedAt = &now
-	} else {
-		run.FinishedAt = nil
+	run.FinishedAt = &now
+	if run.StartedAt != nil {
+		run.DurationMS = now.Sub(*run.StartedAt).Milliseconds()
 	}
+
 	updated, err := s.repo.Update(ctx, run)
 	if err == nil {
-		_ = s.repo.AppendLog(ctx, TaskRunLog{ID: newID("run-log"), RunID: run.ID, Attempt: run.AttemptCount, Status: run.Status, ErrorCode: run.LastErrorCode, CreatedAt: now, UpdatedAt: now})
+		err = s.repo.AppendLog(ctx, TaskRunLog{ID: newID("run-log"), RunID: run.ID, Attempt: run.AttemptCount, Status: run.Status, TriggerSource: run.TriggerSource, ExecutorType: run.ExecutorType, ErrorCode: run.LastErrorCode, StartedAt: run.StartedAt, FinishedAt: run.FinishedAt, DurationMS: run.DurationMS, ResultSummary: run.ResultSummary, RedactedOutput: run.RedactedOutput, CreatedAt: now, UpdatedAt: now})
 	}
 	return updated, err
 }
@@ -415,14 +533,20 @@ func (s *RunService) transition(ctx context.Context, runID string, status RunSta
 	run.Status, run.UpdatedAt = status, now
 	if status == RunRunning {
 		run.StartedAt = &now
+		run.FinishedAt = nil
+		run.DurationMS = 0
 	}
 	if status == RunSucceeded || status == RunCancelled {
 		run.FinishedAt = &now
 	}
 	run.LastErrorCode = errorCode
+	run.ErrorCode = errorCode
+	if run.StartedAt != nil && (status == RunSucceeded || status == RunCancelled || status == RunDeadLetter) {
+		run.DurationMS = now.Sub(*run.StartedAt).Milliseconds()
+	}
 	updated, updateErr := s.repo.Update(ctx, run)
 	if updateErr == nil {
-		_ = s.repo.AppendLog(ctx, TaskRunLog{ID: newID("run-log"), RunID: run.ID, Attempt: run.AttemptCount, Status: status, ErrorCode: errorCode, CreatedAt: now, UpdatedAt: now})
+		updateErr = s.repo.AppendLog(ctx, TaskRunLog{ID: newID("run-log"), RunID: run.ID, Attempt: run.AttemptCount, Status: status, TriggerSource: run.TriggerSource, ExecutorType: run.ExecutorType, ErrorCode: errorCode, StartedAt: run.StartedAt, FinishedAt: run.FinishedAt, DurationMS: run.DurationMS, ResultSummary: run.ResultSummary, RedactedOutput: run.RedactedOutput, CreatedAt: now, UpdatedAt: now})
 	}
 	return updated, updateErr
 }
@@ -439,18 +563,40 @@ func (s *RunService) BindWorker(worker *jobs.Worker, taskType string, handler jo
 		if err != nil {
 			return err
 		}
-		runCtx := ctx
-		if _, scopeErr := tenant.RequireContext(ctx); scopeErr != nil {
-			scope, scopeErr := tenant.NewContext(run.TenantID, run.OrgID, false)
-			if scopeErr != nil {
-				return scopeErr
-			}
-			runCtx = tenant.WithContext(ctx, scope)
+		scope, scopeErr := tenant.NewContext(run.TenantID, run.OrgID, false)
+		if scopeErr != nil {
+			return scopeErr
 		}
+		runCtx := tenant.WithContext(ctx, scope)
 		if _, err := s.MarkRunning(runCtx, run.ID); err != nil {
 			return err
 		}
-		if err := handler(runCtx, queued); err != nil {
+		callCtx, cancel := context.WithCancel(runCtx)
+		defer cancel()
+		finished := make(chan struct{})
+		defer close(finished)
+		go func() {
+			ticker := time.NewTicker(100 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-finished:
+					return
+				case <-callCtx.Done():
+					return
+				case <-ticker.C:
+					current, err := s.queue.Get(context.WithoutCancel(runCtx), queued.ID)
+					if err == nil && current.Status == jobs.StatusCancelled {
+						cancel()
+						return
+					}
+				}
+			}
+		}()
+		if err := handler(callCtx, queued); err != nil {
+			if errors.Is(context.Cause(ctx), jobs.ErrClaimLost) {
+				return jobs.ErrClaimLost
+			} // A lost worker lease must not overwrite a replacement worker.
 			stateCtx := runCtx
 			if runCtx.Err() != nil {
 				stateCtx = context.WithoutCancel(runCtx)
@@ -461,6 +607,9 @@ func (s *RunService) BindWorker(worker *jobs.Worker, taskType string, handler jo
 			}
 			_, _ = s.MarkFailed(stateCtx, run.ID, stableRunErrorCode(err))
 			return err
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
 		_, err = s.MarkSucceeded(runCtx, run.ID)
 		return err
@@ -483,7 +632,10 @@ func runInScope(run TaskRun, tenantID, orgID string) bool {
 	return run.TenantID == tenantID && (orgID == "" || run.OrgID == orgID)
 }
 
-func cloneRun(run TaskRun) TaskRun { return run }
+func cloneRun(run TaskRun) TaskRun {
+	run.ConfigSnapshot = append(json.RawMessage(nil), run.ConfigSnapshot...)
+	return run
+}
 
 func normalizePayload(payload []byte) []byte {
 	if len(strings.TrimSpace(string(payload))) == 0 {
@@ -508,6 +660,12 @@ func digest(payload []byte) string {
 
 func stableRunErrorCode(err error) string {
 	switch {
+	case errors.Is(err, ErrExecutorNotRegistered):
+		return "executor.not_registered"
+	case errors.Is(err, ErrSSRFBlocked):
+		return "http.target_blocked"
+	case errors.Is(err, ErrInvalidHTTPPayload):
+		return "http.invalid_configuration"
 	case errors.Is(err, context.DeadlineExceeded):
 		return "worker.timeout"
 	case errors.Is(err, context.Canceled):
@@ -515,4 +673,26 @@ func stableRunErrorCode(err error) string {
 	default:
 		return "worker.failed"
 	}
+}
+
+// SetExecutionResult persists bounded, already-redacted execution output for a run.
+func (s *RunService) SetExecutionResult(ctx context.Context, runID string, result ExecutionResult) (TaskRun, error) {
+	scope, err := tenant.RequireContext(ctx)
+	if err != nil {
+		return TaskRun{}, err
+	}
+	if s == nil || s.repo == nil {
+		return TaskRun{}, ErrRunQueueUnavailable
+	}
+	run, err := s.repo.Get(ctx, runID, scope.TenantID, scope.Organization)
+	if err != nil {
+		return TaskRun{}, err
+	}
+	run.ResultSummary = RedactOutput(strings.TrimSpace(result.ResultSummary))
+	if len(run.ResultSummary) > 512 {
+		run.ResultSummary = strings.ToValidUTF8(run.ResultSummary[:512], "")
+	}
+	run.RedactedOutput = RedactOutput(result.RedactedOutput)
+	run.UpdatedAt = s.now()
+	return s.repo.Update(ctx, run)
 }

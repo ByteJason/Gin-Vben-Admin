@@ -142,6 +142,37 @@ export function listMediaResourcesApi(params?: MediaListParams) {
   return requestClient.get<MediaPage>(ADMIN_ENDPOINTS.listMediaLibrary, { params });
 }
 
+export interface MediaURLImportResult {
+  index: number;
+  sourceUrl: string;
+  success: boolean;
+  resource?: MediaResource;
+  name?: string;
+  error?: string;
+}
+
+export function importMediaLibraryURLsApi(input: {
+  categoryId?: string;
+  note?: string;
+  urls: string[];
+}) {
+  return requestClient.post<MediaURLImportResult[]>(
+    ADMIN_ENDPOINTS.importMediaLibraryURLs,
+    input,
+  );
+}
+
+export function uploadCroppedMediaResourceApi(
+  file: File,
+  acl: FileACL = 'private',
+  categoryId?: string,
+) {
+  return requestClient.upload<MediaResource>(
+    ADMIN_ENDPOINTS.uploadCroppedMediaResource,
+    { acl, categoryId, file },
+  );
+}
+
 export function uploadMediaResourceApi(
   file: File,
   acl: FileACL = 'private',

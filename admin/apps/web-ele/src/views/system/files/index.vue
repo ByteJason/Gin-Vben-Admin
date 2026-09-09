@@ -3,8 +3,6 @@ import type {
   FileACL,
   FileCategory,
   FileCategoryInput,
-  FileObject,
-  FilePage,
   MediaResource,
   MediaUsage,
 } from '#/api/core/files';
@@ -20,26 +18,24 @@ import {
   attachMediaUsageApi,
   cleanupDryRunApi,
   createFileCategoryApi,
-  deleteFileApi,
   deleteFileCategoryApi,
   deleteMediaResourceApi,
   detachMediaUsageApi,
-  downloadFileApi,
   getBrandingSettingsApi,
   getMediaResourceApi,
+  importMediaLibraryURLsApi,
   listFileCategoriesApi,
-  listFilesApi,
   listMediaResourcesApi,
   listMediaUsagesApi,
   openMediaResourceApi,
-  signedFileUrlApi,
+  signMediaResourceUrlApi,
   updateBrandingSettingsApi,
   updateFileCategoryApi,
-  uploadFileApi,
+  uploadCroppedMediaResourceApi,
   uploadMediaResourceApi,
 } from '#/api/core/files';
-import { $t } from '#/locales';
 import { getSettingApi, updateSettingApi } from '#/api/core/settings';
+import { $t } from '#/locales';
 
 const { hasAccessByCodes } = useAccess();
 const canManage = computed(
@@ -54,16 +50,34 @@ const categoryParentId = ref('');
 const categoryBusy = ref(false);
 const categoryEditorOpen = ref(false);
 const categoryEditingId = ref('');
-const page = ref<FilePage>({ items: [], limit: 50, offset: 0, total: 0 });
+const page = ref<import('#/api/core/files').MediaPage>({
+  items: [],
+  limit: 50,
+  offset: 0,
+  total: 0,
+  hasMore: false,
+});
 const selectedFile = ref<File | null>(null);
-const selectedAsset = ref<FileObject | null>(null);
+const uploadQueue = ref<Array<{ error?: string; file: File; status: 'error' | 'pending' | 'success' | 'uploading'; }>>([]);
+const urlDialogOpen = ref(false);
+const urlInput = ref('');
+const urlNote = ref('');
+const urlImporting = ref(false);
+const urlResults = ref<import('#/api/core/files').MediaURLImportResult[]>([]);
+const cropInput = ref<HTMLInputElement | null>(null);
+const cropUploading = ref(false);
+const cropAspect = ref<'1:1' | '4:3' | '16:9'>('1:1');
+const selectedAsset = ref<MediaResource | null>(null);
+const detailOpen = ref(false);
+const detailAsset = ref<MediaResource | null>(null);
+const detailUsages = ref<MediaUsage[]>([]);
+const detailLoading = ref(false);
 const logoAsset = ref<MediaResource | null>(null);
 const logoPickerOpen = ref(false);
 const logoAssets = ref<MediaResource[]>([]);
 const logoUploadInput = ref<HTMLInputElement | null>(null);
 const logoDialog = ref<HTMLElement | null>(null);
 let logoReturnFocus: HTMLElement | null = null;
-const logoStorageKey = 'media-library:logo-resource-id';
 const logoBusy = ref(false);
 const previewURLs = ref<Record<string, string>>({});
 const previewLoading = new Set<string>();
@@ -173,7 +187,7 @@ async function load() {
   error.value = '';
   loading.value = true;
   try {
-    page.value = await listFilesApi({
+    page.value = await listMediaResourcesApi({
       categoryId: selectedCategoryId.value || undefined,
       limit: 50,
       offset: 0,
@@ -261,7 +275,11 @@ async function removeCategory(category: FileCategory) {
 function onFileChange(event: Event) {
   if (!canManage.value) return;
   const input = event.target as HTMLInputElement;
-  selectedFile.value = input.files?.[0] ?? null;
+  const files = Array.from(input.files ?? []);
+  input.value = '';
+  if (!files.length) return;
+  selectedFile.value = files[0] ?? null;
+  uploadQueue.value = files.map((file) => ({ file, status: 'pending' }));
 }
 
 function previewURL(item: { id: string }) {
@@ -302,8 +320,28 @@ function isImage(item: { mime?: string }) {
   return item.mime?.toLowerCase().startsWith('image/') ?? false;
 }
 
-function selectAsset(item: FileObject) {
+function selectAsset(item: MediaResource) {
   if (isImage(item)) selectedAsset.value = item;
+}
+
+async function openDetails(item: MediaResource) {
+  detailAsset.value = item;
+  detailUsages.value = [];
+  detailOpen.value = true;
+  detailLoading.value = true;
+  try {
+    detailUsages.value = await listMediaUsagesApi(item.id);
+  } catch {
+    notifyError(String($t('page.files.loadError')));
+  } finally {
+    detailLoading.value = false;
+  }
+}
+
+function closeDetails() {
+  detailOpen.value = false;
+  detailAsset.value = null;
+  detailUsages.value = [];
 }
 
 async function openLogoPicker() {
@@ -328,17 +366,11 @@ async function openLogoPicker() {
         .slice(0, 48)
         .map((item) => ensurePreviewURL(item)),
     );
-    let storedId = window.localStorage.getItem(logoStorageKey);
-    try {
-      const setting = await getBrandingSettingsApi();
-      storedId = setting.value.logoResourceId || storedId;
-    } catch {
-      // The local fixture may not mount settings; localStorage still keeps the
-      // picker usable while the server-side setting is unavailable.
-    }
+    const setting = await getBrandingSettingsApi();
+    const storedId = setting.value.logoResourceId;
     if (storedId) {
       logoAsset.value =
-        result.items.find((item) => item.id === storedId) ?? logoAsset.value;
+        result.items.find((item) => item.id === storedId) ?? null;
     }
   } catch {
     notifyError(String($t('page.files.loadError')));
@@ -399,9 +431,8 @@ async function chooseLogo(item: MediaResource): Promise<boolean> {
   let attachedUsageWasNew = false;
   const detachedPreviousUsages: MediaUsage[] = [];
   try {
-    // Read the server-side final state first. A localStorage-only fallback is
-    // intentionally not used for a save, otherwise a failed mutation could
-    // make the UI claim a Logo that the server never committed.
+    // Read the server-side final state first so failed mutations cannot
+    // make the UI claim a Logo the server never committed.
     previousSettings = await getBrandingSettingsApi();
     const previousID =
       previousSettings.value.logoResourceId || previousAsset?.id;
@@ -429,7 +460,6 @@ async function chooseLogo(item: MediaResource): Promise<boolean> {
       await removeLogoUsage(previousID, detachedPreviousUsages);
     logoAsset.value = item;
     void ensurePreviewURL(item);
-    window.localStorage.setItem(logoStorageKey, item.id);
     closeLogoPicker();
     return true;
   } catch {
@@ -504,27 +534,97 @@ async function uploadLogo(event: Event) {
 }
 
 async function upload() {
-  if (!canManage.value) return;
-  if (!selectedFile.value) {
+  if (!canManage.value || !uploadQueue.value.length) {
     notifyError(String($t('page.files.fileRequired')));
     return;
   }
   uploading.value = true;
+  for (const entry of uploadQueue.value) {
+    if (entry.status === 'success') continue;
+    entry.status = 'uploading';
+    try {
+      const uploaded = await uploadMediaResourceApi(entry.file, acl.value, selectedCategoryId.value || undefined);
+      entry.status = 'success';
+      if (uploaded && isImage(uploaded)) selectedAsset.value = uploaded;
+    } catch (error) {
+      entry.status = 'error';
+      entry.error = error instanceof Error ? error.message : '上传失败';
+    }
+  }
+  uploading.value = false;
+  selectedFile.value = null;
+  if (uploadQueue.value.every((entry) => entry.status === 'success')) {
+    notifySuccess(String($t('page.files.uploaded')));
+    uploadQueue.value = [];
+  } else {
+    notifyError('部分文件上传失败，可点击重试');
+  }
+  await load();
+}
+
+async function retryUpload(entry: (typeof uploadQueue.value)[number]) {
+  entry.status = 'pending';
+  await upload();
+}
+
+async function importURLs() {
+  const urls = urlInput.value.split(/\r?\n/).map((url) => url.trim()).filter(Boolean);
+  if (!urls.length) return;
+  urlImporting.value = true;
   try {
-    const uploaded = await uploadFileApi(
-      selectedFile.value,
-      acl.value,
-      selectedCategoryId.value || undefined,
-    );
+    urlResults.value = await importMediaLibraryURLsApi({ urls, categoryId: selectedCategoryId.value || undefined, note: urlNote.value.trim() || undefined });
+    await load();
+  } catch {
+    notifyError('URL 导入失败');
+  } finally {
+    urlImporting.value = false;
+  }
+}
+
+async function retryFailedURLs() {
+  const failed = urlResults.value.filter((result) => !result.success).map((result) => result.sourceUrl);
+  if (!failed.length) return;
+  urlInput.value = failed.join('\n');
+  await importURLs();
+}
+
+function openCropUpload() { cropInput.value?.click(); }
+async function cropUpload(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file || !file.type.startsWith('image/')) return;
+  cropUploading.value = true;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const ratioParts = cropAspect.value.split(':').map(Number);
+    const ratioWidth = ratioParts[0] ?? 1;
+    const ratioHeight = ratioParts[1] ?? 1;
+    const targetRatio = ratioWidth / ratioHeight;
+    let cropWidth = bitmap.width;
+    let cropHeight = Math.round(cropWidth / targetRatio);
+    if (cropHeight > bitmap.height) {
+      cropHeight = bitmap.height;
+      cropWidth = Math.round(cropHeight * targetRatio);
+    }
+    const sourceX = Math.floor((bitmap.width - cropWidth) / 2);
+    const sourceY = Math.floor((bitmap.height - cropHeight) / 2);
+    const canvas = document.createElement('canvas');
+    canvas.width = cropWidth;
+    canvas.height = cropHeight;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('裁剪画布不可用');
+    context.drawImage(bitmap, sourceX, sourceY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+    bitmap.close();
+    const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error('裁剪失败')), file.type));
+    const cropped = new File([blob], file.name, { type: blob.type });
+    const uploaded = await uploadCroppedMediaResourceApi(cropped, acl.value, selectedCategoryId.value || undefined);
     if (uploaded && isImage(uploaded)) selectedAsset.value = uploaded;
-    selectedFile.value = null;
     notifySuccess(String($t('page.files.uploaded')));
     await load();
   } catch {
-    notifyError(String($t('page.files.uploadError')));
-  } finally {
-    uploading.value = false;
-  }
+    notifyError('裁剪上传失败');
+  } finally { cropUploading.value = false; }
 }
 
 function formatSize(value: number) {
@@ -549,7 +649,7 @@ function categoryLabel(id?: string) {
   );
 }
 
-async function download(item: FileObject, preview = false) {
+async function download(item: MediaResource, preview = false) {
   actionId.value = item.id;
   // Open the preview tab while the click still has user activation. Opening
   // it only after the authenticated blob request resolves is blocked by many
@@ -562,7 +662,7 @@ async function download(item: FileObject, preview = false) {
   }
   if (previewWindow) previewWindow.opener = null;
   try {
-    const blob = await downloadFileApi(item.id, preview);
+    const blob = await openMediaResourceApi(item.id);
     const url = URL.createObjectURL(blob);
     if (preview) {
       previewWindow!.location.href = url;
@@ -587,12 +687,12 @@ async function download(item: FileObject, preview = false) {
   }
 }
 
-async function deleteItem(item: FileObject) {
+async function deleteItem(item: MediaResource) {
   if (!canManage.value) return;
   if (!window.confirm(String($t('page.files.confirmDelete')))) return;
   actionId.value = item.id;
   try {
-    await deleteFileApi(item.id);
+    await deleteMediaResourceApi(item.id, `media:delete:${item.id}`);
     notifySuccess(String($t('page.files.deleted')));
     await load();
   } catch {
@@ -602,11 +702,11 @@ async function deleteItem(item: FileObject) {
   }
 }
 
-async function createSignedURL(item: FileObject) {
+async function createSignedURL(item: MediaResource) {
   if (!canManage.value) return;
   actionId.value = item.id;
   try {
-    const result = await signedFileUrlApi(item.id);
+    const result = await signMediaResourceUrlApi(item.id, 'download');
     await navigator.clipboard?.writeText(result.url);
     notifySuccess(String($t('page.files.signedURLCopied')));
   } catch {
@@ -669,7 +769,7 @@ onMounted(async () => {
       void ensurePreviewURL(logoAsset.value);
     }
   } catch {
-    // The picker can still recover the local fixture value when opened.
+    // Branding is optional; the server remains the source of truth.
   }
 });
 </script>
@@ -787,14 +887,13 @@ onMounted(async () => {
             >
               <span aria-hidden="true">◈</span>{{ category.name }}
             </button>
-            <span v-if="canManage" class="category-actions"
-              ><button
+            <span v-if="canManage" class="category-actions"><button
                 type="button"
                 :disabled="categoryBusy"
                 :aria-label="$t('page.files.editCategory')"
                 @click="editCategory(category)"
               >
-                ✎</button
+                ✎</button>
               ><button
                 type="button"
                 :disabled="categoryBusy"
@@ -802,8 +901,7 @@ onMounted(async () => {
                 @click="removeCategory(category)"
               >
                 ×
-              </button></span
-            >
+              </button></span>
           </div>
           <p v-if="!categoryRows.length" class="empty-state">
             {{ $t('page.files.noCategories') }}
@@ -937,8 +1035,7 @@ onMounted(async () => {
                   :src="previewURL(item)"
                   :alt="item.name"
                 />
-                <span>{{ item.name }}</span
-                ><small>{{ categoryLabel(item.categoryId) }}</small>
+                <span>{{ item.name }}</span><small>{{ categoryLabel(item.categoryId) }}</small>
               </button>
             </div>
           </div>
@@ -957,23 +1054,23 @@ onMounted(async () => {
             <span class="selected-category">{{ selectedCategoryName }}</span>
           </div>
           <div class="upload-controls">
-            <label class="file-picker"
-              ><span>{{ $t('page.files.chooseFile') }}</span
-              ><input
+            <button class="secondary" type="button" :disabled="uploading || cropUploading" @click="openCropUpload">裁剪上传</button>
+            <label class="field crop-aspect"><span>裁剪比例</span><select v-model="cropAspect" :disabled="cropUploading"><option value="1:1">1:1</option><option value="4:3">4:3</option><option value="16:9">16:9</option></select></label>
+            <button class="secondary" type="button" :disabled="urlImporting" @click="urlDialogOpen = true">URL 上传</button>
+            <input ref="cropInput" class="sr-only" type="file" accept="image/*" @change="cropUpload" />
+            <label class="file-picker"><span>{{ $t('page.files.chooseFile') }}</span><input
                 type="file"
+                multiple
                 :accept="accept"
                 :disabled="uploading"
                 @change="onFileChange"
             /></label>
-            <label class="field"
-              ><span>{{ $t('page.files.acl') }}</span
-              ><select v-model="acl" :disabled="uploading">
+            <label class="field"><span>{{ $t('page.files.acl') }}</span><select v-model="acl" :disabled="uploading">
                 <option value="private">{{ $t('page.files.private') }}</option>
                 <option value="public-read">
                   {{ $t('page.files.publicRead') }}
                 </option>
-              </select></label
-            >
+              </select></label>
             <button
               class="primary"
               type="button"
@@ -989,8 +1086,24 @@ onMounted(async () => {
             {{ selectedFile.name }} · {{ formatSize(selectedFile.size) }} ·
             {{ selectedFile.type || 'application/octet-stream' }}
           </p>
+          <ul v-if="uploadQueue.length" class="upload-queue">
+            <li v-for="entry in uploadQueue" :key="entry.file.name + entry.file.lastModified">
+              <span>{{ entry.file.name }}</span><span>{{ entry.status }}</span>
+              <button v-if="entry.status === 'error'" type="button" @click="retryUpload(entry)">重试</button>
+            </li>
+          </ul>
           <p class="help">{{ $t('page.files.uploadHelp') }}</p>
         </section>
+
+        <aside v-if="urlDialogOpen" class="detail-drawer" role="dialog" aria-modal="true">
+          <div class="detail-panel">
+            <div class="section-heading"><h2>URL 上传</h2><button type="button" class="secondary" @click="urlDialogOpen = false">关闭</button></div>
+            <label class="field"><span>文件 URL（每行一个）</span><textarea v-model="urlInput" rows="8" placeholder="https://example.com/image.jpg"></textarea></label>
+            <label class="field"><span>备注（可选）</span><input v-model="urlNote" maxlength="200" /></label>
+            <div v-if="urlResults.length" class="usage-list"><h3>导入结果</h3><ul><li v-for="result in urlResults" :key="result.sourceUrl">{{ result.sourceUrl }} · {{ result.success ? '成功' : '失败' }}<span v-if="result.error"> · {{ result.error }}</span></li></ul></div>
+            <button class="primary" type="button" :disabled="urlImporting" @click="importURLs">{{ urlImporting ? '导入中…' : '开始导入' }}</button><button v-if="urlResults.some((result) => !result.success)" class="secondary" type="button" :disabled="urlImporting" @click="retryFailedURLs">重试失败项</button>
+          </div>
+        </aside>
 
         <section class="table-card" aria-labelledby="files-table-title">
           <div class="table-heading">
@@ -1051,23 +1164,33 @@ onMounted(async () => {
                     <button
                       type="button"
                       :disabled="actionId === item.id"
+                      @click="openDetails(item)"
+                    >
+                      详情
+</button>
+                    <button
+                      type="button"
+                      :disabled="actionId === item.id"
                       @click="download(item, true)"
                     >
-                      {{ $t('page.files.preview') }}</button
-                    ><button
+                      {{ $t('page.files.preview') }}
+</button>
+                    <button
                       type="button"
                       :disabled="actionId === item.id"
                       @click="download(item)"
                     >
-                      {{ $t('page.files.download') }}</button
-                    ><button
+                      {{ $t('page.files.download') }}
+</button>
+                    <button
                       v-if="canManage"
                       type="button"
                       :disabled="actionId === item.id"
                       @click="createSignedURL(item)"
                     >
-                      {{ $t('page.files.signedURL') }}</button
-                    ><button
+                      {{ $t('page.files.signedURL') }}
+</button>
+                    <button
                       v-if="canManage"
                       class="danger"
                       type="button"
@@ -1083,6 +1206,48 @@ onMounted(async () => {
           </div>
         </section>
 
+        <aside
+          v-if="detailOpen && detailAsset"
+          class="detail-drawer"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="media-detail-title"
+        >
+          <div class="detail-panel">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">媒体详情</p>
+                <h2 id="media-detail-title">{{ detailAsset.name }}</h2>
+              </div>
+              <button type="button" class="secondary" @click="closeDetails">关闭</button>
+            </div>
+            <dl class="detail-grid">
+              <div><dt>ID</dt><dd>{{ detailAsset.id }}</dd></div>
+              <div><dt>MIME</dt><dd>{{ detailAsset.mime }}</dd></div>
+              <div><dt>大小</dt><dd>{{ formatSize(detailAsset.size) }}</dd></div>
+              <div><dt>状态</dt><dd>{{ detailAsset.status }}</dd></div>
+              <div><dt>分类</dt><dd>{{ categoryLabel(detailAsset.categoryId) }}</dd></div>
+              <div><dt>上传时间</dt><dd>{{ formatDate(detailAsset.createdAt) }}</dd></div>
+            </dl>
+            <section class="usage-list" aria-labelledby="usage-title">
+              <h3 id="usage-title">业务引用</h3>
+              <p v-if="detailLoading">加载中…</p>
+              <p v-else-if="!detailUsages.length">暂无业务引用，可安全删除。</p>
+              <ul v-else>
+                <li v-for="usage in detailUsages" :key="usage.id">
+                  {{ usage.module }} / {{ usage.entityType }} / {{ usage.entityId }} / {{ usage.field }}
+                </li>
+              </ul>
+            </section>
+            <p v-if="detailUsages.length" class="help">该文件正在被业务引用，删除操作将由服务端拒绝，请先解除引用。</p>
+            <div class="detail-actions">
+              <button type="button" class="secondary" @click="download(detailAsset, true)">预览</button>
+              <button type="button" class="primary" @click="download(detailAsset)">下载</button>
+              <button type="button" class="danger" :disabled="detailUsages.length > 0" @click="deleteItem(detailAsset)">删除</button>
+            </div>
+          </div>
+        </aside>
+
         <section
           v-if="canManage"
           class="cleanup-card"
@@ -1091,13 +1256,11 @@ onMounted(async () => {
           <h2 id="cleanup-title">{{ $t('page.files.cleanupTitle') }}</h2>
           <p>{{ $t('page.files.cleanupDescription') }}</p>
           <div class="cleanup-controls">
-            <label class="field"
-              ><span>{{ $t('page.files.cleanupAge') }}</span
-              ><input
+            <label class="field"><span>{{ $t('page.files.cleanupAge') }}</span><input
                 v-model.number="cleanupAge"
                 min="1"
-                type="number" /></label
-            ><button
+                type="number"
+/></label><button
               type="button"
               :disabled="cleanupLoading"
               @click="cleanupDryRun"
@@ -1589,6 +1752,32 @@ td {
   border: 1px solid var(--line);
   border-radius: 0.5rem;
 }
+.upload-queue { margin: .75rem 0; padding: 0; list-style: none; display: grid; gap: .4rem; }
+.upload-queue li { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .45rem .6rem; border: 1px solid rgb(148 163 184 / 25%); border-radius: .4rem; }
+.detail-drawer {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  justify-content: flex-end;
+  background: rgb(15 23 42 / 35%);
+}
+.detail-panel {
+  width: min(32rem, 100%);
+  height: 100%;
+  overflow: auto;
+  padding: 1.5rem;
+  background: var(--background, #fff);
+  box-shadow: -0.5rem 0 2rem rgb(15 23 42 / 18%);
+}
+.detail-grid { display: grid; gap: .75rem; margin: 1.25rem 0; }
+.detail-grid div { display: flex; justify-content: space-between; gap: 1rem; border-bottom: 1px solid rgb(148 163 184 / 18%); padding-bottom: .5rem; }
+.detail-grid dt { color: #64748b; }
+.detail-grid dd { margin: 0; text-align: right; word-break: break-all; }
+.usage-list { margin-top: 1rem; }
+.usage-list ul { margin: .5rem 0; padding-left: 1.25rem; }
+.detail-actions { display: flex; gap: .5rem; margin-top: 1.5rem; }
+
 .logo-drawer {
   position: fixed;
   inset: 0;

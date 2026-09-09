@@ -11,8 +11,34 @@ import (
 	fileapp "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/file"
 	notification "github.com/ByteJason/Gin-Vben-Admin/server/internal/application/notification"
 	"github.com/ByteJason/Gin-Vben-Admin/server/internal/domain/tenant"
+	httpmiddleware "github.com/ByteJason/Gin-Vben-Admin/server/internal/transport/http/middleware"
 	"github.com/gin-gonic/gin"
 )
+
+func TestMediaURLImportRejectsUnsafeSchemesAndReturnsPerItemResults(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	legacy := fileapp.NewService(fileapp.NewMemoryStore(""), fileapp.Config{MaxBytes: 1 << 20})
+	catalog := fileapp.NewCatalog(legacy)
+	r := gin.New()
+	r.Use(httpmiddleware.TenantContext(httpmiddleware.TenantPolicy{Mode: "single", DefaultTenantID: "tenant-a"}))
+	RegisterRoutes(r, NewHandler(nil, catalog))
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/v1/media/library/url-import", strings.NewReader(`{"urls":["file:///etc/passwd","http://127.0.0.1/image.png"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	res := httptest.NewRecorder()
+	r.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", res.Code, res.Body.String())
+	}
+	var envelope struct {
+		Data []fileapp.URLImportResult `json:"data"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if len(envelope.Data) != 2 || envelope.Data[0].Success || envelope.Data[1].Success {
+		t.Fatalf("unexpected results: %#v", envelope.Data)
+	}
+}
 
 type recordingNotificationMailer struct {
 	messages []notification.Message

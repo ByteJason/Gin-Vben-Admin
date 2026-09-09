@@ -63,7 +63,7 @@ func TestInitialNavigationSeedIsIdempotentAndContainsFiveProductionGroups(t *tes
 	if !reflect.DeepEqual(roots, wantRoots) {
 		t.Fatalf("roots=%v want=%v", roots, wantRoots)
 	}
-	if childCounts["menu-overview"] != 0 || childCounts["menu-identity"] != 4 || childCounts["menu-system-config"] != 5 || childCounts["menu-operations"] != 5 || childCounts["menu-media"] != 1 {
+	if childCounts["menu-overview"] != 0 || childCounts["menu-identity"] != 4 || childCounts["menu-system-config"] != 6 || childCounts["menu-operations"] != 4 || childCounts["menu-media"] != 1 {
 		t.Fatalf("child counts=%v", childCounts)
 	}
 	for id, wantName := range map[string]string{

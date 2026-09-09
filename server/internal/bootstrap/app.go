@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -297,6 +298,9 @@ func New(cfg config.Config) (*App, error) {
 		taskRepository = tasksplatform.NewGORMRepository(app.database)
 	}
 	app.tasks = tasksapp.NewService(taskRepository)
+	if app.database != nil {
+		app.tasks.SetAuditSink(tasksplatform.NewGORMAuditSink(app.database))
+	}
 	var taskRunRepository tasksapp.RunRepository = tasksapp.NewMemoryRunRepository()
 	if app.database != nil {
 		taskRunRepository = tasksplatform.NewGORMRunRepository(app.database)
@@ -307,7 +311,27 @@ func New(cfg config.Config) (*App, error) {
 	}
 	app.taskWorker = jobs.NewWorker(app.taskQueue, jobs.WorkerOptions{Concurrency: 1})
 	app.taskRuns = tasksapp.NewRunService(app.tasks, taskRunRepository, app.taskQueue)
+	// Register compiled-in methods here; business modules supply application
+	// methods rather than storing code or function expressions in task payloads.
+	methodExecutor := tasksapp.NewMethodExecutor()
+	if err := methodExecutor.Register("TaskInventory", app.tasks.Inventory); err != nil {
+		return cleanupOnError(err)
+	}
+	app.tasks.SetMethodExecutor(methodExecutor)
+	if err := app.taskRuns.BindExecutors(app.taskWorker, methodExecutor, tasksplatform.NewHTTPExecutor(nil, true)); err != nil {
+		return cleanupOnError(err)
+	}
 	app.taskScheduler = tasksapp.NewScheduler(app.tasks, app.taskRuns)
+	if scopeSource, ok := taskRepository.(tasksapp.ScopeSource); ok {
+		app.taskScheduler.SetScopeSource(scopeSource)
+	}
+	app.taskScheduler.SetErrorHandler(func(error) {
+		slog.Error("task scheduler tick failed; retrying next tick", "code", "tasks.scheduler.tick_failed")
+	})
+	if app.redis != nil {
+		app.taskScheduler.SetLeaderLease(tasksplatform.RedisLeaderLease{Client: app.redis})
+	}
+
 	var importRepository importsapp.Repository
 	if app.database != nil {
 		importRepository = importsplatform.NewGORMRepository(app.database)
@@ -621,7 +645,7 @@ func (a *App) Run(ctx context.Context) error {
 	if a.taskScheduler != nil {
 		scope, scopeErr := tenant.NewContext(a.config.Tenant.DefaultID, "", true)
 		if scopeErr == nil {
-			go func() { _ = a.taskScheduler.Run(tenant.WithContext(workerCtx, scope), time.Minute) }()
+			go func() { _ = a.taskScheduler.Run(tenant.WithContext(workerCtx, scope), time.Second) }()
 		}
 	}
 	// Redis carries invalidation/revision hints only. A bounded periodic

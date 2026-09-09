@@ -40,7 +40,7 @@
 | 文件模型 | `gvba_storage_file_objects` 已扩展 category/provider/status/metadata/reconcile 字段；新增 `gvba_storage_media_categories`、`gvba_storage_media_usages` 模型 | 双库兼容迁移、旧数据回填和生产回滚演练 |
 | 设置 | `server/internal/application/settings/runtime_snapshot.go` 提供 immutable snapshot、generation 和订阅失效；应用服务可即时读取最终态 | 集群广播与持久化审计接线继续收口 |
 | UI/API | 三套 `system/mail`、`system/files` 页面已接入共享引导 schema、侧边抽屉、媒体图片筛选基础能力；`admin/packages/api-client/src/generated/admin-v1.ts` 已由 OpenAPI 生成并包含 challenge/media endpoint 常量 | 模板管理交互、Logo 业务引用和 E2E/axe 一致性验收 |
-| 任务 | 已有 `jobs.Queue`/worker 和持久化任务相关能力 | outbox relay、provider 清理、补偿和 reconcile 复用具名 jobs port |
+| 任务 | 已有持久化任务定义、队列 worker、注册方法/HTTP 执行器、运行日志和 Redis lease | 业务模块按[定时任务接入与运维指南](scheduled-tasks.md)注册 method key；outbox relay、provider 清理、补偿和 reconcile 复用具名 jobs port |
 
 当前实现的内存 map 在服务重启后缺少完整的文件元数据恢复链。若现场存在旧数据，正式切换前建立 manifest/双写回填并完成 owner、分类和 ACL 对账；对象目录扫描仅作为补充线索。
 
@@ -385,7 +385,7 @@ pending (metadata + provider intent)
 ready → deleting (soft delete) → deleted (physical cleanup job)
 ```
 
-每个对象固定所属 provider；切换默认 provider 只影响新上传，历史对象迁移走独立任务。hash 冲突按既有 DEC-091 进入提示分支，上传同时校验扩展名、canonical MIME、内容探测、大小、配额和预留的病毒扫描 hook。`Open` 支持取消/限流，当前 HTTP adapter 支持单一 `Range` 并返回 206/Content-Range；多段 Range 与真实远端流式 provider 仍在生产化收口。
+每个对象固定所属 provider；当前开源默认实现是 Local provider，切换默认 provider 只影响新上传，历史对象迁移走独立任务。hash 冲突按既有 DEC-091 进入提示分支，上传同时校验扩展名、canonical MIME、内容探测、大小、配额和预留的病毒扫描 hook。`Open` 支持取消/限流，当前 HTTP adapter 支持单一 `Range` 并返回 206/Content-Range；多段 Range 与远端 provider 适配属于后续实现。业务模块只依赖 `MediaCatalog`/`StorageProvider` 端口，不拼接 object key 或永久 URL。
 
 ### 6.4 语言回退
 
@@ -406,6 +406,8 @@ HTTP 仅供管理端和受控测试，不是业务模块公共调用入口。已
 /api/admin/v1/mail/accounts
 /api/admin/v1/mail/messages
 /api/admin/v1/media/library
+/api/admin/v1/media/library/url-import       # 服务端下载、逐条结果
+/api/admin/v1/media/library/crop-upload      # 浏览器生成裁剪文件，服务端最终校验
 /api/admin/v1/media/library/{id}   # PATCH/PUT/DELETE
 /api/admin/v1/media/categories
 /api/admin/v1/media/resources/{id}
@@ -416,6 +418,10 @@ HTTP 仅供管理端和受控测试，不是业务模块公共调用入口。已
 ```
 
 现有后端 `/api/admin/v1/files` 与前端 UI 路由 `/system/files` 保留兼容窗口，由 adapter 转发到 `MediaCatalog`；新媒体端点统一使用 cursor、scope、MIME/category filters 和 `selectable`/`disabledReason` 元数据。所有 ID 路径参数 URL 编码，TTL 有上限（推荐默认 15 分钟、最大 24 小时）。
+
+`/media/library/url-import` 接受 1–50 个 URL。服务端只允许 HTTP(S)，解析每次重定向并拒绝 loopback、link-local、私有网段、未解析主机、超时和超出大小上限的响应；下载后再次执行 MIME/内容检测，再按行返回 `success/resource/error`。`Idempotency-Key` 会按行派生，重试失败行不会重复成功行。URL、响应正文和签名地址不得写入日志。
+
+`/media/library/crop-upload` 使用与普通上传相同的 multipart 字段和服务端校验。前端裁剪只负责交互、比例、缩放、旋转和生成新 Blob；服务端不信任客户端声明的 MIME、尺寸或裁剪元数据。裁剪结果始终创建新的媒体资源，原文件和已有业务引用保持不变。
 
 管理 DTO 要区分 create/update patch：布尔值、数字和“保留原密码”使用指针/field mask/显式 clear 标记，避免零值语义歧义。密钥只返回 `passwordConfigured` 等摘要，secret 字段保持写入专用。
 
@@ -476,6 +482,15 @@ SMTP 和媒体库页面都提供“使用说明”入口，打开侧边抽屉并
 3. 用 `SignedURL` 获取短期预览地址，需要字节流时调用 `Open`。
 4. 在业务设置中保存 `resource_id`，通过 usage 接口绑定实体字段。
 5. 处理 `ready/failed/deleted/media_in_use` 状态，并在异步清理完成后刷新页面。
+6. URL 导入使用服务端 `/media/library/url-import` 并逐项处理结果；不要让业务服务器自行拼接或保存远端 URL。
+7. 裁剪上传将浏览器生成的 Blob 作为新文件上传；保存业务时只绑定返回的 `resource_id`。
+
+**业务表单接入约定：**
+
+- “媒体库选择”和“立即上传”是两个入口，最终都返回同一种 `MediaResource`，业务只保存 opaque `resource_id`。
+- 主图使用 `role=cover` 且最多一项；相册使用 `role=gallery`，由 `NormalizeMediaSelections` 校验唯一资源 ID 和稳定排序。
+- 业务保存成功后调用 `MediaUsageService.Attach(module, entityType, entityID, field)`；替换时先绑定新资源，再解除旧引用，失败时恢复旧值。
+- 删除由媒体服务端按 usage 保护；前端可以提前展示引用，但不能把前端禁用当成唯一安全边界。
 
 ### 7.4 Logo 选择器
 
